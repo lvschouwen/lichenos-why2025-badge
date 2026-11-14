@@ -155,7 +155,7 @@ static void store_dump_sum(uint32_t v) {
 // Reads the whole log (it is small); returns its length
 static size_t read_file(char const *path, char *buf, size_t cap) {
     buf[0]  = '\0';
-    FILE *f = lichen_file_open_recovered(path);
+    FILE *f = fopen(path, "r");
     if (!f) {
         return 0;
     }

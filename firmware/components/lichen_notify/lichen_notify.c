@@ -200,7 +200,7 @@ static void changed_locked(save_when_t when) {
 // ---- loading --------------------------------------------------------------------------------------------------------
 
 static bool load_file(char const *path) {
-    FILE *f = lichen_file_open_recovered(path);
+    FILE *f = fopen(path, "rb");
     if (!f) {
         return false;
     }
@@ -215,10 +215,15 @@ static bool load_file(char const *path) {
 }
 
 static void load(void) {
-    // An older firmware's swap leftovers: .tmp (complete, newer) before .old; they only matter when notify.bin is gone
-    lichen_file_adopt_legacy(NOTIFY_FILE, NOTIFY_LEGACY_TMP);
-    lichen_file_adopt_legacy(NOTIFY_FILE, NOTIFY_LEGACY_OLD);
     bool loaded = load_file(NOTIFY_FILE);
+    // An older firmware's swap leftovers: .tmp (newer, maybe partial) before .old; the first that decodes becomes the
+    // file, then both names go
+    char const *legacy[] = {NOTIFY_LEGACY_TMP, NOTIFY_LEGACY_OLD};
+    for (size_t i = 0; i < 2 && !loaded; i++) {
+        loaded = load_file(legacy[i]) && rename(legacy[i], NOTIFY_FILE) == 0;
+    }
+    unlink(NOTIFY_LEGACY_TMP);
+    unlink(NOTIFY_LEGACY_OLD);
     uint16_t boot = loaded ? s_ring->boot : 0;
     if (!loaded) {
         nr_init(s_ring, 0);

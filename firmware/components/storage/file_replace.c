@@ -56,25 +56,14 @@ bool lichen_file_replace(char const *path, void const *buf, size_t len) {
     return false;
 }
 
-FILE *lichen_file_open_recovered(char const *path) {
-    char side[FILE_REPLACE_PATH_MAX + 5];
-    if (!side_of(path, side)) {
-        return NULL;
-    }
-    if (unlink(side) != 0 && errno != ENOENT) {
-        return NULL;
-    }
-    return fopen(path, "r");
-}
-
 void lichen_file_adopt_legacy(char const *path, char const *legacy) {
     struct stat st;
     if (stat(legacy, &st) != 0) {
         return;
     }
-    if (stat(path, &st) != 0 && errno == ENOENT) {
-        rename(legacy, path);
-    } else {
+    if (stat(path, &st) == 0) {
         unlink(legacy);
-    }
+    } else if (errno == ENOENT) {
+        rename(legacy, path);
+    } // any other error: the main file is unknown, the legacy copy stays
 }

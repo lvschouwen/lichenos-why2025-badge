@@ -1,5 +1,5 @@
 // Host test: the atomic file replace (#463) on a real directory (LittleFS rules: rename replaces). A power cut leaves
-// one of three states, which the test seeds directly: the old file with a half-written .new (cut in the write), the old
+// one of a few states, which the test seeds directly: the old file with a half-written .new (cut in the write), the old
 // file with a complete .new (cut before the rename), the new file (cut after). Whatever the state, the file reads as the
 // old or the new content complete, and the next replace converges. Also the refusals and the legacy adoption.
 #include "file_replace.h"
@@ -67,57 +67,36 @@ static char const *path_of(char const *name) {
     return p[i];
 }
 
-static bool open_reads(char const *name, char const *text) {
-    FILE *f = lichen_file_open_recovered(path_of(name));
-    char  buf[64] = "";
-    if (!f) {
-        return false;
-    }
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    return strcmp(buf, text) == 0;
-}
-
 static void test_basic(void) {
     clean();
-    errno = 0;
-    CHECK(lichen_file_open_recovered(path_of("f")) == NULL && errno == ENOENT);
     CHECK(lichen_file_replace(path_of("f"), "one", 3) && is("f", "one") && !has("f.new"));
     CHECK(lichen_file_replace(path_of("f"), "two!", 4) && is("f", "two!") && !has("f.new"));
     CHECK(lichen_file_replace(path_of("f"), "", 0) && is("f", "")); // an empty file is a file
 }
 
-// The cut states, then a recovered open and a replace after each
+// The cut states: a reader (plain fopen) sees the old or the new file whole, and the next replace converges. A
+// reader never touches the side file: a writer may be about to rename it.
 static void test_cuts(void) {
-    for (int state = 0; state < 3; state++) {
-        for (int twice = 0; twice < 2; twice++) { // a second cut before any recovery ran: same state again
-            clean();
-            put("f", "old");
-            if (state == 0) {
-                put("f.new", "ne"); // cut in the write: partial
-            } else if (state == 1) {
-                put("f.new", "new"); // cut before the rename: complete but never promoted
-            } else {
-                put("f", "new"); // cut after the rename
-            }
-            if (twice) {
-                put("f.new", "n"); // the next replace was cut in its write too
-            }
-            CHECK(open_reads("f", state == 2 ? "new" : "old")); // never a partial, never neither
-            CHECK(!has("f.new"));                              // the recovered open removed the stale one
+    for (int state = 0; state < 4; state++) {
+        clean();
+        put("f", "old");
+        if (state == 0) {
+            put("f.new", "ne"); // cut in the write: partial
+        } else if (state == 1) {
+            put("f.new", "new"); // cut before the rename: complete but never promoted
+        } else if (state == 2) {
+            put("f", "new"); // cut after the rename
+        } else {
+            put("f.new", "a much longer stale partial of a second cut"); // two cuts in a row, no recovery between
         }
+        CHECK(is("f", state == 2 ? "new" : "old")); // never a partial, never neither
+        CHECK(lichen_file_replace(path_of("f"), "next", 4) && is("f", "next") && !has("f.new"));
     }
-    // A replace straight after a cut (no open in between) overwrites the stale .new and lands whole
-    clean();
-    put("f", "old");
-    put("f.new", "a much longer stale partial");
-    CHECK(lichen_file_replace(path_of("f"), "new", 3) && is("f", "new") && !has("f.new"));
-    // First write cut in its write: nothing there, the partial .new is not a file
+    // First write cut in its write: no file, then the next replace lands whole over the stale .new
     clean();
     put("f.new", "pa");
-    errno = 0;
-    CHECK(lichen_file_open_recovered(path_of("f")) == NULL && errno == ENOENT && !has("f.new"));
+    CHECK(!has("f"));
+    CHECK(lichen_file_replace(path_of("f"), "x", 1) && is("f", "x") && !has("f.new"));
 }
 
 static void test_refusals(void) {
@@ -126,11 +105,7 @@ static void test_refusals(void) {
     errno = 0;
     CHECK(!lichen_file_replace("/sd", "a", 1) && errno == EINVAL);
     errno = 0;
-    CHECK(lichen_file_open_recovered("/sd/x") == NULL && errno == EINVAL);
-    errno = 0;
     CHECK(!lichen_file_replace("", "a", 1) && errno == EINVAL);
-    errno = 0;
-    CHECK(lichen_file_open_recovered("") == NULL && errno == EINVAL);
     char longp[FILE_REPLACE_PATH_MAX + 8];
     memset(longp, 'a', sizeof(longp));
     longp[0]                 = '/';
@@ -140,8 +115,6 @@ static void test_refusals(void) {
     // "/sdx/..." is no card path: accepted (it fails only because the directory is not there)
     errno = 0;
     CHECK(!lichen_file_replace("/sdx_not_there/f", "a", 1) && errno == ENOENT);
-    errno = 0;
-    CHECK(lichen_file_open_recovered("/sdx_not_there/f") == NULL && errno == ENOENT);
     // A directory where the file goes: refused with errno set, no side file left
     clean();
     char blocked[128];
@@ -149,14 +122,7 @@ static void test_refusals(void) {
     CHECK(mkdir(blocked, 0777) == 0);
     errno = 0;
     CHECK(!lichen_file_replace(blocked, "x", 1) && errno != 0 && !has("d.new"));
-    // A stale .new that cannot be removed (a directory): the open reports it instead of ENOENT
-    char dn[140];
-    snprintf(dn, sizeof(dn), "%s/g.new", dir);
-    CHECK(mkdir(dn, 0777) == 0);
-    put("g", "x");
-    errno = 0;
-    CHECK(lichen_file_open_recovered(path_of("g")) == NULL && errno != ENOENT && errno != 0);
-    CHECK(rmdir(dn) == 0 && rmdir(blocked) == 0);
+    CHECK(rmdir(blocked) == 0);
 }
 
 static void test_legacy(void) {
@@ -181,6 +147,14 @@ static void test_legacy(void) {
     lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.tmp"));
     lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.old"));
     CHECK(is("n.bin", "older") && !has("n.old"));
+    // The main file's state is unknown (ENOTDIR, not ENOENT): the legacy copy stays
+    clean();
+    put("plain", "x");
+    put("m.tmp", "keep");
+    char under[160];
+    snprintf(under, sizeof(under), "%s/plain/x", dir);
+    lichen_file_adopt_legacy(under, path_of("m.tmp"));
+    CHECK(is("m.tmp", "keep") && is("plain", "x"));
 }
 
 int main(void) {

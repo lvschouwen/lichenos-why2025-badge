@@ -22,7 +22,7 @@ size	libboard.a	12830
 size	libbootloader_support.a	5942
 size	libc.a	47702
 size	libc6link.a	33164
-size	libcrash.a	5730
+size	libcrash.a	5756
 size	libcxx.a	872
 size	libefuse.a	2173
 size	libeh_common.a	144
@@ -105,7 +105,7 @@ size	liblichen_haptics.a	2769
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
 size	liblichen_net.a	24602
-size	liblichen_notify.a	13176
+size	liblichen_notify.a	13334
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	73227
 size	liblichen_random.a	63
@@ -131,7 +131,7 @@ size	libsensors.a	29289
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
-size	libstorage.a	2320
+size	libstorage.a	2216
 size	libtfpsacrypto.a	80464
 size	libvfs.a	4945
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872
