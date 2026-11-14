@@ -6,6 +6,7 @@
 // ("stress started ...", "stress status: ..."), never repeating a "stress:" line, so the UART shows each one once.
 #include "fonts.h"
 #include "fw_console.h"
+#include "shell_cmd_rules.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "nav.h"
@@ -195,11 +196,11 @@ static void cmd_stress(char const *args) {
 
 void stress_init(void) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("stress", "stress [minutes 1-30 | stop | status] (#278: DMA, PSRAM, SD, storage, redraw and latency "
+    console_register_rules("stress", "stress [minutes 1-30 | stop | status] (#278: DMA, PSRAM, SD, storage, redraw and latency "
                                "load at once, keys locked; a \"stress:\" log line every 10 s, then the report; never "
                                "transmits)",
-                     cmd_stress);
+                     cmd_stress, STRESS_RULES);
 #else
-    console_register("stress", "stress status", cmd_stress);
+    console_register_rules("stress", "stress status", cmd_stress, STRESS_RULES);
 #endif
 }

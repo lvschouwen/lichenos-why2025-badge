@@ -2562,6 +2562,7 @@ add_test(NAME safe_mode_policy_test COMMAND safe_mode_policy_test)
 add_executable(dev_gate_test
     ${CMAKE_CURRENT_SOURCE_DIR}/dev_gate_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/dev_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/console_sub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/dev_mode.c
 )
 target_include_directories(dev_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
@@ -2635,7 +2636,8 @@ set(CONSOLE_PIN_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/console_pin_test.c ${NPT_FW}/fw
 foreach(t console_pin_test console_pin_dev_test)
     add_executable(${t} ${CONSOLE_PIN_SRCS})
     target_include_directories(${t} PRIVATE ${NPT_FW}/fw_console ${NPT_FW}/mesh ${NPT_FW}/sdcard ${NPT_FW}/crash ${NPT_FW}/lichen_boot ${NPT_FW}/ota
-        ${NPT_FW}/lichen_nvs ${NPT_FW}/lichen_os)
+        ${NPT_FW}/lichen_nvs ${NPT_FW}/lichen_os
+        ${NPT_FW}/lichen_shell)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
     target_link_libraries(${t} PRIVATE lichen_text)
     add_test(NAME ${t} COMMAND ${t})

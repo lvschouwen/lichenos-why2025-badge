@@ -13,6 +13,7 @@
 #include "crash_rules.h"
 #include "dev_mode.h"
 #include "sd_rules.h"
+#include "shell_cmd_rules.h"
 #include "mesh_onair.h"
 #include "nvs_rules.h"
 #include "os_cmd_rules.h"
@@ -345,6 +346,9 @@ static rules_of_t const RULES[] = {
     {"mem", OS_MEM_RULES},
     {"thermal", THERMAL_RULES},
     {"app", APP_RULES},
+    {"stress", STRESS_RULES},
+    {"idle", IDLE_RULES},
+    {"setup", SETUP_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

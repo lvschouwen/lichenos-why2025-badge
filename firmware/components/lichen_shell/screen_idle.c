@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
 #include "idle_policy.h"
+#include "shell_cmd_rules.h"
 #include "lichen_sys_display.h"
 #include "lichen_sys_keys.h"
 #include "lvgl.h"
@@ -211,9 +212,9 @@ static void cmd_idle(char const *args) {
 
 void screen_idle_init(void) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("idle", "idle | idle test <s> (screen timeout: state, or fake s seconds without a key)", cmd_idle);
+    console_register_rules("idle", "idle | idle test <s> (screen timeout: state, or fake s seconds without a key)", cmd_idle, IDLE_RULES);
 #else
-    console_register("idle", "idle (screen timeout: state)", cmd_idle);
+    console_register_rules("idle", "idle (screen timeout: state)", cmd_idle, IDLE_RULES);
 #endif
 }
 

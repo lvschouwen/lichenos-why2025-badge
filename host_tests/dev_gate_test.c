@@ -1,4 +1,5 @@
 // Host test: the test and state-changing console forms need developer mode (#421), also under the "fw <app>" prefix
+#include "console_sub.h"
 #include "dev_gate.h"
 
 #include <stdio.h>
@@ -33,8 +34,16 @@ static void dispatch(char const *text, bool dev_on) {
                                             {"ui", "ui", counting, true, 0, 0}};
     snprintf(buf, sizeof(buf), "%s", text);
     char *name = dev_gate_split(buf, IDS, 2, &app, &args);
+    // psram's and stress's open forms, as their tables list them (#464); a line that no row refuses runs
+    static console_sub_t const psram_rules[]  = {{"", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 0},
+                                                 {NULL, CON_MATCH_REST, CON_GATE_DEV, CON_ORIGIN_ANY, 0}, CONSOLE_SUB_END};
+    static console_sub_t const stress_rules[] = {{"stop", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 0},
+                                                 {NULL, CON_MATCH_REST, CON_GATE_DEV, CON_ORIGIN_ANY, 0}, CONSOLE_SUB_END};
     dev_find_t found = dev_mode_find_app(table, 3, name, dev_on, app, &i);
-    if (dev_gate_decide(found, dev_gate_needs_dev(name, args), dev_on) == DEV_GATE_RUN) {
+    console_sub_t const *rules = strcmp(name, "psram") == 0 ? psram_rules : strcmp(name, "stress") == 0 ? stress_rules : NULL;
+    console_ask_t        ask   = {.dev_on = dev_on, .origin = CONSOLE_ORIGIN_UART, .held = false};
+    bool                 dev   = console_sub_rule(console_sub_find(rules, args), &ask) == CON_RULE_DEV;
+    if (dev_gate_decide(found, dev, dev_on) == DEV_GATE_RUN) {
         table[i].fn(args);
     }
 }

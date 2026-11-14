@@ -10,6 +10,7 @@
 #include "logo.h"
 #include "settings_store.h"
 #include "setup_state.h"
+#include "shell_cmd_rules.h"
 #include "shell_parts.h"
 #include "fonts.h"
 #include "theme.h"
@@ -126,6 +127,6 @@ static void cmd_setup(char const *args) {
 
 void setup_init(void) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("setup", "setup reset (show the first-run welcome again after a reboot)", cmd_setup);
+    console_register_rules("setup", "setup reset (show the first-run welcome again after a reboot)", cmd_setup, SETUP_RULES);
 #endif
 }
