@@ -7,7 +7,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current (2026-11-13, late night):** waves A, B, C and D CLOSED. The badge runs fw-869e608d (wave D) in ota_1; ota_0 holds the same image marked aborted by the #411 rollback proof. Next step: the post-wave-D queue below, starting with #416 and #289.
+- **Current (2026-11-14, morning):** waves A-D CLOSED. Wave E: #416, #403, #289 and #232 merged and pushed; NOT flashed, NOT benched. Next step: flash wave E and bench it (see "Wave E state").
 - Planning finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan).
 
 ## Process (owner, 2026-11-13)
@@ -54,7 +54,15 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 | A | #389 (sent label), #368, #397, #211, #208, #11 (wave 1), #212 (5 functions), #298 | fw-0746e922 | CLOSED. #208, #397, #376, #378, #379 closed. Open ends: #11 (hands, breakout), #298 (rest of its bench list) |
 | B | #404, #389 (heard time), #400 | fw-f537a44a | CLOSED. #389, #404 closed; #400 has one hands check left. Found #412 |
 | C | #406, #410, #408, #405, #398 | fw-f742e4ce | CLOSED. All five closed. The #368 SD-format proof was NOT run: the permission check refused `fw sd format ERASE` from the bench agent; the owner runs it or allows it (#368, `needs-lucas`) |
+| E | #416, #403, #289, #232 | not flashed yet | see "Wave E state" |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
+
+### Wave E state (resume here)
+1. Merged, each reviewed and re-reviewed: #416 sticky `rstcrash` (Sonnet), #403 OTA parser follow-ups, #289 on-air allow list, #232 crash attribution and safe mode (Opus). Bench steps are in the merge comment on #416, #403 and #289; #232's are in this list.
+2. Flash: no C6 change. This image adds NVS keys (`onair_on`, `onair_list`, `bg_off`) but no settings migration.
+3. Bench script (model: `orchestration/bench/bench-wave-D.md`) must cover: #416 (`crash test panic` -> `rstcrash=1` on the re-arm boot, still 1 after `crash clear`, 0 after a reboot); #403 (normal update about 25 s; raw requests with `Expect: foo` -> 417, `Content-Length : 5` -> 400, `Content-Encoding: gzip` -> 415; an update passes afterwards; the raw requests are run by main, not the agent); #232 (`app background` -> off for no app; `app crash timer` twice -> named in the notice, never listed; `app crash weather` twice -> listed, no weather task, `app background weather on` restores it; `app crash meshcore` twice -> never listed, mesh still runs; `crash test panic` blames nobody; no "crash attribution off" line in the boot log; `crash clear` at the end); #289 (off by default; `onair on` over Wi-Fi refuses every console send; `onair off|allow` and `factory-reset settings YES` over Wi-Fi are refused; the USB steps and the re-key test need the owner at the USB console; leave it as the owner wants).
+4. Owner questions open: #289's accepted limit (a Wi-Fi update or `fw slot other` can boot an image without the list: accept, or refuse both from non-USB origins while the list is on).
+5. Follow-ups filed: #417 (folded header lines), #418 (hung app loop, after the soak), #419 (`fw soak` fourth line with slow-path counters). Soak scope widened by the owner on #407: expected against measured per feature (`tools/soak_budgets.txt`), a log census, a trend test on every sampled number, timed probes; issues now state expected resources (`.claude/docs/issues.md`).
 
 ### After wave D (resume here)
 Wave D bench facts: the #288 move line appeared once (1 moved, 0 not moved); the factory-reset preview hides 2 app secrets (1 more than moved: look once at what the second is). A crash at 120 MHz is followed within 20 s by the `psram 120 re-arm after crash` restart, so a sampler sees `boot` +2, `rst=sw rstcrash=0`, `crash` +1 (#416: decide the rule before the soak tooling is built). Old issues with fresh evidence comments: #205, #261, #263, #256, #210, #236 (About version row differs from its checklist), #52, #50, #133. Not run: #127 (needs Enter on the Contacts tile), most of #136/#138.
@@ -64,7 +72,7 @@ Next, in dependency order: #416 (soak crash rule, small), #289 on-air allow list
 Every merge had an independent review and a re-review of its fix commit. Reviews caught before merge: a journal wipe on a card read error (#368), a fail-open race and a regression in the hand-only start (#400), an uncapped decompression size (#298), two holes in the loosened advert-page rule (#405), a false "nothing transmitted" in the transmit log (#408), a migration record that stranded plaintext after a rollback (#288), two ways to keep a bad image (#411).
 
 ## Slots
-- Free: wt-1, wt-2, wt-4, wt-5.
+- Free: wt-1, wt-2, wt-4, wt-5 (wave E branches merged; released with `agent-wt done`).
 - wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict. wt-6: the unmerged #398 branch, no longer needed (#398 closed as already fixed); deleting an unmerged branch is the owner's call.
 
 ## Tools kept in the repo

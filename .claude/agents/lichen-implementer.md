@@ -48,7 +48,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 
 ## Hand-back
 
-Commit locally with a conventional message referencing the issue (`feat(ui): ... (#n)`), following the trailer rule in your brief. Do not push and do not close the issue. Report:
+Commit locally with a conventional message referencing the issue (`feat(ui): ... (#n)`), following the trailer rule in your brief. Do not push and do not close the issue. Report: the measured resource cost against the issue's expected resources (archive size delta, new static RAM by region, task stack size and high-water where a test shows it; say so when the issue states none),
 - commit SHA(s) and branch;
 - full-build result with the host-test count (passed/total);
 - the bench steps the main session should run, each with the expected result;
