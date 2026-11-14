@@ -30,7 +30,8 @@
 
 #define CRASH_DIR    STORAGE_BASE "/crash"
 #define CRASH_LOG    CRASH_DIR "/log.txt"
-#define CRASH_TMP    CRASH_LOG ".new" // lichen_file_replace's side file: a clear removes a stale one
+#define CRASH_NEW    CRASH_LOG ".new" // lichen_file_replace's side file: a clear removes a stale one
+#define CRASH_LEGACY CRASH_DIR "/log.tmp" // the swap file of older firmware (lichen_file_adopt_legacy)
 #define KEEP_RECORDS 20
 #define LOG_MAX      (KEEP_RECORDS * 256 + 256)
 #define B64_LINE     76
@@ -177,7 +178,7 @@ bool crash_log_store(char const *text, size_t len) {
     crash_log_lock();
     if (len == 0) {
         ok = unlink(CRASH_LOG) == 0 || errno == ENOENT;
-        unlink(CRASH_TMP);
+        unlink(CRASH_NEW);
     } else {
         mkdir(CRASH_DIR, 0777); // exists after the first crash
         ok = lichen_file_replace(CRASH_LOG, text, len); // LittleFS: a cut leaves the old log or the new one (#300)
@@ -480,6 +481,9 @@ void crash_check_early(void) {
 
 void crash_check_late(void) {
     check_image_fits();
+    crash_log_lock();
+    lichen_file_adopt_legacy(CRASH_LOG, CRASH_LEGACY); // a log.tmp cut before its rename is the only copy then
+    crash_log_unlock();
     restart_log_t *rl = malloc(sizeof(*rl));
     if (rl) {
         if (system_restart_history(rl) > 0) {

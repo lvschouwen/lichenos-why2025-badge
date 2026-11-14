@@ -64,26 +64,12 @@ static bool read_token_nvs(char *out) {
     return valid;
 }
 
-// Unbuffered, in one fwrite (no fprintf: unbuffered, newlib formats through a stack buffer of BUFSIZ)
+// The token line, swapped in whole (lichen_file_replace: written unbuffered to OTA_TOKEN_NEW, then renamed over the file)
 static bool write_text(char const *path, char const *text) {
-    FILE *f = fopen(path, "w");
-    if (!f) {
-        return false;
-    }
-    setvbuf(f, NULL, _IONBF, 0); // no stdio buffer: it would keep a copy of the token in freed heap
-    char line[OTA_TOKEN_LEN + 2];
-    int  n       = snprintf(line, sizeof(line), "%s\n", text);
-    bool written = n > 0 && (size_t)n < sizeof(line) && fwrite(line, 1, (size_t)n, f) == (size_t)n;
-    secure_wipe(line, sizeof(line));
-    return fclose(f) == 0 && written;
-}
-
-// The same line, swapped in whole (lichen_file_replace writes OTA_TOKEN_NEW and renames it over the file)
-static bool replace_text(char const *path, char const *text) {
     char line[OTA_TOKEN_LEN + 2];
     int  n  = snprintf(line, sizeof(line), "%s\n", text);
     bool ok = n > 0 && (size_t)n < sizeof(line) && lichen_file_replace(path, line, (size_t)n);
-    secure_wipe(line, sizeof(line));
+    secure_wipe(line, sizeof(line)); // the token itself
     return ok;
 }
 
@@ -147,7 +133,7 @@ ota_rotate_t ota_token_rotate(char *out, bool storage_up) {
         return OTA_ROTATE_FAILED;
     }
     make_token(out);
-    bool swapped = replace_text(OTA_TOKEN_FILE, out);
+    bool swapped = write_text(OTA_TOKEN_FILE, out);
     if (!swapped) {
         if (!token_file_absent()) { // it would bring the old token back at boot, whatever NVS says
             secure_wipe(out, OTA_TOKEN_LEN + 1);

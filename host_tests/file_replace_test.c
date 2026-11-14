@@ -1,7 +1,7 @@
-// Host test: the atomic file replace (#463). A fake file system (FAT mode: rename refuses an existing target) with a
-// power cut injected at every file operation of a replace: the operation and everything after it never happen, a
-// write leaves a partial file. After the cut, and the recovery a boot runs, the file must hold the old content or the
-// new one complete, never neither (when there was an old one), and the next replace must converge.
+// Host test: the atomic file replace (#463) on a real directory (LittleFS rules: rename replaces). A power cut leaves
+// one of three states, which the test seeds directly: the old file with a half-written .new (cut in the write), the old
+// file with a complete .new (cut before the rename), the new file (cut after). Whatever the state, the file reads as the
+// old or the new content complete, and the next replace converges. Also the refusals and the legacy adoption.
 #include "file_replace.h"
 
 #include <errno.h>
@@ -21,221 +21,177 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-#define FILES_MAX 6
-typedef struct {
-    char name[40];
-    char data[16];
-    bool used;
-} ffile_t;
+static char dir[64];
 
-typedef struct {
-    ffile_t files[FILES_MAX];
-    bool    fat;
-    int     op, cut_at; // 1-based, 0 = never
-    bool    dead;
-} fake_t;
-
-static ffile_t *find(fake_t *f, char const *name) {
-    for (int i = 0; i < FILES_MAX; i++) {
-        if (f->files[i].used && strcmp(f->files[i].name, name) == 0) {
-            return &f->files[i];
-        }
+static void put(char const *name, char const *text) {
+    char  p[128];
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    FILE *f = fopen(p, "w");
+    CHECK(f != NULL);
+    if (f) {
+        fputs(text, f);
+        fclose(f);
     }
-    return NULL;
 }
 
-static ffile_t *make(fake_t *f, char const *name) {
-    ffile_t *e = find(f, name);
-    for (int i = 0; !e && i < FILES_MAX; i++) {
-        e = f->files[i].used ? NULL : &f->files[i];
-    }
-    snprintf(e->name, sizeof(e->name), "%s", name);
-    e->used = true;
-    return e;
+static bool has(char const *name) {
+    char p[128];
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    return access(p, F_OK) == 0;
 }
 
-// True when this operation may take effect; a cut kills it and every later one
-static bool alive(fake_t *f) {
-    if (f->dead) {
+static bool is(char const *name, char const *text) {
+    char  p[128], buf[64] = "";
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    FILE *f = fopen(p, "r");
+    if (!f) {
         return false;
     }
-    if (++f->op == f->cut_at) {
-        f->dead = true;
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    return strcmp(buf, text) == 0;
+}
+
+static void clean(void) {
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "rm -f %s/*", dir);
+    CHECK(system(cmd) == 0);
+}
+
+static char const *path_of(char const *name) {
+    static char p[4][128]; // a call may name two paths
+    static int  i;
+    i = (i + 1) % 4;
+    snprintf(p[i], sizeof(p[i]), "%s/%s", dir, name);
+    return p[i];
+}
+
+static bool open_reads(char const *name, char const *text) {
+    FILE *f = lichen_file_open_recovered(path_of(name));
+    char  buf[64] = "";
+    if (!f) {
         return false;
     }
-    return true;
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    return strcmp(buf, text) == 0;
 }
 
-static bool f_write(void *c, char const *path, void const *buf, size_t len) {
-    fake_t *f = c;
-    bool    ok = alive(f);
-    ffile_t *e = ok || f->dead ? make(f, path) : NULL;
-    snprintf(e->data, sizeof(e->data), "%.*s", ok ? (int)len : 1, (char const *)buf); // a cut leaves a partial file
-    return ok;
+static void test_basic(void) {
+    clean();
+    errno = 0;
+    CHECK(lichen_file_open_recovered(path_of("f")) == NULL && errno == ENOENT);
+    CHECK(lichen_file_replace(path_of("f"), "one", 3) && is("f", "one") && !has("f.new"));
+    CHECK(lichen_file_replace(path_of("f"), "two!", 4) && is("f", "two!") && !has("f.new"));
+    CHECK(lichen_file_replace(path_of("f"), "", 0) && is("f", "")); // an empty file is a file
 }
 
-static bool f_rename(void *c, char const *from, char const *to) {
-    fake_t *f = c;
-    if (!alive(f)) {
-        return false;
-    }
-    ffile_t *s = find(f, from), *d = find(f, to);
-    if (!s || (d && f->fat)) {
-        errno = s ? EEXIST : ENOENT;
-        return false;
-    }
-    if (d) {
-        d->used = false; // LittleFS replaces
-    }
-    snprintf(s->name, sizeof(s->name), "%s", to);
-    return true;
-}
-
-static bool f_remove(void *c, char const *path) {
-    fake_t *f = c;
-    if (!alive(f)) {
-        return false;
-    }
-    ffile_t *e = find(f, path);
-    if (e) {
-        e->used = false;
-    }
-    return true;
-}
-
-static bool f_exists(void *c, char const *path) {
-    return find(c, path) != NULL;
-}
-
-static file_ops_t const OPS = {f_write, f_rename, f_remove, f_exists};
-
-#define P "/d/file"
-
-static void seed(fake_t *f, bool fat, char const *old) {
-    memset(f, 0, sizeof(*f));
-    f->fat = fat;
-    if (old) {
-        snprintf(make(f, P)->data, sizeof(f->files[0].data), "%s", old);
-    }
-}
-
-// One replace of "new" with a cut at op `cut`; then the boot-time recovery and the checks
-static void run_cut(bool fat, char const *old, int cut, int *total_ops) {
-    fake_t f;
-    seed(&f, fat, old);
-    f.cut_at = cut;
-    bool ok  = file_replace_ops(&OPS, &f, P, "new", 3, fat);
-    if (total_ops) {
-        *total_ops = f.op;
-    }
-    CHECK(cut != 0 || ok); // with a cut the call may still report true: the last step is a best-effort cleanup
-    f.dead = false;
-    f.cut_at = 0;
-    CHECK(file_recover_ops(&OPS, &f, P, fat));
-    ffile_t *e = find(&f, P);
-    if (old) {
-        CHECK(e && (strcmp(e->data, old) == 0 || strcmp(e->data, "new") == 0));
-    } else {
-        CHECK(!e || strcmp(e->data, "new") == 0); // first write: nothing, or complete, never a part
-    }
-    if (cut == 0 || cut > f.op) {
-        CHECK(e && strcmp(e->data, "new") == 0);
-    }
-    // The next replace works on whatever the cut left
-    CHECK(file_replace_ops(&OPS, &f, P, "again", 5, fat));
-    e = find(&f, P);
-    CHECK(e && strcmp(e->data, "again") == 0);
-    CHECK(!find(&f, P ".new") && (!fat || !find(&f, P ".old")));
-}
-
+// The cut states, then a recovered open and a replace after each
 static void test_cuts(void) {
-    for (int fat = 0; fat < 2; fat++) {
-        for (int has_old = 0; has_old < 2; has_old++) {
-            int total = 0;
-            run_cut(fat, has_old ? "old" : NULL, 0, &total);
-            CHECK(total >= 2);
-            for (int cut = 1; cut <= total + 1; cut++) {
-                run_cut(fat, has_old ? "old" : NULL, cut, NULL);
+    for (int state = 0; state < 3; state++) {
+        for (int twice = 0; twice < 2; twice++) { // a second cut before any recovery ran: same state again
+            clean();
+            put("f", "old");
+            if (state == 0) {
+                put("f.new", "ne"); // cut in the write: partial
+            } else if (state == 1) {
+                put("f.new", "new"); // cut before the rename: complete but never promoted
+            } else {
+                put("f", "new"); // cut after the rename
             }
+            if (twice) {
+                put("f.new", "n"); // the next replace was cut in its write too
+            }
+            CHECK(open_reads("f", state == 2 ? "new" : "old")); // never a partial, never neither
+            CHECK(!has("f.new"));                              // the recovered open removed the stale one
         }
     }
+    // A replace straight after a cut (no open in between) overwrites the stale .new and lands whole
+    clean();
+    put("f", "old");
+    put("f.new", "a much longer stale partial");
+    CHECK(lichen_file_replace(path_of("f"), "new", 3) && is("f", "new") && !has("f.new"));
+    // First write cut in its write: nothing there, the partial .new is not a file
+    clean();
+    put("f.new", "pa");
+    errno = 0;
+    CHECK(lichen_file_open_recovered(path_of("f")) == NULL && errno == ENOENT && !has("f.new"));
 }
 
-// The window FAT has: the old file is aside, the new one complete; the open must find it
-static void test_fat_window(void) {
-    fake_t f;
-    seed(&f, true, NULL);
-    snprintf(make(&f, P ".old")->data, 16, "old");
-    snprintf(make(&f, P ".new")->data, 16, "new");
-    CHECK(file_recover_ops(&OPS, &f, P, true));
-    CHECK(find(&f, P) && strcmp(find(&f, P)->data, "new") == 0 && !find(&f, P ".old") && !find(&f, P ".new"));
-    // Only the .old left: the previous file comes back
-    seed(&f, true, NULL);
-    snprintf(make(&f, P ".old")->data, 16, "old");
-    CHECK(file_recover_ops(&OPS, &f, P, true) && strcmp(find(&f, P)->data, "old") == 0);
-    // An unfinished first write (.new alone) is never promoted
-    seed(&f, true, NULL);
-    snprintf(make(&f, P ".new")->data, 16, "n");
-    CHECK(file_recover_ops(&OPS, &f, P, true) && !find(&f, P));
-    // A write that was cut mid-way on top of an intact file leaves it alone
-    seed(&f, true, "old");
-    snprintf(make(&f, P ".new")->data, 16, "n");
-    snprintf(make(&f, P ".old")->data, 16, "older");
-    CHECK(file_recover_ops(&OPS, &f, P, true) && strcmp(find(&f, P)->data, "old") == 0);
-}
-
-static void test_names(void) {
-    fake_t f;
-    seed(&f, false, "old");
+static void test_refusals(void) {
+    errno = 0;
+    CHECK(!lichen_file_replace("/sd/x", "a", 1) && errno == EINVAL);
+    errno = 0;
+    CHECK(!lichen_file_replace("/sd", "a", 1) && errno == EINVAL);
+    errno = 0;
+    CHECK(lichen_file_open_recovered("/sd/x") == NULL && errno == EINVAL);
+    errno = 0;
+    CHECK(!lichen_file_replace("", "a", 1) && errno == EINVAL);
+    errno = 0;
+    CHECK(lichen_file_open_recovered("") == NULL && errno == EINVAL);
     char longp[FILE_REPLACE_PATH_MAX + 8];
     memset(longp, 'a', sizeof(longp));
+    longp[0]                 = '/';
     longp[sizeof(longp) - 1] = '\0';
     errno = 0;
-    CHECK(!file_replace_ops(&OPS, &f, longp, "x", 1, false) && errno == ENAMETOOLONG && f.op == 0);
-    CHECK(!file_replace_ops(&OPS, &f, "", "x", 1, false));
-}
-
-// The stdio binding on a real directory (LittleFS rules: rename replaces)
-static void test_posix(void) {
-    char dir[] = "/tmp/file_replace_XXXXXX";
-    CHECK(mkdtemp(dir) != NULL);
-    char path[128], side[140];
-    snprintf(path, sizeof(path), "%s/f.txt", dir);
-    snprintf(side, sizeof(side), "%s.new", path);
-    CHECK(lichen_file_open_recovered(path) == NULL && errno == ENOENT);
-    CHECK(lichen_file_replace(path, "one\n", 4));
-    CHECK(lichen_file_replace(path, "two!\n", 5));
-    char  buf[16] = "";
-    FILE *f       = lichen_file_open_recovered(path);
-    CHECK(f && fread(buf, 1, sizeof(buf) - 1, f) == 5 && strcmp(buf, "two!\n") == 0);
-    if (f) {
-        fclose(f);
-    }
-    CHECK(access(side, F_OK) != 0);
-    CHECK(lichen_file_replace(path, "", 0)); // an empty file is a file
-    f = lichen_file_open_recovered(path);
-    CHECK(f && fgetc(f) == EOF);
-    if (f) {
-        fclose(f);
-    }
-    // A directory in the way of the target: the call fails with errno set and no .new is left
+    CHECK(!lichen_file_replace(longp, "x", 1) && errno == ENAMETOOLONG);
+    // "/sdx/..." is no card path: accepted (it fails only because the directory is not there)
+    errno = 0;
+    CHECK(!lichen_file_replace("/sdx_not_there/f", "a", 1) && errno == ENOENT);
+    errno = 0;
+    CHECK(lichen_file_open_recovered("/sdx_not_there/f") == NULL && errno == ENOENT);
+    // A directory where the file goes: refused with errno set, no side file left
+    clean();
     char blocked[128];
     snprintf(blocked, sizeof(blocked), "%s/d", dir);
     CHECK(mkdir(blocked, 0777) == 0);
     errno = 0;
-    CHECK(!lichen_file_replace(blocked, "x", 1) && errno != 0);
-    snprintf(side, sizeof(side), "%s.new", blocked);
-    CHECK(access(side, F_OK) != 0);
-    char cmd[200];
-    snprintf(cmd, sizeof(cmd), "rm -r %s", dir);
-    CHECK(system(cmd) == 0);
+    CHECK(!lichen_file_replace(blocked, "x", 1) && errno != 0 && !has("d.new"));
+    // A stale .new that cannot be removed (a directory): the open reports it instead of ENOENT
+    char dn[140];
+    snprintf(dn, sizeof(dn), "%s/g.new", dir);
+    CHECK(mkdir(dn, 0777) == 0);
+    put("g", "x");
+    errno = 0;
+    CHECK(lichen_file_open_recovered(path_of("g")) == NULL && errno != ENOENT && errno != 0);
+    CHECK(rmdir(dn) == 0 && rmdir(blocked) == 0);
+}
+
+static void test_legacy(void) {
+    clean();
+    put("log.tmp", "newer"); // the only copy: the main file is missing
+    lichen_file_adopt_legacy(path_of("log.txt"), path_of("log.tmp"));
+    CHECK(is("log.txt", "newer") && !has("log.tmp"));
+    put("log.tmp", "stale"); // the main file is there: the leftover goes
+    lichen_file_adopt_legacy(path_of("log.txt"), path_of("log.tmp"));
+    CHECK(is("log.txt", "newer") && !has("log.tmp"));
+    lichen_file_adopt_legacy(path_of("log.txt"), path_of("log.tmp")); // none: nothing happens
+    CHECK(is("log.txt", "newer"));
+    // notify's order: .tmp (newer) beats .old when both are left and the main file is gone
+    clean();
+    put("n.tmp", "newer");
+    put("n.old", "older");
+    lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.tmp"));
+    lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.old"));
+    CHECK(is("n.bin", "newer") && !has("n.tmp") && !has("n.old"));
+    clean();
+    put("n.old", "older"); // only the old one left: it is the file
+    lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.tmp"));
+    lichen_file_adopt_legacy(path_of("n.bin"), path_of("n.old"));
+    CHECK(is("n.bin", "older") && !has("n.old"));
 }
 
 int main(void) {
+    snprintf(dir, sizeof(dir), "/tmp/file_replace_XXXXXX");
+    CHECK(mkdtemp(dir) != NULL);
+    test_basic();
     test_cuts();
-    test_fat_window();
-    test_names();
-    test_posix();
+    test_refusals();
+    test_legacy();
+    clean();
+    rmdir(dir);
     printf(failures ? "file_replace_test: %d FAILED\n" : "file_replace_test: ok\n", failures);
     return failures != 0;
 }

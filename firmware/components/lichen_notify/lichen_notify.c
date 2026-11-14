@@ -1,9 +1,9 @@
 // The notification service (#62): lichen_notify.h for apps, notify_os.h for the shell. The history (notify_ring.c,
 // pure) lives in PSRAM under one mutex; lichen_notify() writes it from the caller's task and queues a toast for the
-// shell's LVGL timer, which only ever reads copies. The file is rewritten whole (tmp, then swapped in, as crash.c does)
+// shell's LVGL timer, which only ever reads copies. The file is rewritten whole (lichen_file_replace: .new, then renamed over it)
 // on a short-lived task: 30 s after the first change of a batch, and never sooner than 30 s after the last save
 // began, so a source raising errors in a loop costs one write per 30 s; a new error saves after 3 s within that gap,
-// a removal or a clear after 3 s regardless. Normally a few writes a day. Plain FAT writes; nothing maps flash.
+// a removal or a clear after 3 s regardless. Normally a few writes a day. Plain LittleFS writes; nothing maps flash.
 // The status LED and the motor sit below notify (L2): the service pushes do-not-disturb and "anything unread" to the
 // hooks lichen_os binds (notify_bind.h), and fires the feedback hooks it was given; neither driver calls in (#245).
 #include "notify_os.h"
@@ -17,11 +17,11 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "file_replace.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "file_replace.h"
 #include "fw_console.h"
 #include "notify_mute.h"
 #include "notify_rate.h"
@@ -128,7 +128,7 @@ static void save_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-// esp_timer task: the write itself runs on its own task, so a slow FAT write never holds up other timers
+// esp_timer task: the write itself runs on its own task, so a slow drive write never holds up other timers
 static void save_due(void *arg) {
     (void)arg;
     lock();
@@ -215,6 +215,9 @@ static bool load_file(char const *path) {
 }
 
 static void load(void) {
+    // An older firmware's swap leftovers: .tmp (complete, newer) before .old; they only matter when notify.bin is gone
+    lichen_file_adopt_legacy(NOTIFY_FILE, NOTIFY_LEGACY_TMP);
+    lichen_file_adopt_legacy(NOTIFY_FILE, NOTIFY_LEGACY_OLD);
     bool loaded = load_file(NOTIFY_FILE);
     uint16_t boot = loaded ? s_ring->boot : 0;
     if (!loaded) {
