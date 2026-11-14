@@ -397,6 +397,55 @@ static void held_saves(void) {
     CHECK(SPIFFS.remove("/contacts3"));
 }
 
+// #425 round two: a held save reserves its buffer once, at the file's last size plus a chunk, instead of doubling up
+// from 4 KB (at 552 contacts: six PSRAM allocations, five frees and 124 KB copied under the mesh lock)
+static void held_reserve(void) {
+    static uint8_t expect[260 * REC_SIZE], disk[260 * REC_SIZE];
+    CHECK(fs_shim_reserve(0) == 0 && fs_shim_reserve(100) == 100 + FS_SHIM_CHUNK);
+    CHECK(fs_shim_reserve(FS_SHIM_MAX_FILE - 1) == FS_SHIM_MAX_FILE);
+    CHECK(fs_shim_reserve(FS_SHIM_MAX_FILE) == FS_SHIM_MAX_FILE);
+    CHECK(fs_shim_grow_cap(0, 10, 0) == FS_SHIM_CHUNK && fs_shim_grow_cap(0, 10, 9000) == 9000);
+    CHECK(fs_shim_grow_cap(0, 9001, 9000) == 4 * FS_SHIM_CHUNK && fs_shim_grow_cap(9000, 9001, 0) == 18000);
+    CHECK(fs_shim_grow_cap(9000, 9001, 50000) == 18000); // a reserve only for an empty buffer
+
+    save_contacts(expect, 200, 999, 0); // not held: on the file system, 30400 B
+    fs_shim_set_buffer_hooks(count_alloc, count_free);
+    fs_shim_hold("/contacts3"); // the reserve starts at the file's size
+    fs_shim_held_stats_t st;
+    fs_shim_take_held_stats(NULL);
+    alloc_calls = 0;
+    save_contacts(expect, 200, 5, 1);
+    fs_shim_take_held_stats(&st);
+    CHECK(st.saves == 1 && st.writes == 200 * 12 && st.allocs == 1 && st.copied == 0 && alloc_calls == 1);
+    fs_shim_held_t taken;
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && taken.len == 200 * REC_SIZE && taken.cap == 200 * REC_SIZE + FS_SHIM_CHUNK);
+    CHECK(File::writeHeld(&taken).ok && live_blocks == 0);
+
+    // Thirty contacts more than the headroom holds: one growth past the reserve, then the next save fits at once
+    save_contacts(expect, 230, 6, 2);
+    fs_shim_take_held_stats(&st);
+    CHECK(st.saves == 1 && st.allocs == 2 && st.copied > 200 * REC_SIZE && st.copied < 230 * REC_SIZE);
+    fs_shim_take_held(&taken);
+    CHECK(File::writeHeld(&taken).ok);
+    save_contacts(expect, 230, 7, 3);
+    fs_shim_take_held_stats(&st);
+    CHECK(st.saves == 1 && st.allocs == 1 && st.copied == 0);
+    fs_shim_take_held(&taken);
+    CHECK(File::writeHeld(&taken).ok && live_blocks == 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 230 * REC_SIZE && memcmp(disk, expect, 230 * REC_SIZE) == 0);
+
+    // A file that is not held never reserves, and its writes are not counted
+    File other = SPIFFS.open("/prefs", "w");
+    CHECK(other.write(expect, 10) == 10);
+    other.close();
+    fs_shim_take_held_stats(&st);
+    CHECK(st.saves == 0 && st.writes == 0 && st.allocs == 0);
+    fs_shim_hold(NULL);
+    fs_shim_set_buffer_hooks(NULL, NULL);
+    CHECK(SPIFFS.remove("/prefs") && SPIFFS.remove("/contacts3"));
+}
+
 int main(void) {
     char root[] = "/tmp/fs_shim_test.XXXXXX";
     CHECK(mkdtemp(root) != NULL);
@@ -455,6 +504,7 @@ int main(void) {
 
     buffered_writes();
     held_saves();
+    held_reserve();
 
     // Remove; mkdir of a nested directory
     CHECK(SPIFFS.remove("/a/b") && !SPIFFS.exists("/a/b"));

@@ -396,26 +396,43 @@ static void contacts_write_taken(void) {
 }
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-// The slow loop's file calls of 10 ms and more (#425), as the shim noted them: the first n, the ones under the lock
-// (the writes after the unlock come later in the shim's list). A bench diagnostic: developer build only.
-static void log_slow_calls(size_t n) {
-    fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];
-    fs_shim_slow_calls(calls, FS_SHIM_SLOW_CALLS);
-    for (size_t i = 0; i < n && i < FS_SHIM_SLOW_CALLS; i++) {
-        fs_shim_call_t const &c = calls[i];
+// Where a slow loop's time under the lock went (#425), a bench diagnostic: developer build only. Copied under the lock
+// before fs_shim_take_busy_us, which forgets the shim's notes (and the writes after the unlock add calls of their own).
+// Per loop: one timer read, a load of the slow-call count, two small struct copies.
+static fs_shim_call_t       slow_calls[FS_SHIM_SLOW_CALLS];
+static size_t               slow_calls_n;
+static fs_shim_held_stats_t slow_held;
+static int64_t              slow_loop_us;
+
+// The file calls of 10 ms and more, the held save's build, and node->loop() against the rest under the lock
+static void log_slow_notes(int64_t took_ms) {
+    for (size_t i = 0; i < slow_calls_n && i < FS_SHIM_SLOW_CALLS; i++) {
+        fs_shim_call_t const &c = slow_calls[i];
         ESP_LOGW(TAG, "  slow file call: %s %s, %lu B (%lu B rewritten), %lu ms (file system close %lu ms)",
                  fs_shim_op_name(c.op), c.name, (unsigned long)c.bytes, (unsigned long)c.rewritten,
                  (unsigned long)(c.us / 1000), (unsigned long)(c.sync_us / 1000));
     }
-    if (n > FS_SHIM_SLOW_CALLS) {
-        ESP_LOGW(TAG, "  and %u more slow file call(s)", (unsigned)(n - FS_SHIM_SLOW_CALLS));
+    if (slow_calls_n > FS_SHIM_SLOW_CALLS) {
+        ESP_LOGW(TAG, "  and %u more slow file call(s)", (unsigned)(slow_calls_n - FS_SHIM_SLOW_CALLS));
     }
+    fs_shim_held_stats_t const &h = slow_held;
+    ESP_LOGW(TAG, "  under the lock: node loop %lld ms, the rest %lld ms; held save: %lu save(s), %lu write(s), %lu "
+                  "allocation(s) (%lu B copied, %lu ms), open to close %lu ms",
+             (long long)(slow_loop_us / 1000), (long long)(took_ms - slow_loop_us / 1000), (unsigned long)h.saves,
+             (unsigned long)h.writes, (unsigned long)h.allocs, (unsigned long)h.copied,
+             (unsigned long)(h.alloc_us / 1000), (unsigned long)(h.open_us / 1000));
 }
-#define SLOW_FILE_CALLS()   fs_shim_slow_calls(NULL, 0) // a count only: the calls are copied for a slow loop's log
-#define LOG_SLOW_CALLS(n)   log_slow_calls(n)
+#define SLOW_NOTES_BEGIN()        fs_shim_take_held_stats(NULL) // other tasks' saves between loops are not this one's
+#define SLOW_NOTES_LOOP(since)    (slow_loop_us = esp_timer_get_time() - (since))
+#define SLOW_NOTES_TAKE_CALLS()   (slow_calls_n = fs_shim_slow_calls(slow_calls, FS_SHIM_SLOW_CALLS))
+#define SLOW_NOTES_TAKE_HELD()    fs_shim_take_held_stats(&slow_held)
+#define LOG_SLOW_NOTES(took_ms)   log_slow_notes(took_ms)
 #else
-#define SLOW_FILE_CALLS()   ((size_t)0)
-#define LOG_SLOW_CALLS(n)   ((void)(n))
+#define SLOW_NOTES_BEGIN()        ((void)0)
+#define SLOW_NOTES_LOOP(since)    ((void)(since))
+#define SLOW_NOTES_TAKE_CALLS()   ((void)0)
+#define SLOW_NOTES_TAKE_HELD()    ((void)0)
+#define LOG_SLOW_NOTES(took_ms)   ((void)(took_ms))
 #endif
 
 static void mesh_task(void *arg) {
@@ -429,13 +446,15 @@ static void mesh_task(void *arg) {
         int64_t  started = esp_timer_get_time();
         uint32_t rx      = radio_driver.getPacketsRecv();
         fs_shim_take_busy_us(NULL); // what other tasks spent in files under the lock is not this loop's
+        SLOW_NOTES_BEGIN();
         node->loop();
+        SLOW_NOTES_LOOP(started);
         if (sync_outgoing()) {
             tile_publish_unread(); // an added message can evict a DM chat that had unread
         }
         uint32_t file_ops;
-        uint32_t file_us   = fs_shim_take_busy_us(&file_ops);
-        size_t   slow_file = SLOW_FILE_CALLS();
+        SLOW_NOTES_TAKE_CALLS(); // before the take, which forgets them
+        uint32_t file_us = fs_shim_take_busy_us(&file_ops);
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
         advert_tick_locked();
@@ -483,6 +502,7 @@ static void mesh_task(void *arg) {
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
         fs_shim_take_held(&contacts_taken);
+        SLOW_NOTES_TAKE_HELD();
         contacts_taken_n = node->getNumContacts();
         int64_t took_ms  = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
@@ -510,7 +530,7 @@ static void mesh_task(void *arg) {
                           "the lock, %d contacts",
                      (long long)took_ms, (unsigned long)(file_us / 1000), (unsigned long)file_ops, (unsigned long)rx,
                      (long long)((started - asked) / 1000), contacts_taken_n);
-            LOG_SLOW_CALLS(slow_file);
+            LOG_SLOW_NOTES(took_ms);
         }
         vTaskDelay(pdMS_TO_TICKS(MESH_POLL_MS));
     }

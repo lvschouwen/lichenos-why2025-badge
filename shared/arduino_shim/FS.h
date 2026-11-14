@@ -70,6 +70,7 @@ private:
     File(char const *full_path, uint8_t *view, size_t len); // an "r" file reading a parked save, not owning it
     bool buffered() const { return fd_ >= 0 || held_ || view_; }
     bool commit(); // a "w" file's buffer onto the file, only the chunks that differ
+    bool grow(size_t end); // the buffer made at least end bytes; false (and failed_) when it does not fit
     void hold();   // close() of a held file: the buffer goes to the held slot
 
     FILE    *f_ = nullptr;
@@ -158,6 +159,23 @@ void fs_shim_hold(char const *path);
 void fs_shim_take_held(fs_shim_held_t *out);
 // Forgets what is held, unwritten (a save of the newest state follows)
 void fs_shim_drop_held(void);
+// The buffer a held save reserves at its first write (#425): the file's last size plus one chunk of headroom (26
+// contacts), at most FS_SHIM_MAX_FILE; 0 (no reserve: one chunk, doubling) when the size is not known. Pure.
+size_t fs_shim_reserve(size_t last_len);
+// The size a "w" buffer of cap bytes grows to for end bytes: the reserve when it is empty and the reserve fits, else
+// one chunk (when empty) doubled until end fits. Pure.
+size_t fs_shim_grow_cap(size_t cap, size_t end, size_t reserve);
+// What the held path's saves did since the last take (#425: the slow-loop notes). Developer build only (and the host
+// tests); the owner takes it under its lock. out may be NULL (forget only). The times are 0 off the badge.
+typedef struct {
+    uint32_t saves;    // held "w" Files closed
+    uint32_t writes;   // their write() calls
+    uint32_t allocs;   // their buffer allocations (the first one and each growth)
+    uint32_t copied;   // bytes the growths copied from the old buffer
+    uint32_t alloc_us; // time in those allocations, copies and frees
+    uint32_t open_us;  // time from each held "w" open to its close (the whole save as MeshCore builds it)
+} fs_shim_held_stats_t;
+void fs_shim_take_held_stats(fs_shim_held_stats_t *out);
 #ifndef ESP_PLATFORM
 // Host tests only. Writes (and truncates) that reached the file system for buffered "w" files since the last call
 uint32_t fs_shim_take_raw_writes(void);

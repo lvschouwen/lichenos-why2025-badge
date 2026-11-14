@@ -103,8 +103,8 @@ static void buf_free(void *p) {
     }
 }
 
-// Grows p to n bytes (p NULL: a fresh buffer): a new block, the old bytes copied, the old block released. old is the
-// size of what p holds.
+// Grows p to n bytes (p NULL: a fresh buffer): a new block, the old bytes copied, the old block released. old is how
+// many bytes of p are in use (the file's length, not the block's size).
 static void *buf_grow(void *p, size_t old, size_t n) {
     if (fail_alloc) {
         return NULL;
@@ -153,6 +153,44 @@ static uint32_t       slow_count;
 #define FORGET_SLOW_CALLS() __atomic_store_n(&slow_count, 0, __ATOMIC_RELAXED)
 #else
 #define FORGET_SLOW_CALLS() ((void)0)
+#endif
+
+size_t fs_shim_reserve(size_t last_len) {
+    if (last_len == 0) {
+        return 0;
+    }
+    return last_len < FS_SHIM_MAX_FILE - FS_SHIM_CHUNK ? last_len + FS_SHIM_CHUNK : FS_SHIM_MAX_FILE;
+}
+
+size_t fs_shim_grow_cap(size_t cap, size_t end, size_t reserve) {
+    if (cap == 0 && reserve >= end) {
+        return reserve;
+    }
+    size_t n = cap ? cap : FS_SHIM_CHUNK;
+    while (n < end) {
+        n *= 2;
+    }
+    return n;
+}
+
+#if FS_SHIM_SLOW_NOTES
+// What the held path's saves did (#425): touched only by the owner's saves, all under its lock, and read under it
+static fs_shim_held_stats_t held_stats;
+static int64_t              held_opened;
+#define NOTE_HELD_WRITE()    (held_stats.writes++)
+#define NOTE_HELD_OPEN(now)  (held_opened = (now))
+#define NOTE_HELD_CLOSE(now) (held_stats.saves++, held_stats.open_us += (uint32_t)((now) - held_opened))
+
+void fs_shim_take_held_stats(fs_shim_held_stats_t *out) {
+    if (out) {
+        *out = held_stats;
+    }
+    held_stats = fs_shim_held_stats_t{};
+}
+#else
+#define NOTE_HELD_WRITE()    ((void)0)
+#define NOTE_HELD_OPEN(now)  ((void)0)
+#define NOTE_HELD_CLOSE(now) ((void)0)
 #endif
 
 uint32_t fs_shim_take_busy_us(uint32_t *ops) {
@@ -262,9 +300,13 @@ static void timed_end(Timed &t) {
 }
 #endif
 
-// The held path's saves (#425): the path (the owner's string) and the newest save not yet taken
+// The held path's saves (#425): the path (the owner's string), the newest save not yet taken, and the size of the
+// file's last save (on the file system when the hold began, then each held save's): a held save's buffer is reserved
+// at that size plus headroom in one allocation, instead of doubling up from 4 KB (six PSRAM allocations, five frees and
+// copies under the owner's lock at 552 contacts)
 static char const    *hold_path;
 static fs_shim_held_t held_slot;
+static size_t         held_last_len;
 
 // Atomic: other tasks open their own files without the owner's lock and read it then
 static char const *held_path(void) {
@@ -282,11 +324,23 @@ static bool is_held(char const *path) {
     return held && path && strcmp(path, held) == 0;
 }
 
+static bool full_path(char const *path, char *out);
+
+// The size of path's file on the file system, 0 when there is none
+static size_t size_on_disk(char const *path) {
+    [[maybe_unused]] Timed timed(FS_OP_EXISTS, path);
+    char        full[PATH_MAX_LEN];
+    struct stat st;
+    return full_path(path, full) && stat(full, &st) == 0 && S_ISREG(st.st_mode) ? (size_t)st.st_size : 0;
+}
+
 void fs_shim_hold(char const *path) {
     __atomic_store_n(&hold_path, path, __ATOMIC_RELEASE);
     if (!path) {
         fs_shim_drop_held(); // a direct save follows: a parked one written later would be older than it
+        return;
     }
+    held_last_len = size_on_disk(path);
 }
 
 void fs_shim_take_held(fs_shim_held_t *out) {
@@ -461,28 +515,45 @@ int File::read() {
     return read(&b, 1) == 1 ? b : -1;
 }
 
+// Makes the buffer hold at least end bytes. A held save starts at the reserve (fs_shim_reserve), every other "w" file
+// at one chunk; past that the size doubles. In the developer build a held save's growths are counted and timed.
+bool File::grow(size_t end) {
+    size_t cap = fs_shim_grow_cap(cap_, end, held_ ? fs_shim_reserve(held_last_len) : 0);
+#if FS_SHIM_SLOW_NOTES
+    int64_t t0 = held_ ? timed_now() : 0;
+#endif
+    uint8_t *grown = (uint8_t *)buf_grow(buf_, len_, cap);
+#if FS_SHIM_SLOW_NOTES
+    if (held_) {
+        held_stats.allocs++;
+        held_stats.copied += buf_ ? (uint32_t)len_ : 0;
+        held_stats.alloc_us += (uint32_t)(timed_now() - t0);
+    }
+#endif
+    if (!grown) {
+        failed_ = true; // a half-written file must not replace the old one
+        return false;
+    }
+    buf_ = grown;
+    cap_ = cap;
+    return true;
+}
+
 size_t File::write(uint8_t const *buf, size_t len) {
     if (buffered()) { // into the buffer, no file system call: committed by flush() or close()
         if (failed_ || view_ || len == 0) { // a view of a parked save is read-only
             return 0;
         }
         size_t end = pos_ + len;
-        if (end < pos_ || end > FS_SHIM_MAX_FILE) { // also keeps the doubling below from overflowing
+        if (end < pos_ || end > FS_SHIM_MAX_FILE) { // also keeps the doubling in grow() from overflowing
             failed_ = true;
             return 0;
         }
-        if (end > cap_) {
-            size_t cap = cap_ ? cap_ : FS_SHIM_CHUNK;
-            while (cap < end) {
-                cap *= 2;
-            }
-            uint8_t *grown = (uint8_t *)buf_grow(buf_, cap_, cap);
-            if (!grown) {
-                failed_ = true; // a half-written file must not replace the old one
-                return 0;
-            }
-            buf_ = grown;
-            cap_ = cap;
+        if (held_) {
+            NOTE_HELD_WRITE();
+        }
+        if (end > cap_ && !grow(end)) {
+            return 0;
         }
         if (pos_ > len_) { // a seek past the end leaves zeroes, as a file does
             memset(buf_ + len_, 0, pos_ - len_);
@@ -592,8 +663,10 @@ void File::hold() {
         buf_free(buf_);
     } else {
         buf_free(held_slot.buf); // an older save of the same file: this one is newer
-        held_slot = fs_shim_held_t{buf_, len_, cap_, true, path};
+        held_slot     = fs_shim_held_t{buf_, len_, cap_, true, path};
+        held_last_len = len_; // the next save's reserve
     }
+    NOTE_HELD_CLOSE(timed_now());
     held_   = false;
     buf_    = nullptr;
     len_    = cap_ = pos_ = 0;
@@ -659,7 +732,11 @@ File FS::open(char const *path, char const *mode, bool create) {
     if ((mode[0] == 'w' || (mode[0] == 'r' && held_slot.set)) && is_held(path)) {
         // "w": a buffer only, File::writeHeld opens the file after the owner's unlock; "r": the parked save is the
         // file's newest state
-        return mode[0] == 'w' ? File(full, true) : File(full, held_slot.buf, held_slot.len);
+        if (mode[0] == 'w') {
+            NOTE_HELD_OPEN(timed_now());
+            return File(full, true);
+        }
+        return File(full, held_slot.buf, held_slot.len);
     }
     [[maybe_unused]] Timed timed(FS_OP_OPEN, full);
     char        m[4] = {mode[0], 'b', '\0', '\0'};
