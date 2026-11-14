@@ -14,8 +14,6 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-ccn	firmware/components/mesh/mesh_telem.c:lpp_type	26
-ccn	firmware/components/mesh/mesh_telem.c:one_value	36
 ccn	shared/lora/lora_proto.c:lora_decode	27
 nest	firmware/components/mesh/mesh_notify.c:mn_decide	7
 size	<merged-strings>	286533
