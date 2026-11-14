@@ -80,7 +80,7 @@ typedef struct {
 } ln_stats_t;
 void lichen_notify_stats(ln_stats_t *out);
 // Notices dropped for want of room or a source too long, since boot (fw soak, #419): stats.dropped without the walk of
-// the entries. Any task.
+// the entries or the notify lock (an atomic mirror). Any task.
 uint32_t lichen_notify_dropped(void);
 
 #ifdef __cplusplus

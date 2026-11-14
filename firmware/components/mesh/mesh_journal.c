@@ -58,7 +58,8 @@ static uint32_t     retry_after_s;
 static size_t       keep_n;
 static bool         drop_warned;
 static uint32_t     pend_hw;    // fw soak (#419): the most pending bytes seen at a tick; written by the mesh task only,
-static uint32_t     pend_drops; // and the records the full buffer refused then (hist is freed at a stop, so a copy)
+static uint32_t     pend_drops; // and the records the full buffer refused, summed over restarts like the other counters
+static uint32_t     drops_seen; // hist->dropped as last added to pend_drops (hist starts at 0 again at each start)
 static void (*lock_fn)(void);
 static void (*unlock_fn)(void);
 
@@ -456,6 +457,7 @@ static bool boot_buffers(void) {
         return false;
     }
     mesh_hist_init(hist, a, MESH_HIST_PENDING, &wcrypt);
+    drops_seen = 0;
     return true;
 }
 
@@ -573,7 +575,10 @@ void mesh_journal_tick_locked(void) {
     if (!hist || !on) {
         return;
     }
-    __atomic_store_n(&pend_drops, hist->dropped, __ATOMIC_RELAXED);
+    if (hist->dropped != drops_seen) {
+        __atomic_store_n(&pend_drops, pend_drops + (hist->dropped - drops_seen), __ATOMIC_RELAXED);
+        drops_seen = hist->dropped;
+    }
     if (hist->len > __atomic_load_n(&pend_hw, __ATOMIC_RELAXED)) {
         __atomic_store_n(&pend_hw, (uint32_t)hist->len, __ATOMIC_RELAXED);
     }

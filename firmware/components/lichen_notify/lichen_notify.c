@@ -64,6 +64,7 @@ static atomic_bool       s_dnd;
 static fw_get_u8_fn      s_get; // the settings service (#235); NULL until lichen_os binds it
 static fw_set_u8_fn      s_set;
 static atomic_uint       s_generation;
+static atomic_uint       s_dropped_total; // fw soak (#419): the ring's dropped count, kept lock-free beside it
 static bool (*s_clock_set)(void);
 static ln_feedback_t     s_feedback;
 // The state pushed to notify_bind.h's hooks. One critical section keeps each value and its push in the order the
@@ -405,6 +406,7 @@ static bool source_usable(char const *source, char const *title) {
     if (strlen(source) > NR_SOURCE_CAP - 1) { // cut, it would never match itself again (coalescing, badges)
         lock();
         s_ring->dropped++;
+        atomic_fetch_add(&s_dropped_total, 1);
         unlock();
         ESP_LOGW(TAG, "dropped \"%s\": source \"%s\" is longer than an app id", title ? title : "", source);
         return false;
@@ -461,6 +463,7 @@ static uint32_t post_as(char const *source, ln_level_t level, char const *target
     nrate_show_t show = nrate_show((uint8_t)level, flags & LN_SILENT, atomic_load(&s_dnd), within);
     unlock();
     if (outcome == NR_DROPPED) {
+        atomic_fetch_add(&s_dropped_total, 1);
         ESP_LOGW(TAG, "no room for \"%s\" from %s: dropped", title ? title : "", source);
         return 0;
     }
@@ -634,13 +637,7 @@ void lichen_notify_feedback(ln_level_t level, bool on) {
 }
 
 uint32_t lichen_notify_dropped(void) {
-    if (!atomic_load(&s_started)) {
-        return 0;
-    }
-    lock();
-    uint32_t n = s_ring->dropped;
-    unlock();
-    return n;
+    return atomic_load(&s_dropped_total);
 }
 
 void lichen_notify_stats(ln_stats_t *out) {
