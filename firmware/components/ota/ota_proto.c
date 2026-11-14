@@ -259,6 +259,9 @@ static int parse_header(char *line, ota_request_t *req, uint32_t *seen) {
     char  *name;
     char  *value;
     size_t vlen;
+    if (line[0] == ' ' || line[0] == '\t') {
+        return 400; // an obsolete folded line: HTTP/1.1 says to refuse it rather than ignore it as an unknown header (#417)
+    }
     if (!split_header(line, &name, &value, &vlen)) {
         return 400;
     }

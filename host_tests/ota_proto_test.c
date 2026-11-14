@@ -593,6 +593,32 @@ static void test_blank_before_colon(void) {
     }
 }
 
+// #417: a header line starting with a blank (obsolete folding) used to be read as an unknown header and ignored
+static void test_folded_header(void) {
+    ota_request_t req;
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: 5\r\n 6\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: 5\r\n\t6\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /info HTTP/1.1\r\n X: y\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: 5\r\n\r\n", &req) == 0 && req.content_length == 5);
+    static uint8_t out[1024];
+    for (size_t i = 0; i < sizeof(recorded) / sizeof(recorded[0]); i++) {
+        if (!recorded[i].parsed) {
+            continue;
+        }
+        char const *head = recorded[i].head;
+        size_t      len  = strlen(head);
+        size_t      line = (size_t)(strstr(head, "\r\n") - head) + 2; // past the request line
+        while (line < len && strncmp(head + line, "\r\n", 2) != 0) {
+            for (char const *blank = " \t"; *blank; blank++) {
+                size_t n = mut_insert((uint8_t const *)head, len, line, blank, 1, out, sizeof(out));
+                CHECK(n && ota_parse_request((char const *)out, n, &req) == 400);
+            }
+            char const *eol = strstr(head + line, "\r\n");
+            line            = eol ? (size_t)(eol - head) + 2 : len;
+        }
+    }
+}
+
 // #403: an Expect other than 100-continue used to be ignored; the receiver cannot meet it, so it is refused with 417
 static void test_expect(void) {
     ota_request_t req;
@@ -685,6 +711,7 @@ int main(void) {
     test_status_reason();
     test_request_line_reentrant();
     test_blank_before_colon();
+    test_folded_header();
     test_expect();
     test_slot_size();
     if (failures) {

@@ -137,7 +137,7 @@ size	libmesh.a	405494
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
-size	libota.a	76111
+size	libota.a	76121
 size	libpsram_guard.a	25315
 size	libpthread.a	1229
 size	libriscv.a	1684
