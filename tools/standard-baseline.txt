@@ -14,13 +14,13 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	287861
+size	<merged-strings>	288365
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	12830
 size	libbootloader_support.a	5942
-size	libc.a	47594
+size	libc.a	47702
 size	libc6link.a	33164
 size	libcrash.a	5718
 size	libcxx.a	872
@@ -89,14 +89,14 @@ size	libesp_wifi_remote_glue.a	617
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	38921
+size	libespressif__mdns.a	38925
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	15716
+size	libfw_console.a	15784
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
-size	libjoltwallet__littlefs.a	34382
+size	libjoltwallet__littlefs.a	34390
 size	liblichen_api.a	42184
 size	liblichen_apps.a	51552
 size	liblichen_boot.a	13082
@@ -117,11 +117,11 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13319
 size	libmbedtls.a	22
-size	libmesh.a	404359
+size	libmesh.a	404367
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
-size	libota.a	77273
+size	libota.a	78418
 size	libpsram_guard.a	25315
 size	libpthread.a	1229
 size	libriscv.a	1684
