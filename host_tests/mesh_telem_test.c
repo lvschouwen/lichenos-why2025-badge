@@ -398,8 +398,9 @@ static void request(void) {
     uint8_t d[] = {1, 116, 0x01, 0x9C};
     memcpy(ans.telem, d, 4);
     CHECK(rr_on_telemetry(&r, &ans, 300) && r.state == RR_DONE && r.have_telem);
-    char view[600];
-    tl_view_text(&r, A, view, sizeof(view));
+    char      view[600];
+    tl_line_t lines[TL_LINES_MAX];
+    tl_view_text(&r, A, lines, view, sizeof(view));
     CHECK(strcmp(view, "Battery: 4.12 V") == 0); // a good answer: values only, no state line
     // the next request times out: "No answer", the old values stay above with the reason
     CHECK(rr_request(&r, RR_TELEMETRY, A, NULL, 1000, &why) == 2);
@@ -409,9 +410,9 @@ static void request(void) {
     CHECK(r.state == RR_SENT);
     rr_poll(&r, 1100 + rr_deadline_ms(4000) + 1, NULL);
     CHECK(r.state == RR_TIMEOUT);
-    tl_view_text(&r, A, view, sizeof(view));
+    tl_view_text(&r, A, lines, view, sizeof(view));
     CHECK(strstr(view, "Battery: 4.12 V") && strstr(view, "No answer:") && strstr(view, "last answer above"));
-    tl_view_text(&r, B, view, sizeof(view)); // another contact's page never shows these values
+    tl_view_text(&r, B, lines, view, sizeof(view)); // another contact's page never shows these values
     CHECK(strncmp(view, "No answer:", 10) == 0);
     // MyMesh refusing it ends it with the reason
     CHECK(rr_request(&r, RR_TELEMETRY, A, NULL, 9000, &why) == 3);

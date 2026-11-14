@@ -47,8 +47,10 @@ void tl_rate_note(tl_rate_t *t, uint8_t const prefix[MF_PREFIX], uint32_t now_ms
 // ---- the result page ------------------------------------------------------------------------------------------------
 // The page's text for the request r about target: the values of the newest answer from that contact, then a line for
 // where the request stands: "Asking... waiting for the answer (direct)", "No answer: ..." (with the next step), or
-// nothing extra after a good answer. Returns the length written.
-size_t tl_view_text(rr_t const *r, uint8_t const target[MF_PREFIX], char *out, size_t cap);
+// nothing extra after a good answer. lines is the caller's scratch for the values (TL_LINES_MAX of them, 1.5 KB: too
+// much for the UI task's stack, #209). Returns the length written.
+size_t tl_view_text(rr_t const *r, uint8_t const target[MF_PREFIX], tl_line_t lines[TL_LINES_MAX], char *out,
+                    size_t cap);
 
 #ifdef __cplusplus
 }

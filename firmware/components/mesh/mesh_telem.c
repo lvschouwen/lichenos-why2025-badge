@@ -212,17 +212,15 @@ void tl_rate_note(tl_rate_t *t, uint8_t const prefix[MF_PREFIX], uint32_t now_ms
     pick->used  = true;
 }
 
-size_t tl_view_text(rr_t const *r, uint8_t const target[MF_PREFIX], char *out, size_t cap) {
+size_t tl_view_text(rr_t const *r, uint8_t const target[MF_PREFIX], tl_line_t lines[TL_LINES_MAX], char *out,
+                    size_t cap) {
     size_t at = 0;
     if (cap == 0) {
         return 0;
     }
-    out[0] = 0;
-    bool       have = r->have_telem && memcmp(r->telem_prefix, target, MF_PREFIX) == 0;
-    tl_line_t *lines = NULL;
-    tl_line_t  buf[TL_LINES_MAX];
-    size_t     n = 0;
-    lines        = buf;
+    out[0]      = 0;
+    bool   have = r->have_telem && memcmp(r->telem_prefix, target, MF_PREFIX) == 0;
+    size_t n    = 0;
     if (have) {
         n = tl_lpp_lines(r->telem, r->telem_len, lines, TL_LINES_MAX);
         if (n == 0) {

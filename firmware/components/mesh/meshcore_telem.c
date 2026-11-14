@@ -18,8 +18,9 @@
 #define POLL_MS 250
 
 typedef struct {
-    rr_t rr;
-    char text[TL_LINES_MAX * TL_LINE_MAX + 160];
+    rr_t      rr;
+    tl_line_t lines[TL_LINES_MAX]; // tl_view_text's scratch: off the LVGL task's stack (#209)
+    char      text[TL_LINES_MAX * TL_LINE_MAX + 160];
 } view_mem_t;
 
 static uint8_t     target[6];
@@ -60,7 +61,7 @@ static void show(void) {
         set_text(result, "Another request to a contact was started: Again asks for telemetry once more.");
         return;
     }
-    tl_view_text(r, target, mem->text, sizeof(mem->text));
+    tl_view_text(r, target, mem->lines, mem->text, sizeof(mem->text));
     set_text(result, mem->text);
     bool busy = rr_busy(r);
     if (busy != shown_busy) {
