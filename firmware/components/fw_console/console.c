@@ -810,18 +810,14 @@ static void run_command(char *line) {
     char const *args;
     int         app;
     line = dev_gate_split(line, (char const *const *)app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), &app, &args);
-    int i = 0;
-    switch (dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i)) {
-        case DEV_FIND_RUN:
-            // A test arm of a command that is otherwise open (#421): refused before it can write anything
-            if (dev_gate_decide(DEV_FIND_RUN, dev_gate_needs_dev(line, args), console_dev_mode()) == DEV_GATE_REFUSE) {
-                console_reply("%s: " DEV_OFF_REPLY, line);
-                return;
-            }
-            commands[i].fn(args);
-            return;
-        case DEV_FIND_DEV_OFF: console_reply("%s: " DEV_OFF_REPLY, commands[i].name); return;
-        case DEV_FIND_NONE: break;
+    int        i = 0;
+    dev_find_t found = dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i);
+    // One decision for all three outcomes (host-tested): a test arm of an otherwise open command (#421) is refused
+    // before it can write anything
+    switch (dev_gate_decide(found, dev_gate_needs_dev(line, args), console_dev_mode())) {
+        case DEV_GATE_RUN: commands[i].fn(args); return;
+        case DEV_GATE_REFUSE: console_reply("%s: " DEV_OFF_REPLY, line); return;
+        case DEV_GATE_UNKNOWN: break;
     }
     // Not echoed: a mistyped line may be a password, and the reply goes to the log store (#123); the asker sees what
     // they typed on their own side

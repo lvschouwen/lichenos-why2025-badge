@@ -1,6 +1,5 @@
 // Host test: the test and state-changing console forms need developer mode (#421), also under the "fw <app>" prefix
 #include "dev_gate.h"
-#include "dev_mode.h"
 
 #include <stdio.h>
 #include <string.h>

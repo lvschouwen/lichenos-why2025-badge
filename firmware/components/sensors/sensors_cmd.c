@@ -134,6 +134,12 @@ static bool save_boot(bool on) {
 
 #endif
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define SENSORS_USAGE "sensors [raw|start|stop|boot [on|off]]"
+#else
+#define SENSORS_USAGE "sensors [raw|boot]" // no start, stop or boot on|off in a release image (#421)
+#endif
+
 static void cmd_sensors(char const *args) {
     if (args[0] == '\0') {
         print_lines();
@@ -154,7 +160,7 @@ static void cmd_sensors(char const *args) {
     } else if (strcmp(args, "boot") == 0) {
         console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
     } else {
-        console_reply("sensors [raw|boot]");
+        console_reply(SENSORS_USAGE);
     }
 }
 
@@ -163,5 +169,5 @@ bool sensors_boot_start(void) {
 }
 
 void sensors_register_console(void) {
-    console_register("sensors", "sensors [raw|boot] (IMU, environment, P4 die temperature)", cmd_sensors);
+    console_register("sensors", SENSORS_USAGE " (IMU, environment, P4 die temperature)", cmd_sensors);
 }

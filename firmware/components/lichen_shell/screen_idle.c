@@ -166,6 +166,12 @@ static void times_text(char *out, size_t cap, idle_times_t t) {
     snprintf(out, cap, "dim after %s, off after %s", dim, off);
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define IDLE_USAGE "idle | idle test <seconds> (screen timeout state; fake the time since the last key)"
+#else
+#define IDLE_USAGE "idle (screen timeout state)" // no test arm in a release image (#421)
+#endif
+
 // "fw idle": the state; "fw idle test <s>": the idle clock as if the last key was s seconds ago (bench)
 static void cmd_idle(char const *args) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS // a debug arm (#421): not in a release image
@@ -184,7 +190,7 @@ static void cmd_idle(char const *args) {
     }
 #endif
     if (*args) {
-        console_reply("idle (screen timeout state)");
+        console_reply(IDLE_USAGE);
         return;
     }
     portENTER_CRITICAL(&lock);
