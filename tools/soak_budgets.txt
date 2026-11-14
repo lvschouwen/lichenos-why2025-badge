@@ -1,0 +1,64 @@
+# Soak budgets (#424, #407): what was planned, and how the soak measures it. Read by tools/soak_report.py.
+#
+# One figure per line, whitespace-separated columns; a '#' followed by a space (or ending the line) starts a comment; '#234' is an issue, not a comment.
+#   figure     name for the report (no spaces)
+#   kind       key       a `fw soak` key (soak1..soak4, firmware/main/soak_line.c); `measure` is the key
+#              log       a number in a serial-log line; `measure` is a regex with ONE group (\s for a space)
+#              probe     a figure no soak key or log line carries; `measure` names the probe (the report has
+#                        no data for it until a later tool, or a CSV column of that name, supplies one)
+#              unplanned measured only, nothing was planned; expected `-`
+#   measure    see kind
+#   expected   a number (two-sided, with tolerance), `<=N` / `>=N` (a limit, one-sided, tolerance `-`) or `-`
+#   tolerance  `-`, an absolute number (`2`) or a percentage (`15%`); applies in both directions around expected
+#   unit       free label (ms, KiB, B, count, MB/s, s)
+#   source     where the plan was written: an issue (#234), a file path or a doc
+#   note       everything after the source (optional)
+# Flags in the report: over, under (outside the tolerance, `under` can mean the feature is not running),
+# unplanned, no data. An `under` on a one-sided limit does not exist.
+#
+# figure kind measure expected tolerance unit source note
+
+# Gates already enforced elsewhere
+dma_free key dma >=89981 - B #234 DMA-capable internal RAM free now
+dma_min key dmamin >=80650 - B #234 since-boot minimum
+crashes key crash <=0 - count #407 fw crash clear resets it
+c6_restarts key c6rs <=0 - count #277
+hb_misses key hbmiss <=0 - count #277
+air_dropped key airdrop <=0 - count #419
+mesh_rx_dropped key mdrop <=0 - count #419
+journal_dropped key jdrop <=0 - count #419
+toast_drops key toastdrop <=0 - count #419
+notice_drops key notdrop <=0 - count #419
+mesh_loop_slow_ms key mslowms <=200 - ms firmware/components/mesh/mesh_task.cpp MESH_SLOW_LOOP_MS=200 (#407 text says 500: the code is stricter)
+mesh_loop_slow_log log MeshCore\sloop\stook\s(\d+)\sms <=200 - ms firmware/components/mesh/mesh_task.cpp warning line, same limit
+notice_slow_ms key nslowms <=500 - ms firmware/components/lichen_os/sys_notice_rules.h SYSN_SLOW_MS=500
+storage_count_ms key stmax - - ms none measured 2.5-3.1 s on fw-869e608d, no written expectation
+storage_count_log log storage\scount:\s(\d+)\sms - - ms none sys_notices warning line, every 10 min
+
+# Probes (no soak key; the probe name is what a later tool or a CSV column supplies)
+first_frame_ms probe first-frame-ms <=3000 - ms #205 under 3 s
+update_time_s probe ota-update-s 26 2 s #298 24-28 s, compressed image
+sd_write_mbps probe sd-test-write-mbps 2.3 15% MB/s #263 on record; 1.90 seen on fw-869e608d
+
+# Per-app RAM from tools/layers.conf (#229): statics and stacks ONLY (not heap, not LVGL objects).
+# No soak key measures per-app RAM yet: the probe is `fw mem` per-app use, so these read `no data`.
+app_clock_internal probe fw-mem-app-clock-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_clock_psram probe fw-mem-app-clock-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_timer_internal probe fw-mem-app-timer-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_timer_psram probe fw-mem-app-timer-psram <=1024 - B tools/layers.conf statics and stacks only, PSRAM=1 KiB
+app_calc_internal probe fw-mem-app-calc-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_calc_psram probe fw-mem-app-calc-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_weather_internal probe fw-mem-app-weather-internal <=7168 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=7 KiB
+app_weather_psram probe fw-mem-app-weather-psram <=3072 - B tools/layers.conf statics and stacks only, PSRAM=3 KiB
+app_notes_internal probe fw-mem-app-notes-internal <=9216 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=9 KiB
+app_notes_psram probe fw-mem-app-notes-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_qrcode_internal probe fw-mem-app-qrcode-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_qrcode_psram probe fw-mem-app-qrcode-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_keytest_internal probe fw-mem-app-keytest-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_keytest_psram probe fw-mem-app-keytest-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_lora_spectrum_internal probe fw-mem-app-lora_spectrum-internal <=5120 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=5 KiB
+app_lora_spectrum_psram probe fw-mem-app-lora_spectrum-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_testcard_internal probe fw-mem-app-testcard-internal <=1024 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=1 KiB
+app_testcard_psram probe fw-mem-app-testcard-psram <=0 - B tools/layers.conf statics and stacks only, PSRAM=0 KiB
+app_meshcore_internal probe fw-mem-app-meshcore-internal <=49152 - B tools/layers.conf statics and stacks only, INTERNAL_RAM=48 KiB
+app_meshcore_psram probe fw-mem-app-meshcore-psram <=24576 - B tools/layers.conf statics and stacks only, PSRAM=24 KiB
