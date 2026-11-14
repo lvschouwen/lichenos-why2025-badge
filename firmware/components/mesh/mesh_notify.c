@@ -15,27 +15,38 @@ mn_mode_t mn_default_mode(mesh_chat_key_t const *key) {
     return MN_MODE_ALL;
 }
 
-mn_out_t mn_decide(mn_kind_t kind, mn_mode_t mode, mn_switches_t const *sw, bool chat_open, bool mention, bool dnd) {
-    mn_out_t out = {MN_POST, MN_R_OK};
-    if (chat_open) {
-        out = (mn_out_t){MN_SKIP, MN_R_CHAT_OPEN};
-    } else if (kind == MN_DM) {
-        if (!sw->dm) {
-            out = (mn_out_t){MN_SKIP, MN_R_DM_OFF};
-        }
-    } else if (kind == MN_FAILED) {
-        if (!sw->fail) {
-            out = (mn_out_t){MN_SKIP, MN_R_FAIL_OFF};
-        }
-    } else if (mode == MN_MODE_OFF) {
-        out = (mn_out_t){MN_SKIP, MN_R_MODE_OFF};
-    } else if (mode == MN_MODE_MENTIONS) {
+// A channel line: the mode decides, Mentions also needs the mentions switch
+static mn_out_t decide_channel(mn_mode_t mode, mn_switches_t const *sw, bool mention) {
+    if (mode == MN_MODE_OFF) {
+        return (mn_out_t){MN_SKIP, MN_R_MODE_OFF};
+    }
+    if (mode == MN_MODE_MENTIONS) {
         if (!mention) {
-            out = (mn_out_t){MN_SKIP, MN_R_NOT_MENTION};
-        } else if (!sw->mentions) {
-            out = (mn_out_t){MN_SKIP, MN_R_MENTIONS_OFF};
+            return (mn_out_t){MN_SKIP, MN_R_NOT_MENTION};
+        }
+        if (!sw->mentions) {
+            return (mn_out_t){MN_SKIP, MN_R_MENTIONS_OFF};
         }
     }
+    return (mn_out_t){MN_POST, MN_R_OK};
+}
+
+// Everything but do-not-disturb; that only softens a POST
+static mn_out_t decide_switches(mn_kind_t kind, mn_mode_t mode, mn_switches_t const *sw, bool chat_open, bool mention) {
+    if (chat_open) {
+        return (mn_out_t){MN_SKIP, MN_R_CHAT_OPEN};
+    }
+    if (kind == MN_DM) {
+        return sw->dm ? (mn_out_t){MN_POST, MN_R_OK} : (mn_out_t){MN_SKIP, MN_R_DM_OFF};
+    }
+    if (kind == MN_FAILED) {
+        return sw->fail ? (mn_out_t){MN_POST, MN_R_OK} : (mn_out_t){MN_SKIP, MN_R_FAIL_OFF};
+    }
+    return decide_channel(mode, sw, mention);
+}
+
+mn_out_t mn_decide(mn_kind_t kind, mn_mode_t mode, mn_switches_t const *sw, bool chat_open, bool mention, bool dnd) {
+    mn_out_t out = decide_switches(kind, mode, sw, chat_open, mention);
     if (out.verdict == MN_POST && dnd) {
         out = (mn_out_t){MN_SILENT, MN_R_DND};
     }
