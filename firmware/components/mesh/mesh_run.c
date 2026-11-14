@@ -2,73 +2,101 @@
 
 #include <stdio.h>
 
+// One handler per event, in the event's order; each returns whether r changed
+
+static bool on_start(mesh_run_t *r) {
+    if (r->state != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE || r->paused) {
+        return false;
+    }
+    r->state = MESH_RUN_STARTING;
+    return true;
+}
+
+static bool on_stop(mesh_run_t *r) {
+    if (r->state != MESH_RUN_RUNNING) {
+        return false;
+    }
+    r->state = MESH_RUN_STOPPING;
+    return true;
+}
+
+static bool on_done_ok(mesh_run_t *r) {
+    if (r->state == MESH_RUN_STARTING) {
+        r->state = MESH_RUN_RUNNING;
+        return true;
+    }
+    if (r->state == MESH_RUN_STOPPING) {
+        r->state = MESH_RUN_STOPPED; // paused stays: this stop may be the pause's
+        r->why   = MESH_WHY_USER;
+        return true;
+    }
+    return false;
+}
+
+static bool on_done_fail(mesh_run_t *r) {
+    if (r->state == MESH_RUN_STARTING) {
+        *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, r->paused};
+        return true;
+    }
+    if (r->state == MESH_RUN_STOPPING) {
+        r->state = MESH_RUN_RUNNING;
+        return true;
+    }
+    return false;
+}
+
+static bool on_update(mesh_run_t *r) {
+    if (r->state == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) {
+        return false;
+    }
+    *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_UPDATE, false};
+    return true;
+}
+
+static bool on_seen_up(mesh_run_t *r) {
+    // Only a settled state is corrected: a start or stop under way reports for itself
+    if (r->state != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE) {
+        return false;
+    }
+    r->state = MESH_RUN_RUNNING;
+    return true;
+}
+
+static bool on_seen_down(mesh_run_t *r) {
+    if (r->state != MESH_RUN_RUNNING) {
+        return false;
+    }
+    *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, false};
+    return true;
+}
+
+static bool on_pause(mesh_run_t *r) {
+    if ((r->state == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) || r->paused) {
+        return false;
+    }
+    r->paused = true;
+    return true;
+}
+
+static bool on_unpause(mesh_run_t *r) {
+    if (!r->paused) {
+        return false;
+    }
+    r->paused = false;
+    return true;
+}
+
 bool mesh_run_event(mesh_run_t *r, mesh_run_ev_t ev) {
-    mesh_run_state_t s = r->state;
     switch (ev) {
-        case MESH_EV_START:
-            if (s != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE || r->paused) {
-                return false;
-            }
-            r->state = MESH_RUN_STARTING;
-            return true;
-        case MESH_EV_STOP:
-            if (s != MESH_RUN_RUNNING) {
-                return false;
-            }
-            r->state = MESH_RUN_STOPPING;
-            return true;
-        case MESH_EV_DONE_OK:
-            if (s == MESH_RUN_STARTING) {
-                r->state = MESH_RUN_RUNNING;
-                return true;
-            }
-            if (s == MESH_RUN_STOPPING) {
-                r->state = MESH_RUN_STOPPED; // paused stays: this stop may be the pause's
-                r->why   = MESH_WHY_USER;
-                return true;
-            }
-            return false;
-        case MESH_EV_DONE_FAIL:
-            if (s == MESH_RUN_STARTING) {
-                *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, r->paused};
-                return true;
-            }
-            if (s == MESH_RUN_STOPPING) {
-                r->state = MESH_RUN_RUNNING;
-                return true;
-            }
-            return false;
-        case MESH_EV_UPDATE:
-            if (s == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) {
-                return false;
-            }
-            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_UPDATE, false};
-            return true;
-        case MESH_EV_SEEN_UP:
-            // Only a settled state is corrected: a start or stop under way reports for itself
-            if (s != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE) {
-                return false;
-            }
-            r->state = MESH_RUN_RUNNING;
-            return true;
-        case MESH_EV_SEEN_DOWN:
-            if (s != MESH_RUN_RUNNING) {
-                return false;
-            }
-            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, false};
-            return true;
-        case MESH_EV_PAUSE:
-            if ((s == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) || r->paused) {
-                return false;
-            }
-            r->paused = true;
-            return true;
-        case MESH_EV_UNPAUSE:
-            if (!r->paused) {
-                return false;
-            }
-            r->paused = false;
-            return true;
+        case MESH_EV_START: return on_start(r);
+        case MESH_EV_STOP: return on_stop(r);
+        case MESH_EV_DONE_OK: return on_done_ok(r);
+        case MESH_EV_DONE_FAIL: return on_done_fail(r);
+        case MESH_EV_UPDATE: return on_update(r);
+        case MESH_EV_SEEN_UP: return on_seen_up(r);
+        case MESH_EV_SEEN_DOWN: return on_seen_down(r);
+        case MESH_EV_PAUSE: return on_pause(r);
+        case MESH_EV_UNPAUSE: return on_unpause(r);
     }
     return false;
 }

@@ -168,7 +168,67 @@ static void enter_starts(void) {
     CHECK(!mesh_run_enter_starts(r, true));
 }
 
+// Every state x why x paused x event (#212: recorded from the switch before it was split into handlers). Per event
+// four digits: changed, then the state, why and paused after it
+static char const *const EVERY_OUTCOME[4 * 4 * 2] = {
+    "1100 0000 0000 0000 1030 1200 0000 1001 0000", // state 0 why 0 paused 0
+    "0001 0001 0001 0001 1030 1201 0001 0001 1000", // state 0 why 0 paused 1
+    "1110 0010 0010 0010 1030 1210 0010 1011 0010", // state 0 why 1 paused 0
+    "0011 0011 0011 0011 1030 1211 0011 0011 1010", // state 0 why 1 paused 1
+    "1120 0020 0020 0020 1030 1220 0020 1021 0020", // state 0 why 2 paused 0
+    "0021 0021 0021 0021 1030 1221 0021 0021 1020", // state 0 why 2 paused 1
+    "0030 0030 0030 0030 0030 0030 0030 0030 0030", // state 0 why 3 paused 0
+    "0031 0031 0031 0031 0031 0031 0031 0031 1030", // state 0 why 3 paused 1
+    "0100 0100 1200 1020 1030 0100 0100 1101 0100", // state 1 why 0 paused 0
+    "0101 0101 1201 1021 1030 0101 0101 0101 1100", // state 1 why 0 paused 1
+    "0110 0110 1210 1020 1030 0110 0110 1111 0110", // state 1 why 1 paused 0
+    "0111 0111 1211 1021 1030 0111 0111 0111 1110", // state 1 why 1 paused 1
+    "0120 0120 1220 1020 1030 0120 0120 1121 0120", // state 1 why 2 paused 0
+    "0121 0121 1221 1021 1030 0121 0121 0121 1120", // state 1 why 2 paused 1
+    "0130 0130 1230 1020 1030 0130 0130 1131 0130", // state 1 why 3 paused 0
+    "0131 0131 1231 1021 1030 0131 0131 0131 1130", // state 1 why 3 paused 1
+    "0200 1300 0200 0200 1030 0200 1020 1201 0200", // state 2 why 0 paused 0
+    "0201 1301 0201 0201 1030 0201 1020 0201 1200", // state 2 why 0 paused 1
+    "0210 1310 0210 0210 1030 0210 1020 1211 0210", // state 2 why 1 paused 0
+    "0211 1311 0211 0211 1030 0211 1020 0211 1210", // state 2 why 1 paused 1
+    "0220 1320 0220 0220 1030 0220 1020 1221 0220", // state 2 why 2 paused 0
+    "0221 1321 0221 0221 1030 0221 1020 0221 1220", // state 2 why 2 paused 1
+    "0230 1330 0230 0230 1030 0230 1020 1231 0230", // state 2 why 3 paused 0
+    "0231 1331 0231 0231 1030 0231 1020 0231 1230", // state 2 why 3 paused 1
+    "0300 0300 1010 1200 1030 0300 0300 1301 0300", // state 3 why 0 paused 0
+    "0301 0301 1011 1201 1030 0301 0301 0301 1300", // state 3 why 0 paused 1
+    "0310 0310 1010 1210 1030 0310 0310 1311 0310", // state 3 why 1 paused 0
+    "0311 0311 1011 1211 1030 0311 0311 0311 1310", // state 3 why 1 paused 1
+    "0320 0320 1010 1220 1030 0320 0320 1321 0320", // state 3 why 2 paused 0
+    "0321 0321 1011 1221 1030 0321 0321 0321 1320", // state 3 why 2 paused 1
+    "0330 0330 1010 1230 1030 0330 0330 1331 0330", // state 3 why 3 paused 0
+    "0331 0331 1011 1231 1030 0331 0331 0331 1330", // state 3 why 3 paused 1
+};
+
+static void every_outcome(void) {
+    size_t k = 0;
+    for (int s = 0; s < 4; s++) {
+        for (int w = 0; w < 4; w++) {
+            for (int p = 0; p < 2; p++, k++) {
+                char got[9 * 5];
+                size_t n = 0;
+                for (int e = 0; e <= MESH_EV_UNPAUSE; e++) {
+                    mesh_run_t r = {(mesh_run_state_t)s, (mesh_run_why_t)w, p != 0};
+                    bool       c = mesh_run_event(&r, (mesh_run_ev_t)e);
+                    n += (size_t)snprintf(got + n, sizeof(got) - n, "%d%d%d%d%s", c, (int)r.state, (int)r.why, r.paused,
+                                          e < MESH_EV_UNPAUSE ? " " : "");
+                }
+                if (strcmp(got, EVERY_OUTCOME[k]) != 0) {
+                    printf("FAIL state %d why %d paused %d: got \"%s\", want \"%s\"\n", s, w, p, got, EVERY_OUTCOME[k]);
+                    failures++;
+                }
+            }
+        }
+    }
+}
+
 int main(void) {
+    every_outcome();
     enter_starts();
     machine();
     paused();

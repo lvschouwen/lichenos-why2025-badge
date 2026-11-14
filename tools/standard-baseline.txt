@@ -15,7 +15,6 @@
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
 ccn	firmware/components/mesh/mesh_journal.c:scan_task_fn	29
-ccn	firmware/components/mesh/mesh_run.c:mesh_run_event	27
 ccn	firmware/components/mesh/mesh_telem.c:lpp_type	26
 ccn	firmware/components/mesh/mesh_telem.c:one_value	36
 ccn	shared/lora/lora_proto.c:lora_decode	27
