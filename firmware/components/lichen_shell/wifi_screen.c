@@ -140,7 +140,7 @@ static void drop_scan(void) {
 static void scan_after_radio_on(void) {
     drop_scan();
     set_status("Starting Wi-Fi...");
-    start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
+    start_timer = lichen_ui_timer_create(scan_after_start, RADIO_START_MS, NULL);
 }
 
 static bool focus_in_rows(void) {
@@ -245,7 +245,7 @@ static void begin_join(char const *pass) {
     // The request only queues the trial for c6link's own task; the outcome is c6link's, not this screen's
     set_status("Connecting to %s...", target);
     if (!poll) {
-        poll = lv_timer_create(on_poll, POLL_MS, NULL);
+        poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
     }
 }
 
@@ -351,7 +351,7 @@ static void build_saved_rows(void *arg) {
     if (n == SIZE_MAX) { // the Wi-Fi task holds the list (#249): say so and look again shortly
         rows[row_count++] = menu_note(menu, "Saved networks are busy");
         if (!busy_timer && !busy_retrying) {
-            busy_timer = lv_timer_create(retry_saved_rows, SAVED_RETRY_MS, NULL);
+            busy_timer = lichen_ui_timer_create(retry_saved_rows, SAVED_RETRY_MS, NULL);
             lv_timer_set_repeat_count(busy_timer, 1);
         }
         return;
@@ -572,8 +572,8 @@ static lv_obj_t *build(void) {
     radio_shown[0] = '\0';
     radio_was_on   = lichen_radio_get(RADIO_WIFI); // the scan below covers a radio that is on now
     radio_note_refresh(NULL);
-    radio_timer = lv_timer_create(radio_note_refresh, 1000, NULL);
-    lv_obj_add_event_cb(scr, on_delete, LV_EVENT_DELETE, NULL);
+    radio_timer = lichen_ui_timer_create(radio_note_refresh, 1000, NULL);
+    lichen_ui_event_add(scr, on_delete, LV_EVENT_DELETE, NULL);
     if (lichen_radio_get(RADIO_WIFI)) {
         start_scan();
     } else {
@@ -582,7 +582,7 @@ static lv_obj_t *build(void) {
     }
     lichen_sys_wifi_join_t now = lichen_sys_wifi_join_state(target, sizeof(target), NULL, 0);
     if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {
-        poll = lv_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
+        poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
     }
     return scr;
 }

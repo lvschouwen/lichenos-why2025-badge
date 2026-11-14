@@ -337,12 +337,12 @@ static lv_obj_t *build(void) {
     an->status = lichen_label_wrap(screen, LV_PCT(100));
     lv_obj_set_style_text_color(an->status, lv_color_hex(THEME_DIM), 0);
     shell_page_hint(screen, "Up/Down", "other network", "Enter", "scan now", NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     draw_channels();
     draw_meter();
     draw_watched();
-    an->timer = lv_timer_create(on_tick, TICK_MS, NULL);
+    an->timer = lichen_ui_timer_create(on_tick, TICK_MS, NULL);
     on_tick(an->timer); // the first scan at once
     return screen;
 }

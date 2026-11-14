@@ -196,6 +196,6 @@ lv_obj_t *time_set_build(void) {
     shell_page_hint(screen, "Up/Down", "change", "Left/Right", "move", "Enter", "set", NULL);
     prefill();
     render();
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
     return screen;
 }

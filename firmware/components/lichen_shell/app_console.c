@@ -310,7 +310,7 @@ static void build_output(con_t *c, lv_obj_t *screen) {
     shell_no_arrow_scroll(c->out); // Up/Down scroll by on_out_key, not by LVGL's own jump
     c->label = lichen_label_wrap(c->out, LV_PCT(100));
     lv_obj_set_style_text_font(c->label, lichen_font(LICHEN_FONT_SMALL), 0);
-    lv_obj_add_event_cb(c->out, on_out_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(c->out, on_out_key, LV_EVENT_KEY, NULL);
 }
 
 static void build_entry(con_t *c, lv_obj_t *screen) {
@@ -326,8 +326,8 @@ static void build_entry(con_t *c, lv_obj_t *screen) {
     lv_obj_set_style_bg_opa(c->ta, LV_OPA_COVER, LV_PART_CURSOR);
     lv_obj_set_style_bg_color(c->ta, lv_color_hex(THEME_AMBER), LV_PART_CURSOR);
     lv_obj_set_style_text_color(c->ta, lv_color_hex(THEME_BG), LV_PART_CURSOR);
-    lv_obj_add_event_cb(c->ta, on_ready, LV_EVENT_READY, c);
-    lv_obj_add_event_cb(c->ta, on_entry_key, LV_EVENT_KEY, c);
+    lichen_ui_event_add(c->ta, on_ready, LV_EVENT_READY, c);
+    lichen_ui_event_add(c->ta, on_entry_key, LV_EVENT_KEY, c);
 }
 
 static lv_obj_t *build_console(void) {
@@ -371,7 +371,7 @@ static lv_obj_t *build_console(void) {
     show_output(c, false);
     shell_page_hint(screen, "Enter", "run", "Tab", "scroll", NULL);
     cur = c;
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, c);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, c);
     return screen;
 }
 

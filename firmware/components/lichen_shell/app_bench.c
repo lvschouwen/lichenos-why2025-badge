@@ -404,10 +404,10 @@ static void open_bench(lv_obj_t *screen) {
     lv_obj_set_style_text_color(s_b.hint, lv_color_hex(THEME_AMBER), 0);
     lv_label_set_text(s_b.hint, "");
 
-    s_b.timer = lv_timer_create(tick, TICK_MS, NULL);
+    s_b.timer = lichen_ui_timer_create(tick, TICK_MS, NULL);
     lv_timer_pause(s_b.timer);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     start_run();
 }
 

@@ -179,7 +179,7 @@ static lv_obj_t *build_backup(void) {
     menu_note(menu, "Wi-Fi passwords, the update token and the MeshCore identity and keys are never saved. A load checks "
                     "every line first, shows what changes and refuses a file with a wrong value. Restart the badge after "
                     "loading.");
-    lv_obj_add_event_cb(screen, forget_rows, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, forget_rows, LV_EVENT_DELETE, NULL);
     return screen;
 }
 

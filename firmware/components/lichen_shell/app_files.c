@@ -354,7 +354,7 @@ static lv_obj_t *build_view(void) {
     // rows that push the page's last lines below the fixed height, where nobody ever sees them (#144)
     lv_label_set_long_mode(s_t->text, LV_LABEL_LONG_MODE_CLIP);
     lv_label_set_text(s_t->text, "Reading...");
-    s_t->poll = lv_timer_create(view_poll, POLL_MS, NULL);
+    s_t->poll = lichen_ui_timer_create(view_poll, POLL_MS, NULL);
     s_t->hint = lv_label_create(screen);
     lv_obj_set_width(s_t->hint, LV_PCT(100));
     lv_obj_set_style_text_color(s_t->hint, lv_color_hex(THEME_DIM), 0); // page and size; messages turn it amber
@@ -362,8 +362,8 @@ static lv_obj_t *build_view(void) {
     shell_page_hint(screen, "Up/Down", "page", NULL);
     size_page(screen, heading);
     lv_group_add_obj(lv_group_get_default(), screen);
-    lv_obj_add_event_cb(screen, on_view_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_view_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_view_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_view_delete, LV_EVENT_DELETE, NULL);
     read_page();
     return screen;
 }
@@ -604,10 +604,10 @@ static void open_files(lv_obj_t *screen) {
     memset(&s_v, 0, sizeof(s_v));
     s_v.screen = screen;
     s_v.group  = lv_group_get_default(); // shell_open's group for this screen while it is built
-    s_v.poll   = lv_timer_create(on_poll, POLL_MS, NULL);
+    s_v.poll   = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     shell_on_esc(on_esc, NULL);
-    lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
     files_job_result_t stale;
     if (files_job_busy()) {
         s_v.discard = true; // an earlier visit's job: wait for it, then start

@@ -124,9 +124,9 @@ static lv_obj_t *build_stress(void) {
     s_p.dma     = add_label(screen, LICHEN_FONT_SMALL, THEME_DIM);
     lv_label_set_text(s_p.dma, "DMA min -");
     s_p.result = add_label(screen, LICHEN_FONT_LARGE, THEME_TEXT);
-    s_p.timer  = lv_timer_create(tick, TICK_MS, NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    s_p.timer  = lichen_ui_timer_create(tick, TICK_MS, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     shell_on_esc(on_esc, NULL);
     stress_view_t v;
     stress_view(&v);

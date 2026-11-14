@@ -230,7 +230,7 @@ static lv_obj_t *build_sd(void) {
     }
     asking = ASK_NONE; // the dialog layer is modal: no question of ours can be open while the page is built
     refresh();
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, lv_timer_create(on_refresh, REFRESH_MS, NULL));
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, lichen_ui_timer_create(on_refresh, REFRESH_MS, NULL));
     return screen;
 }
 

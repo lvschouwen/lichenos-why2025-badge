@@ -330,8 +330,8 @@ static lv_obj_t *build_entry(void) {
     crashlog_full(e, s_v.shown == 0, full, sizeof(full));
     add_text(screen, full, THEME_TEXT);
     s_v.hint = shell_page_hint(screen, "Up/Down", "scroll", "Enter", "delete", NULL);
-    lv_obj_add_event_cb(screen, on_entry_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_entry_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_entry_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_entry_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 
@@ -361,10 +361,10 @@ static void open_crashlog(lv_obj_t *screen) {
     if (s_job == JOB_NONE) {
         s_result[0] = '\0'; // an old outcome is news no more
     }
-    s_v.poll = lv_timer_create(on_poll, POLL_MS, NULL);
+    s_v.poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     fill_list();
-    lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
 }
 
 // Reads the log only when it changed or the viewer marked it seen, and sets the badge (#102) from what it read; false
@@ -446,9 +446,9 @@ static void notice_tick(lv_timer_t *timer) {
 void crashlog_app_register(void) {
     self_ctx = lichen_register_app(&crashlog_app);
     lichen_sys_ui_lock(0);
-    lv_timer_create(badge_tick, BADGE_TICK_MS, NULL);
+    lichen_ui_timer_create(badge_tick, BADGE_TICK_MS, NULL);
     if (lichen_crashlog_after_crash()) {
-        lv_timer_create(notice_tick, NOTICE_TICK_MS, NULL);
+        lichen_ui_timer_create(notice_tick, NOTICE_TICK_MS, NULL);
     }
     lichen_sys_ui_unlock();
 }

@@ -43,7 +43,7 @@ static void on_level(int value, void *arg) {
     if (save_timer) {
         lv_timer_reset(save_timer);
     } else {
-        save_timer = lv_timer_create(save_due, SAVE_AFTER_MS, NULL);
+        save_timer = lichen_ui_timer_create(save_due, SAVE_AFTER_MS, NULL);
         lv_timer_set_repeat_count(save_timer, 1);
     }
 }
@@ -232,7 +232,7 @@ static void bl_rows_build(lv_obj_t *menu) {
         bl_rows[i] = shell_live_row(menu_note(menu, ""), true, fills[i]);
     }
     bl_refresh(NULL);
-    bl_timer = lv_timer_create(bl_refresh, 1000, NULL);
+    bl_timer = lichen_ui_timer_create(bl_refresh, 1000, NULL);
 }
 
 static void on_display_delete(lv_event_t *e) {
@@ -295,7 +295,7 @@ static lv_obj_t *build_display(void) {
     order_row = menu_add(menu, "Reset order", "", ask_reset_order, NULL);
     order_row_refresh();
     shell_page_hint(screen, "Left/Right", "sliders", "Enter", "change", NULL);
-    lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 

@@ -146,7 +146,7 @@ static lv_obj_t *build_detail(void) {
         add_text(screen, line, THEME_DIM);
     }
     shell_page_hint(screen, "Up/Down", "scroll", NULL);
-    lv_obj_add_event_cb(screen, on_detail_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_detail_key, LV_EVENT_KEY, NULL);
     return screen;
 }
 
@@ -454,8 +454,8 @@ static void open_centre(lv_obj_t *screen) {
     fill_list(); // unread info still shows as unread this once
     lichen_notify_mark_read_upto(LN_INFO);
     s_c.gen  = lichen_notify_generation(); // our own mark is no reason to rebuild
-    s_c.poll = lv_timer_create(on_poll, POLL_MS, NULL);
-    lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
+    s_c.poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
+    lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
 }
 
 static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
@@ -622,7 +622,7 @@ static lv_obj_t *build_settings(void) {
     menu_set_danger(s_s.clear_row, "Clear all notifications?", "clear all");
     menu_note(menu, "A source that is off loses its notices: no history, no badge. Do not disturb keeps them but shows "
                     "no pop-ups, except errors (without sound).");
-    lv_obj_add_event_cb(screen, on_settings_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_settings_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 

@@ -274,13 +274,13 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     lv_obj_get_coords(v->dial, &c);
     v->cx = c.x1 + v->r;
     v->cy = c.y1 + v->r;
-    lv_obj_add_event_cb(v->dial, on_draw, LV_EVENT_DRAW_MAIN_END, v);
-    lv_obj_add_event_cb(v->dial, on_dial_delete, LV_EVENT_DELETE, v);
+    lichen_ui_event_add(v->dial, on_draw, LV_EVENT_DRAW_MAIN_END, v);
+    lichen_ui_event_add(v->dial, on_dial_delete, LV_EVENT_DELETE, v);
     frame(v); // the first frame now, not in 66 ms
-    v->timer = lv_timer_create(tick, FRAME_MS, v);
+    v->timer = lichen_ui_timer_create(tick, FRAME_MS, v);
     if (cfg->pause_when_hidden) {
-        lv_obj_add_event_cb(parent, on_screen_hidden, LV_EVENT_SCREEN_UNLOADED, v);
-        lv_obj_add_event_cb(parent, on_screen_shown, LV_EVENT_SCREEN_LOADED, v);
+        lichen_ui_event_add(parent, on_screen_hidden, LV_EVENT_SCREEN_UNLOADED, v);
+        lichen_ui_event_add(parent, on_screen_shown, LV_EVENT_SCREEN_LOADED, v);
     }
     return v;
 }

@@ -203,7 +203,7 @@ static lv_obj_t *build_tz(void) {
     if (tz_selected >= 0 && tz_selected < TZ_MAX) {
         menu_focus_row(menu, tz_selected);
     }
-    lv_obj_add_event_cb(screen, on_tz_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_tz_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 
@@ -314,7 +314,7 @@ static lv_obj_t *build_time(void) {
     time_rows[0]     = shell_live_row(set_row, false, now_value);
     time_rows[1]     = shell_live_row(tz_open, false, tz_value);
     time_rows[2]     = shell_live_row(menu_note(menu, ""), true, source_note);
-    lv_obj_add_event_cb(screen, forget_time_page, LV_EVENT_DELETE, lv_timer_create(refresh_time_page, 1000, NULL));
+    lichen_ui_event_add(screen, forget_time_page, LV_EVENT_DELETE, lichen_ui_timer_create(refresh_time_page, 1000, NULL));
     return screen;
 }
 
@@ -380,7 +380,7 @@ static lv_obj_t *build_app_page(void) {
         page_app->about(menu);
     }
     lichen_ctx_leave(previous);
-    lv_obj_add_event_cb(screen, on_page_key, LV_EVENT_KEY, menu);
+    lichen_ui_event_add(screen, on_page_key, LV_EVENT_KEY, menu);
     return screen;
 }
 
@@ -545,7 +545,7 @@ static void add_psram_speed_row(lv_obj_t *menu) {
     unsigned other = lichen_sys_psram_speed_other();
     lv_obj_t *row  = menu_add(menu, "PSRAM speed", value, psram_speed_enter, (void *)(uintptr_t)other);
     psram_speed_row = row;
-    lv_obj_add_event_cb(row, forget_psram_speed_row, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(row, forget_psram_speed_row, LV_EVENT_DELETE, NULL);
     menu_set_danger(row, other == 120 ? "Switch PSRAM to 120 MHz? Restarts the badge. If 120 MHz fails, it comes back at 80."
                                        : "Switch PSRAM to 80 MHz? Restarts the badge.",
                     "restart");
@@ -576,12 +576,12 @@ static void open_settings(lv_obj_t *screen) {
     settings_lora_row = shell_live_row(lora_row, false, lora_value);
     menu_set_on(air_row, lichen_airplane_get());
     add_radio_notes(menu);
-    lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
     open_row(menu, "Display", settings_display_open);
     lv_obj_t *time_open = open_row(menu, "Time", open_time);
     settings_time_row = shell_live_row(time_open, false, time_value);
-    lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
-                        lv_timer_create(refresh_settings_time, 1000, NULL));
+    lichen_ui_event_add(screen, forget_settings_time, LV_EVENT_DELETE,
+                        lichen_ui_timer_create(refresh_settings_time, 1000, NULL));
     settings_sd_row = shell_live_row(open_row(menu, "SD card", open_sd), false, sd_value);
     settings_notify_row = shell_live_row(open_row(menu, "Notifications", open_notify), false, notify_value);
     open_row(menu, "Battery", battery_open);

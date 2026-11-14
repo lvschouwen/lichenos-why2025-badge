@@ -88,9 +88,9 @@ static lv_obj_t *build_battery(void) {
     menu_note(menu, "The only thing Lichen can do is watch the temperature: it warns, dims the screen, and powers "
                     "the badge off when it gets too hot.");
     shell_page_hint(screen, "Up/Down", "scroll", NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, menu);
-    lv_timer_t *timer = lv_timer_create(refresh, REFRESH_MS, status_label);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, menu);
+    lv_timer_t *timer = lichen_ui_timer_create(refresh, REFRESH_MS, status_label);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, timer);
     refresh(timer);
     return screen;
 }

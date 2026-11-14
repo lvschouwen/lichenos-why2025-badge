@@ -347,10 +347,10 @@ static void open_about(lv_obj_t *screen) {
     lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_DEV + DEV_N - 1]), 12, 0);
     lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_CLOCK]), 12, 0); // the same while the block is hidden
 
-    lv_timer_t *timer = lv_timer_create(refresh, 1000, NULL);
+    lv_timer_t *timer = lichen_ui_timer_create(refresh, 1000, NULL);
     refresh(timer); // builds the hint too (apply_dev), after the padding above: it keeps the room it needs
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, timer);
 }
 
 static lichen_app_t const about_app = {

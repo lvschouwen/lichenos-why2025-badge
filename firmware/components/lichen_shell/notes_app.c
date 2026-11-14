@@ -131,7 +131,7 @@ static lv_obj_t *build_entry(void) {
     lv_obj_t *screen = page_create();
     notes_render(screen, s_notes[s_shown].text, s_notes[s_shown].date);
     shell_page_hint(screen, "Up/Down", "scroll", NULL);
-    lv_obj_add_event_cb(screen, on_page_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_page_key, LV_EVENT_KEY, NULL);
     return screen;
 }
 
@@ -148,7 +148,7 @@ static lv_obj_t *build_new(void) {
         notes_render(screen, s_notes[i].text, s_notes[i].date);
     }
     shell_page_hint(screen, "Up/Down", "scroll", "Enter", "continue", NULL);
-    lv_obj_add_event_cb(screen, on_new_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_new_key, LV_EVENT_KEY, NULL);
     mark_seen();
     return screen;
 }
@@ -184,7 +184,7 @@ static void open_notes(lv_obj_t *screen) {
         menu_note(menu, "Not enough memory to list the notes.");
         return;
     }
-    lv_obj_add_event_cb(screen, on_list_delete, LV_EVENT_DELETE, rows);
+    lichen_ui_event_add(screen, on_list_delete, LV_EVENT_DELETE, rows);
     for (size_t i = 0; i < s_count; i++) {
         rn_title(s_notes[i].text, rows[i].title, sizeof(rows[i].title));
         bool fresh = s_notes[i].seq > s_seen_at_open;
@@ -248,7 +248,7 @@ void notes_boot_check(bool updated) {
         update_badge();
     }
     if (what == RN_BOOT_SHOW) {
-        lv_timer_create(wait_tick, WAIT_TICK_MS, NULL);
+        lichen_ui_timer_create(wait_tick, WAIT_TICK_MS, NULL);
     }
     lichen_sys_ui_unlock();
 }
