@@ -8,7 +8,8 @@
 // started it and is dropped when that screen is gone, so no callback ever reaches a deleted widget.
 //
 // Safety: the app adds no way around the commands' own confirms (YES, the remote CLI confirm). console_exec marks the
-// worker task as not-the-UART (console_from_uart() is false inside it), so `nvs-enc burn` stays USB-only (#116).
+// worker task as not-the-UART (its origin is LOCAL), so `nvs-enc burn` and the other USB-console rows stay USB-only
+// (#116, #464).
 #include "app_icons.h"
 #include "console_model.h"
 #include "lichen_mem.h"

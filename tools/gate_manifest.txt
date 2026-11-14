@@ -90,13 +90,10 @@ clock_sync_snapshot	SYSTEM	unspecified	lichen_clock.h
 console_bind_boot_pending	SYSTEM	any	fw_console.h
 console_bind_dev_store	SYSTEM	unspecified	fw_console.h
 console_boot_pending	-	unspecified	fw_console.h
-console_dev_gate	-	unspecified	fw_console.h
 console_dev_mode	-	any	fw_console.h
 console_dev_set	SYSTEM	unspecified	fw_console.h
-console_erase_ok	SYSTEM	unspecified	fw_console.h
 console_exec	SYSTEM	unspecified	fw_console.h
 console_exec_with_secrets	SYSTEM	unspecified	fw_console.h
-console_from_uart	-	unspecified	fw_console.h
 console_line_max	-	unspecified	fw_console.h
 console_origin	-	unspecified	fw_console.h
 console_register	CONSOLE	unspecified	fw_console.h
@@ -113,7 +110,6 @@ console_set_mem_window	SYSTEM	unspecified	fw_console.h
 console_set_tap	SYSTEM	unspecified	fw_console.h
 console_start	SYSTEM	unspecified	fw_console.h
 console_usb_hold_bind	-	unspecified	fw_console.h
-console_usb_hold_ok	-	unspecified	fw_console.h
 console_usb_hold_why	-	any	fw_console.h
 crashlog_badge	-	unspecified	crashlog_fmt.h
 crashlog_export	-	unspecified	crashlog_fmt.h

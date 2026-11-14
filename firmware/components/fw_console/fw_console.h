@@ -52,9 +52,8 @@ static inline void console_register_dev(char const *name, char const *usage, con
     (void)fn;
 }
 #endif
-// For a command where only some subcommands are debug ones: true while developer mode is on; otherwise it replies
-// "<what>: " DEV_MODE_OFF_NOTE and is false. what names the subcommand, e.g. "ui lockcheck".
-bool             console_dev_gate(char const *what);
+// For a command where only some subcommands are debug ones: a CON_GATE_DEV row in its table (console_register_rules,
+// #464); run_command answers "<command> <word>: " DEV_MODE_OFF_NOTE while developer mode is off.
 // Developer mode now (always false in a release build). Any task.
 bool             console_dev_mode(void);
 // Turns developer mode on or off and saves it (dev.mode). For the owner's own path, About's taps (#374); `fw dev on`
@@ -63,15 +62,12 @@ bool             console_dev_set(bool on);
 // The saved state through the settings service (#235); read once here. Bound in settings_bind_dev_mode(), after the
 // factory reset step.
 void             console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
-// The USB hold (#289): a guard that, while it is on, makes the console's commands that would erase it USB-only (MeshCore's
-// on-air allow list, which a factory reset erases). held returns what holds (a short text) or NULL; one guard, bound
-// once (tools/layers.conf: only mesh binds it). A guarded command asks console_usb_hold_ok(what) before acting: true
-// when it may go on, else it has replied why.
+// The USB hold (#289): a guard that, while it is on, makes the console's commands that would undo it USB-only (MeshCore's
+// on-air allow list, which another image may not keep). held returns what holds (a short text) or NULL; one guard,
+// bound once (tools/layers.conf: only mesh binds it). A guarded form is a CON_F_USB_HOLD row (#464): run_command
+// refuses it while it holds, from anywhere but the USB console. A form that erases or wipes storage is a
+// CON_ORIGIN_UART row with CON_F_ERASE (#455), whatever the hold says; the reset or format by hand on the screen works.
 void             console_usb_hold_bind(char const *(*held)(void));
-bool             console_usb_hold_ok(char const *what);
-// A command that erases or wipes storage asks this before acting (#455): true from the USB console only; else it has
-// replied that it is refused, whatever the hold says. The reset or format by hand on the screen still works.
-bool             console_erase_ok(char const *what);
 // What holds now (NULL: nothing), for a caller that is never the USB console and answers on its own: the update server
 // refuses firmware while it holds (#420), since another image may not keep the hold. Lock-free, any task.
 char const      *console_usb_hold_why(void);
@@ -113,10 +109,8 @@ void console_set_activity(void (*activity)(void));
 // so a reply can be sent before the restart). Output of printf/ESP_LOG calls is not collected. Not reentrant. The
 // caller wipes buf after done.
 typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
-// True when the calling task runs a line typed on the UART, false inside console_exec (Wi-Fi POST /console, the Console
-// app) and on any other task. For commands only a person at the cable may run (#116); console_origin() tells the other
-// two apart.
-bool console_from_uart(void);
+// A form only a person at the cable may run (#116) is a CON_ORIGIN_UART row (#464): console_exec runs count as Wi-Fi
+// or the Console app, never as the UART.
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
 // The same, but secret lines are collected too: for POST /console, whose reply goes only to the one who asked (with the
 // update token). The caller wipes buf after done.

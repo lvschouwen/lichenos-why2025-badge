@@ -239,14 +239,6 @@ bool console_dev_set(bool on) {
 #endif
 }
 
-bool console_dev_gate(char const *what) {
-    if (console_dev_mode()) {
-        return true;
-    }
-    console_reply("%s: " DEV_OFF_REPLY, what);
-    return false;
-}
-
 static void help_line(char const *usage, void *ctx) {
     (void)ctx;
     console_reply("%s", usage);
@@ -863,23 +855,6 @@ char const *console_boot_pending(void) {
     return pending ? pending() : NULL;
 }
 
-bool console_usb_hold_ok(char const *what) {
-    char const *why = console_usb_hold_why();
-    if (!console_hold_refuses(why != NULL, console_origin())) {
-        return true;
-    }
-    console_reply("%s refused: %s is on, which it would erase; only the USB console can do that", what, why);
-    return false;
-}
-
-bool console_erase_ok(char const *what) {
-    if (!console_erase_refuses(console_origin())) {
-        return true;
-    }
-    console_reply("%s refused: it erases storage, so only the USB console can do it (the screen's Settings can too)", what);
-    return false;
-}
-
 static void run_command(char *line);
 
 // Every command line, from the UART and from Wi-Fi
@@ -957,10 +932,6 @@ static void run_command(char *line) {
 console_origin_t console_origin(void) {
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
     return dev_mode_origin(capture.task == self, capture.origin, atomic_load(&s_uart_task) == self);
-}
-
-bool console_from_uart(void) {
-    return console_origin() == CONSOLE_ORIGIN_UART;
 }
 
 // keep_secret is the Wi-Fi console (console_exec_with_secrets, POST /console); without it, the Console app

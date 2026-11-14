@@ -551,9 +551,9 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
 - A setting in MeshCore's app settings (`onair_on`, `onair_list`), **off by default**: a user badge behaves as before.
   Kept across flashes; a factory reset or MeshCore's Clear data erases it (off again). The list is never in the repo.
   The console's `fw factory-reset settings|all YES` and `fw sd format` run only from the USB console, list on or off
-  (#455, `console_erase_ok`; `plan` from any). While it is on, the same holds through the USB hold:
-  MeshCore binds fw_console's USB hold (`console_usb_hold_bind`, `owner-only` in `tools/layers.conf`), and
-  `factory_reset.c` asks `console_usb_hold_ok` before it acts. The reset by hand on the screen still clears it.
+  (#455; their USB-console rows in `boot_rules.h` and `sd_rules.h`, checked once by `run_command`, #464; `plan` from
+  any). MeshCore binds fw_console's USB hold (`console_usb_hold_bind`, `owner-only` in `tools/layers.conf`); a
+  `CON_F_USB_HOLD` row (`fw slot other`) is refused while it holds. The reset by hand on the screen still clears it.
 - While it is on, nothing but the USB console boots another image or changes the C6's (#420), since that image may
   not keep the list (an older one has none) and the C6 drives the LoRa radio (a changed C6 image could send anything):
   `fw slot other` from any other console answers `slot other refused: ...; switch it off at the USB console first`, and

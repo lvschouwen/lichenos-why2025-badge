@@ -3,9 +3,11 @@
 // console, Wi-Fi, the Console app on the badge). Built twice: console_pin_dev_test (CONFIG_LICHEN_DEV_COMMANDS, checks
 // the "on" and "off" columns) and console_pin_test (a release-like build, checks the "rel" column).
 //
-// The expectations below are the pin: they were written against the code before #464 moved the rules into tables, and
-// a change to one of them changes what the badge accepts. The evaluator under them is what the console decides today
-// (pin_decide): the dev gate and origin layer that runs before a command's own code.
+// The expectations below are the pin: they were written against the code before #464 moved the rules into tables
+// (dev_gate.c's GATED[] and the gate and origin checks inside the handlers), and a change to one of them changes what
+// the badge accepts. #464 changed only the lines marked "tighter", where nothing happened either way before. The
+// evaluator under them (pin_decide) is what run_command decides: the command lookup, then the matched row of the table
+// each command registers with (the same headers the firmware includes).
 #include "console_os_rules.h"
 #include "console_sub.h"
 #include "dev_gate.h"
@@ -134,7 +136,7 @@ static pin_t const PINS[] = {
     {"onair off now",              "ROO", "ROO", "ROO", false},
     {"onair bogus",                "ROO", "ROO", "ROO", false},
     {"meshcore onair off",         "ROO", "ROO", "ROO", false},
-    // handler gates (console_dev_gate inside the command)
+    // gates that were inside the handlers before #464 (console_dev_gate)
     {"boot",                       "RRR", "RRR", "RRR", false},
     {"boot keys",                  "RRR", "DDD", "DDD", false},
     {"boot keys down",             "RRR", "DDD", "DDD", false},
@@ -161,7 +163,7 @@ static pin_t const PINS[] = {
     {"app crash meshcore",         "RRR", "DDD", "RRR", false}, // release: usage
     {"app crash meshcore cb",      "RRR", "DDD", "RRR", false},
     {"app crash ",                 "RRR", "DDD", "RRR", false}, // #464: tighter (usage before, a PREFIX row now)
-    // handler origin rules
+    // origin rules that were inside the handlers before #464 (console_from_uart, console_erase_ok)
     {"token",                      "RRR", "RRR", "RRR", false},
     {"token new",                  "ROO", "ROO", "ROO", false},
     {"token bogus",                "RRR", "RRR", "RRR", false},
