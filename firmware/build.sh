@@ -190,6 +190,7 @@ elif [ "$building" = 1 ]; then
     python3 -I "$repo/tools/check_console_slots.py"
     # A console row that transmits or restarts and anyone may run is a decision on an allow list, not a default (#464)
     python3 -I "$repo/tools/check_console_rules.py" --selftest
+    python3 -I "$repo/tools/tests/check_console_rules_test.py" # the fail-closed fixtures (also a host test)
     python3 -I "$repo/tools/check_console_rules.py"
     # The release check is only worth something while the developer image holds the marker it looks for (#401)
     for arg in "$@"; do

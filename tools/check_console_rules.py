@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Console rule guard (#464), two checks over the firmware sources:
 
-1. Every sub-command row (console_sub_t, fw_console/console_sub.h) that transmits (CON_F_TX) or restarts
-   (CON_F_RESTART) and has origin CON_ORIGIN_ANY fails, unless it is on ALLOW below with its reason. run_command checks
+1. Every sub-command row (console_sub_t, fw_console/console_sub.h) that transmits (CON_F_TX), restarts
+   (CON_F_RESTART) or erases (CON_F_ERASE) and has origin CON_ORIGIN_ANY fails, unless it is on ALLOW below with its
+   reason. run_command checks
    each row once, so a row is the one place that says who may make the badge transmit or restart: a form anyone (Wi-Fi,
    the Console app) may run must be a decision, not a default. Whether each ALLOW entry stays open is the owner's call.
 2. The tables the firmware registers (console_register_rules / console_register_app_rules) are exactly the pairs the
@@ -10,8 +11,10 @@
    or both with and without one fails, so the pin's verdicts are the badge's.
 
 Fail closed: a console_sub_t or mesh_sub_t array the parser cannot read (either qualifier order is read), a row or a
-field it does not recognise (a macro-built row, a flag from another header's macro), a registration whose name or
-table it cannot resolve, and an ALLOW entry that matches no row (it would hide the next one).
+field it does not recognise (a macro-built row, a flag from another header's macro, a flag as a number other than 0),
+a `struct console_sub` array or a typedef alias of the type other than mesh_sub_t, a macro defined more than once in
+a file (#if/#else spellings) that a table uses unless it is on MULTI_DEFINED, a registration whose name or table it
+cannot resolve, and an ALLOW entry that matches no row (it would hide the next one).
 Rows are read with the plain #defines of their own file expanded and CON_DEV_WORD("x") as "x" (the developer image).
 Usage: check_console_rules.py [--selftest] [--list]
 """
@@ -34,6 +37,8 @@ ALLOW = {
     ("APP_RULES", "crash "),
     ("PSRAM_RULES", "speed"),
     ("THERMAL_RULES", "test"),
+    # "crash clear" erases the crash log and the core dump: anyone may run it today; the owner decides
+    ("CRASH_RULES", "clear"),
     # MeshCore's sends and its start (it claims the radio and adverts): the on-air allow list (#289) and the bench
     # console scope (#290) judge the sends in the senders
     ("MESH_SUBS", "start"),
@@ -55,18 +60,24 @@ ALLOW = {
     ("LORA_RULES", "on"),
 }
 
-WATCHED = ("CON_F_TX", "CON_F_RESTART")
+WATCHED = ("CON_F_TX", "CON_F_RESTART", "CON_F_ERASE")
+# Macros a table may use that a file defines once per #if branch: each spelling is read as a row origin UART or a word
+# that matches nothing (NVS_BURN_WORD: "burn YES" with the burn arm, NULL without; both on a USB-console row)
+MULTI_DEFINED = {"NVS_BURN_WORD"}
+TYPE_ALIASES = {"mesh_sub_t"}
 MATCHES = {"CON_MATCH_EXACT", "CON_MATCH_PREFIX", "CON_MATCH_WORD", "CON_MATCH_WORD_RAW", "CON_MATCH_REST",
            "MESH_SUB_EXACT", "MESH_SUB_PREFIX", "MESH_SUB_WORD", "MESH_SUB_WORD_RAW"}
 GATES = {"CON_GATE_OPEN", "CON_GATE_DEV"}
 ORIGINS = {"CON_ORIGIN_ANY", "CON_ORIGIN_LOCAL", "CON_ORIGIN_UART"}
-FLAG_TOKEN = re.compile(r"CON_F_(TX|RESTART|ERASE|USB_HOLD|SECRET|DEV_HINT|OWNER)|MESH_SUB_RUNNING|0|0x[0-9a-fA-F]+")
+FLAG_TOKEN = re.compile(r"CON_F_(TX|RESTART|ERASE|USB_HOLD|SECRET|DEV_HINT|OWNER)|MESH_SUB_RUNNING|0")  # no other number
 END = "CONSOLE_SUB_END"
 
 # A table definition, either qualifier order (static const console_sub_t X[] = / console_sub_t const X[N] =)
 DECL = re.compile(r"\b(?:console_sub_t|mesh_sub_t)\b(?:\s+const)?\s+(\w+)\s*\[[^\]]*\]\s*=\s*\{")
 # Any array of the type with an initializer, however spelled: every one must be a DECL the parser read
-LOOSE = re.compile(r"\b(?:console_sub_t|mesh_sub_t)\b[^;{}()=]*\[[^\]]*\]\s*=")
+LOOSE = re.compile(r"\b(?:console_sub_t|mesh_sub_t|struct\s+console_sub)\b[^;{}()=]*\[[^\]]*\]\s*=")
+# A typedef of the type under another name: rows declared through it would not be read
+ALIAS = re.compile(r"\btypedef\s+(?:const\s+)?(?:console_sub_t|mesh_sub_t|struct\s+console_sub)\s+(?:const\s+)?(\w+)\s*;")
 DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+(.+?)[ \t]*$", re.M)
 CALL = re.compile(r"(?<![\w])console_register(_app|_dev)?(_rules)?\s*\(")
 
@@ -76,8 +87,17 @@ def strip_comments(text):
     return re.sub(r"//[^\n]*", "", text)
 
 
+def multi_defined(text):
+    """The macro names text defines more than once (one per #if branch, say)."""
+    seen, multi = set(), set()
+    for m in DEFINE.finditer(text):
+        (multi if m.group(1) in seen else seen).add(m.group(1))
+    return multi
+
+
 def expand(text):
-    """The file's plain object-like #defines applied to the text (one level is enough for the tables)."""
+    """The file's plain object-like #defines applied to the text (one level is enough for the tables; a name defined
+    twice takes its last spelling, so tables() refuses one a table uses unless it is on MULTI_DEFINED)."""
     defs = {m.group(1): m.group(2) for m in DEFINE.finditer(text)}
     out = text
     if defs:
@@ -160,11 +180,22 @@ def parse_row(item):
 
 def tables(text):
     """(table name, rows) of every table in one source text; ValueError for one it cannot read."""
-    clean = expand(strip_comments(text))
+    raw = strip_comments(text)
+    clean = expand(raw)
+    for m in ALIAS.finditer(clean):
+        if m.group(1) not in TYPE_ALIASES:
+            raise ValueError("a typedef alias of console_sub_t the check does not read: %s" % m.group(1))
+    multi = multi_defined(raw) - MULTI_DEFINED
     decls = list(DECL.finditer(clean))
     if len(LOOSE.findall(clean)) != len(decls):
         raise ValueError("a console_sub_t array the check cannot read (%d declared, %d read)" %
                          (len(LOOSE.findall(clean)), len(decls)))
+    for m in DECL.finditer(raw):  # the unexpanded bodies: a table that uses a macro with two spellings
+        body = raw[m.end() - 1:closing(raw, m.end() - 1, "{", "}") + 1]
+        used = sorted(n for n in multi if re.search(r"\b%s\b" % re.escape(n), body))
+        if used:
+            raise ValueError("table %s uses %s, defined more than once in the file (#if spellings): give each spelling "
+                             "its own row, or add it to MULTI_DEFINED with the reason" % (m.group(1), ", ".join(used)))
     for m in decls:
         body = clean[m.end() - 1:closing(clean, m.end() - 1, "{", "}") + 1]
         items = split_top(body[1:-1])
@@ -173,7 +204,7 @@ def tables(text):
         yield m.group(1), [r for r in (parse_row(it) for it in items) if r]
 
 
-def check_rows(sources, allow):
+def check_rows(sources, allow: "set[tuple[str, str]] | frozenset[tuple[str, str]]"):
     """(problems, open rows): the watched rows open to any origin, those ALLOW does not name, and unreadable tables."""
     problems, open_rows, used = [], [], set()
     for path, text in sources:
@@ -193,11 +224,11 @@ def check_rows(sources, allow):
                 if key in allow:
                     used.add(key)
                 else:
-                    problems.append("%s: %s row %r %s with origin ANY: give it an origin rule, or put it on ALLOW in "
-                                    "tools/check_console_rules.py with the reason" % (path, name, key[1],
-                                                                                     " and ".join(watched)))
+                    problems.append("%s: %s row %r (%s) with origin ANY: give it an origin rule, or put it on ALLOW "
+                                    "in tools/check_console_rules.py with the reason" % (path, name, key[1],
+                                                                                        " | ".join(watched)))
     for key in sorted(allow - used):
-        problems.append("ALLOW entry %s %r matches no transmitting or restarting row: remove it" % key)
+        problems.append("ALLOW entry %s %r matches no transmitting, restarting or erasing row: remove it" % key)
     return problems, open_rows
 
 
@@ -353,7 +384,7 @@ def main():
             print("%-14s %-18s %-16s %s" % (what, name, word, path))
     for p in problems:
         print("check_console_rules: " + p)
-    print("console rules: %d transmitting or restarting rows open to any origin, %d on the allow list; registered "
+    print("console rules: %d transmitting, restarting or erasing rows open to any origin, %d on the allow list; registered "
           "tables match the pin" % (len(open_rows), len(ALLOW)) if not problems else "console rules: FAILED")
     return 1 if problems else 0
 

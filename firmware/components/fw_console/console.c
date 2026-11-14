@@ -32,7 +32,7 @@
 
 // 12 B of .bss per slot (name, usage, fn). tools/check_console_slots.py fails the build above 80 % of this (#243)
 #define MAX_COMMANDS   96
-#define MAX_RULE_TABLES 32 // 4 B of .bss each: the commands with a sub-command table (#464)
+#define MAX_RULE_TABLES 40 // 4 B of .bss each: the commands with a sub-command table (#464)
 #define MAX_TASKS_SEEN 48
 
 static char const TAG[] = "console";
@@ -195,11 +195,7 @@ void console_register_app_rules(char const *app, char const *name, char const *u
 
 // Developer mode (#373): read once from the settings service at bind time, then kept here. A release build points at
 // no fw dev, so its image holds no developer mode words at all.
-#ifdef CONFIG_LICHEN_DEV_COMMANDS
-#define DEV_OFF_REPLY CONSOLE_DEV_OFF_REPLY
-#else
-#define DEV_OFF_REPLY CONSOLE_DEV_OFF_REPLY
-#endif
+#define DEV_OFF_REPLY CONSOLE_DEV_OFF_REPLY // "not in this build" in a release (console_sub.h)
 static atomic_bool s_dev_on;
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS

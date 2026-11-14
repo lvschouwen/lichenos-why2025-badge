@@ -41,8 +41,8 @@ void mesh_console_init(void) {
 
 
 class Rows(unittest.TestCase):
-    def problems(self, text, allow=frozenset()):
-        return ccr.check_rows([("f.h", text)], set(allow))[0]
+    def problems(self, text, allow: "set[tuple[str, str]] | None" = None):
+        return ccr.check_rows([("f.h", text)], allow or set())[0]
 
     def test_open_tx_row_fails_unless_allowed(self):
         text = table("static console_sub_t const T[]", ['{"go", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, CON_F_TX}'])
@@ -70,6 +70,39 @@ class Rows(unittest.TestCase):
     def test_flag_from_another_header_fails(self):
         text = table("static console_sub_t const T[]", ['{"x", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, MY_TX}'])
         self.assertIn("flag", self.problems(text)[0])
+
+    def test_numeric_flag_fails(self):
+        text = table("static console_sub_t const T[]", ['{"on", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 0x01}'])
+        self.assertIn("flag", self.problems(text)[0])
+        text = "#define MY_TX 0x01\n" + table("static console_sub_t const T[]",
+                                              ['{"on", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, MY_TX}'])
+        self.assertIn("flag", self.problems(text)[0])
+        text = table("static console_sub_t const T[]", ['{"on", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 1}'])
+        self.assertIn("flag", self.problems(text)[0])
+
+    def test_open_erase_row_fails_unless_allowed(self):
+        row = '{"wipe", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, CON_F_ERASE}'
+        text = table("static console_sub_t const T[]", [row])
+        self.assertIn("CON_F_ERASE", self.problems(text)[0])
+        self.assertEqual(self.problems(text, {("T", "wipe")}), [])
+
+    def test_struct_spelling_fails(self):
+        text = table("static struct console_sub const T[]", [ROW_OK])
+        self.assertIn("cannot read", self.problems(text)[0])
+
+    def test_typedef_alias_fails(self):
+        text = "typedef console_sub_t my_row_t;\n" + table("static my_row_t const T[]", [ROW_OK])
+        self.assertIn("alias", self.problems(text)[0])
+        self.assertEqual(self.problems("typedef console_sub_t mesh_sub_t;\n"), [])  # the one known alias
+
+    def test_word_macro_with_two_spellings_fails(self):
+        text = ("#if CONFIG_X\n#define W \"go\"\n#else\n#define W NULL\n#endif\n" +
+                table("static console_sub_t const T[]", ['{W, CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, CON_F_TX}']))
+        self.assertIn("more than once", self.problems(text)[0])
+        known = text.replace("W", "NVS_BURN_WORD").replace("CON_ORIGIN_ANY", "CON_ORIGIN_UART")
+        self.assertEqual(self.problems(known), [])
+        unused = "#if A\n#define Z 1\n#else\n#define Z 2\n#endif\n" + table("static console_sub_t const T[]", [ROW_OK])
+        self.assertEqual(self.problems(unused), [])  # a twice-defined macro no table uses is not the check's
 
     def test_unknown_origin_fails(self):
         text = table("static console_sub_t const T[]", ['{"x", CON_MATCH_EXACT, CON_GATE_OPEN, ORIGIN_X, 0}'])
