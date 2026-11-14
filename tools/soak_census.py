@@ -54,7 +54,9 @@ FROM_WORD = re.compile(r"(?i)\b(from|named|called|channel|chan|via|joined|connec
                        r"(?=[A-Za-z\u0080-\U0010FFFF])\S+(?:\s+(?=[A-Z\u0080-\U0010FFFF])\S+)*")
 NUMUNIT = re.compile("([%s])%s*( ?)(%s)(?![%s%s%s])" % (
     NUMCH, FILL, "|".join(re.escape(u) for u in UNITS), LETTER, NUMCH, FILL))
-TOKEN = re.compile("[%s%s%s_]+" % (LETTER, NUMCH, FILL))
+# A hyphenated name (`Zed-Home-Repeater`) is one token, judged whole (#449); a lone `-` before a number stays a sign
+TOKEN = re.compile("[%s]+(?:-[%s]+)+|[%s%s%s_]+" % (LETTER, LETTER, LETTER, NUMCH, FILL))
+UNKNOWN_TAG = re.compile(r"(?i)<unknown>")
 FINAL = re.compile(r"(?:(?<![\w%s.])-)?([%s])%s*(?:\.([%s])%s*)?(?:( ?)([%s]))?" % (
     NUMCH, NUMCH, FILL, NUMCH, FILL, UNITCH))
 KEY_BEFORE = re.compile(r"([a-z]+)=$")
@@ -76,6 +78,8 @@ def classify(vocab):
         tok = m.group(0)
         if re.fullmatch("[%s]%s*" % (NUMCH, FILL), tok):
             return tok                                  # a number: FINAL takes it out later
+        if "-" in tok:                                  # every part must be a vocabulary word
+            return tok if all(word_ok(p, vocab) for p in tok.split("-")) else UNK
         if re.search("[%s]" % NUMCH, tok) or not word_ok(tok, vocab):
             return UNK                                  # a digit anywhere, or not a vocabulary word
         return tok
@@ -117,7 +121,7 @@ def cut_after_colon(text: str) -> str:
 
 def scrub_marked(marked: str, vocab) -> str:
     """Marked text (numbers and units as private-use chars) -> text of vocabulary words, `#` slots and `<w>`."""
-    text = SAID.sub("\\1 " + UNK, QUOTED.sub(UNK, marked))
+    text = SAID.sub("\\1 " + UNK, QUOTED.sub(UNK, UNKNOWN_TAG.sub(UNK, marked)))  # the firmware's own "<unknown>" too
     text = FREE_KV.sub("\\1=" + UNK, text)
     text = FROM_WORD.sub("\\1 " + UNK, text)
     text = cut_after_colon(TOKEN.sub(classify(vocab), mark_units(text)))

@@ -168,7 +168,8 @@ void mesh_int::cmd_mesh_loc(char const *args) {
     }
     char pos[40];
     advcfg_coord_text(c.lat, c.lon, pos, sizeof(pos));
-    console_reply("location %s, %s in adverts", advcfg_location_set(c.lat, c.lon) ? pos : "not set",
+    // The position is private (#449): to the asker, never into the log tap, even with sharing off.
+    console_reply_private("location %s, %s in adverts", advcfg_location_set(c.lat, c.lon) ? pos : "not set",
                   c.share_loc ? "shared" : "not shared");
 }
 

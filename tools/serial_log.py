@@ -128,6 +128,16 @@ def _split_fw(line: str) -> tuple[str, list[str]]:
     return "", words
 
 
+def _readings(line: str) -> list[tuple[str, list[str]]]:
+    """The line as (kept prefix, words) under each reading of its first word: `fw meshcore channel add <key>` (#423)
+    puts an app id between `fw` and the command, so the words are judged with and without that one word (#449)."""
+    fw, words = _split_fw(line)
+    out = [(fw, words)]
+    if fw and len(words) > 1:
+        out.append((fw + words[0] + " ", words[1:]))
+    return out
+
+
 def _starts_with(words: list[str], pattern: tuple[str, ...]) -> bool:
     return len(words) >= len(pattern) and all(p in ("*", w.lower()) for p, w in zip(pattern, words))
 
@@ -138,11 +148,12 @@ def _secret_word(word: str) -> bool:
 
 def redact(line: str) -> str:
     """The line as the log shows it: command words kept, arguments that can be a secret masked."""
+    for fw, words in _readings(line):
+        for pattern, applies in SECRET_ARGS:
+            rest = words[len(pattern) :]
+            if _starts_with(words, pattern) and rest and (applies is None or applies(rest)):
+                return fw + " ".join(words[: len(pattern)] + [MASK])
     fw, words = _split_fw(line)
-    for pattern, applies in SECRET_ARGS:
-        rest = words[len(pattern) :]
-        if _starts_with(words, pattern) and rest and (applies is None or applies(rest)):
-            return fw + " ".join(words[: len(pattern)] + [MASK])
     if _starts_with(words, ("keys", "send")):  # text: types into the focused field, which may be a password field
         return fw + " ".join("text:" + MASK if w.lower().startswith("text:") else w for w in words)
     if len(words) > 1 and any(_secret_word(w) for w in words):
@@ -152,9 +163,9 @@ def redact(line: str) -> str:
 
 def reply_is_secret(line: str) -> bool:
     """Whether the reply to this sent line can print a secret: listed commands, and get/set of a secret-named key."""
-    _, words = _split_fw(line)
-    if any(_starts_with(words, pattern) for pattern in SECRET_REPLIES):
+    if any(_starts_with(words, pattern) for _, words in _readings(line) for pattern in SECRET_REPLIES):
         return True
+    _, words = _split_fw(line)
     return len(words) > 1 and words[0].lower() in ("get", "set") and _secret_word(words[1])
 
 

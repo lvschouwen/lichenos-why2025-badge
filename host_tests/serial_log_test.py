@@ -57,6 +57,13 @@ SECRET_LINES = [
     ("fw mesh remote a1b2c3 cli password hunter22", "fw mesh remote a1b2c3 cli ***"),
     ("fw mesh remote a1b2c3 cli set guest.password x", "fw mesh remote a1b2c3 cli ***"),
     ("fw channel add Team 8b3387e9c5cdea6ac9e5edbaa115cd72", "fw channel add Team ***"),
+    # #449: the `fw meshcore <cmd>` forms (#423), with spacing and case variants
+    ("fw meshcore channel add Team 8b3387e9c5cdea6ac9e5edbaa115cd72", "fw meshcore channel add Team ***"),
+    ("fw  meshcore\tchannel  add Team 8b33", "fw meshcore channel add Team ***"),
+    ("FW MeshCore Channel Add Team 8b33", "FW MeshCore Channel Add Team ***"),
+    ("fw meshcore mesh remote rpt1 login hunter22", "fw meshcore mesh remote rpt1 login ***"),
+    ("fw meshcore mesh remote rpt1 cli set bridge.secret x", "fw meshcore mesh remote rpt1 cli ***"),
+    ("fw mesh remote rpt1 cli set bridge.secret x", "fw mesh remote rpt1 cli ***"),
     ("fw keys send down text:hunter22 enter", "fw keys send down text:*** enter"),
     ("fw set some.password hunter22", "fw set ***"),
     ("fw qr my secret", "fw qr ***"),
@@ -87,7 +94,7 @@ def test_normal_commands_are_kept() -> None:
 
 
 def test_replies_that_print_a_secret() -> None:
-    for line in ["fw token", "token", "fw channel show 1", "fw mesh remote rpt1 cli get prv.key"]:
+    for line in ["fw token", "token", "fw channel show 1", "fw meshcore channel show 1", "fw meshcore mesh remote r", "fw mesh remote rpt1 cli get prv.key"]:
         assert serial_log.reply_is_secret(line), line
     for line in ["fw get bl.", "fw crash", "fw crash dump", "fw channels", "fw mesh"]:  # a dump: its own rule
         assert not serial_log.reply_is_secret(line), line

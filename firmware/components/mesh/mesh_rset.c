@@ -408,7 +408,8 @@ static char const *skip_tag(char const *cmd) {
     return cmd;
 }
 
-static char const *const SECRET[] = {"password ", "set guest.password ", "set prv.key "};
+static char const *const SECRET[] = {"password ", "set guest.password ", "set prv.key ",
+                                       "set bridge.secret "};
 
 rs_cmd_class_t rs_cmd_class(char const *cmd) {
     static char const *const RADIO[]  = {"set radio ", "set freq ", "tempradio "};

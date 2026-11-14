@@ -161,6 +161,9 @@ class ScrubTest(unittest.TestCase):
     LEAKS = [
         ("mesh: got advert Alice Smith", ["Alice", "Smith"]),
         ("mesh: neighbour Bob-the-Builder seen", ["Bob", "Builder"]),
+        ("mesh: node Zed-Home-Repeater seen", ["Zed"]),
+        ("mesh: node mesh-Zed seen", ["Zed"]),
+        ("mesh: heard <unknown>: meet at the gate", ["gate", "meet"]),
         ("wifi: connected Home_WiFi_Net ok", ["Home", "WiFi", "Net"]),
         ("mesh: label=Jan", ["Jan"]),
         ("mesh: foo=Jan Pietersen bar=3", ["Jan", "Pietersen"]),
@@ -186,6 +189,12 @@ class ScrubTest(unittest.TestCase):
                 out = "\n".join(sc.census_report(c)) + "\n".join(c.kinds)
                 for word in bad:
                     self.assertNotIn(word, out, "%r leaked from %r" % (word, text))
+
+    def test_a_hyphenated_name_prints_only_when_every_part_is_a_word(self):
+        # #449: a hyphen no longer splits a name into parts that are judged one by one
+        sc_ = sc.Scrubber(TEST_VOCAB)
+        self.assertEqual(sc_.text("mesh: node Zed-Home-Repeater seen")[0], "mesh: node <w> seen")
+        self.assertEqual(sc_.text("mesh: node mesh-Zed seen")[0], "mesh: node <w> seen")
 
     def test_free_text_of_vocabulary_words_is_cut(self):
         for vocab in (TEST_VOCAB, sv.build()):
