@@ -2639,7 +2639,7 @@ foreach(t console_pin_test console_pin_dev_test)
         ${NPT_FW}/lichen_nvs ${NPT_FW}/lichen_os
         ${NPT_FW}/lichen_shell ${NPT_FW}/../main
         ${NPT_FW}/psram_guard ${NPT_FW}/sensors
-        ${NPT_FW}/lichen_notify)
+        ${NPT_FW}/lichen_notify ${NPT_FW}/lichen_haptics)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
     target_link_libraries(${t} PRIVATE lichen_text)
     add_test(NAME ${t} COMMAND ${t})

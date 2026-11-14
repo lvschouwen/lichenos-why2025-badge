@@ -12,6 +12,7 @@
 #include "boot_rules.h"
 #include "crash_rules.h"
 #include "dev_mode.h"
+#include "haptics_rules.h"
 #include "sd_rules.h"
 #include "sensors_rules.h"
 #include "shell_cmd_rules.h"
@@ -357,6 +358,7 @@ static rules_of_t const RULES[] = {
     {"psram", PSRAM_RULES},
     {"sensors", SENSORS_RULES},
     {"notify", NOTIFY_RULES},
+    {"vib", VIB_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

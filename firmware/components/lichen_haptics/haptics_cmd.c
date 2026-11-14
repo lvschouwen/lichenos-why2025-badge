@@ -2,6 +2,7 @@
 #include "fw_console.h"
 #include "haptics.h"
 #include "haptics_cmd.h"
+#include "haptics_rules.h"
 
 #include <string.h>
 
@@ -63,5 +64,5 @@ static void cmd_vib(char const *args) {
 }
 
 void haptics_register_console(void) {
-    console_register("vib", VIB_USAGE, cmd_vib);
+    console_register_rules("vib", VIB_USAGE, cmd_vib, VIB_RULES);
 }

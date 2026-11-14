@@ -5,16 +5,13 @@
 
 #include <string.h>
 
-// "vib test ...": the other forms are settings a person uses, so only the test word is gated
+// "mesh chat ..." and "mesh ident ...": the word alone or followed by a space
 static bool first_word_is(char const *args, char const *word) {
     size_t n = strlen(word);
     return strncmp(args, word, n) == 0 && (args[n] == '\0' || args[n] == ' ');
 }
 
 bool dev_gate_needs_dev(char const *name, char const *args) {
-    if (strcmp(name, "vib") == 0) {
-        return first_word_is(args, "test");
-    }
     if (strcmp(name, "mesh") == 0) {
         // #438: "mesh chat open|close" opens a screen from the console; #455: "mesh ident simulate" blocks TX
         return first_word_is(args, "chat") || first_word_is(args, "ident");
