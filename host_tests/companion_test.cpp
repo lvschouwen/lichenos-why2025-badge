@@ -849,6 +849,34 @@ static bool sent_has_type(size_t from, uint8_t want_type) {
     return false;
 }
 
+// A RESPONSE too long for the app's frame is dropped before it is copied (#448). MyMesh builds the frame in
+// out_frame (MAX_FRAME_SIZE bytes of frame); an unasked response from any contact reached the copy with up to 176
+// bytes behind a 2-byte header, and the pipe was then handed a frame longer than the buffer it sits in
+static void long_response_checks(BadgeMesh &mesh) {
+    static Rng          peer_rng;
+    mesh::LocalIdentity peer(&peer_rng);
+    ContactInfo         ci{}; // value-initialised: Identity has a constructor, so no memset (-Wclass-memaccess)
+    ci.id           = mesh::Identity(peer.pub_key);
+    ci.type         = ADV_TYPE_CHAT;
+    ci.out_path_len = OUT_PATH_UNKNOWN;
+    ci.lastmod      = rtc_clock.getCurrentTime();
+    strcpy(ci.name, "Long");
+    CHECK(mesh.addContact(ci));
+    uint32_t now = (uint32_t)time(NULL) + 9000;
+
+    // 160 bytes after decryption (whole cipher blocks): 2 + 160 fits, the app gets the push
+    auto pushes        = mesh.pipe().stats().pushes;
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_RESPONSE, with_tag(now++, std::vector<uint8_t>(156, 0x5A)));
+    settle(mesh, 5);
+    CHECK(mesh.pipe().stats().pushes == pushes + 1);
+
+    // 176 bytes, the longest a datagram can carry: 2 + 176 does not fit, nothing is copied or pushed
+    pushes             = mesh.pipe().stats().pushes;
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_RESPONSE, with_tag(now++, std::vector<uint8_t>(172, 0x5A)));
+    settle(mesh, 5);
+    CHECK(mesh.pipe().stats().pushes == pushes);
+}
+
 // Log in, status, CLI and a room's posts (#51) through the pipe on the real MyMesh, against a peer that answers as
 // a repeater does (its replies built as simple_repeater builds them)
 static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener) {
@@ -1272,6 +1300,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     channel_scope_damage_checks(mesh, ob, pub.channel, root);
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
+    long_response_checks(mesh);
     contact_action_checks(mesh);
     import_checks(mesh);
     tx_note_checks(mesh, sent_at_start, notes_at_start);
