@@ -13,7 +13,7 @@
 
 // In PSRAM through gate_mem.h (#296), charged to whoever made the filter
 struct menu_filter {
-    lichen_ctx_t         owner; // freed with it, never lichen_ctx_self(): the screen's delete runs as the OS
+    lichen_ctx_t         owner; // freed with it, never lichen_ctx_self(): the delete may run in another context
     lv_obj_t            *menu, *line, *none;
     lv_obj_t            *fallback;
     menu_filter_match_fn match;
@@ -140,7 +140,7 @@ menu_filter_t *menu_filter_create(lv_obj_t *screen, lv_obj_t *menu, menu_filter_
     menu_on_text(menu, on_text, f);
     shell_on_esc(on_esc, f);
     shell_on_search(on_search, f);
-    lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, f);
+    lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, f);
     return f;
 }
 

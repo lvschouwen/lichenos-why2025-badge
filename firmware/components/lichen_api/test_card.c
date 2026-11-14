@@ -2,6 +2,7 @@
 #include "test_card.h"
 
 #include "fonts.h"
+#include "lichen_ui.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -54,7 +55,7 @@ static void on_grating_draw(lv_event_t *e) {
 
 static void add_grating(lv_obj_t *card, int i) {
     lv_obj_t *o = box(card, tcard_grating(i).area, 0x000000);
-    lv_obj_add_event_cb(o, on_grating_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
+    lichen_ui_event_add(o, on_grating_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
 }
 
 static lv_obj_t *add_info_line(lv_obj_t *card, tcard_rect_t strip, int row) {
@@ -127,7 +128,7 @@ static void add_test_pattern(lv_obj_t *card, tcard_t *t) {
     lv_obj_set_style_bg_opa(frame, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(frame, 1, 0);
     lv_obj_set_style_border_color(frame, lv_color_white(), 0);
-    t->info_timer = lv_timer_create(update_info, INFO_MS, t);
+    t->info_timer = lichen_ui_timer_create(update_info, INFO_MS, t);
     update_info(t->info_timer);
 }
 
@@ -184,7 +185,7 @@ lv_obj_t *test_card_create(lv_obj_t *parent, tcard_mode_t mode) {
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_scrollable(card, false);
     lv_obj_set_user_data(card, t);
-    lv_obj_add_event_cb(card, on_card_delete, LV_EVENT_DELETE, t);
+    lichen_ui_event_add(card, on_card_delete, LV_EVENT_DELETE, t);
     if (hooks.opened) {
         hooks.opened(1);
     }

@@ -3,6 +3,7 @@
 // lichen_reg_get the cache).
 #include "meshcore_screens.h"
 
+#include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
 #include "mesh_format.h"
@@ -85,8 +86,8 @@ void meshcore_applied_notes(lv_obj_t *menu) {
     lv_obj_t *differs = menu_note(box, "");               // amber and in words (R8): MeshCore's settings, not applied
     lv_obj_set_style_text_color(differs, lv_color_hex(THEME_AMBER), 0);
     applied_fill(box);
-    lv_timer_t *timer = lv_timer_create(applied_tick, APPLIED_REFRESH_MS, box);
+    lv_timer_t *timer = lichen_ui_timer_create(applied_tick, APPLIED_REFRESH_MS, box);
     if (timer) {
-        lv_obj_add_event_cb(box, applied_delete, LV_EVENT_DELETE, timer);
+        lichen_ui_event_add(box, applied_delete, LV_EVENT_DELETE, timer);
     }
 }

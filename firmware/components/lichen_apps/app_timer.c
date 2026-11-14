@@ -173,8 +173,8 @@ static lv_obj_t *build_timer(void) {
     s_t.quick = menu_add(menu, "Quick set", "", on_quick, NULL);
     menu_set_kind(s_t.quick, MENU_CYCLE);
     timer_svc_ack(); // opening the page is seeing the notice
-    lv_timer_t *timer = lv_timer_create(timer_refresh, REFRESH_MS, NULL);
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(timer_refresh, REFRESH_MS, NULL);
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, timer);
     timer_refresh(NULL);
     return screen;
 }
@@ -264,8 +264,8 @@ static lv_obj_t *build_stopwatch(void) {
     s_s.reset        = menu_add(menu, "Reset", NULL, on_sw_reset, NULL);
     s_s.laps         = menu_note(menu, "");
     shell_page_hint(screen, "Enter", "choose", NULL);
-    lv_timer_t *timer = lv_timer_create(stopwatch_refresh, REFRESH_MS, NULL);
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(stopwatch_refresh, REFRESH_MS, NULL);
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, timer);
     stopwatch_refresh(NULL);
     return screen;
 }
@@ -321,8 +321,8 @@ static lv_obj_t *build_world(void) {
         zone_label(label, sizeof(label), tz_at(i)->name);
         s_w.row[i] = menu_add(menu, label, "", no_action, NULL);
     }
-    lv_timer_t *timer = lv_timer_create(world_refresh, 1000, NULL);
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(world_refresh, 1000, NULL);
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, timer);
     world_refresh(NULL);
     return screen;
 }
@@ -384,8 +384,8 @@ static void open_timer_app(lv_obj_t *screen) {
     menu_set_kind(s_h.stopwatch, MENU_OPEN);
     menu_set_kind(world, MENU_OPEN);
     timer_svc_ack(); // the user is here now
-    lv_timer_t *timer = lv_timer_create(hub_refresh, 500, NULL);
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(hub_refresh, 500, NULL);
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, timer);
     hub_refresh(NULL);
 }
 

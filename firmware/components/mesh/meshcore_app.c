@@ -72,7 +72,7 @@ static void icon(lv_obj_t *parent, int size_px) {
     lv_obj_set_clickable(obj, false);
     lv_obj_set_scrollable(obj, false);
     lv_obj_center(obj);
-    lv_obj_add_event_cb(obj, draw_icon, LV_EVENT_DRAW_MAIN, NULL);
+    lichen_ui_event_add(obj, draw_icon, LV_EVENT_DRAW_MAIN, NULL);
 }
 
 // ---- the tile ----------------------------------------------------------------------------------------------------
@@ -147,7 +147,7 @@ static bool first_needs_running(void) {
         return true;
     }
     if (mesh_run_busy(meshcore_run_get())) {
-        lv_timer_t *t = lv_timer_create(first_wait_due, FIRST_WAIT_MS, NULL);
+        lv_timer_t *t = lichen_ui_timer_create(first_wait_due, FIRST_WAIT_MS, NULL);
         if (t) {
             lv_timer_set_repeat_count(t, 1);
         }
@@ -240,8 +240,8 @@ static void open(lv_obj_t *screen) {
             lv_label_set_text(first_wait, "Starting MeshCore...");
             lv_obj_set_style_text_color(first_wait, lv_color_hex(THEME_AMBER), 0);
         }
-        lv_obj_add_event_cb(screen, on_first_loaded, LV_EVENT_SCREEN_LOADED, NULL);
-        lv_obj_add_event_cb(screen, on_first_delete, LV_EVENT_DELETE, NULL);
+        lichen_ui_event_add(screen, on_first_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+        lichen_ui_event_add(screen, on_first_delete, LV_EVENT_DELETE, NULL);
         return;
     }
     meshcore_grid_build(screen, lv_group_get_default()); // the screen's own (shell_open)
@@ -336,7 +336,7 @@ static void about(lv_obj_t *page) {
     radio_texts(text, sizeof(text), power, sizeof(power));
     about_radio = add_row(page, "Radio", text);
     about_power = add_row(page, "TX power", power);
-    lv_obj_add_event_cb(about_radio, on_about_delete, LV_EVENT_DELETE, lv_timer_create(about_tick, 1000, NULL));
+    lichen_ui_event_add(about_radio, on_about_delete, LV_EVENT_DELETE, lichen_ui_timer_create(about_tick, 1000, NULL));
     snprintf(text, sizeof(text), "MeshCore %s", mesh_firmware_version());
     add_row(page, "Version", text);
 }

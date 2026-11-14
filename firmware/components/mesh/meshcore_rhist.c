@@ -324,7 +324,7 @@ static lv_obj_t *build(void) {
     v->shown_on      = -1;
     v->drawn_answers = UINT32_MAX;
     lv_obj_set_user_data(screen, v);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     v->toggle = menu_add(menu, "Ask for status", "", on_toggle, v);
     menu_set_kind(v->toggle, MENU_TOGGLE);
     v->interval = menu_add(menu, "Interval", "", on_interval, v);
@@ -343,7 +343,7 @@ static lv_obj_t *build(void) {
         v->chart[f] = add_chart(menu, &v->ser[f]);
     }
     live     = v;
-    v->timer = lv_timer_create(refresh, REFRESH_MS, v);
+    v->timer = lichen_ui_timer_create(refresh, REFRESH_MS, v);
     update(v); // not the active screen yet, so the timer would skip it
     return screen;
 }

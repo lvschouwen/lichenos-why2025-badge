@@ -38,8 +38,8 @@ static void open_testcard(lv_obj_t *screen) {
         lv_label_set_text(l, "Not enough memory.");
         return;
     }
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
 }
 
 static bool testcard_tile(char *l1, size_t c1, char *l2, size_t c2) {

@@ -433,7 +433,7 @@ static void add_rows(lv_obj_t *menu) {
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Repeater settings", title);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     meshcore_remote_hold(screen); // no scheduled status ask while the settings are read or set (#168)
     screen_obj = screen;
     menu_obj   = menu;
@@ -459,7 +459,7 @@ static lv_obj_t *build(void) {
     add_rows(menu);
     shell_page_hint(screen, "Enter", "change", NULL);
     read_all(NULL); // the values are read as the page opens (gets only), as the Status screen asks as it opens
-    timer = lv_timer_create(tick, TICK_MS, NULL);
+    timer = lichen_ui_timer_create(tick, TICK_MS, NULL);
     return screen;
 }
 

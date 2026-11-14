@@ -144,7 +144,7 @@ static void open_calc(lv_obj_t *screen) {
     s_w.value_row = menu_add(menu, "Number", "", on_value, NULL);
     menu_set_kind(s_w.value_row, MENU_OPEN);
     s_w.unit_result = menu_note(menu, "");
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     show_expression();
     show_unit();
 }

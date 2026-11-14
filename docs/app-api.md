@@ -48,7 +48,9 @@ to `layers.conf`):
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
   never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task
   to the LVGL task (fn runs there, soon; false when it could not be queued) and `lichen_ui_with_group(group, build,
-  arg)` adds widgets to a screen's group (LVGL context). `shell_back()` pops the top screen like Esc, for a screen that
+  arg)` adds widgets to a screen's group (LVGL context). Register event and timer callbacks with
+  `lichen_ui_event_add` / `lichen_ui_timer_create` (LVGL's arguments; `lv_obj_add_event_cb` and `lv_timer_create` are
+  forbidden to apps, #349) so they run as the app. `shell_back()` pops the top screen like Esc, for a screen that
   takes Esc itself (the Keyboard test).
 - `lichen_ui.h` for home tiles and clocks (#180): `lichen_icon_box(parent, w, h, x, y, color, radius)` is a filled box
   centred off the icon's middle (`draw_icon` builds its picture from them, `LV_RADIUS_CIRCLE` for a dot);
@@ -226,8 +228,8 @@ Clock, Calculator and Test card declare none. `CAP_SECRETS` is an app's own clas
 - **Checked at run time** at the gate's entry points (`lichen_sys_caps_ok`): a call made for an app without the
   capability is refused (NULL, false, 0, nothing done) and logged at most once per 10 s; `fw app caps` lists each app's
   capabilities, budgets and refusals. The check is one table lookup and a compare, no lock, no heap, any task. The OS's
-  context passes, so a call from an ISR, an esp_timer or an LVGL callback outside a hook is never refused, and so do
-  SYSTEM apps. `main.c` skips a `start_background` hook without `BACKGROUND`. The `lora_app.h` and `fw_console.h`
+  context passes, so a call from an ISR, an esp_timer or an OS callback is never refused, and so do SYSTEM apps; an
+  app's own event and timer callbacks run as the app (#349) and are checked like its hooks. `main.c` skips a `start_background` hook without `BACKGROUND`. The `lora_app.h` and `fw_console.h`
   calls (LORA_TX/RX, CONSOLE, RESTART) sit below the gate and are checked at build time only until #221's wrapper.
 - **An accident and audit guard, not a security boundary:** apps are compiled in and share the address space.
 - Identity: an opaque `lichen_ctx_t` handed out at registration, plus the calling task's TLS (#230).
@@ -240,11 +242,18 @@ slot 1 (slot 0 is IDF's pthread storage). `lichen_ctx_self()` (`lichen_app.h`) r
   each in `lichen_ctx_enter`/`lichen_ctx_leave` (`lichen_sys_app.h`; TLS only, no lock, nests);
 - in a `lichen_ui_call` (or `lichen_sys_ui_call`): each queued call keeps the context of the code that queued it and
   runs inside it (a burst past the queue's 16 entries goes to LVGL directly and runs for the OS);
+- in an LVGL event or timer callback registered with `lichen_ui_event_add` / `lichen_ui_timer_create` (#349): the
+  context of the code that registered it, entered around each call by a trampoline (`lichen_ui_cb.c`; TLS only, no
+  lock, no heap; the caller's context comes back exactly, also when the callback deletes its object). The record
+  (context + callback, 8 B in LVGL's PSRAM heap) is the descriptor's or timer's external data and LVGL frees it with
+  them (`CONFIG_LV_USE_EXT_DATA`). The panic hook (#232) reads the same slot, so a crash in such a callback blames the
+  app. Every app registration uses them; the shell's own infrastructure (home, status bar, toasts, screensaver, boot
+  screen, dialog layer, bench overlays) registers raw and runs as whatever context is current, the OS's between calls;
 - on a task from `lichen_task_start`: the context it was given. An app passes its own; code that runs for whoever
   called it (the OS, shell helpers) passes `lichen_ctx_self()`, so a task an app's task or hook starts inherits the app.
 
-Everywhere else it is the OS's context: an ISR, an esp_timer callback (the esp_timer task), an LVGL event or timer
-callback outside a hook, a task not made through `lichen_task_start`. A stale or made-up context given to a gate call
+Everywhere else it is the OS's context: an ISR, an esp_timer callback (the esp_timer task), a raw LVGL event or
+timer callback outside a hook, a task not made through `lichen_task_start`. A stale or made-up context given to a gate call
 or to `lichen_ctx_enter` is refused (the OS's context is used instead), logged at most once per 10 s and counted:
 `fw app ctx` lists every app's context and the refusals since boot. Never an abort. Since E1b the memory and task
 calls take the context: an app keeps what `lichen_register_app` returned and passes it (MeshCore through
@@ -262,9 +271,9 @@ notice is dropped, a refused `lichen_fs_sd_end` leaves the lock alone. The pure 
 the ctx the table holds for the app's index, and the lookups and `lichen_ctx_enter`/`_leave` are owner-only in
 `layers.conf` (forbidden to apps outright).
 
-Not yet covered: an LVGL event or timer callback an app registers runs as the OS when it fires outside a hook (a key
-press, a timer tick), and so does a `lichen_ui_call` queued from one, until those registrations are wrapped (a follow-up
-of #230).
+Since #349 an app's LVGL event and timer callbacks run as the app (above), and so does a `lichen_ui_call` queued from
+one. Display, input-device and group callbacks (`lv_display_add_event_cb`, `lv_indev_add_event_cb`,
+`lv_group_set_focus_cb`) are the OS's and stay raw.
 
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees

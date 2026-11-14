@@ -599,7 +599,7 @@ static lv_obj_t *create_search_line(chat_t *c) {
     lv_obj_set_style_border_color(line, lv_color_hex(THEME_AMBER), 0);
     lv_obj_set_style_outline_width(line, 0, LV_STATE_ANY);
     lv_obj_set_hidden(line, true);
-    lv_obj_add_event_cb(line, on_search_key, LV_EVENT_KEY, c);
+    lichen_ui_event_add(line, on_search_key, LV_EVENT_KEY, c);
     return line;
 }
 
@@ -626,10 +626,10 @@ static void create_widgets(chat_t *c) {
     lv_textarea_set_max_length(c->ta, (uint32_t)text_max(c));
     lv_textarea_set_placeholder_text(c->ta, "Write a message");
     style_ta(c->ta);
-    lv_obj_add_event_cb(c->ta, on_ready, LV_EVENT_READY, c);
-    lv_obj_add_event_cb(c->ta, on_changed, LV_EVENT_VALUE_CHANGED, c);
-    lv_obj_add_event_cb(c->ta, on_key, LV_EVENT_KEY, c);
-    lv_obj_add_event_cb(c->ta, on_compose_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, c);
+    lichen_ui_event_add(c->ta, on_ready, LV_EVENT_READY, c);
+    lichen_ui_event_add(c->ta, on_changed, LV_EVENT_VALUE_CHANGED, c);
+    lichen_ui_event_add(c->ta, on_key, LV_EVENT_KEY, c);
+    lichen_ui_event_add(c->ta, on_compose_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, c);
 
     c->search_line = create_search_line(c);
 
@@ -667,9 +667,9 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 10, 0);
     lv_obj_set_scrollable(screen, false);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, c);
-    lv_obj_add_event_cb(screen, on_loaded, LV_EVENT_SCREEN_LOADED, c);
-    lv_obj_add_event_cb(screen, on_unload, LV_EVENT_SCREEN_UNLOAD_START, c);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, c);
+    lichen_ui_event_add(screen, on_loaded, LV_EVENT_SCREEN_LOADED, c);
+    lichen_ui_event_add(screen, on_unload, LV_EVENT_SCREEN_UNLOAD_START, c);
     shell_on_esc(on_esc, c);
     shell_on_search(on_search, c);
     c->next = chats;
@@ -691,7 +691,7 @@ static lv_obj_t *build_chat(void) {
         lv_group_set_user_data(group, c);
         lv_group_set_focus_cb(group, on_focus_move); // keeps the focus on a search (#48), Tab retries (#47)
     }
-    c->timer = lv_timer_create(tick, TICK_MS, c); // NULL without memory: the chat then shows what refresh found once
+    c->timer = lichen_ui_timer_create(tick, TICK_MS, c); // NULL without memory: the chat then shows what refresh found once
     refresh(c);
     return screen;
 }
@@ -813,7 +813,7 @@ static lv_obj_t *build_dm_pick(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Message a contact");
     menu_filter_t *filter = menu_filter_create(screen, menu, contact_matches, NULL); // #57
-    lv_obj_add_event_cb(screen, free_peers, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, free_peers, LV_EVENT_DELETE, NULL);
     lichen_free(meshcore_ctx(), peers);
     peers = lichen_alloc(meshcore_ctx(), MAX_PEERS * sizeof(*peers), LICHEN_MEM_BULK);
     size_t total, n = peers ? mesh_contacts_snapshot(peers, MAX_PEERS, &total, SCREEN_WAIT_MS) : 0;

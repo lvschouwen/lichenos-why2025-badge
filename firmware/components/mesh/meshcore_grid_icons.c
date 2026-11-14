@@ -1,6 +1,7 @@
 // The MeshCore grid's tile icons (#88), drawn rather than font symbols: a label inside a tile would be the first text
 // "fw ui" reads for the focused tile, ahead of its name. In a 60x60 view like the app's home icon, on a rounded square
 // as Lichen's own app icons.
+#include "lichen_ui.h"
 #include "mesh_grid.h"
 #include "meshcore_screens.h"
 #include "theme.h"
@@ -159,5 +160,5 @@ void meshcore_grid_icon(lv_obj_t *parent, int tile, int size_px) {
     lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
     lv_obj_set_scrollable(box, false);
     lv_obj_set_clickable(box, false);
-    lv_obj_add_event_cb(box, on_draw, LV_EVENT_DRAW_MAIN_END, (void *)(intptr_t)tile);
+    lichen_ui_event_add(box, on_draw, LV_EVENT_DRAW_MAIN_END, (void *)(intptr_t)tile);
 }

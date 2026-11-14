@@ -5,9 +5,10 @@
 // lichen_sys_mem.h) and these calls forward to them. Before that, every allocation here is NULL: never a plain calloc,
 // whose memory "fw mem" cannot see. Pure (no LVGL, no heap of its own): host_tests/gate_mem_test.c.
 //
-// The owner is lichen_ctx_self() when the block is made: the app inside its hooks and on its tasks, the OS in an LVGL
-// event callback (a submenu opened on a click). The caller keeps it next to the block and frees with that one, never
-// with lichen_ctx_self() at the free: an LV_EVENT_DELETE handler runs as the OS, and the app's count would stay up.
+// The owner is lichen_ctx_self() when the block is made: the app inside its hooks, its tasks and (#349) the event
+// callbacks it registered (a submenu opened on a click). The caller keeps it next to the block and frees with that
+// one, never with lichen_ctx_self() at the free: the delete may run in another context (a raw OS handler, a screen
+// closed from another app's callback), and the owner's count would stay up.
 
 #include "lichen_app.h"
 

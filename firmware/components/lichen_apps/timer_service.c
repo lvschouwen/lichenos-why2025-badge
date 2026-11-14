@@ -66,7 +66,7 @@ static void poll(lv_timer_t *timer) {
 
 static void start_poll(void *arg) {
     (void)arg;
-    if (!lv_timer_create(poll, POLL_MS, NULL)) {
+    if (!lichen_ui_timer_create(poll, POLL_MS, NULL)) {
         ESP_LOGE(TAG, "no poll timer: a finished countdown will not be noticed");
     }
 }

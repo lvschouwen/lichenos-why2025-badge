@@ -55,7 +55,7 @@ static void on_page_delete(lv_event_t *e) {
 static lv_obj_t *build_page(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "MeshCore notifications");
-    lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_page_delete, LV_EVENT_DELETE, NULL);
     sw_row[MN_SW_DM]       = menu_add(menu, "Direct messages", on_off(mesh_notify_get_switch(MN_SW_DM)), toggle_switch,
                                       (void *)(uintptr_t)MN_SW_DM);
     sw_row[MN_SW_FAIL]     = menu_add(menu, "Delivery failed", on_off(mesh_notify_get_switch(MN_SW_FAIL)),

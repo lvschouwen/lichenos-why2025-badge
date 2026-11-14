@@ -323,13 +323,13 @@ static lv_obj_t *build_trace(void) {
     tr->kind = kind;
     memcpy(tr->prefix, ct->prefix, sizeof(tr->prefix));
     lv_obj_set_user_data(screen, tr);
-    lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
     menu_note(menu, kind == MT_TRACE ? "Along the stored path and back; SNR as each hop heard it:"
                                      : "Asks the contact over the whole mesh which path to use:");
     tr->label = add_text(menu, "Sending...");
     tr->again = menu_add(menu, "Again", "", on_trace_again, tr);
     trace_start(tr);
-    tr->timer = lv_timer_create(trace_tick, TRACE_TICK_MS, tr);
+    tr->timer = lichen_ui_timer_create(trace_tick, TRACE_TICK_MS, tr);
     return screen;
 }
 
@@ -462,7 +462,7 @@ static lv_obj_t *build_detail(void) {
     ct->list_screen    = want_contact.list_screen;
     ct->shown_path_len = ct->shown_flags = ct->shown_login = ct->shown_hist = -1;
     lv_obj_set_user_data(screen, ct);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     for (size_t i = 0; i < MESH_CONTACT_LINES; i++) {
         ct->info[i] = add_text(menu, "...");
     }
@@ -487,7 +487,7 @@ static lv_obj_t *build_detail(void) {
     menu_set_danger(remove_row, ask, "remove");
     ct->note = menu_note(menu, "");
     fill(ct, KEY_WAIT_MS);
-    ct->timer = lv_timer_create(tick, TICK_MS, ct);
+    ct->timer = lichen_ui_timer_create(tick, TICK_MS, ct);
     return screen;
 }
 

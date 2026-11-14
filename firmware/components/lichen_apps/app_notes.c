@@ -293,8 +293,8 @@ static void open_notes(lv_obj_t *screen) {
     s_v.screen = screen;
     s_v.menu   = NULL;
     s_v.group  = lv_group_get_default();
-    s_v.poll   = lv_timer_create(on_poll, POLL_MS, NULL);
-    lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
+    s_v.poll   = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
+    lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
     s_v.result[0] = s_v.focus_name[0] = '\0';
     s_v.focus_index                   = 0;
     s_v.no_card                       = false;

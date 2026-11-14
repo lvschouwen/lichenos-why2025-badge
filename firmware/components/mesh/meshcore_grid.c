@@ -496,7 +496,7 @@ static void add_cell(lv_obj_t *grid, lv_group_t *group, int i) {
     lv_obj_set_hidden(dot, true);
     g.badge_dot[i] = dot;
     g.badge[i]     = add_label(row, "", THEME_AMBER);
-    lv_obj_add_event_cb(cell, on_key, LV_EVENT_KEY, (void *)(intptr_t)i);
+    lichen_ui_event_add(cell, on_key, LV_EVENT_KEY, (void *)(intptr_t)i);
     if (group) {
         lv_group_add_obj(group, cell);
     }
@@ -537,14 +537,14 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     lv_obj_set_width(g.status, LV_PCT(100));
     lv_obj_set_hidden(g.status, true); // set_status shows it with a result
     set_hint();
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     if (group) {
         lv_group_focus_obj(g.cell[g.order[0]]);
     }
-    g.status_timer = lv_timer_create(clear_status, STATUS_KEEP_MS, NULL);
+    g.status_timer = lichen_ui_timer_create(clear_status, STATUS_KEEP_MS, NULL);
     if (g.status_timer) {
         lv_timer_pause(g.status_timer); // runs from the first result on
     }
-    g.timer = lv_timer_create(refresh, REFRESH_MS, NULL);
+    g.timer = lichen_ui_timer_create(refresh, REFRESH_MS, NULL);
     refresh(NULL); // the screen is not loaded yet: the badges right away all the same
 }

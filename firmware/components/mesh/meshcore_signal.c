@@ -174,7 +174,7 @@ static lv_obj_t *build(void) {
     s->screen      = screen;
     s->drawn_heard = UINT32_MAX;
     lv_obj_set_user_data(screen, s);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     // Read-only rows: with no selectable row the menu takes the focus, opens at the top and Up/Down scroll it (#174)
     for (int i = 0; i < ROWS; i++) {
         s->row[i] = menu_add(menu, LABELS[i], "", NULL, NULL);
@@ -186,7 +186,7 @@ static lv_obj_t *build(void) {
     s->rssi_chart = add_chart(menu, &s->rssi_ser, THEME_TEAL);
     s->snr_note   = menu_note(menu, "");
     s->snr_chart  = add_chart(menu, &s->snr_ser, THEME_AMBER);
-    s->timer      = lv_timer_create(refresh, REFRESH_MS, s);
+    s->timer      = lichen_ui_timer_create(refresh, REFRESH_MS, s);
     update(s); // not the active screen yet, so the timer would skip it
     return screen;
 }

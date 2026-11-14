@@ -219,14 +219,14 @@ static lv_obj_t *build(void) {
     st->next   = live;
     live       = st;
     lv_obj_set_user_data(screen, st);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, st);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, st);
     st->list      = (mc_list_t){.keys = st->keys, .items = st->items, .cap = SHOW_ROWS, .sel = 1};
     st->list.list = mc_list_screen(screen, "Chat", NULL, "Enter", "open");
-    lv_obj_add_event_cb(st->list.list, on_key, LV_EVENT_KEY, st);
+    lichen_ui_event_add(st->list.list, on_key, LV_EVENT_KEY, st);
     st->shown_sig      = UINT32_MAX;
     st->sel_new        = false; // the newest chat is highlighted first, as before; Up reaches "New message..."
     st->last_rebuild_s = mesh_uptime_s();
-    st->timer          = lv_timer_create(tick, 1000, st);
+    st->timer          = lichen_ui_timer_create(tick, 1000, st);
     refresh(st, false); // not loaded yet: the rows right away all the same
     return screen;
 }

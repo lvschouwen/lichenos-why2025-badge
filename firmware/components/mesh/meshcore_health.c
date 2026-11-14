@@ -109,8 +109,8 @@ static lv_obj_t *build(void) {
         g.row[i] = menu_add(menu, LABELS[i], "", NULL, NULL);
         menu_set_kind(g.row[i], MENU_INFO);
     }
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    g.timer = lv_timer_create(refresh, REFRESH_MS, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
+    g.timer = lichen_ui_timer_create(refresh, REFRESH_MS, NULL);
     refresh(NULL); // not loaded yet: the values right away all the same
     return screen;
 }

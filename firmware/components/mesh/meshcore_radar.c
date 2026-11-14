@@ -256,7 +256,7 @@ static void build_body(lv_obj_t *screen) {
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     mem = lichen_alloc(meshcore_ctx(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for the contact radar");
@@ -270,11 +270,11 @@ static lv_obj_t *build(void) {
     lv_obj_move_to_index(lichen_heading(screen, "MeshCore", "Contact radar"), 0);
     note_label = lv_obj_get_child(screen, 1);
     build_body(screen);
-    lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(list.list, on_key, LV_EVENT_KEY, NULL);
     shown_sig   = UINT32_MAX;
     shown_state = SHOWN_NONE;
     sel_valid   = false;
-    timer     = lv_timer_create(refresh, TICK_MS, NULL);
+    timer     = lichen_ui_timer_create(refresh, TICK_MS, NULL);
     refresh(NULL);
     return screen;
 }

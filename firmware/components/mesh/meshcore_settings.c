@@ -157,7 +157,7 @@ static void retry_due(lv_timer_t *timer) {
 
 // A refresh that met another change still running: again shortly (fn checks its screen is still there)
 static void retry_later(void (*fn)(void)) {
-    lv_timer_t *timer = lv_timer_create(retry_due, RETRY_MS, (void *)fn);
+    lv_timer_t *timer = lichen_ui_timer_create(retry_due, RETRY_MS, (void *)fn);
     if (timer) {
         lv_timer_set_repeat_count(timer, 1);
     }
@@ -500,7 +500,7 @@ static void run_rows(lv_obj_t *page) {
     run_refusal   = NULL;
     run_shown     = meshcore_run_get();
     run_row_refresh(NULL);
-    run_timer = lv_timer_create(run_row_refresh, RUN_POLL_MS, NULL); // a start or stop ends on the job task
+    run_timer = lichen_ui_timer_create(run_row_refresh, RUN_POLL_MS, NULL); // a start or stop ends on the job task
 }
 
 // ---- the grid's tile order (#189) --------------------------------------------------------------------------------
@@ -571,7 +571,7 @@ static void open_notify_page(void *arg) {
 
 void meshcore_settings(lv_obj_t *page) {
     run_rows(page);
-    lv_obj_add_event_cb(page, on_page_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(page, on_page_delete, LV_EVENT_DELETE, NULL);
     mesh_settings_t s;
     if (!mesh_running() || !mesh_get_settings(&s)) {
         menu_note(page, "MeshCore is not running: its settings come back when it does.");
@@ -796,7 +796,7 @@ static void on_tx(int value, void *arg) {
     if (tx_timer) {
         lv_timer_reset(tx_timer);
     } else {
-        tx_timer = lv_timer_create(tx_settled, TX_SETTLE_MS, NULL);
+        tx_timer = lichen_ui_timer_create(tx_settled, TX_SETTLE_MS, NULL);
         lv_timer_set_repeat_count(tx_timer, 1);
     }
 }
@@ -879,7 +879,7 @@ static lv_obj_t *build_radio(void) {
     tx_wanted = s.tx_dbm;
     menu_add_slider(menu, "TX power (dBm)", -9, 22, s.tx_dbm, on_tx, NULL);
     tx_note = menu_note(menu, "Left / Right: TX power, saved after a second");
-    lv_obj_add_event_cb(screen, on_radio_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_radio_delete, LV_EVENT_DELETE, NULL);
     marks_refresh();
     int cur = current_preset(&s);
     menu_focus_row(menu, cur >= 0 ? cur : (int)radio_preset_count());
@@ -1049,7 +1049,7 @@ static lv_obj_t *build_custom(void) {
     menu_set_kind(cr_row, MENU_CYCLE);
     menu_add(menu, "Apply", "", apply_custom, NULL);
     custom_note = menu_note(menu, "862 to 928 MHz on this badge");
-    lv_obj_add_event_cb(screen, on_custom_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_custom_delete, LV_EVENT_DELETE, NULL);
     draft_show();
     return screen;
 }
@@ -1361,7 +1361,7 @@ static void chan_scope_not_saved(char const *why) {
     if (chan_scope_timer) {
         lv_timer_delete(chan_scope_timer); // a newer note: its own full time
     }
-    chan_scope_timer = lv_timer_create(chan_scope_show_due, CHAN_SCOPE_NOTE_MS, NULL);
+    chan_scope_timer = lichen_ui_timer_create(chan_scope_show_due, CHAN_SCOPE_NOTE_MS, NULL);
     if (chan_scope_timer) {
         lv_timer_set_repeat_count(chan_scope_timer, 1);
     }
@@ -1514,7 +1514,7 @@ static lv_obj_t *build_channel(void) {
     lv_obj_t *screen = shell_page_create();
     channel_screen   = screen;
     chan_group       = lv_group_get_default();
-    lv_obj_add_event_cb(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
     chan_mem  = lichen_alloc(meshcore_ctx(), sizeof(*chan_mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     chan_menu = menu_create_named(screen, "Channel", pending_channel);
     if (!chan_mem) {
@@ -1542,7 +1542,7 @@ static lv_obj_t *build_channels(void) {
     add_tag_row          = menu_add(menu, "Add #hashtag channel", "", add_tag, NULL);
     menu_add(menu, "Add channel with key", "", add_keyed, NULL);
     channel_note = menu_note(menu, "A #hashtag channel's key comes from its name, as in MeshCore's apps.");
-    lv_obj_add_event_cb(screen, on_channels_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_channels_delete, LV_EVENT_DELETE, NULL);
     list_refresh();
     return screen;
 }

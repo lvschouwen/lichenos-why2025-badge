@@ -59,8 +59,8 @@ static void open_text_clock(lv_obj_t *screen) {
     lv_obj_set_width(label, LV_PCT(100));
     lv_label_set_text(label, "");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-    lv_timer_t *timer = lv_timer_create(text_tick, 1000, label);
-    lv_obj_add_event_cb(screen, on_text_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(text_tick, 1000, label);
+    lichen_ui_event_add(screen, on_text_delete, LV_EVENT_DELETE, timer);
     text_tick(timer);
 }
 

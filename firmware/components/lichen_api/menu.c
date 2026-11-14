@@ -305,8 +305,8 @@ static lv_obj_t *menu_base(lv_obj_t *parent) {
     if (m) {
         m->owner = owner;
         lv_obj_set_user_data(menu, m);
-        lv_obj_add_event_cb(menu, on_menu_delete, LV_EVENT_DELETE, m);
-        lv_obj_add_event_cb(menu, on_menu_key, LV_EVENT_KEY, NULL);
+        lichen_ui_event_add(menu, on_menu_delete, LV_EVENT_DELETE, m);
+        lichen_ui_event_add(menu, on_menu_key, LV_EVENT_KEY, NULL);
     }
     return menu;
 }
@@ -394,9 +394,9 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_set_height(row->value, line_h);
     lv_label_set_text(label, label_text);
     lv_label_set_text(row->value, value_text ? value_text : "");
-    lv_obj_add_event_cb(r, on_key, LV_EVENT_KEY, row);
-    lv_obj_add_event_cb(r, on_focused, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(r, on_delete, LV_EVENT_DELETE, row);
+    lichen_ui_event_add(r, on_key, LV_EVENT_KEY, row);
+    lichen_ui_event_add(r, on_focused, LV_EVENT_FOCUSED, NULL);
+    lichen_ui_event_add(r, on_delete, LV_EVENT_DELETE, row);
     row->group = lv_group_get_default();
     if (row->group) {
         lv_group_add_obj(row->group, r);

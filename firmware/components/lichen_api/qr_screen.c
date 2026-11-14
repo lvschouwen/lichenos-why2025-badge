@@ -80,8 +80,8 @@ static lv_obj_t *build_qr(void) {
         lv_label_set_text(label, "This does not fit in a QR code: it is too long.");
     }
     shell_page_hint(screen, "Up/Down", "scroll", NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 

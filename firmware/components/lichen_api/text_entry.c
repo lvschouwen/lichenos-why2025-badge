@@ -125,9 +125,9 @@ static lv_obj_t *build(void) {
     lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, LV_PART_CURSOR);
     lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_AMBER), LV_PART_CURSOR);
     lv_obj_set_style_text_color(ta, lv_color_hex(THEME_BG), LV_PART_CURSOR);
-    lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL); // after the initial text: that is no typing
-    lv_obj_add_event_cb(ta, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(ta, on_ready, LV_EVENT_READY, NULL);
+    lichen_ui_event_add(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL); // after the initial text: that is no typing
+    lichen_ui_event_add(ta, on_delete, LV_EVENT_DELETE, NULL);
 
     lv_obj_t *hint = lv_label_create(screen);
     lv_obj_set_width(hint, LV_PCT(100));

@@ -300,8 +300,8 @@ static lv_obj_t *build(void) {
     menu_set_kind(ui.aa_hops, MENU_CYCLE);
     menu_set_kind(ui.aa_overwrite, MENU_TOGGLE);
     ui.note = menu_note(menu, "Advert every: Enter steps through Off, 3 h ... 7 d (flood adverts).");
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    ui.timer = lv_timer_create(rows_refresh, REFRESH_MS, NULL); // "next advert" counts down
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
+    ui.timer = lichen_ui_timer_create(rows_refresh, REFRESH_MS, NULL); // "next advert" counts down
     rows_refresh(NULL);
     return screen;
 }

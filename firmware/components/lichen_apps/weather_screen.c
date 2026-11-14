@@ -166,9 +166,9 @@ void weather_screen_open(lv_obj_t *screen) {
     s_ui.high_low = dim_label(screen);
     s_ui.note     = dim_label(screen);
     shell_page_hint(screen, "Left/Right", "quantity", NULL);
-    lv_timer_t *timer = lv_timer_create(refresh, REFRESH_MS, NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);
+    lv_timer_t *timer = lichen_ui_timer_create(refresh, REFRESH_MS, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, timer);
     refresh(timer);
 }
 

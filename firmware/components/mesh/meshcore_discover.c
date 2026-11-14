@@ -186,7 +186,7 @@ static void on_delete(lv_event_t *e) {
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     mem = lichen_alloc(meshcore_ctx(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for discover nearby");
@@ -199,11 +199,11 @@ static lv_obj_t *build(void) {
     lv_obj_delete(lv_obj_get_child(screen, 0));
     lv_obj_move_to_index(lichen_heading(screen, "MeshCore", "Discover nearby"), 0);
     status_label = lv_obj_get_child(screen, 1); // the note under the heading
-    lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(list.list, on_key, LV_EVENT_KEY, NULL);
     refusal  = NULL;
     sig_seen = 0;
     built_s  = mesh_uptime_s();
-    timer    = lv_timer_create(refresh, TICK_MS, NULL);
+    timer    = lichen_ui_timer_create(refresh, TICK_MS, NULL);
     refresh(NULL);
     return screen;
 }

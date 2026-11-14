@@ -512,8 +512,8 @@ static void open_spectrum(lv_obj_t *screen) {
     lv_obj_set_style_text_color(ui->status, lv_color_hex(THEME_DIM), 0);
     lv_obj_set_height(ui->status, two_lines(ui->status));
     shell_page_hint(screen, "Enter", "other band", "Backspace", "clear highest", NULL);
-    lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     lock();
     ui->band = sh->band; // the band chosen last time
     unlock();

@@ -148,12 +148,12 @@ static void open_keytest(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_TRACK), 0);
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
 
-    t->timer     = lv_timer_create(tick, 50, t);
+    t->timer     = lichen_ui_timer_create(tick, 50, t);
     t->listening = lichen_keys_raw_take(on_raw, t);
     if (!t->listening) {
         lv_label_set_text(t->event_line, "raw keys unavailable");
     }
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, t);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, t);
 }
 
 static bool keytest_tile(char *l1, size_t c1, char *l2, size_t c2) {

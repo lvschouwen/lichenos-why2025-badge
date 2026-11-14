@@ -93,7 +93,7 @@ static void again_row(void *arg);
 static lv_obj_t *build_page(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Telemetry", title[0] ? title : "(no name)");
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lichen_ui_event_add(screen, on_delete, LV_EVENT_DELETE, NULL);
     screen_obj = screen;
     if (timer) {
         lv_timer_delete(timer);
@@ -111,7 +111,7 @@ static lv_obj_t *build_page(void) {
     note  = menu_note(menu, "");
     result = menu_note(menu, "Asking...");
     lv_obj_set_style_text_color(result, lv_color_hex(THEME_TEXT), 0);
-    timer = lv_timer_create(tick, POLL_MS, NULL);
+    timer = lichen_ui_timer_create(tick, POLL_MS, NULL);
     // Normally a new page asks as it is built. If a request to this contact is running already, adopt it instead.
     if (mesh_remote_get(&mem->rr) && mem->rr.op == RR_TELEMETRY && rr_busy(&mem->rr) &&
         memcmp(mem->rr.prefix, target, sizeof(target)) == 0) {

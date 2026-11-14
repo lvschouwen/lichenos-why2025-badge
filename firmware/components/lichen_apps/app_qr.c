@@ -86,7 +86,7 @@ static void on_password(char const *password, void *arg) {
     }
     // A dialog replaced by another one never answers: wipe the password-holding payload anyway, a little after the
     // countdown would have ended (review #153). The QR screen keeps its own copy, wiped when it closes.
-    lv_timer_t *t = lv_timer_create(wipe_later, (ASK_SECONDS + 2) * 1000, NULL);
+    lv_timer_t *t = lichen_ui_timer_create(wipe_later, (ASK_SECONDS + 2) * 1000, NULL);
     if (t) {
         lv_timer_set_repeat_count(t, 1);
     } else {
