@@ -193,11 +193,11 @@ static pin_t const PINS[] = {
     {"soak",                       "RRR", "DDD", "???", false},
     // no rule today: transmitting or restarting forms open from everywhere (#464 lists them for the owner)
     {"c6",                         "RRR", "RRR", "RRR", false},
-    {"c6 reset",                   "RRR", "RRR", "RRR", false},
-    {"c6 reset rom",               "RRR", "RRR", "RRR", false},
-    {"c6 reattach",                "RRR", "RRR", "RRR", false},
-    {"c6 verify",                  "RRR", "RRR", "RRR", false},
-    {"c6 reflash",                 "RRR", "RRR", "RRR", false},
+    {"c6 reset",                   "ROO", "ROO", "ROO", false}, // USB console only (#466)
+    {"c6 reset rom",               "ROO", "ROO", "ROO", false},
+    {"c6 reattach",                "ROO", "ROO", "ROO", false},
+    {"c6 verify",                  "ROO", "ROO", "ROO", false},
+    {"c6 reflash",                 "ROO", "ROO", "ROO", false},
     {"lora",                       "RRR", "RRR", "RRR", false},
     {"lora on",                    "RRR", "RRR", "RRR", false},
     {"lora off",                   "RRR", "RRR", "RRR", false},

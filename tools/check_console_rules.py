@@ -51,12 +51,7 @@ ALLOW = {
     ("MESH_SUBS", "remote"),
     ("MESH_SUBS", "advert"),
     ("MESH_ADVERT_RULES", "*"),
-    # no origin rule before #464 (the C6 resets and reflash, the LoRa switch): kept as they were, for the owner to decide
-    ("C6_RULES", "reset"),
-    ("C6_RULES", "reset rom"),
-    ("C6_RULES", "reattach"),
-    ("C6_RULES", "verify"),
-    ("C6_RULES", "reflash"),
+    # the LoRa switch: no origin rule, left as it is (owner, 2026-11-14; the C6 forms became USB only in #466)
     ("LORA_RULES", "on"),
 }
 
