@@ -13,31 +13,35 @@
 #   unit       free label (ms, KiB, B, count, MB/s, s)
 #   source     where the plan was written: an issue (#234), a file path or a doc
 #   note       everything after the source (optional)
-# Flags in the report: over, under (outside the tolerance, `under` can mean the feature is not running),
-# unplanned, no data. An `under` on a one-sided limit does not exist.
+# Operators: `<=N` `>=N` `<N` `>N` are one-sided limits (tolerance must be `-`); a plain number is two-sided with a
+# tolerance. Flags: ok; over / under (two-sided figures only; `under` can mean the feature is not running); breach (a
+# one-sided limit violated, either direction); unplanned; no data. The run fails on over, under, breach and on
+# `no data` for a `key` figure; `unplanned` and `no data` for probe and log figures are shown, not failed.
+# Probe names are PLACEHOLDERS: no tool emits them yet. A source of `inferred` means no written plan: 0 (or the
+# figure) is the working expectation, to be confirmed by the first soak.
 #
 # figure kind measure expected tolerance unit source note
 
 # Gates already enforced elsewhere
 dma_free key dma >=89981 - B #234 DMA-capable internal RAM free now
 dma_min key dmamin >=80650 - B #234 since-boot minimum
-crashes key crash <=0 - count #407 fw crash clear resets it
-c6_restarts key c6rs <=0 - count #277
-hb_misses key hbmiss <=0 - count #277
+crashes key crash <=0 - count inferred no written plan, 0 is the working expectation; fw crash clear resets it
+c6_restarts key c6rs <=0 - count inferred no written plan, 0 is the working expectation
+hb_misses key hbmiss <=0 - count inferred no written plan, 0 is the working expectation
 air_dropped key airdrop <=0 - count #419
 mesh_rx_dropped key mdrop <=0 - count #419
 journal_dropped key jdrop <=0 - count #419
-toast_drops key toastdrop <=0 - count #419
-notice_drops key notdrop <=0 - count #419
-mesh_loop_slow_ms key mslowms <=200 - ms firmware/components/mesh/mesh_task.cpp MESH_SLOW_LOOP_MS=200 (#407 text says 500: the code is stricter)
-mesh_loop_slow_log log MeshCore\sloop\stook\s(\d+)\sms <=200 - ms firmware/components/mesh/mesh_task.cpp warning line, same limit
+toast_drops key toastdrop <=0 - count inferred no written plan, 0 is the working expectation
+notice_drops key notdrop <=0 - count inferred no written plan, 0 is the working expectation
+mesh_loop_slow_ms key mslowms <200 - ms firmware/components/mesh/mesh_task.cpp the loop warns at took_ms >= MESH_SLOW_LOOP_MS (200), so 200 is already slow (#407 text says 500: the code is stricter)
+mesh_loop_slow_log log MeshCore\sloop\stook\s(\d+)\sms <200 - ms firmware/components/mesh/mesh_task.cpp warning line, same limit as mslowms
 notice_slow_ms key nslowms <=500 - ms firmware/components/lichen_os/sys_notice_rules.h SYSN_SLOW_MS=500
 storage_count_ms key stmax - - ms none measured 2.5-3.1 s on fw-869e608d, no written expectation
 storage_count_log log storage\scount:\s(\d+)\sms - - ms none sys_notices warning line, every 10 min
 
 # Probes (no soak key; the probe name is what a later tool or a CSV column supplies)
 first_frame_ms probe first-frame-ms <=3000 - ms #205 under 3 s
-update_time_s probe ota-update-s 26 2 s #298 24-28 s, compressed image
+update_time_s probe ota-update-s 26 2 s #298 #298 records 24 s; the 24-28 s range is from bench runs on 2026-11-13/14
 sd_write_mbps probe sd-test-write-mbps 2.3 15% MB/s #263 on record; 1.90 seen on fw-869e608d
 
 # Per-app RAM from tools/layers.conf (#229): statics and stacks ONLY (not heap, not LVGL objects).

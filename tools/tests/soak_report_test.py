@@ -31,8 +31,13 @@ mem key ps 26000000 2% B #1 two-sided
 stor key stmax - - ms none
 need key nosuchkey <=0 - count #1
 probe1 probe first-frame-ms <=3000 - ms #205
-loop log took\\s(\\d+)\\sms <=200 - ms code
+loop log took\\s(\\d+)\\sms <200 - ms code
 """
+
+
+def put(path, text):
+    with open(path, "w") as f:
+        f.write(text)
 
 
 def sample(**kw):
@@ -44,8 +49,9 @@ def sample(**kw):
 def run(samples, budgets=BUDGETS, log=None):
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "b.txt")
-        open(p, "w").write(budgets)
-        rows, failed = sr.run(sr.load_budgets(p), samples, log)
+        put(p, budgets)
+        budgets = sr.load_budgets(p)
+        rows, failed = sr.run(budgets, samples, None if log is None else sr.scan_log(log.splitlines(), budgets))
     return {r[0]: r for r in rows}, failed
 
 
@@ -74,6 +80,35 @@ class ParseTest(unittest.TestCase):
         self.assertIsNone(sp.parse_line("I (12) sys: up=5"))
         self.assertIsNone(sp.parse_line("soakx v=1"))
 
+    def test_prefixed_and_crlf_lines(self):
+        lines = REPLY.splitlines()
+        text = "\r\n".join(["fw: " + lines[0], "12:00:01 " + lines[1], ">> " + lines[2], lines[3]]) + "\r\n"
+        (s,) = sp.parse_reply(text)
+        self.assertNotIn("incomplete", s)
+        self.assertEqual(s["stmax"], 3058)
+        self.assertEqual(s["therm"], "ok")
+
+    def test_duplicate_key_keeps_first(self):
+        self.assertEqual(sp.parse_line("soak1 v=1 boot=3 up=4 boot=9")[1]["boot"], 3)
+
+    def test_lost_line_does_not_merge(self):
+        lines = REPLY.splitlines()
+        text = REPLY + "\n".join(lines[1:]) + "\n" + REPLY      # the second reply lost its soak1
+        a, b, c = sp.parse_reply(text)
+        self.assertNotIn("incomplete", a)
+        self.assertEqual(b["incomplete"], 1)
+        self.assertNotIn("dmamin", b)
+        self.assertNotIn("incomplete", c)
+        self.assertEqual(len(sp.usable([a, b, c])), 2)
+
+    def test_mismatched_boot_is_incomplete(self):
+        lines = REPLY.splitlines()
+        (s,) = sp.parse_reply("\n".join(lines[:3] + [lines[3].replace("boot=30", "boot=31")]))
+        self.assertEqual(s["incomplete"], 1)
+
+    def test_reboots_track_last_known(self):
+        self.assertEqual(sp.reboots([{"boot": 5, "up": 9}, {"boot": -1, "up": -1}, {"boot": 4, "up": 20}]), [2])
+
     def test_reboots(self):
         a = {"boot": 30, "up": 100}
         self.assertEqual(sp.reboots([a, {"boot": 30, "up": 700}]), [])
@@ -97,7 +132,7 @@ class ReportTest(unittest.TestCase):
         rows, failed = run([sample()])
         self.assertEqual(rows["dma_free"][5], "ok")
         self.assertEqual(rows["crashes"][5], "ok")
-        self.assertEqual(rows["nslow"][5], "over")        # 3061 ms against 500: the known off-plan figure
+        self.assertEqual(rows["nslow"][5], "breach")      # 3061 ms against 500: the known off-plan figure
         self.assertEqual(rows["stor"][5], "unplanned")
         self.assertEqual(rows["probe1"][5], "no data")
         self.assertEqual(rows["loop"][5], "no data")      # no --log
@@ -105,9 +140,9 @@ class ReportTest(unittest.TestCase):
 
     def test_over_and_under(self):
         rows, _ = run([sample(dmamin=70000, crash=1, ps=30000000)])
-        self.assertEqual(rows["dma_min"][5], "over")       # a floor that was undercut
+        self.assertEqual(rows["dma_min"][5], "breach")     # a floor that was undercut
         self.assertEqual(rows["dma_min"][4], "70000")      # worst of a floor is the minimum
-        self.assertEqual(rows["crashes"][5], "over")
+        self.assertEqual(rows["crashes"][5], "breach")
         self.assertEqual(rows["mem"][5], "over")
         rows, _ = run([sample(ps=1000000)])
         self.assertEqual(rows["mem"][5], "under")          # much cheaper than expected
@@ -144,16 +179,91 @@ class ReportTest(unittest.TestCase):
     def test_log_numbers(self):
         log = "I (1) x: fine\nW (2) mesh: MeshCore loop took 650 ms\nW (3) mesh: MeshCore loop took 250 ms\n"
         rows, _ = run([sample()], log=log)
-        self.assertEqual(rows["loop"][5], "over")
+        self.assertEqual(rows["loop"][5], "breach")
         self.assertEqual(rows["loop"][4], "650")
         self.assertEqual(rows["loop"][3], "450")
+        self.assertEqual(run([sample()], log="x\nMeshCore loop took 200 ms\n")[0]["loop"][5], "breach")  # < not <=
 
-    def test_bad_budget_line(self):
+    def test_bad_budget_files(self):
+        base = "a key dma >=1 - B x\n"
+        bad = {
+            "only three columns": "only three columns\n",
+            "expected": "a key dma <=abc - B x\n",
+            "tolerance": "a key dma 5 abc B x\n",
+            "one-sided": "a key dma <=5 2 B x\n",
+            "unplanned": "a unplanned dma 5 - B x\n",
+            "duplicate": base + base,
+            "compile": "a log (unclosed <5 - ms x\n",
+            "exactly one group": "a log two(\\d)(\\d) <5 - ms x\n",
+            "no group": "a log took <5 - ms x\n",
+        }
+        for why, text in bad.items():
+            with tempfile.TemporaryDirectory() as d:
+                p = os.path.join(d, "b.txt")
+                put(p, "# header\n" + text)
+                with self.assertRaises(sr.BudgetError, msg=why) as cm:
+                    sr.load_budgets(p)
+                self.assertRegex(str(cm.exception), r"b\.txt:\d+: ", why)
+
+    def test_absolute_and_percent_tolerance(self):
+        b = "a key ps 100 5 B x\nb key ps 100 5% B x\n"
+        rows, _ = run([sample(ps=106)], b)
+        self.assertEqual((rows["a"][5], rows["b"][5]), ("over", "over"))
+        rows, _ = run([sample(ps=105)], b)
+        self.assertEqual((rows["a"][5], rows["b"][5]), ("ok", "ok"))
+        rows, _ = run([sample(ps=94)], b)
+        self.assertEqual(rows["a"][5], "under")
+
+    def test_two_sided_median_ok_but_spike_not(self):
+        b = "a key ps 100 5 B x\n"
+        rows, _ = run([sample(ps=100), sample(ps=101), sample(ps=100), sample(ps=130)], b)
+        self.assertEqual(rows["a"][3], "100.50")
+        self.assertEqual(rows["a"][5], "over")
+        self.assertEqual(rows["a"][4], "130")
+
+    def test_ceiling_worst_over_many_samples(self):
+        b = "a key nslowms <=500 - ms x\n"
+        rows, _ = run([sample(nslowms=10), sample(nslowms=600), sample(nslowms=20)], b)
+        self.assertEqual((rows["a"][4], rows["a"][5]), ("600", "breach"))
+        rows, _ = run([sample(nslowms=10), sample(nslowms=20)], b)
+        self.assertEqual((rows["a"][4], rows["a"][5]), ("20", "ok"))
+        f = "a key dmamin >=100 - B x\n"
+        rows, _ = run([sample(dmamin=500), sample(dmamin=50), sample(dmamin=300)], f)
+        self.assertEqual((rows["a"][4], rows["a"][5]), ("50", "breach"))
+
+    def test_counter_reset_at_reboot_still_counts(self):
+        a = sample(boot=30, up=100000, crash=1)
+        b = sample(boot=31, up=40, crash=0)
+        rows, failed = run([a, b], "c key crash <=0 - count x\n")
+        self.assertEqual((rows["c"][4], rows["c"][5], failed), ("1", "breach", True))
+
+    def test_incomplete_samples_are_left_out(self):
+        bad = sample(dmamin=1, incomplete=1)
+        rows, _ = run([sample(), bad])
+        self.assertEqual(rows["dma_min"][5], "ok")
+        self.assertIn("incomplete (left out): 1", sr.render([], [sample(), bad]))
+
+    def test_no_log_is_said(self):
+        self.assertIn("no --log given", sr.render([], [sample()], log_given=False))
+        self.assertNotIn("no --log", sr.render([], [sample()], log_given=True))
+
+    def test_exit_2_on_tool_errors(self):
         with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "b.txt")
-            open(p, "w").write("only three columns\n")
-            with self.assertRaises(ValueError):
-                sr.load_budgets(p)
+            c = os.path.join(d, "s.csv")
+            sp.write_csv(c, [sample()])
+            b = os.path.join(d, "b.txt")
+            put(b, "# x\na key dma <=abc - B x\n")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(sr.main(["r", "expected", c, "--budgets", b]), 2)
+                self.assertEqual(sr.main(["r", "expected", os.path.join(d, "none.csv")]), 2)
+                self.assertEqual(sr.main(["r", "expected", c, "--log", os.path.join(d, "none.log")]), 2)
+            self.assertIn("b.txt:2:", err.getvalue())
+
+    def test_help(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(sr.main(["r", "--help"]), 0)
+        self.assertIn("breach", out.getvalue())
 
 
 class ShippedBudgetsTest(unittest.TestCase):

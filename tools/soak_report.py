@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Soak report (#424, #407): `soak_report.py expected <samples.csv> [--log <serial.log>] [--budgets FILE]`.
-Prints the expected-against-measured table of tools/soak_budgets.txt (format documented there): key, expected,
-tolerance, measured median, measured worst, flag. Exit 0 when nothing is flagged, 1 otherwise.
-Flags: ok, over, under (outside the tolerance, both directions), unplanned (measured only, no plan), no data.
-`over`, `under` and a `no data` on a soak-key figure fail the run (a planned key the CSV lacks is a broken sampler);
-`unplanned` and `no data` on a probe or log figure are shown but do not. Worst = the value furthest past the
-expectation (min for `>=`, max for `<=`, farthest from expected for a tolerance, max for unplanned).
-Standard library only."""
+Prints the expected-against-measured table of tools/soak_budgets.txt (format documented there): figure, expected,
+tolerance, measured median, measured worst, flag. Samples marked incomplete (a lost or mismatched soak line) are
+counted and left out of the figures.
+Flags: ok; over / under (a TWO-SIDED figure outside its tolerance, either direction: `under` can mean the feature is
+not running); breach (a ONE-SIDED limit, <= >= < >, violated, in whichever direction); unplanned (measured only, no
+plan); no data.
+Exit status: 0 nothing flagged, 1 flagged (over, under, breach, or no data on a soak-key figure: a planned key the CSV
+lacks is a broken sampler), 2 a tool error (unreadable file, bad budget file: the message names path:line).
+`unplanned`, and `no data` on a probe or log figure (including every log figure when --log is not given), are shown
+and counted in the summary but do not fail the run.
+Worst = the value furthest past the expectation (min for >= and >, max for <= and <, farthest from expected for a
+tolerance, max for unplanned). Standard library only."""
 import os
 import re
 import statistics
 import sys
+from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import soak_parse  # noqa: E402
@@ -19,77 +25,113 @@ DEFAULT_BUDGETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "soak
 # A comment is a "#" followed by a space or the line end: "#234" (an issue) is a source, not a comment.
 COMMENT = re.compile(r"(?:^|\s)#(?:\s|$)")
 KINDS = ("key", "log", "probe", "unplanned")
+EXPECTED = re.compile(r"^(<=|>=|<|>)?(-?\d+(?:\.\d+)?)$")
+TOLERANCE = re.compile(r"^(\d+(?:\.\d+)?)(%?)$")
+FORMAT = "figure kind measure expected tolerance unit source [note]"
+
+
+class BudgetError(ValueError):
+    """A budget file problem; the message starts with path:line."""
 
 
 class Budget:
-    def __init__(self, figure, kind, measure, expected, tol, unit, source, note):
+    def __init__(self, figure: str, kind: str, measure: str, expected: str, tol: str, unit: str, source: str,
+                 note: str, where: str = "budget"):
         self.figure, self.kind, self.measure = figure, kind, measure
         self.unit, self.source, self.note = unit, source, note
-        self.limit = None  # "<=" or ">="
-        self.expected = None
-        if expected[:2] in ("<=", ">="):
-            self.limit, self.expected = expected[:2], float(expected[2:])
-        elif expected != "-":
-            self.expected = float(expected)
-        self.tol_text = tol
-        self.tol = 0.0
-        if tol.endswith("%"):
-            self.tol = abs(self.expected or 0.0) * float(tol[:-1]) / 100.0
-        elif tol != "-":
-            self.tol = float(tol)
+        self.limit: Optional[str] = None  # "<=", ">=", "<" or ">": one-sided
+        self.expected: Optional[float] = None
+        self.tol_text, self.tol = tol, 0.0
+        m = None if expected == "-" else EXPECTED.match(expected)
+        if expected != "-" and m is None:
+            raise BudgetError("%s: expected '%s' is not a number, <=N, >=N, <N, >N or -" % (where, expected))
+        if m:
+            self.limit, self.expected = m.group(1), float(m.group(2))
+        self._check_tolerance(where)
+        self._check_kind(where)
+
+    def _check_tolerance(self, where: str) -> None:
+        if self.tol_text == "-":
+            return
+        t = TOLERANCE.match(self.tol_text)
+        if t is None:
+            raise BudgetError("%s: tolerance '%s' is not a number, a percentage or -" % (where, self.tol_text))
+        if self.limit or self.expected is None:
+            raise BudgetError("%s: a one-sided or unplanned figure takes tolerance '-'" % where)
+        self.tol = float(t.group(1)) * (abs(self.expected) / 100.0 if t.group(2) else 1.0)
+
+    def _check_kind(self, where: str) -> None:
+        if self.kind == "unplanned" and self.expected is not None:
+            raise BudgetError("%s: an unplanned figure carries no expected value" % where)
+        if self.kind == "log":
+            try:
+                groups = re.compile(self.measure).groups
+            except re.error as e:
+                raise BudgetError("%s: log regex does not compile: %s" % (where, e))
+            if groups != 1:
+                raise BudgetError("%s: log regex needs exactly one group, has %d" % (where, groups))
 
 
-def load_budgets(path):
-    out = []
-    with open(path) as f:
+def load_budgets(path: str) -> List[Budget]:
+    out, names = [], set()
+    with open(path, encoding="utf-8", errors="replace") as f:
         for n, raw in enumerate(f, 1):
             cols = COMMENT.split(raw, 1)[0].split(None, 7)
             if not cols:
                 continue
+            where = "%s:%d" % (path, n)
             if len(cols) < 7 or cols[1] not in KINDS:
-                raise ValueError("%s:%d: want 'figure kind measure expected tolerance unit source [note]'" % (path, n))
+                raise BudgetError("%s: want '%s'" % (where, FORMAT))
+            if cols[0] in names:
+                raise BudgetError("%s: duplicate figure '%s'" % (where, cols[0]))
+            names.add(cols[0])
             cols += [""] * (8 - len(cols))
-            out.append(Budget(*cols))
+            out.append(Budget(*cols, where=where))
     return out
 
 
-def log_numbers(log_text, pattern):
-    rx = re.compile(pattern)
-    nums = []
-    for line in log_text.splitlines():
-        m = rx.search(line)
-        if m:
-            nums.append(float(m.group(1)))
-    return nums
+def scan_log(lines, budgets: Sequence[Budget]) -> Dict[str, List[float]]:
+    """One pass over the serial log's lines (a file object, never read whole): every log budget's numbers."""
+    rx = [(b.figure, re.compile(b.measure)) for b in budgets if b.kind == "log"]
+    found: Dict[str, List[float]] = {name: [] for name, _ in rx}
+    for line in lines:
+        for name, r in rx:
+            m = r.search(line)
+            if m:
+                found[name].append(float(m.group(1)))
+    return found
 
 
-def measured(b, samples, log_text):
+def measured(b: Budget, samples: List[soak_parse.Sample], log: Optional[Dict[str, List[float]]]) -> List[float]:
     """The numbers the run holds for a budget line (unknown -1 and absent keys left out)."""
-    if b.kind in ("key", "unplanned") or b.kind == "probe":
-        return [v for v in (soak_parse.value(s, b.measure) for s in samples) if v is not None]
-    return log_numbers(log_text, b.measure) if log_text is not None else []
+    if b.kind == "log":
+        return log.get(b.figure, []) if log is not None else []
+    return [v for v in (soak_parse.value(s, b.measure) for s in samples) if v is not None]
 
 
-def worst(b, nums):
-    if b.limit == "<=" or b.expected is None:
+def worst(b: Budget, nums: List[float]) -> float:
+    if b.limit in ("<=", "<") or b.expected is None:
         return max(nums)
-    if b.limit == ">=":
+    if b.limit in (">=", ">"):
         return min(nums)
     return max(nums, key=lambda v: abs(v - b.expected))
 
 
-def flag(b, nums):
+def violates(b: Budget, v: float) -> bool:
+    e = b.expected
+    return {"<=": v > e, "<": v >= e, ">=": v < e, ">": v <= e}[b.limit]
+
+
+def flag(b: Budget, nums: List[float]) -> str:
     if not nums:
         return "no data"
     if b.expected is None:
         return "unplanned"
-    med, w = statistics.median(nums), worst(b, nums)
-    if b.limit == "<=":
-        return "over" if w > b.expected else "ok"
-    if b.limit == ">=":
-        return "over" if w < b.expected else "ok"
-    # Two-sided: judged on the median (a steady figure) and on the worst (a spike); the side of the worst names it.
-    for v in (med, w):
+    w = worst(b, nums)
+    if b.limit:
+        return "breach" if violates(b, w) else "ok"
+    # Two-sided: judged on the median (a steady figure) and on the worst (a spike).
+    for v in (statistics.median(nums), w):
         if v > b.expected + b.tol:
             return "over"
         if v < b.expected - b.tol:
@@ -97,44 +139,51 @@ def flag(b, nums):
     return "ok"
 
 
-def fmt(v):
+def fmt(v: Optional[float]) -> str:
     if v is None:
         return "-"
     return "%d" % v if float(v).is_integer() else "%.2f" % v
 
 
-def expected_text(b):
+def expected_text(b: Budget) -> str:
     return "-" if b.expected is None else (b.limit or "") + fmt(b.expected)
 
 
-def run(budgets, samples, log_text):
-    """-> (rows, failed). A row is (figure, expected, tolerance, median, worst, flag, unit, how)."""
+def run(budgets: List[Budget], samples: List[soak_parse.Sample], log: Optional[Dict[str, List[float]]]) -> Tuple[list, bool]:
+    """-> (rows, failed). A row is (figure, expected, tolerance, median, worst, flag, unit, how). Only usable
+    (complete) samples count."""
     rows, failed = [], False
+    good = soak_parse.usable(samples)
     for b in budgets:
-        nums = measured(b, samples, log_text)
+        nums = measured(b, good, log)
         f = flag(b, nums)
         med = statistics.median(nums) if nums else None
         w = worst(b, nums) if nums else None
         rows.append((b.figure, expected_text(b), b.tol_text, fmt(med), fmt(w), f, b.unit, "%s:%s" % (b.kind, b.measure)))
-        if f in ("over", "under") or (f == "no data" and b.kind == "key"):
+        if f in ("over", "under", "breach") or (f == "no data" and b.kind == "key"):
             failed = True
     return rows, failed
 
 
-def render(rows, samples):
+def render(rows: list, samples: List[soak_parse.Sample], log_given: bool = True) -> str:
     head = ("figure", "expected", "tol", "median", "worst", "flag", "unit", "measured by")
     table = [head] + rows
     widths = [max(len(str(r[i])) for r in table) for i in range(len(head))]
     lines = ["  ".join(str(c).ljust(widths[i]) for i, c in enumerate(r)).rstrip() for r in table]
     reb = soak_parse.reboots(samples)
-    lines.append("")
-    lines.append("samples: %d, reboots inside the run: %d%s" % (len(samples), len(reb),
-                 " (at samples %s)" % ", ".join(str(i) for i in reb) if reb else ""))
+    bad = len(samples) - len(soak_parse.usable(samples))
+    lines += ["", "samples: %d, incomplete (left out): %d, reboots inside the run: %d%s" % (
+        len(samples), bad, len(reb), " (at samples %s)" % ", ".join(str(i) for i in reb) if reb else "")]
+    if not log_given:
+        lines.append("log figures: no data, no --log given")
     return "\n".join(lines)
 
 
-def main(argv):
+def main(argv: Sequence[str]) -> int:
     args = list(argv[1:])
+    if args and args[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
     if len(args) < 2 or args[0] != "expected":
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2
@@ -149,10 +198,18 @@ def main(argv):
         else:
             print("soak_report: unknown option " + opt, file=sys.stderr)
             return 2
-    samples = soak_parse.read_csv(csv_path)
-    log_text = open(log_path, errors="replace").read() if log_path else None
-    rows, failed = run(load_budgets(budgets_path), samples, log_text)
-    print(render(rows, samples))
+    try:
+        budgets = load_budgets(budgets_path)
+        samples = soak_parse.read_csv(csv_path)
+        log = None
+        if log_path:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                log = scan_log(f, budgets)
+    except (ValueError, OSError, re.error) as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
+    rows, failed = run(budgets, samples, log)
+    print(render(rows, samples, log_path is not None))
     return 1 if failed else 0
 
 
