@@ -1939,6 +1939,12 @@ target_include_directories(settings_backup_swap_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_options(settings_backup_swap_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME settings_backup_swap_test COMMAND settings_backup_swap_test)
 
+# The `fw c6log` duration argument (#458)
+add_executable(c6_log_arg_test ${CMAKE_CURRENT_SOURCE_DIR}/c6_log_arg_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link/c6_log_arg.c)
+target_include_directories(c6_log_arg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link)
+target_compile_options(c6_log_arg_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME c6_log_arg_test COMMAND c6_log_arg_test)
+
 add_executable(crashlog_fmt_test ${CMAKE_CURRENT_SOURCE_DIR}/crashlog_fmt_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/crashlog_fmt.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash/crash_log.c)
 target_include_directories(crashlog_fmt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash)
 target_compile_options(crashlog_fmt_test PRIVATE -Wall -Wextra -Werror)
@@ -2191,6 +2197,7 @@ add_custom_target(run_tests
     crashlog_fmt_test
     settings_backup_test
     settings_backup_swap_test
+    c6_log_arg_test
     lora_activity_test
     notify_ring_test
     notify_rate_test

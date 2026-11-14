@@ -6,6 +6,7 @@
 #include "c6link_priv.h"
 #include "c6_flasher.h"
 #include "c6_image.h"
+#include "c6_log_arg.h"
 #include "c6_paths.h"
 #include "fw_console.h"
 #include "nvs_fail.h"
@@ -95,8 +96,8 @@ bool c6link_updating(void) {
 }
 
 static void cmd_c6log(char const *args) {
-    uint32_t ms = *args ? (uint32_t)strtoul(args, NULL, 10) : 10000;
-    if (ms == 0 || ms > 60000) {
+    uint32_t ms;
+    if (!c6_log_parse_ms(args, &ms)) {
         console_reply("c6log [1-60000 ms]");
         return;
     }
