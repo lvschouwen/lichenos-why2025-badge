@@ -1,6 +1,7 @@
 // Pins of the update server's front door (#447), recorded from the code before its split: every route with the right,
 // a wrong, a malformed and no token, each wrong method, unknown targets and malformed heads, plus seeded mutations of
-// the recorded heads under ASan+UBSan. The token check must hold for every route the parser knows.
+// the recorded heads under ASan+UBSan. The token check must hold for every route the parser knows. Since the split the
+// route table is pinned too: every route reaches the handler the old switch ran, and none without the token.
 #include "mutate.h"
 #include "ota_route.h"
 
@@ -18,6 +19,27 @@ static int failures = 0;
         }                                                                                                              \
     } while (0)
 
+// Stand-ins for the handlers (ota_upload.c, ota_piece_http.c, ota_extra.c, ota_server.c): each records that it ran
+static char const *ran;
+#define STUB(name, reboot)                                                                                             \
+    bool name(ota_conn_t const *conn) {                                                                                \
+        (void)conn;                                                                                                    \
+        ran = #name;                                                                                                   \
+        return reboot;                                                                                                 \
+    }
+STUB(ota_on_info, false)
+STUB(ota_on_firmware, false)
+STUB(ota_on_file, false)
+STUB(ota_on_piece, false)
+STUB(ota_on_assets, false)
+STUB(ota_on_prepare, false)
+STUB(ota_on_delete, false)
+STUB(ota_on_screenshot, false)
+STUB(ota_on_log, false)
+STUB(ota_on_crashes, false)
+STUB(ota_on_console, false)
+STUB(ota_on_reboot, true)
+
 #define TOKEN "0123456789abcdef0123456789abcdef"
 #define OTHER "0123456789abcdef0123456789abcdee"
 #define SHA   "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -27,18 +49,21 @@ static struct {
     char const *method;
     char const *target;
     ota_route_t route;
+    char const *whole;    // the handler the old switch in handle_connection ran
+    char const *piece;    // the same with X-Offset
+    bool        up_front; // whether refused_up_front ran before it (all but /info)
 } const routes[] = {
-    {"GET", "/info", OTA_ROUTE_INFO},
-    {"PUT", "/firmware", OTA_ROUTE_FIRMWARE},
-    {"PUT", "/file", OTA_ROUTE_FILE},
-    {"POST", "/reboot", OTA_ROUTE_REBOOT},
-    {"DELETE", "/file", OTA_ROUTE_DELETE},
-    {"POST", "/prepare", OTA_ROUTE_PREPARE},
-    {"PUT", "/assets", OTA_ROUTE_ASSETS},
-    {"GET", "/screenshot", OTA_ROUTE_SCREENSHOT},
-    {"GET", "/log", OTA_ROUTE_LOG},
-    {"POST", "/console", OTA_ROUTE_CONSOLE},
-    {"GET", "/crashes", OTA_ROUTE_CRASHES},
+    {"GET", "/info", OTA_ROUTE_INFO, "ota_on_info", "ota_on_info", false},
+    {"PUT", "/firmware", OTA_ROUTE_FIRMWARE, "ota_on_firmware", "ota_on_piece", true},
+    {"PUT", "/file", OTA_ROUTE_FILE, "ota_on_file", "ota_on_piece", true},
+    {"POST", "/reboot", OTA_ROUTE_REBOOT, "ota_on_reboot", "ota_on_reboot", true},
+    {"DELETE", "/file", OTA_ROUTE_DELETE, "ota_on_delete", "ota_on_delete", true},
+    {"POST", "/prepare", OTA_ROUTE_PREPARE, "ota_on_prepare", "ota_on_prepare", true},
+    {"PUT", "/assets", OTA_ROUTE_ASSETS, "ota_on_assets", "ota_on_piece", true},
+    {"GET", "/screenshot", OTA_ROUTE_SCREENSHOT, "ota_on_screenshot", "ota_on_screenshot", true},
+    {"GET", "/log", OTA_ROUTE_LOG, "ota_on_log", "ota_on_log", true},
+    {"POST", "/console", OTA_ROUTE_CONSOLE, "ota_on_console", "ota_on_console", true},
+    {"GET", "/crashes", OTA_ROUTE_CRASHES, "ota_on_crashes", "ota_on_crashes", true},
 };
 #define N_ROUTES (sizeof(routes) / sizeof(routes[0]))
 
@@ -195,6 +220,70 @@ static void test_malformed_heads(void) {
     CHECK(req.has_path && strcmp(req.path, "FLASH0:a.txt") == 0 && !req.has_offset);
 }
 
+// Open a request the way handle_connection does and run what it hands back; ran says which handler that was
+static int open_and_run(char const *head, char const *token, bool *up_front, char const **why) {
+    ota_request_t req;
+    ota_verdict_t v      = {.status = -1};
+    ran                  = NULL;
+    ota_route_fn handler = ota_route_open(head, strlen(head), token, &req, &v);
+    int          status  = v.status;
+    *why                 = v.why;
+    *up_front            = v.up_front;
+    CHECK((handler == NULL) == (status != 0));
+    if (handler) {
+        ota_conn_t const conn = {.fd = -1, .req = &req, .pre = NULL, .pre_len = 0};
+        CHECK(handler(&conn) == (req.route == OTA_ROUTE_REBOOT));
+    }
+    return status;
+}
+
+// The table (#447): every route the parser gives has exactly the row the old switch had, every row is reached only
+// with the token, and no route value outside the table has one
+static void test_table(void) {
+    char        head[512];
+    bool        up_front;
+    char const *why;
+    bool        covered[OTA_ROUTE_CRASHES + 1] = {false};
+    for (size_t i = 0; i < N_ROUTES; i++) {
+        CHECK(!covered[routes[i].route]);
+        covered[routes[i].route] = true;
+        CHECK(ota_route_row(routes[i].route) != NULL && ota_route_row(routes[i].route)->whole != NULL);
+
+        head_for(head, sizeof(head), routes[i].method, routes[i].target, "Bearer " TOKEN);
+        CHECK(open_and_run(head, TOKEN, &up_front, &why) == 0);
+        CHECK(ran && strcmp(ran, routes[i].whole) == 0 && up_front == routes[i].up_front);
+
+        snprintf(head, sizeof(head), "%s %s HTTP/1.1\r\nAuthorization: Bearer " TOKEN "\r\nX-Offset: 0\r\n\r\n",
+                 routes[i].method, routes[i].target);
+        CHECK(open_and_run(head, TOKEN, &up_front, &why) == 0);
+        CHECK(ran && strcmp(ran, routes[i].piece) == 0 && up_front == routes[i].up_front);
+
+        // Without the token, with another, or with the server's wiped: refused before any handler, piece or not
+        char const *const refused[][2] = {
+            {NULL, TOKEN}, {"Bearer " OTHER, TOKEN}, {"Bearer " TOKEN, ""}, {"Bearer " OTHER, OTHER "0"}};
+        for (size_t r = 0; r < sizeof(refused) / sizeof(refused[0]); r++) {
+            head_for(head, sizeof(head), routes[i].method, routes[i].target, refused[r][0]);
+            CHECK(open_and_run(head, refused[r][1], &up_front, &why) == 401 && ran == NULL);
+            CHECK(why && strcmp(why, "wrong or missing token") == 0);
+            snprintf(head, sizeof(head), "%s %s HTTP/1.1\r\n%s%s%sX-Offset: 4096\r\n\r\n", routes[i].method,
+                     routes[i].target, refused[r][0] ? "Authorization: " : "", refused[r][0] ? refused[r][0] : "",
+                     refused[r][0] ? "\r\n" : "");
+            CHECK(open_and_run(head, refused[r][1], &up_front, &why) == 401 && ran == NULL);
+        }
+        // A wrong method or a malformed head never reaches a handler either
+        head_for(head, sizeof(head), "PATCH", routes[i].target, "Bearer " TOKEN);
+        CHECK(open_and_run(head, TOKEN, &up_front, &why) == 405 && ran == NULL);
+        snprintf(head, sizeof(head), "%s %s\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", routes[i].method,
+                 routes[i].target);
+        CHECK(open_and_run(head, TOKEN, &up_front, &why) == 400 && ran == NULL);
+    }
+    for (int r = 0; r <= OTA_ROUTE_CRASHES; r++) {
+        CHECK(covered[r]); // every route value is one the parser gives, and tested above
+    }
+    CHECK(ota_route_row((ota_route_t)(OTA_ROUTE_CRASHES + 1)) == NULL);
+    CHECK(ota_route_row((ota_route_t)-1) == NULL);
+}
+
 // What an admitted request always is, however its head was mangled
 static void admit_mutated(uint8_t const *buf, size_t len) {
     uint8_t *exact = mut_exact(buf, len); // exactly len bytes: ASan sees any read past them
@@ -211,6 +300,10 @@ static void admit_mutated(uint8_t const *buf, size_t len) {
     } else {
         CHECK(why && strcmp(why, st == 401 ? "wrong or missing token" : "bad request") == 0);
     }
+    ota_verdict_t v       = {.status = -1};
+    ota_route_fn  handler = ota_route_open((char const *)exact, len, TOKEN, &req, &v);
+    CHECK(v.status == st && (handler != NULL) == (st == 0));
+    CHECK(!handler || (req.has_token && strcmp(req.token, TOKEN) == 0));
     free(exact);
 }
 
@@ -245,6 +338,7 @@ int main(void) {
     test_each_route_token();
     test_wrong_method_and_target();
     test_malformed_heads();
+    test_table();
     test_mutations();
     if (failures) {
         printf("%d failure(s)\n", failures);
