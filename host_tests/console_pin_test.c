@@ -17,6 +17,7 @@
 #include "shell_cmd_rules.h"
 #include "main_rules.h"
 #include "mesh_onair.h"
+#include "notify_rules.h"
 #include "nvs_rules.h"
 #include "os_cmd_rules.h"
 #include "ota_rules.h"
@@ -355,6 +356,7 @@ static rules_of_t const RULES[] = {
     {"noscreen", NOSCREEN_RULES},
     {"psram", PSRAM_RULES},
     {"sensors", SENSORS_RULES},
+    {"notify", NOTIFY_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

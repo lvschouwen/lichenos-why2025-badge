@@ -2,6 +2,7 @@
 // clearing and do-not-disturb
 #include "esp_timer.h"
 #include "fw_console.h"
+#include "notify_rules.h"
 #include "notify_os.h"
 #include "notify_post.h"
 #include "notify_paths.h"
@@ -111,5 +112,5 @@ static void cmd_notify(char const *args) {
 }
 
 void notify_cmd_register(void) {
-    console_register("notify", NOTIFY_USAGE, cmd_notify);
+    console_register_rules("notify", NOTIFY_USAGE, cmd_notify, NOTIFY_RULES);
 }

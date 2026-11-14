@@ -5,14 +5,14 @@
 
 #include <string.h>
 
-// "notify test ..." and "vib test ...": the other forms are settings a person uses, so only the test word is gated
+// "vib test ...": the other forms are settings a person uses, so only the test word is gated
 static bool first_word_is(char const *args, char const *word) {
     size_t n = strlen(word);
     return strncmp(args, word, n) == 0 && (args[n] == '\0' || args[n] == ' ');
 }
 
 bool dev_gate_needs_dev(char const *name, char const *args) {
-    if (strcmp(name, "notify") == 0 || strcmp(name, "vib") == 0) {
+    if (strcmp(name, "vib") == 0) {
         return first_word_is(args, "test");
     }
     if (strcmp(name, "mesh") == 0) {
