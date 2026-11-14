@@ -100,5 +100,5 @@ static void cmd_notify(char const *args) {
 }
 
 void notify_cmd_register(void) {
-    console_register("notify", "notify [test <info|warn|error> [@target] [text] | clear | read | dnd on|off]", cmd_notify);
+    console_register("notify", "notify [test <info|warn|error> [@target] [text] | clear | read | dnd on|off] (test: developer mode)", cmd_notify);
 }

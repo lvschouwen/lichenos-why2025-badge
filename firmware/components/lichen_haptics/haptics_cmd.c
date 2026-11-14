@@ -52,5 +52,5 @@ static void cmd_vib(char const *args) {
 }
 
 void haptics_register_console(void) {
-    console_register("vib", "vib [on|off|test [tick|notify|alert]|strength low|medium|high]", cmd_vib);
+    console_register("vib", "vib [on|off|test [tick|notify|alert]|strength low|medium|high] (test: developer mode)", cmd_vib);
 }

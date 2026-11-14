@@ -220,6 +220,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   which refuses the keys unless the lock is on), `fw ui lock on [s]|off` (the badge's own keys off, "Keys locked: hold
   Esc 3 s" in the status bar; ends s seconds (default 60, max 600) after the last command, on Esc held 3 s or a
   restart, #190), `fw ui open <app id|name|home>` (an app as from its home tile), `fw uicheck` (walk every LVGL object now, #89), `fw crash test panic|wdt`.
+  Developer mode only (refused with the developer-mode note while it is off, #421): `fw crash test`, `fw boot fail`, `fw thermal test|seen reset`, `fw psram` with an argument, `fw noscreen`, `fw stress` (except `status`), `fw idle test`, `fw notify test`, `fw vib test`, `fw setup reset|done`, `fw sensors start|stop|boot on|off`; their status prints stay open.
 
 ## Flashing through a remote USB host
 

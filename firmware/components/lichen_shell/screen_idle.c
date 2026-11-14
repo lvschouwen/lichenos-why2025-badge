@@ -202,7 +202,7 @@ static void cmd_idle(char const *args) {
 }
 
 void screen_idle_init(void) {
-    console_register("idle", "idle | idle test <s> (screen timeout: state, or fake s seconds without a key)", cmd_idle);
+    console_register("idle", "idle | idle test <s> (screen timeout: state, or fake s seconds without a key; test: developer mode)", cmd_idle);
 }
 
 void screen_idle_start(void) {

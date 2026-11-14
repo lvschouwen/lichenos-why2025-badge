@@ -391,7 +391,7 @@ void thermal_start(lichen_watch_hooks_t const *h) {
     if (h) {
         hooks = *h;
     }
-    console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
+    console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety; test: developer mode)",
                      cmd_thermal);
     // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
     if (!lichen_task_start_in(lichen_sys_ctx_os(), "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE,

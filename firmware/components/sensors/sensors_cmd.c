@@ -158,5 +158,5 @@ bool sensors_boot_start(void) {
 }
 
 void sensors_register_console(void) {
-    console_register("sensors", "sensors [raw|start|stop|boot [on|off]] (IMU, environment, P4 die temperature)", cmd_sensors);
+    console_register("sensors", "sensors [raw|start|stop|boot [on|off]] (IMU, environment, P4 die temperature; start, stop, boot on|off: developer mode)", cmd_sensors);
 }

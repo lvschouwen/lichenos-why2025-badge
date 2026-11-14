@@ -319,7 +319,7 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | speed [80|120] [yes] | carrier] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | speed [80|120] [yes] | carrier] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live; any argument: developer mode)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3584 /* peak 1.4 KB (#107) + the PSRAM heap check and its failure line (#353): fw psram speed shows the margin */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }

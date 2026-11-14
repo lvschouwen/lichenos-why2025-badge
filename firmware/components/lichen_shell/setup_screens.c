@@ -122,5 +122,5 @@ static void cmd_setup(char const *args) {
 }
 
 void setup_init(void) {
-    console_register("setup", "setup reset (show the first-run welcome again after a reboot)", cmd_setup);
+    console_register("setup", "setup reset (show the first-run welcome again after a reboot; developer mode)", cmd_setup);
 }

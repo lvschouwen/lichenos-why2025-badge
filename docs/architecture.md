@@ -622,7 +622,7 @@ called in `BadgeMesh`'s `GroupChannel` override of `sendFloodScoped`.
 
 ## Stress run (#278)
 
-`fw stress [1-30 | stop | status]` (default 10 min; console only, the badge has no tile for it) loads the badge for
+`fw stress [1-30 | stop | status]` (developer mode, except `status`, #421; default 10 min; console only, the badge has no tile for it) loads the badge for
 minutes and reports how deep memory and stacks went (the numbers #268 needs). `lichen_shell/stress_workers.c` runs it
 on OS tasks (`lichen_task_start_in`, internal stacks): stress-mon (SERVICE, 4 KB), stress-dma and stress-sd
 (BACKGROUND, 6 KB), stress-fs (BACKGROUND, 4 KB), stress-lat (SERVICE, 2 KB). Workers: DMA gate rounds

@@ -5,6 +5,7 @@
 
 #include "assets.h"
 #include "console_capture.h"
+#include "dev_gate.h"
 #include "console_cmd.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
@@ -805,32 +806,19 @@ static void run(char *line) {
 }
 
 static void run_command(char *line) {
-    char *args = strchr(line, ' ');
-    if (args) {
-        *args++ = '\0';
-        while (*args == ' ') {
-            args++;
-        }
-    } else {
-        args = line + strlen(line);
-    }
     // "fw <app> <command>" (#423): the same table, the same gates; only the command's owner may answer under a prefix
-    int app = dev_mode_app_of(app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), line);
-    if (app) {
-        line = args;
-        args = strchr(line, ' ');
-        if (args) {
-            *args++ = '\0';
-            while (*args == ' ') {
-                args++;
-            }
-        } else {
-            args = line + strlen(line);
-        }
-    }
+    char const *args;
+    int         app;
+    line = dev_gate_split(line, (char const *const *)app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), &app, &args);
     int i = 0;
     switch (dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i)) {
-        case DEV_FIND_RUN: commands[i].fn(args); return;
+        case DEV_FIND_RUN:
+            // A test arm of a command that is otherwise open (#421): refused before it can write anything
+            if (dev_gate_needs_dev(line, args) && !console_dev_gate(line)) {
+                return;
+            }
+            commands[i].fn(args);
+            return;
         case DEV_FIND_DEV_OFF: console_reply("%s: " DEV_OFF_REPLY, commands[i].name); return;
         case DEV_FIND_NONE: break;
     }

@@ -7,8 +7,11 @@ commit; `<...>` is a value that differs per badge. Procedure and rules: the `lic
 
 Rules for the whole pass:
 - Wait 75 s after every reboot before a console command. Console lines are `fw <command>`.
-- Developer mode on first: `fw ui ...` and `fw keys ...` are developer-mode commands (#373, #377). Run `fw dev on` once
-  from the USB console (saved; never over Wi-Fi); while it is off they answer `developer mode is off (...)`.
+- Developer mode on first: `fw ui ...` and `fw keys ...` are developer-mode commands (#373, #377), and so are `fw crash test`,
+  `fw boot fail`, `fw thermal test|seen reset`, `fw psram <anything>`, `fw noscreen`, `fw stress` (all but `status`), `fw idle test`,
+  `fw notify test`, `fw vib test`, `fw setup reset|done`, `fw sensors start|stop|boot on|off` (#421). Run `fw dev on` once
+  from the USB console (saved; never over Wi-Fi); while it is off they answer `developer mode is off (...)` and change nothing.
+  Open: `fw thermal`, `psram`, `idle`, `notify`, `stress status`, `sensors`, `sensors raw`, `sensors boot` and the settings forms of `vib`/`notify`.
 - A dialog is answered remotely with `fw ui answer` (prints the verdict, the confirm label and the open number `#n`),
   then `fw ui answer yes <confirm_label> #<n>` (always with the number) or `fw ui answer no`. Hand-only (REFUSE)
   dialogs and the radio pages without the bench console scope (`fw mesh scope console <region> YES`, #290) are refused;

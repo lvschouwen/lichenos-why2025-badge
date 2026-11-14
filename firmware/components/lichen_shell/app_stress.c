@@ -189,7 +189,7 @@ static void cmd_stress(char const *args) {
 }
 
 void stress_init(void) {
-    console_register("stress", "stress [minutes 1-30 | stop | status] (#278: DMA, PSRAM, SD, storage, redraw and latency "
+    console_register("stress", "stress [minutes 1-30 | stop | status] (developer mode except status; #278: DMA, PSRAM, SD, storage, redraw and latency "
                                "load at once, keys locked; a \"stress:\" log line every 10 s, then the report; never "
                                "transmits)",
                      cmd_stress);
