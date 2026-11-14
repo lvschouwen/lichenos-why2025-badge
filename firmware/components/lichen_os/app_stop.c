@@ -26,12 +26,13 @@ static void drop_timers(void *arg) {
 }
 
 // The app's booked timers go with its stop: dead at once (any later tick deletes itself), deleted on the LVGL task
-// when its lock is free. Queued, never run here: this task holds no LVGL lock.
+// when its lock is free. Queued, never run here: this task holds no LVGL lock. Killed even with none booked: a task the
+// hook left running must not book one after the stop. Only the drop, which needs the lock, waits for a booked timer.
 static void stop_timers(lichen_app_t const *app, lichen_ctx_t ctx) {
+    lichen_sys_timer_kill(ctx);
     if (!lichen_sys_timer_count(ctx)) {
         return;
     }
-    lichen_sys_timer_kill(ctx);
     if (!lichen_sys_ui_call(drop_timers, (void *)(uintptr_t)ctx, TIMER_DROP_LOCK_MS)) {
         ESP_LOGW(TAG, "%s: booked timers left to end at their next tick (LVGL busy)", app->name);
     }
