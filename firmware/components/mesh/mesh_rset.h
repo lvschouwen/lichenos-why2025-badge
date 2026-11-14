@@ -95,6 +95,9 @@ typedef enum {
 rs_confirm_t rs_cmd_confirm(char const *cmd, char *out, size_t cap);
 // A secret command for the CLI history: "password (hidden)", "a7|set guest.password (hidden)"
 void rs_redact_cmd(char const *cmd, char *out, size_t cap);
+// Whether the line is a secret command under a looser reading than rs_cmd_class: any case, any run of blanks (#449).
+// For what is shown and kept only: the line is sent as typed, and the repeater refuses such a form.
+bool rs_cmd_secret_loose(char const *cmd);
 // A reply to a secret command: "password now: <pw>" (the repeater echoes it) becomes "password now: (hidden)"
 void rs_redact_reply(char const *reply, char *out, size_t cap);
 

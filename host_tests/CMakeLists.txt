@@ -919,6 +919,15 @@ add_executable(mesh_cmd_table_test
 target_include_directories(mesh_cmd_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_cmd_table_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_cmd_table_test COMMAND mesh_cmd_table_test)
+# The same table as a developer image builds it (#455): the "ident simulate" row and its help branch
+add_executable(mesh_cmd_table_dev_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_cmd_table_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_cmd_table.c
+)
+target_include_directories(mesh_cmd_table_dev_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_cmd_table_dev_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(mesh_cmd_table_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
+add_test(NAME mesh_cmd_table_dev_test COMMAND mesh_cmd_table_dev_test)
 
 add_executable(list_filter_test
     ${CMAKE_CURRENT_SOURCE_DIR}/list_filter_test.c

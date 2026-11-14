@@ -130,6 +130,12 @@ static void filter(void) {
     CHECK(rs_cmd_class("set prv.key ab") == RS_CMD_SECRET);
     CHECK(rs_cmd_class("set bridge.secret ab") == RS_CMD_SECRET && rs_cmd_class("a3|set bridge.secret ab") == RS_CMD_SECRET);
     CHECK(rs_cmd_class("  set bridge.secret ab") == RS_CMD_SECRET && rs_cmd_class("set bridge.enabled on") == RS_CMD_PLAIN);
+    // #449: the redaction reads looser than the class (the repeater is exact and refuses these, but they were typed)
+    CHECK(rs_cmd_secret_loose("SET bridge.secret x") && rs_cmd_secret_loose("SET BRIDGE.SECRET x"));
+    CHECK(rs_cmd_secret_loose("\tset\tbridge.secret  x") && rs_cmd_secret_loose("a1|Set  Guest.Password x"));
+    CHECK(rs_cmd_secret_loose("PASSWORD x") && rs_cmd_secret_loose("  set\tprv.key ab"));
+    CHECK(!rs_cmd_secret_loose("set bridge.enabled on") && !rs_cmd_secret_loose("get bridge.secret") && !rs_cmd_secret_loose("passwordx"));
+    CHECK(rs_cmd_class("SET bridge.secret x") == RS_CMD_PLAIN); // what is sent stays exact
     CHECK(rs_cmd_class("reboot") == RS_CMD_REBOOT && rs_cmd_class("b2|clkreboot") == RS_CMD_REBOOT);
     CHECK(rs_cmd_class("start ota") == RS_CMD_REBOOT && rs_cmd_class("get name") == RS_CMD_PLAIN);
 
@@ -157,6 +163,8 @@ static void filter(void) {
     CHECK(strcmp(out, "a7|set guest.password (hidden)") == 0);
     rs_redact_cmd("set bridge.secret hunter2", out, sizeof(out));
     CHECK(strcmp(out, "set bridge.secret (hidden)") == 0);
+    rs_redact_cmd("a7|SET\t bridge.secret hunter2", out, sizeof(out));
+    CHECK(strcmp(out, "a7|set bridge.secret (hidden)") == 0 && strstr(out, "hunter2") == NULL);
     rs_redact_cmd("get name", out, sizeof(out));
     CHECK(strcmp(out, "get name") == 0);
     rs_redact_reply("a7|password now: s3cret", out, sizeof(out));

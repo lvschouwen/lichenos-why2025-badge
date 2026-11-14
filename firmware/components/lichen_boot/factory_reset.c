@@ -653,9 +653,7 @@ static void cmd_factory(char const *args) {
     if (!console_erase_ok("factory reset")) {
         return; // #455: USB only, hold or not (epic-395 rule 4)
     }
-    if (!console_usb_hold_ok("factory reset")) {
-        return; // #289: it would switch MeshCore's on-air allow list off; the reset by hand on the screen still does
-    }
+    // No console_usb_hold_ok here: it is the #289 check for non-USB callers, and console_erase_ok already refused them
     if (!factory_reset_request(level)) {
         console_reply("could not save the reset: nothing erased");
         return;

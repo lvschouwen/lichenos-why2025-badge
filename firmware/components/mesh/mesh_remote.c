@@ -34,6 +34,9 @@ uint32_t rr_deadline_ms(uint32_t est_ms) {
 
 void rr_prepare(rr_op_t op, char const *arg, rr_prep_t *p) {
     p->cls      = op == RR_CLI && arg ? (uint8_t)rs_cmd_class(arg) : (uint8_t)RS_CMD_PLAIN;
+    if (p->cls == RS_CMD_PLAIN && op == RR_CLI && arg && rs_cmd_secret_loose(arg)) {
+        p->cls = RS_CMD_SECRET; // typed in a form the repeater refuses, but the history and the log must not keep it
+    }
     p->shown[0] = 0;
     if (p->cls == RS_CMD_SECRET) {
         rs_redact_cmd(arg, p->shown, sizeof(p->shown)); // the history never holds a password (#117)

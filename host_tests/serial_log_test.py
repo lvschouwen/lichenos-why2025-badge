@@ -64,6 +64,10 @@ SECRET_LINES = [
     ("fw meshcore mesh remote rpt1 login hunter22", "fw meshcore mesh remote rpt1 login ***"),
     ("fw meshcore mesh remote rpt1 cli set bridge.secret x", "fw meshcore mesh remote rpt1 cli ***"),
     ("fw mesh remote rpt1 cli set bridge.secret x", "fw mesh remote rpt1 cli ***"),
+    # #449: the position (dummy coordinates); "share on|off" carries none
+    ("fw mesh loc 12.3456 -65.4321", "fw mesh loc ***"),
+    ("fw meshcore mesh loc 12.3456 -65.4321", "fw meshcore mesh loc ***"),
+    ("FW MESH LOC 12.3456 -65.4321", "FW MESH LOC ***"),
     ("fw keys send down text:hunter22 enter", "fw keys send down text:*** enter"),
     ("fw set some.password hunter22", "fw set ***"),
     ("fw qr my secret", "fw qr ***"),
@@ -94,7 +98,7 @@ def test_normal_commands_are_kept() -> None:
 
 
 def test_replies_that_print_a_secret() -> None:
-    for line in ["fw token", "token", "fw channel show 1", "fw meshcore channel show 1", "fw meshcore mesh remote r", "fw mesh remote rpt1 cli get prv.key"]:
+    for line in ["fw token", "token", "fw channel show 1", "fw meshcore channel show 1", "fw mesh loc", "fw mesh loc share on", "fw meshcore mesh loc", "fw meshcore mesh remote r", "fw mesh remote rpt1 cli get prv.key"]:
         assert serial_log.reply_is_secret(line), line
     for line in ["fw get bl.", "fw crash", "fw crash dump", "fw channels", "fw mesh"]:  # a dump: its own rule
         assert not serial_log.reply_is_secret(line), line

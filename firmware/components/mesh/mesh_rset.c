@@ -465,17 +465,65 @@ rs_confirm_t rs_cmd_confirm(char const *cmd, char *out, size_t cap) {
     return rs_cmd_needs_confirm(cmd) ? RS_CONF_MISSING : RS_CONF_NOT_NEEDED;
 }
 
+static bool is_ws(char ch) {
+    return ch == ' ' || ch == '\t';
+}
+
+static char const *skip_ws(char const *s) {
+    while (is_ws(*s)) {
+        s++;
+    }
+    return s;
+}
+
+// The pattern against the text, ignoring case, a space of the pattern matching any run of blanks (#449). The
+// repeater is exact and refuses such a line, but the history and the log are written before it answers, so the
+// redaction fails closed. Returns the text after the match, or NULL.
+static char const *loose_match(char const *text, char const *pat) {
+    for (; *pat; pat++) {
+        if (*pat == ' ') {
+            if (!is_ws(*text)) {
+                return NULL;
+            }
+            text = skip_ws(text);
+        } else if (tolower((unsigned char)*text) == *pat) {
+            text++;
+        } else {
+            return NULL;
+        }
+    }
+    return text;
+}
+
+// The secret pattern a line loosely starts with (after blanks and a tag), or -1
+static int loose_secret(char const *cmd, char const **tag_end) {
+    char const *c = skip_ws(cmd);
+    if (strlen(c) > 4 && c[2] == '|') {
+        c = skip_ws(c + 3);
+    }
+    *tag_end = c;
+    for (size_t k = 0; k < sizeof(SECRET) / sizeof(SECRET[0]); k++) {
+        if (loose_match(c, SECRET[k])) {
+            return (int)k;
+        }
+    }
+    return -1;
+}
+
+bool rs_cmd_secret_loose(char const *cmd) {
+    char const *c;
+    return loose_secret(cmd, &c) >= 0;
+}
+
 void rs_redact_cmd(char const *cmd, char *out, size_t cap) {
-    char const *c = skip_tag(cmd);
+    char const *c;
+    int         k = loose_secret(cmd, &c);
     if (!cap) {
         return;
     }
-    for (size_t k = 0; k < sizeof(SECRET) / sizeof(SECRET[0]); k++) {
-        size_t len = strlen(SECRET[k]);
-        if (strncmp(c, SECRET[k], len) == 0) {
-            snprintf(out, cap, "%.*s (hidden)", (int)(c - cmd + len - 1), cmd);
-            return;
-        }
+    if (k >= 0) { // the command as the repeater would read it, whatever the blanks and case typed
+        snprintf(out, cap, "%.*s%.*s (hidden)", (int)(c - cmd), cmd, (int)strlen(SECRET[k]) - 1, SECRET[k]);
+        return;
     }
     snprintf(out, cap, "%s", cmd);
 }

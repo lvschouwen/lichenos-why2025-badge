@@ -108,6 +108,7 @@ SECRET_ARGS = (
     (("wifi",), lambda rest: rest[0].lower() not in WIFI_SUBS),  # wifi <ssid> <password> (the SSID is private too)
     (("mesh", "remote", "*", "login"), None),  # mesh remote <who> login <password>
     (("mesh", "remote", "*", "cli"), None),  # cli <text>: "password x", "set guest.password x", "set prv.key x"
+    (("mesh", "loc"), lambda rest: rest[0].lower() != "share"),  # mesh loc <lat> <lon>: the owner's position (#449)
     (("channel", "add", "*"), None),  # channel add <name> <base64 key>; "channel add #name" has no key
 )
 # Name parts (split at anything but letters and digits) that make any other line secret: everything after its command
@@ -118,7 +119,7 @@ SECRET_WORDS = {"password", "passwd", "pass", "pw", "secret", "key", "psk", "tok
 # badge may still be printing the secret when that line is sent. The firmware prints a remote's answer (it comes over
 # LoRa seconds later) only when "mesh remote" is run again, synchronously, but "mesh remote <who> login|cli" open a
 # window too in case that changes. A core dump's body is always kept out (RAM).
-SECRET_REPLIES = (("token",), ("channel", "show"), ("channel", "add"), ("mesh", "remote"))
+SECRET_REPLIES = (("token",), ("channel", "show"), ("channel", "add"), ("mesh", "remote"), ("mesh", "loc"))
 
 
 def _split_fw(line: str) -> tuple[str, list[str]]:
