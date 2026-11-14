@@ -374,18 +374,19 @@ static void start_apps(void) {
         if (safe_mode_background_off(app->id, may_off) || !app->start_background) {
             continue;
         }
-        // #229: a background part is CAP_BACKGROUND (layers.conf rule D checks it at build time; this is the backstop)
-        if (!app_caps_allows(app->caps, CAP_BACKGROUND)) {
-            ESP_LOGE(TAG, "%s not started: it has a background part but did not declare CAP_BACKGROUND", app->name);
-            continue;
+        // #229: a start_background hook needs CAP_BACKGROUND (rule D checks it at build time; this is the backstop,
+        // and the app counts as failed so the boot step does not read DONE)
+        bool started = false;
+        if (app_caps_allows(app->caps, CAP_BACKGROUND)) {
+            lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app
+            started               = app->start_background();
+            lichen_ctx_leave(previous);
         }
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app
-        bool         started  = app->start_background();
-        lichen_ctx_leave(previous);
         if (started) {
             continue;
         }
-        ESP_LOGE(TAG, "%s not started", app->name);
+        ESP_LOGE(TAG, "%s not started%s", app->name,
+                 app_caps_allows(app->caps, CAP_BACKGROUND) ? "" : ": it did not declare CAP_BACKGROUND (#229)");
         if (used < sizeof(failed)) {
             used += (size_t)snprintf(failed + used, sizeof(failed) - used, "%s%s", used ? ", " : "", app->name);
         }

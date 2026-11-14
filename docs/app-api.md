@@ -206,7 +206,7 @@ with its capability and thread rule, and the build checks that it matches the he
 | `RAW_KEYS` | `lichen_keys_raw_take`/`_release` | Keyboard test |
 | `CONSOLE` | `console_register` (fw_console.h) | MeshCore, QR code |
 | `RESTART` | `system_restart`, `system_restart_asked` | MeshCore (the companion's reboot) |
-| `BACKGROUND` | a `start_background` hook, `lichen_task_start`/`_start_in`, `lichen_task_leftovers` | MeshCore, Weather, Notes, LoRa spectrum |
+| `BACKGROUND` | may start tasks (`lichen_task_start`/`_start_in`, `lichen_task_leftovers`) and may have a `start_background` hook; Notes and LoRa spectrum have it for tasks that run only while they are open. Safe mode (#232) and the Settings > Apps background switch (#233) key on `start_background`, not on this capability | MeshCore, Weather, Notes, LoRa spectrum |
 | `HAPTICS` | `lichen_haptics_play` | none |
 | `SENSORS` | `lichen_sensors.h` | Weather |
 | `NOTIFY` | `lichen_notify.h`, `lichen_badge_set` | MeshCore, Weather, Timer |

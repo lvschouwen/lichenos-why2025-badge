@@ -543,7 +543,9 @@ def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
 
 CAPS_HEADER = "lichen_caps.h"  # the CAP_* list, included by lichen_app.h
 CAP_DEFINE_RE = re.compile(r"^\s*#\s*define\s+CAP_(\w+)\s+\(\s*1u\s*<<\s*(\d+)\s*\)", re.M)
-DESC_RE = re.compile(r"lichen_app_t\s+const\s+(\w+)\s*=\s*\{(.*?)\n\s*\};", re.S)
+# Either qualifier order ("lichen_app_t const x", "const lichen_app_t x"), static or not: a new app cannot escape the
+# mirror by spelling its descriptor differently
+DESC_RE = re.compile(r"(?:\blichen_app_t\s+const|\bconst\s+lichen_app_t)\s+(\w+)\s*=\s*\{(.*?)\n\s*\};", re.S)
 FIELD_RE = re.compile(r"^\s*\.(\w+)\s*=\s*(.+?)\s*,?\s*(?://.*)?$")
 STR_DEFINE_RE = re.compile(r'^\s*#\s*define\s+(\w+)\s+"([^"]*)"', re.M)
 
@@ -1019,7 +1021,8 @@ def parse_args(argv):
     ap.add_argument("--build", help="firmware build dir (default <root>/firmware/build)")
     ap.add_argument("--nm", help="nm to use (default riscv32-esp-elf-nm from PATH)")
     ap.add_argument("--no-symbols", action="store_true", help="skip rule C (no built archives yet)")
-    ap.add_argument("--only-layer", help="check only the components of one layer (the app boundary check is L6)")
+    ap.add_argument("--only-layer", help="check only the components of one layer (the app boundary check is L6); "
+                    "skips rule D's descriptor mirror by design, which covers every component and runs in the full check")
     ap.add_argument("--report", action="store_true", help="print every violation with its place, exit 0")
     ap.add_argument("--shrink", action="store_true", help="drop or lower baseline entries that were fixed (never adds)")
     ap.add_argument("--init", action="store_true", help="write the first baseline from what is measured now")

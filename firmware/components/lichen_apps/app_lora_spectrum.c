@@ -195,7 +195,7 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
     sh->paused_mesh = was_running;
     unlock();
     if (!claimed) {
-        ESP_LOGW(TAG, "LoRa radio not free (MeshCore %s)", paused ? "paused" : "did not stop");
+        ESP_LOGW(TAG, "LoRa radio not free (MeshCore %s)", paused ? "paused" : "could not be paused");
         set_state(ST_NOT_FREE);
     }
     ESP_LOGI(TAG, "%s", claimed ? "sweeping, receive only" : "not sweeping");

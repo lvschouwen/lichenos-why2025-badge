@@ -964,6 +964,15 @@ app-objects one a.c
         self.assertIn("app:one (app line without a descriptor)", got)
         self.assertIn("app:two (no `app two app ...` line in tools/layers.conf)", got)
 
+    def test_const_first_descriptor_is_seen(self):
+        """'static const lichen_app_t x = {' is a descriptor too: without an app line it fails like any other"""
+        fx = self.fixture()
+        src = (self.APP_H + self.TYPES + "static const lichen_app_t two_app = {\n    .id = \"two\",\n};\n"
+               "void const *two_fn(void){return &two_app;}\n")
+        fx.write("firmware/components/app/c.c", src)
+        fx.build()
+        self.assertIn("app:two (no `app two app ...` line in tools/layers.conf)", self.d_keys(fx))
+
     def test_id_from_a_define(self):
         extra = {"ids.h": '#define ONE_ID "one"\n'}
         fields = [("id", "ONE_ID"), ("caps", "CAP_SD"), ("internal_ram_kib", "2"), ("psram_kib", "1")]
