@@ -15,6 +15,7 @@ typedef struct {
     uint8_t *buf;      // the file's whole contents (the File's own buffer, PSRAM on the badge); NULL when empty
     size_t   len, cap; // bytes in it, and the block's size
     bool     set;      // something is held (an empty file too: it truncates)
+    char const *path;  // the held path it was parked for (the owner's string): writeHeld writes there
 } fs_shim_held_t;
 
 // What writing a held file did, for the owner's log
@@ -66,7 +67,8 @@ public:
 private:
     friend class FS;
     File(char const *full_path, bool held); // the held path's "w" file: a buffer and no descriptor (#425)
-    bool buffered() const { return fd_ >= 0 || held_; }
+    File(char const *full_path, uint8_t *view, size_t len); // an "r" file reading a parked save, not owning it
+    bool buffered() const { return fd_ >= 0 || held_ || view_; }
     bool commit(); // a "w" file's buffer onto the file, only the chunks that differ
     void hold();   // close() of a held file: the buffer goes to the held slot
 
@@ -76,8 +78,10 @@ private:
     uint8_t *buf_ = nullptr; // a "w" file's whole contents
     size_t   len_ = 0, cap_ = 0, pos_ = 0;
     size_t   rewritten_ = 0;  // what the last commit wrote
+    bool     saved_ = false;  // the last close() of a "w" file committed and closed without an error
     bool     failed_ = false; // a write did not fit: the file is left as it was
     bool     held_ = false;   // a "w" file of the held path: no descriptor, close() keeps the buffer (#425)
+    bool     view_ = false;   // an "r" file of the held path while a save is parked: buf_ is the slot's
     char     path_[256] = "";
 };
 
@@ -133,16 +137,22 @@ typedef struct {
     uint32_t sync_us;   // a close: the file system's own close (LittleFS commits the file there)
     char     name[16];  // the last path component, cut short
 } fs_shim_call_t;
-// Copies up to max slow calls into out and returns how many there were (may exceed max); all 0 off the badge
+// Copies up to max slow calls into out and returns how many there were (may exceed max); all 0 off the badge.
+// Developer build only (CONFIG_LICHEN_DEV_COMMANDS), with fs_shim_op_name: a release image has neither.
 size_t      fs_shim_slow_calls(fs_shim_call_t *out, size_t max);
 char const *fs_shim_op_name(uint8_t op);
 
 // Holding one file's saves (#425): while path is held, a "w" open of it touches no file system and its close() keeps
 // the buffer in the held slot (a newer save replaces an older one) instead of writing. The owner takes the slot under
-// its lock and writes it after the unlock with File::writeHeld, so it stays the one writer of that file. The owner
-// serializes hold, take, drop and every open of the path (the badge: the mesh lock). path must outlive the hold
-// (MeshCore's "/contacts3"); NULL stops holding. Stopping does not drop what is held; remove() of the path and
-// format() do, so an older save never brings back a file deleted after it.
+// its lock and writes it after the unlock with File::writeHeld, so it stays the one writer of that file. While a save
+// is parked, an "r" open of the path reads the parked bytes (a view: valid until the next save, take or drop of the
+// path; read-only) and exists() is true, so a reload sees what the write will produce.
+// The owner serializes hold, take, drop and every open, remove and format touching the path (the badge: the mesh
+// lock, and while the hold is on only the mesh task removes or formats: a remove from elsewhere between a take and
+// its write would bring the file back). rename() of the held path is not handled (MeshCore renames no contacts file).
+// path must outlive the hold (MeshCore's "/contacts3"). NULL stops holding and drops what is parked: a direct save
+// follows. A "w" File opened while held and closed after the hold ended is dropped, never written over that save.
+// remove() of the path and format() drop the parked save, so an older save never brings back a deleted file.
 void fs_shim_hold(char const *path);
 // Moves the held save into out (out->set false when nothing was held)
 void fs_shim_take_held(fs_shim_held_t *out);

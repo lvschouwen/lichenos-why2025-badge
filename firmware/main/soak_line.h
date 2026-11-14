@@ -11,7 +11,9 @@
 //   not (soak4, #419, kept v=1: a sampler that reads the keys it knows by name loses nothing). soak3 has 11
 //   characters left at its ceilings: room for the Wi-Fi disconnect count (its own issue) and no more. soak4 holds
 //   the slow-path counters, all since boot and only rising within one boot: the mesh ones (mslow, mslowms, mslowfile,
-//   jpend, jdrop) survive a MeshCore stop and start and read -1 only while it is stopped. uiwait is the longest
+//   jpend, jdrop) survive a MeshCore stop and start and read -1 only while it is stopped. mslow* are the loop's time
+//   under the mesh lock: MeshCore's contacts file, written after the unlock since #425, is in none of them (its time is
+//   the "contacts saved after the unlock" log line). uiwait is the longest
 //   timeout a refused ui call asked for, not a measured wait. jpend is a high-water sampled once per mesh loop tick.
 //   notdrop counts notices with no room and sources too long, not "no source" or "service not started". nslow counts
 //   every slow notice step, not the rate-limited warnings.

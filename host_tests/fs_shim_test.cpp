@@ -264,6 +264,51 @@ static void buffered_writes(void) {
     CHECK(SPIFFS.remove("/b") && SPIFFS.remove("/c") && SPIFFS.remove("/d") && SPIFFS.remove("/contacts3"));
 }
 
+// #425 review: while a save is parked, reading the file gives the parked bytes (a reload under the lock sees the newest
+// state); a hold that ends drops what is parked, and a held File closed after it is not written over a direct save
+static void held_reads(uint8_t *expect, uint8_t *older, uint8_t *disk) {
+    size_t const n = 40 * REC_SIZE;
+    save_contacts(older, 40, 999, 0); // on the file system: the old state
+    fs_shim_hold("/contacts3");
+    save_contacts(expect, 40, 7, 99); // parked: the new state
+    File in = SPIFFS.open("/contacts3", "r");
+    static uint8_t got[40 * REC_SIZE];
+    CHECK(in && in.size() == n && in.available() == (int)n && in.read(got, n) == n && memcmp(got, expect, n) == 0);
+    CHECK(in.seek(0) && in.write(older, 10) == 0); // read-only: the parked bytes stay as saved
+    in.close();
+    CHECK(live_blocks == 1 && SPIFFS.exists("/contacts3"));
+    fs_shim_held_t taken;
+    fs_shim_take_held(&taken);
+    fs_shim_hold(NULL);                         // the hold ends between the take and the write: the save still lands
+    CHECK(File::writeHeld(&taken).ok);
+    CHECK(disk_read("/contacts3", disk, n + 1) == n && memcmp(disk, expect, n) == 0); // what the read gave
+    in = SPIFFS.open("/contacts3", "r");        // from the file system again
+    CHECK(in && in.read(got, n) == n && memcmp(got, expect, n) == 0);
+    in.close();
+
+    // Parked and never taken: ending the hold drops it (a direct save follows)
+    fs_shim_hold("/contacts3");
+    save_contacts(older, 40, 999, 0);
+    CHECK(live_blocks == 1);
+    fs_shim_hold(NULL);
+    CHECK(live_blocks == 0);
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && disk_read("/contacts3", disk, n + 1) == n && memcmp(disk, expect, n) == 0);
+
+    // Opened while held, closed after the hold ended and a direct save: dropped, the direct save stays
+    fs_shim_hold("/contacts3");
+    File late = SPIFFS.open("/contacts3", "w", true);
+    CHECK(late.write(older, n) == n);
+    fs_shim_hold(NULL);
+    save_contacts(expect, 40, 3, 5);            // the direct save, newest state
+    static uint8_t direct[40 * REC_SIZE];
+    memcpy(direct, expect, n);
+    late.close();
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && live_blocks == 0);
+    CHECK(disk_read("/contacts3", disk, n + 1) == n && memcmp(disk, direct, n) == 0);
+}
+
 // #425: a held file's saves reach the file system only when the owner writes them, after its unlock: the save under
 // the lock makes no file system call, and what is written is the newest save, whole
 static void held_saves(void) {
@@ -322,7 +367,10 @@ static void held_saves(void) {
     fs_shim_take_held(&taken);
     CHECK(!taken.set && !SPIFFS.exists("/contacts3"));
     save_contacts(expect, 60, 999, 0); // held again, and written: the file the checks below expect
-    CHECK(!SPIFFS.exists("/contacts3")); // the held open made no file system call: nothing created
+    char on_disk[300];
+    snprintf(on_disk, sizeof(on_disk), "%s/contacts3", root_dir);
+    CHECK(access(on_disk, F_OK) != 0);  // the held open made no file system call: nothing created
+    CHECK(SPIFFS.exists("/contacts3")); // ... but the parked save counts as the file
     fs_shim_take_held(&taken);
     CHECK(File::writeHeld(&taken).ok);
     fs_shim_hold(NULL);
@@ -340,6 +388,7 @@ static void held_saves(void) {
     fs_shim_hold(NULL);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 60 * REC_SIZE && memcmp(disk, expect, 60 * REC_SIZE) == 0);
 
+    held_reads(expect, older, disk);
     fs_shim_set_buffer_hooks(NULL, NULL);
     // No slow calls off the badge (nothing is timed there)
     fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];

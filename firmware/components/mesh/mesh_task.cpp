@@ -270,8 +270,7 @@ static fs_shim_held_t contacts_taken; // the mesh task: taken under the lock, wr
 static int            contacts_taken_n;
 
 static void contacts_hold_off_locked(void) {
-    fs_shim_hold(NULL);
-    fs_shim_drop_held(); // the save that follows has the newest state
+    fs_shim_hold(NULL); // drops what is parked: the save that follows has the newest state
 }
 
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
@@ -396,8 +395,9 @@ static void contacts_write_taken(void) {
              (unsigned)w.len, (unsigned)w.rewritten, (unsigned long)(w.us / 1000), w.ok ? "" : " (failed)");
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
 // The slow loop's file calls of 10 ms and more (#425), as the shim noted them: the first n, the ones under the lock
-// (the writes after the unlock come later in the shim's list)
+// (the writes after the unlock come later in the shim's list). A bench diagnostic: developer build only.
 static void log_slow_calls(size_t n) {
     fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];
     fs_shim_slow_calls(calls, FS_SHIM_SLOW_CALLS);
@@ -411,6 +411,12 @@ static void log_slow_calls(size_t n) {
         ESP_LOGW(TAG, "  and %u more slow file call(s)", (unsigned)(n - FS_SHIM_SLOW_CALLS));
     }
 }
+#define SLOW_FILE_CALLS()   fs_shim_slow_calls(NULL, 0) // a count only: the calls are copied for a slow loop's log
+#define LOG_SLOW_CALLS(n)   log_slow_calls(n)
+#else
+#define SLOW_FILE_CALLS()   ((size_t)0)
+#define LOG_SLOW_CALLS(n)   ((void)(n))
+#endif
 
 static void mesh_task(void *arg) {
     (void)arg;
@@ -429,7 +435,7 @@ static void mesh_task(void *arg) {
         }
         uint32_t file_ops;
         uint32_t file_us   = fs_shim_take_busy_us(&file_ops);
-        size_t   slow_file = fs_shim_slow_calls(NULL, 0); // a count only: the calls are copied for a slow loop's log
+        size_t   slow_file = SLOW_FILE_CALLS();
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
         advert_tick_locked();
@@ -504,7 +510,7 @@ static void mesh_task(void *arg) {
                           "the lock, %d contacts",
                      (long long)took_ms, (unsigned long)(file_us / 1000), (unsigned long)file_ops, (unsigned long)rx,
                      (long long)((started - asked) / 1000), contacts_taken_n);
-            log_slow_calls(slow_file);
+            LOG_SLOW_CALLS(slow_file);
         }
         vTaskDelay(pdMS_TO_TICKS(MESH_POLL_MS));
     }
