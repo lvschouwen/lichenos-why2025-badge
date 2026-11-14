@@ -17,8 +17,6 @@
 #include <string.h>
 
 
-static char const TAG[] = "setup";
-
 static bool welcome_up; // LVGL task: the welcome stays under the setup's Wi-Fi step until the setup ends
 
 bool setup_running(void) {
@@ -91,6 +89,9 @@ void setup_start(void) {
     shell_open(build_welcome, SCREEN_WELCOME);
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // test arms are debug commands (#421): not in a release image
+static char const TAG[] = "setup";
+
 static void cmd_setup(char const *args) {
     if (strcmp(args, "reset") == 0) {
         bool ok = settings_set_u8("setup_done", 0); // only this key: Wi-Fi and the rest stay
@@ -121,6 +122,10 @@ static void cmd_setup(char const *args) {
     }
 }
 
+#endif
+
 void setup_init(void) {
-    console_register("setup", "setup reset (show the first-run welcome again after a reboot; developer mode)", cmd_setup);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("setup", "setup reset (show the first-run welcome again after a reboot)", cmd_setup);
+#endif
 }

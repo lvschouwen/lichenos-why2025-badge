@@ -3,6 +3,8 @@
 // place from a table instead of in each command. console.c asks before it calls a command, so the gate sits before
 // any state is written and a new spelling of the line cannot skip it. Pure and host-tested (host_tests/dev_gate_test.c).
 
+#include "dev_mode.h"
+
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -17,6 +19,15 @@ char *dev_gate_split(char *line, char const *const *ids, int n_ids, int *app, ch
 // True when "name args" is a form that needs developer mode. Fail closed: a command with a gated form lists the forms
 // that stay open (a status print), and any other argument is gated, including one the command itself rejects.
 bool dev_gate_needs_dev(char const *name, char const *args);
+
+// What run_command does with a command it found: the gate comes first, so a refused line never reaches the command
+// function. found is dev_mode_find_app's answer (DEV_FIND_DEV_OFF is already refused there).
+typedef enum {
+    DEV_GATE_RUN,    // call the command
+    DEV_GATE_REFUSE, // answer the developer-mode note, call nothing
+    DEV_GATE_UNKNOWN // no such command
+} dev_gate_t;
+dev_gate_t dev_gate_decide(dev_find_t found, bool needs_dev, bool dev_on);
 
 #ifdef __cplusplus
 }

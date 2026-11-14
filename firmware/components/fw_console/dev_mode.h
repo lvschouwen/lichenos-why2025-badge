@@ -28,7 +28,8 @@ console_origin_t dev_mode_exec_origin(bool keep_secret);
 console_origin_t dev_mode_origin(bool captured, console_origin_t exec, bool uart_task);
 
 #define DEV_MODE_KEY      "dev.mode" // u8 in badge_fw through the settings service; a factory reset erases it
-#define DEV_MODE_OFF_NOTE "developer mode is off (About: tap Version 7 times, or USB: fw dev on)"
+#define DEV_MODE_ENTER_HINT "About: press Enter 7 times" // what the About screen counts (the one place that says it)
+#define DEV_MODE_OFF_NOTE   "developer mode is off (" DEV_MODE_ENTER_HINT ", or USB: fw dev on)"
 
 // One console table entry. fn takes the text after the command name.
 typedef struct {

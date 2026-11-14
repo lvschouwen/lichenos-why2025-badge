@@ -5,8 +5,15 @@
 
 #include <string.h>
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define VIB_USAGE "vib [on|off|test [tick|notify|alert]|strength low|medium|high]"
+#else
+#define VIB_USAGE "vib [on|off|strength low|medium|high]" // no test arm in a release image (#421)
+#endif
+
 static char const *const STRENGTH[] = {"low", "medium", "high"};
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // test arms are debug commands (#421): not in a release image
 static bool test(char const *name) {
     if (!*name || strcmp(name, "notify") == 0) {
         haptics_force(HP_NOTIFY);
@@ -19,6 +26,8 @@ static bool test(char const *name) {
     }
     return true;
 }
+
+#endif
 
 static bool strength(char const *name) {
     for (int i = 0; i < 3; i++) {
@@ -36,15 +45,17 @@ static void cmd_vib(char const *args) {
         haptics_set_enabled(true);
     } else if (strcmp(args, "off") == 0) {
         haptics_set_enabled(false);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     } else if (strncmp(args, "test", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
         ok = test(args[4] ? args + 5 : "");
+#endif
     } else if (strncmp(args, "strength ", 9) == 0) {
         ok = strength(args + 9);
     } else if (*args) {
         ok = false;
     }
     if (!ok) {
-        console_reply("vib [on|off|test [tick|notify|alert]|strength low|medium|high]");
+        console_reply(VIB_USAGE);
         return;
     }
     console_reply("vib: GPIO%d, setting %s, strength %s%s", HAPTICS_GPIO, haptics_enabled() ? "on" : "off",
@@ -52,5 +63,5 @@ static void cmd_vib(char const *args) {
 }
 
 void haptics_register_console(void) {
-    console_register("vib", "vib [on|off|test [tick|notify|alert]|strength low|medium|high] (test: developer mode)", cmd_vib);
+    console_register("vib", VIB_USAGE, cmd_vib);
 }

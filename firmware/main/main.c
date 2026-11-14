@@ -617,6 +617,7 @@ static void start_boot_screen(boot_ctx_t *ctx) {
 }
 
 // The bench's way to boot without a display (#281): proves the OS services that must not depend on the shell
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // a debug command (#421): not in a release image
 static void cmd_noscreen(char const *args) {
     (void)args;
     if (!settings_set_u8(NOSCREEN_KEY, 1)) {
@@ -625,6 +626,7 @@ static void cmd_noscreen(char const *args) {
     }
     console_reply("noscreen: the next boot skips the display (that boot only; no screen, no keyboard). fw reboot now.");
 }
+#endif
 
 static void start_console(boot_ctx_t *ctx) {
     (void)ctx;
@@ -633,7 +635,9 @@ static void start_console(boot_ctx_t *ctx) {
     console_bind_slot_switch(ota_image_note_slot_switch); // its trial needs no Wi-Fi (#411)
     console_bind_boot_pending(ota_boot_pending); // MeshCore's on-air list waits for that boot (#420)
     soak_cmd_register(); // "fw soak" (#409), developer mode
-    console_register("noscreen", "noscreen (test, developer mode: the next boot skips the display start, one boot only)", cmd_noscreen);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
+#endif
     console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",
                      cmd_poweroff);
 }

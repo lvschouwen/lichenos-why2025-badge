@@ -771,7 +771,7 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
          ui("0 > 2", "Display")], keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent", "keys sent: 1",
                                         "keys send: guard 1 failed: focus 'Time'; 0 of 3 sent"]),
         lambda b: b.walk("display", settings_page("Display")), 3)
-    expect("developer mode off", DevModeOff, FakeFw([["ui: " + DEV_OFF + " (About: tap Version 7 times, or USB: fw dev on)"]]),
+    expect("developer mode off", DevModeOff, FakeFw([["ui: " + DEV_OFF + " (About: press Enter 7 times, or USB: fw dev on)"]]),
            lambda b: b.lock(), 0)
     try:
         Badge(lambda line: ["keys: " + DEV_OFF + " (...)"]).fw("keys send down")

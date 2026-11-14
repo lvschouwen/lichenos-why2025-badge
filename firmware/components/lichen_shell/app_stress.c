@@ -168,29 +168,38 @@ static void cmd_status(void) {
 }
 
 static void cmd_stress(char const *args) {
-    unsigned    minutes;
-    char const *why;
+    unsigned minutes;
     switch (stress_parse(args, &minutes)) {
-    case STRESS_CMD_START:
-        why = stress_start(minutes);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // starting a run is a debug arm (#421): not in a release image
+    case STRESS_CMD_START: {
+        char const *why = stress_start(minutes);
         if (why) {
             console_reply("stress refused: %s", why);
         } else {
             console_reply("stress started, %u min: the lines follow in the log (tag stress)", minutes);
         }
         break;
-    case STRESS_CMD_STOP:
+    }
+    case STRESS_CMD_STOP: // open under developer mode off: a run started with it on must be stoppable (#421)
         console_reply(stress_running() ? "stress stopping: the report follows in the log" : "stress status: no run on");
         stress_stop(STRESS_STOP_CMD);
         break;
     case STRESS_CMD_STATUS: cmd_status(); break;
     case STRESS_CMD_BAD: console_reply("stress [1-30 minutes, default 10 | stop | status]"); break;
+#else
+    case STRESS_CMD_STATUS: cmd_status(); break;
+    default: console_reply("stress status"); break;
+#endif
     }
 }
 
 void stress_init(void) {
-    console_register("stress", "stress [minutes 1-30 | stop | status] (developer mode except status; #278: DMA, PSRAM, SD, storage, redraw and latency "
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("stress", "stress [minutes 1-30 | stop | status] (#278: DMA, PSRAM, SD, storage, redraw and latency "
                                "load at once, keys locked; a \"stress:\" log line every 10 s, then the report; never "
                                "transmits)",
                      cmd_stress);
+#else
+    console_register("stress", "stress status", cmd_stress);
+#endif
 }

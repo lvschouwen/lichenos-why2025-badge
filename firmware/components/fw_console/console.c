@@ -5,8 +5,8 @@
 
 #include "assets.h"
 #include "console_capture.h"
-#include "dev_gate.h"
 #include "console_cmd.h"
+#include "dev_gate.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -814,7 +814,8 @@ static void run_command(char *line) {
     switch (dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i)) {
         case DEV_FIND_RUN:
             // A test arm of a command that is otherwise open (#421): refused before it can write anything
-            if (dev_gate_needs_dev(line, args) && !console_dev_gate(line)) {
+            if (dev_gate_decide(DEV_FIND_RUN, dev_gate_needs_dev(line, args), console_dev_mode()) == DEV_GATE_REFUSE) {
+                console_reply("%s: " DEV_OFF_REPLY, line);
                 return;
             }
             commands[i].fn(args);
@@ -899,7 +900,7 @@ static void cmd_dev(char const *args) {
             console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
             break;
         }
-        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or About: press Enter 7 times)"); break;
+        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or " DEV_MODE_ENTER_HINT ")"); break;
         case DEV_REQ_USAGE:
         default: console_reply("dev [on|off|status]"); break;
     }

@@ -16,7 +16,7 @@ static gated_t const GATED[] = {
     {"noscreen", {NULL}},                // the next boot skips the display
     {"thermal", {"", NULL}},             // "test ..." can power the badge off; "seen reset" erases a flag
     {"psram", {"", NULL}},               // test, dma, dl, dlboot and speed change timing or the next boot
-    {"stress", {"status", NULL}},        // a bare "stress" starts a run
+    {"stress", {"status", "stop", NULL}}, // a bare "stress" starts a run; stop stays open so a run can be ended
     {"idle", {"", NULL}},                // "test <s>" fakes the idle clock
     {"setup", {NULL}},                   // reset and done write the first-run flags
     {"sensors", {"", "raw", "boot", NULL}}, // start, stop and "boot on|off" change state and what boots
@@ -44,6 +44,15 @@ bool dev_gate_needs_dev(char const *name, char const *args) {
         return true;
     }
     return false;
+}
+
+dev_gate_t dev_gate_decide(dev_find_t found, bool needs_dev, bool dev_on) {
+    switch (found) {
+        case DEV_FIND_NONE: return DEV_GATE_UNKNOWN;
+        case DEV_FIND_DEV_OFF: return DEV_GATE_REFUSE;
+        case DEV_FIND_RUN: return needs_dev && !dev_on ? DEV_GATE_REFUSE : DEV_GATE_RUN;
+    }
+    return DEV_GATE_REFUSE; // fail closed
 }
 
 static char *word_end(char *s, char const **args) {

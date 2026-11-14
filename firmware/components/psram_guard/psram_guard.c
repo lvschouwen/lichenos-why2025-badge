@@ -209,6 +209,7 @@ static void guard_task(void *arg) {
     }
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // the test arms are debug commands (#421): not in a release image
 // "psram test <KB> [dense]": one fill / write-back / invalidate / read-back round trip over a fresh block, on demand
 static void psram_test(char const *kb_text) {
     unsigned kb = (unsigned)atoi(kb_text);
@@ -236,7 +237,10 @@ static void psram_test(char const *kb_text) {
     heap_caps_free(mem);
 }
 
+#endif
+
 static void cmd_psram(char const *args) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (strncmp(args, "test", 4) == 0) {
         psram_test(args + 4);
         return;
@@ -261,6 +265,7 @@ static void cmd_psram(char const *args) {
         psram_dma_cmd(args + 3); // #121: the DMA-path gate; the canaries and the boot check only cover the CPU path
         return;
     }
+#endif
     psram_boot_print();
     psram_speed_print();
     for (size_t i = 0; i < s_npools; i++) {
@@ -319,7 +324,11 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | speed [80|120] [yes] | carrier] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live; any argument: developer mode)", cmd_psram);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | speed [80|120] [yes] | carrier] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
+#else
+    console_register("psram", "psram (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit)", cmd_psram);
+#endif
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3584 /* peak 1.4 KB (#107) + the PSRAM heap check and its failure line (#353): fw psram speed shows the margin */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }

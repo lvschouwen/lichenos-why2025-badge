@@ -4,7 +4,7 @@ menu "Lichen console"
         default y
         help
             Builds the commands registered with console_register_dev and `fw dev [on|off|status]`. At runtime they
-            run only while developer mode is on (About: tap Version 7 times, or `fw dev on` from the USB console;
+            run only while developer mode is on (About: press Enter 7 times, or `fw dev on` from the USB console;
             never over Wi-Fi) and are hidden from `fw help` while it is off. Off in the release build
             (sdkconfig.release.defaults, `build.sh release build`): the commands are then not in the image.
 endmenu

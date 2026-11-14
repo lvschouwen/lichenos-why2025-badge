@@ -123,6 +123,7 @@ static void print_raw(void) {
     );
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // start, stop and boot on|off are debug arms (#421): not in a release image
 // on is the default, so on is no key at all
 static bool save_boot(bool on) {
     if (on) {
@@ -131,25 +132,29 @@ static bool save_boot(bool on) {
     return store_set && store_set(SENSORS_BOOT_KEY, 0);
 }
 
+#endif
+
 static void cmd_sensors(char const *args) {
     if (args[0] == '\0') {
         print_lines();
     } else if (strcmp(args, "raw") == 0) {
         print_raw();
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     } else if (strcmp(args, "start") == 0) {
         sensors_start();
         console_reply("sensors: started");
     } else if (strcmp(args, "stop") == 0) {
         sensors_stop();
         console_reply("sensors: stopped");
-    } else if (strcmp(args, "boot") == 0) {
-        console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
     } else if (strcmp(args, "boot on") == 0 || strcmp(args, "boot off") == 0) {
         bool on = args[6] == 'n';
         bool ok = save_boot(on);
         console_reply("sensors: start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
+#endif
+    } else if (strcmp(args, "boot") == 0) {
+        console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
     } else {
-        console_reply("sensors [raw|start|stop|boot [on|off]]");
+        console_reply("sensors [raw|boot]");
     }
 }
 
@@ -158,5 +163,5 @@ bool sensors_boot_start(void) {
 }
 
 void sensors_register_console(void) {
-    console_register("sensors", "sensors [raw|start|stop|boot [on|off]] (IMU, environment, P4 die temperature; start, stop, boot on|off: developer mode)", cmd_sensors);
+    console_register("sensors", "sensors [raw|boot] (IMU, environment, P4 die temperature)", cmd_sensors);
 }

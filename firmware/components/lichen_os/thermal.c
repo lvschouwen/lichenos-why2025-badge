@@ -350,6 +350,7 @@ static void print_status(void) {
     }
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // test arms are debug commands (#421): not in a release image
 static void sim_set(float c) {
     atomic_store(&sim_since_s, up_s());
     sim_write((int32_t)(c * 1000.0f), true);
@@ -374,9 +375,12 @@ static void cmd_test(char const *what) {
     }
 }
 
+#endif
+
 static void cmd_thermal(char const *args) {
     if (args[0] == '\0') {
         print_status();
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // the test arms are debug commands (#421): not in a release image
     } else if (strncmp(args, "test ", 5) == 0) {
         cmd_test(args + 5);
     } else if (strcmp(args, "seen reset") == 0) {
@@ -384,6 +388,10 @@ static void cmd_thermal(char const *args) {
         console_reply("battery notice will show again after the next reboot");
     } else {
         console_reply("thermal | thermal test warn|clear|shutdown YES | thermal seen reset");
+#else
+    } else {
+        console_reply("thermal");
+#endif
     }
 }
 
@@ -391,8 +399,11 @@ void thermal_start(lichen_watch_hooks_t const *h) {
     if (h) {
         hooks = *h;
     }
-    console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety; test: developer mode)",
-                     cmd_thermal);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)", cmd_thermal);
+#else
+    console_register("thermal", "thermal (temperature watchdog, battery safety)", cmd_thermal);
+#endif
     // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
     if (!lichen_task_start_in(lichen_sys_ctx_os(), "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE,
                               LICHEN_STACK_LP_RAM, NULL)) {

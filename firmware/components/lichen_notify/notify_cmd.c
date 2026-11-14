@@ -45,6 +45,7 @@ static void list(void) {
     }
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // test arms are debug commands (#421): not in a release image
 static void test(char const *args) {
     int level = -1;
     for (int i = 0; i < 3; i++) {
@@ -80,11 +81,21 @@ static void test(char const *args) {
     console_reply("notify test %s: %s %u", LEVEL_NAME[level], id ? "id" : "dropped", (unsigned)id);
 }
 
+#endif
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define NOTIFY_USAGE "notify [test <info|warn|error> [@target] [text] | clear | read | dnd on|off]"
+#else
+#define NOTIFY_USAGE "notify [clear | read | dnd on|off]" // no test arm in a release image (#421)
+#endif
+
 static void cmd_notify(char const *args) {
     if (!*args) {
         list();
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     } else if (strncmp(args, "test", 4) == 0 && (args[4] == ' ' || args[4] == '\0')) {
         test(args[4] ? args + 5 : "");
+#endif
     } else if (strcmp(args, "clear") == 0) {
         lichen_notify_clear_all();
         console_reply("notify: cleared");
@@ -95,10 +106,10 @@ static void cmd_notify(char const *args) {
         lichen_notify_set_dnd(args[5] == 'n');
         console_reply("notify: do-not-disturb %s", lichen_notify_dnd() ? "on" : "off");
     } else {
-        console_reply("notify | notify test <info|warn|error> [@target] [text] | notify clear | notify read | notify dnd on|off");
+        console_reply(NOTIFY_USAGE);
     }
 }
 
 void notify_cmd_register(void) {
-    console_register("notify", "notify [test <info|warn|error> [@target] [text] | clear | read | dnd on|off] (test: developer mode)", cmd_notify);
+    console_register("notify", NOTIFY_USAGE, cmd_notify);
 }
