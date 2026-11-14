@@ -2627,3 +2627,16 @@ add_executable(file_replace_test ${CMAKE_CURRENT_SOURCE_DIR}/file_replace_test.c
 target_include_directories(file_replace_test PRIVATE ${NPT_FW}/storage)
 target_compile_options(file_replace_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME file_replace_test COMMAND file_replace_test)
+# #464: the console's gate and origin pin, per developer mode, build and origin; built as a developer and a release
+# image (the developer one with the off-by-default nvs-down and nvs-enc burn arms compiled in)
+set(CONSOLE_PIN_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/console_pin_test.c ${NPT_FW}/fw_console/dev_gate.c
+    ${NPT_FW}/fw_console/dev_mode.c ${NPT_FW}/mesh/mesh_onair.c)
+foreach(t console_pin_test console_pin_dev_test)
+    add_executable(${t} ${CONSOLE_PIN_SRCS})
+    target_include_directories(${t} PRIVATE ${NPT_FW}/fw_console ${NPT_FW}/mesh)
+    target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(${t} PRIVATE lichen_text)
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()
+target_compile_definitions(console_pin_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1
+    CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=1 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=1)
