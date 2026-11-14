@@ -496,6 +496,14 @@ accident and audit guard, not a security boundary: apps are compiled in and shar
   command ..."; `fw help` ends with "N of 96 commands registered". `tools/check_console_slots.py` runs in
   `build.sh build` and fails when the image's `console_register` calls pass 80 % of the table (#243). Raise
   `MAX_COMMANDS` (12 B of .bss per slot) before the guard trips, not after.
+- **Sub-command rules** (#464, `fw_console/console_sub.h`): a command with forms that need developer mode, an origin
+  (USB console only, or on the badge) or the USB hold registers with `console_register_rules` and a `console_sub_t`
+  table (word, match, gate, origin, flags); `run_command` checks the matched row once, before the command runs, so no
+  handler carries a check of its own. A table with a rule lists its open forms and ends with a `REST` row when every
+  other form takes the rule (fail closed). The tables sit in pure `*_rules.h` headers (MeshCore's in
+  `mesh_cmd_table.c`, which also drives its dispatch), pinned per mode, build and origin in
+  `host_tests/console_pin_test.c`. `tools/check_console_rules.py` fails the build for a `CON_F_TX` or `CON_F_RESTART`
+  row open to any origin that is not on its commented allow list.
 
 ### Enforcement
 

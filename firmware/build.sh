@@ -188,6 +188,9 @@ elif [ "$building" = 1 ]; then
     # The console table must keep headroom (#243); reads the sdkconfig this build just wrote
     python3 -I "$repo/tools/check_console_slots.py" --selftest
     python3 -I "$repo/tools/check_console_slots.py"
+    # A console row that transmits or restarts and anyone may run is a decision on an allow list, not a default (#464)
+    python3 -I "$repo/tools/check_console_rules.py" --selftest
+    python3 -I "$repo/tools/check_console_rules.py"
     # The release check is only worth something while the developer image holds the marker it looks for (#401)
     for arg in "$@"; do
         case $arg in build|all|app) "$repo/tools/check_release_image.sh" dev "$bdir/badge_fw.bin"; break ;; esac
