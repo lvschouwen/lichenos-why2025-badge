@@ -344,6 +344,15 @@ static bool mem_subcommand(char const *args) {
     return true;
 }
 
+// "mem window" is registered by lichen_os only with LICHEN_DEV_COMMANDS (#410), so a release image's usage text
+// neither lists it nor holds the words "developer mode" (#437)
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define MEM_USAGE \
+    "mem [blocks [internal|dma|psram] [min bytes] | window [reset]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, sampled every 250 ms; shorter dips above the since-boot low can be missed, #410)"
+#else
+#define MEM_USAGE "mem [blocks [internal|dma|psram] [min bytes]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap)"
+#endif
+
 static void cmd_mem(char const *args) {
     if (mem_subcommand(args)) {
         return;
@@ -940,7 +949,7 @@ void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help", cmd_help);
-    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes] | window [reset]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, sampled every 250 ms; shorter dips above the since-boot low can be missed, #410)", cmd_mem);
+    console_register("mem", MEM_USAGE, cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);
