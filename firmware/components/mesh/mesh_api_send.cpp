@@ -72,8 +72,9 @@ extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const 
     why = why ? why : &local;
     *why = NULL;
     if (!send_ready(why, from) || (*why = mesh_cscope_channel_refusal(from == MESH_FROM_CONSOLE, channel_name)) ||
-        !onair_channel_ready(why, from, channel_name)) {
-        return 0; // #291: a damaged channel scope refuses the screens' sends
+        !onair_channel_ready(why, from, channel_name) ||
+        (*why = channel_send_refusal(channel_name, from == MESH_FROM_CONSOLE ? MESH_SET_WAIT_MS : 0))) {
+        return 0; // #291: a damaged channel scope refuses the screens' sends; #451: a #name with a foreign key
     }
     size_t len = mf_text_cut(text, mesh_channel_text_max());
     if (len == 0 && text[0]) {

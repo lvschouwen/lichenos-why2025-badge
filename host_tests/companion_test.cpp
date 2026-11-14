@@ -6,6 +6,7 @@
 #include "mesh_ident.h"
 #include "mesh_link.h"
 #include "mesh_onair.h"
+#include "channel_key.h"
 
 #include "SPIFFS.h"
 
@@ -409,6 +410,44 @@ static void onair_frame_checks(BadgeMesh &mesh, ob_t &ob, ChannelDetails const &
     CHECK(find_group(before, pub.channel, prefix + "onair off", pkt));
     memset(&test_onair, 0, sizeof(test_onair));
     CHECK(mesh.setConsoleScope(scope) == NULL);
+}
+
+// #451 where the frame is built: a #name stored with another key (here Public's, as the issue's scenario) sends
+// nothing, a screen's message and a console line's alike; with the hashtag's own key it goes. The public test
+// channel's name only; the slot is emptied again.
+static void hashtag_key_frame_checks(BadgeMesh &mesh, ob_t &ob, ChannelDetails const &pub) {
+    ChannelDetails slot;
+    int            at = -1;
+    for (int i = 0; i < MAX_GROUP_CHANNELS && mesh.getChannel(i, slot); i++) {
+        at = at < 0 && !slot.name[0] ? i : at;
+    }
+    CHECK(at > 0);
+    if (at <= 0) {
+        return;
+    }
+    ChannelDetails tag = pub;
+    snprintf(tag.name, sizeof(tag.name), "%s", "#badgetest");
+    CHECK(mesh.setChannel(at, tag));
+    char const   *why    = NULL;
+    size_t        before = test_radio.sent.size();
+    std::string   prefix = std::string(mesh.getNodeName()) + ": ";
+    mesh::Packet  pkt;
+    mesh_msg_id_t id = ob_add_channel(&ob, "#badgetest", "foreign key", 11, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    mesh_out_state_t st = MESH_OUT_QUEUED;
+    CHECK(id && ob_get(&ob, id, &st, NULL, NULL, NULL) && st == MESH_OUT_FAILED);
+    CHECK(!find_group(before, pub.channel, prefix + "foreign key", pkt));
+    // The hashtag's own key: sent
+    memset(tag.channel.secret, 0, sizeof(tag.channel.secret));
+    CHECK(channel_hashtag_key(tag.name, tag.channel.secret));
+    mesh::Utils::sha256(tag.channel.hash, sizeof(tag.channel.hash), tag.channel.secret, CHANNEL_HASHTAG_KEY_LEN);
+    CHECK(mesh.setChannel(at, tag));
+    id = ob_add_channel(&ob, "#badgetest", "own key", 7, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    CHECK(id && ob_get(&ob, id, &st, NULL, NULL, NULL) && st != MESH_OUT_FAILED);
+    CHECK(find_group(before, tag.channel, prefix + "own key", pkt));
+    ChannelDetails empty = {};
+    CHECK(mesh.setChannel(at, empty));
 }
 
 // A channel's own scope (#291) on the real MyMesh: a screen's message on the channel floods under the channel's region,
@@ -1238,6 +1277,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     tx_note_checks(mesh, sent_at_start, notes_at_start);
     tx_outcome_checks(mesh);
     tx_retry_checks(mesh, ob);
+    hashtag_key_frame_checks(mesh, ob, pub);
     onair_frame_checks(mesh, ob, pub); // last: its unanswered DM retries
 }
 

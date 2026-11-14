@@ -202,7 +202,8 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 - MeshCore: `fw mesh` (identity, clock, packet counters; or why it is not running), `fw mesh start`, `fw mesh stop`,
   `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw mesh pathhash [1|2|3]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
-  (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`
+  (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included; a `#name` takes no other key,
+  a private channel's name has no `#`, and a stored `#name` with another key is listed as such and sends nothing), `fw channel rm <index|name>`
   (a hashtag channel with or without its `#`), `fw channel show <index|name>` (key as hex and base64 and the
   `meshcore://channel/add` link, on the serial console only), `fw channel rename <index|name> <new name>` (the key
   stays), `fw contacts export [<12 hex>]` (MeshCore's `meshcore://<hex>` export of a contact, or of this badge),

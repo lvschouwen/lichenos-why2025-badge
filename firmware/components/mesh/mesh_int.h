@@ -25,6 +25,7 @@
 #include "mesh_rset_run.h"
 #include "mesh_rhist_run.h"
 #include "channel_input.h"
+#include "channel_key.h"
 #include "mesh_pathhash.h"
 #include "mesh_mem.h"
 #include "mesh_prefs.h"
@@ -131,7 +132,8 @@ void        contacts_full_post(void);      // the mesh task, after the unlock
 
 // ---- mesh_api_channels.cpp ----------------------------------------------------------------------------------------
 
-int channel_find_locked(char const *typed); // under the mesh lock
+int         channel_find_locked(char const *typed);                    // under the mesh lock
+char const *channel_send_refusal(char const *name, uint32_t wait_ms); // #451: NULL when the stored channel may send
 
 // ---- mesh_api_send.cpp --------------------------------------------------------------------------------------------
 

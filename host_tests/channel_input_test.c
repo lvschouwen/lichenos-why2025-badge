@@ -60,6 +60,11 @@ int main(void) {
     CHECK(parse("#Foo", NULL) == NULL && strcmp(name, "#foo") == 0 && len == 0);
     CHECK(parse(" #nederland ", "") == NULL && strcmp(name, "#nederland") == 0 && len == 0);
     CHECK(parse("#a b", NULL) != NULL);
+    // #451: a #name with a key is a hashtag too (lowercased, no spaces); channel_key.h checks the key against it
+    CHECK(parse(" #Foo ", key16) == NULL && strcmp(name, "#foo") == 0 && len == 16);
+    CHECK(parse("#a b", key16) != NULL);
+    CHECK(parse("#", key16) != NULL);
+    CHECK(parse("Foo Bar", key16) == NULL && strcmp(name, "Foo Bar") == 0); // without '#': unchanged
     CHECK(parse("#", NULL) != NULL);
     CHECK(parse("foo", NULL) != NULL); // no key and no #
     CHECK(parse("   ", key16) != NULL);

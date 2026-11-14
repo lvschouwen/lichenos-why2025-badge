@@ -17,7 +17,8 @@ extern "C" {
 // NULL when the input makes a channel, else the reason. The name is trimmed and at most 31 bytes (out_name, cap >= 32).
 // Without a key (NULL or "") it must be a #hashtag: no spaces, lowercased into out_name, *secret_len = 0 (the key is
 // SHA-256 of out_name, MeshCore's rule, done by the caller). With a key, the whole key must be base64 of exactly 16 or
-// 32 bytes (padded or not), decoded into out_secret.
+// 32 bytes (padded or not), decoded into out_secret; a #name follows the #hashtag rules then too, and the caller checks
+// the key against it (channel_key.h, #451).
 char const *channel_parse(char const *name, char const *b64_or_null, char *out_name, size_t name_cap,
                           uint8_t out_secret[CHANNEL_SECRET_MAX], size_t *secret_len);
 // A channel's new name (#54): NULL when it can be one, else why not. Trimmed, at most 31 bytes, into out (cap >= 32); a

@@ -2,6 +2,7 @@
 #include "mesh_link.h"
 
 #include "channel_input.h"
+#include "channel_key.h"
 #include "mesh_prefs.h"
 #include "SPIFFS.h"
 #include "mesh_onair_run.h"
@@ -638,6 +639,16 @@ static bool onair_frame_ok(MyMesh *mesh, ob_action_t const &act, int slot) {
     return ok;
 }
 
+// #451: the frame is checked again (mesh_send_channel gave the reason): a #name sends only with its own key. Under the
+// mesh lock.
+static bool channel_key_fits(MyMesh *mesh, int slot) {
+    ChannelDetails d;
+    bool           ok = slot >= 0 && mesh->getChannel(slot, d) &&
+              channel_stored_key_refusal(d.name, d.channel.secret) == NULL;
+    mesh_wipe(&d, sizeof(d)); // the channel's key: not left on the stack
+    return ok;
+}
+
 size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) {
     size_t text_len = strlen(act.text);
     if (act.kind == OB_ACT_SEND_CHANNEL) {
@@ -645,8 +656,8 @@ size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) 
         if (slot < 0 || (!act.console && static_cast<BadgeMesh *>(mesh_)->channelScopeDamaged(slot))) {
             return 0; // #291: a screen's message on a channel with a damaged scope fails, never floods wider
         }
-        if (!onair_frame_ok(mesh_, act, slot)) {
-            return 0; // #289: fails, nothing sent
+        if (!onair_frame_ok(mesh_, act, slot) || !channel_key_fits(mesh_, slot)) {
+            return 0; // #289: fails, nothing sent; #451: also a #name whose key is not its own, retries included
         }
         size_t room = mf_channel_text_max(strlen(mesh_->getNodeName()));
         text_len    = mf_text_cut(act.text, room);

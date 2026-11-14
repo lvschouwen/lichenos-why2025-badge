@@ -76,9 +76,14 @@ char const *channel_parse(char const *name, char const *b64_or_null, char *out_n
     if (strlen(clean) > NAME_MAX_BYTES || strlen(clean) >= name_cap) {
         return "Channel names are at most 31 characters";
     }
-    if (!b64_or_null || !*b64_or_null) {
-        if (clean[0] != '#' || !clean[1]) {
-            return "A channel without a key must be a #hashtag";
+    bool keyed = b64_or_null && *b64_or_null;
+    if (!keyed && (clean[0] != '#' || !clean[1])) {
+        return "A channel without a key must be a #hashtag";
+    }
+    if (clean[0] == '#') {
+        // A #name is a hashtag with or without a typed key (#451: the key is then checked against the name's)
+        if (!clean[1]) {
+            return "A #hashtag needs a name after the #";
         }
         if (strchr(clean, ' ')) {
             return "A #hashtag has no spaces";
@@ -86,7 +91,8 @@ char const *channel_parse(char const *name, char const *b64_or_null, char *out_n
         for (char *p = clean; *p; p++) {
             *p = (char)tolower((unsigned char)*p); // MeshCore's apps derive the key from the lowercase name
         }
-    } else {
+    }
+    if (keyed) {
         uint8_t key[CHANNEL_SECRET_MAX];
         size_t  n = 0;
         if (!decode_key(b64_or_null, key, &n)) {
@@ -104,23 +110,12 @@ char const *channel_rename_parse(char const *new_name, char *out, size_t cap, bo
     size_t      len;
     char const *why;
     *hashtag = false;
-    // channel_parse's name rules; a dummy key keeps it from asking for a #hashtag
+    // channel_parse's name rules (the #hashtag ones too); a dummy key keeps it from asking for a #hashtag
     why = channel_parse(new_name, "AAAAAAAAAAAAAAAAAAAAAA", out, cap, unused, &len);
     if (why) {
         return why;
     }
-    if (out[0] == '#') {
-        if (!out[1]) {
-            return "A #hashtag needs a name after the #";
-        }
-        if (strchr(out, ' ')) {
-            return "A #hashtag has no spaces";
-        }
-        for (char *p = out; *p; p++) {
-            *p = (char)tolower((unsigned char)*p);
-        }
-        *hashtag = true;
-    }
+    *hashtag = out[0] == '#'; // channel_parse applied the #hashtag rules
     return NULL;
 }
 

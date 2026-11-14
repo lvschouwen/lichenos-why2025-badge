@@ -159,9 +159,13 @@ void mesh_int::cmd_channels(char const *args) {
         bool ok = node->getChannel(i, details) && details.name[0];
         mesh_unlock();
         if (ok) {
-            console_reply("channel %d: %s (hash %02x)", i, details.name, details.channel.hash[0]);
+            // #451: a #name stored with another key stays, but sends nothing; the list says why
+            bool foreign = channel_stored_key_refusal(details.name, details.channel.secret) != NULL;
+            console_reply("channel %d: %s (hash %02x)%s", i, details.name, details.channel.hash[0],
+                          foreign ? " - not this #name's key, sends refused" : "");
         }
     }
+    mesh_wipe(&details, sizeof(details)); // a channel key: not left on the stack
 }
 
 // "fw channel rm <index|name>": the same as the screen's confirm

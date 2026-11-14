@@ -6,16 +6,6 @@ using namespace mesh_int;
 
 static char const TAG[] = "mesh";
 
-// MeshCore's hashtag channels: the key is the first 16 bytes of SHA-256 of the name, '#' included, lowercase
-static size_t hashtag_secret(char const *name, uint8_t out[CHANNEL_SECRET_MAX]) {
-    uint8_t digest[32];
-    SHA256  sha;
-    sha.update(name, strlen(name));
-    sha.finalize(digest, sizeof(digest));
-    memcpy(out, digest, 16);
-    return 16;
-}
-
 extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key_or_null) {
     ChannelDetails details = {};
     char           name[MESH_CHANNEL_MAX + 1];
@@ -26,7 +16,14 @@ extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key
         return why;
     }
     if (key_len == 0) {
-        key_len = hashtag_secret(name, details.channel.secret);
+        key_len = channel_hashtag_key(name, details.channel.secret) ? CHANNEL_HASHTAG_KEY_LEN : 0;
+        why     = key_len ? NULL : "The hashtag's key could not be made, try again";
+    } else {
+        why = channel_key_refusal(name, details.channel.secret, key_len); // #451: a #name takes only its own key
+    }
+    if (why) {
+        mesh_wipe(&details, sizeof(details)); // a typed channel key: not left on the stack
+        return why;
     }
     StrHelper::strncpy(details.name, name, sizeof(details.name));
     mesh::Utils::sha256(details.channel.hash, sizeof(details.channel.hash), details.channel.secret, (int)key_len);
@@ -99,6 +96,22 @@ extern "C" size_t mesh_channel_key_id(char const *channel, bool typed, char *nam
     mesh_unlock();
     mesh_wipe(&slot, sizeof(slot)); // the channel's key: not left on the stack
     return found ? 1 : 0;
+}
+
+// #451: a stored #name whose key is not that hashtag's (stored so before the add refused it, or written by another
+// firmware) is kept, but nothing is sent on it: NULL when the channel stored as `name` may be sent on (or is not there:
+// the outbox fails that itself), else why not. wait_ms 0 (the screens: the LVGL task never waits on the mesh lock)
+// says nothing when the lock is taken; the frame is checked again when it is built (channel_key_fits, mesh_link.cpp).
+char const *mesh_int::channel_send_refusal(char const *name, uint32_t wait_ms) {
+    if (!mesh_lock_within(wait_ms)) {
+        return wait_ms ? "MeshCore is busy, try again" : NULL;
+    }
+    ChannelDetails slot;
+    int            at  = channel_named_locked(name, slot);
+    char const    *why = at >= 0 ? channel_stored_key_refusal(slot.name, slot.channel.secret) : NULL;
+    mesh_unlock();
+    mesh_wipe(&slot, sizeof(slot)); // the channel's key: not left on the stack
+    return why;
 }
 
 // Clears slot `index` as MeshCore's apps do (setChannel with an empty ChannelDetails) and saves. DataStore writes every
@@ -212,12 +225,7 @@ extern "C" char const *mesh_channel_rename(char const *name, char const *new_in)
         }
     }
     if (!why && hashtag) {
-        uint8_t tag[CHANNEL_SECRET_MAX] = {};
-        hashtag_secret(clean, tag);
-        if (memcmp(tag, slot.channel.secret, sizeof(slot.channel.secret)) != 0) {
-            why = "A #name needs that hashtag's key: add it as a new channel instead";
-        }
-        memset(tag, 0, sizeof(tag));
+        why = channel_stored_key_refusal(clean, slot.channel.secret); // the key stays: it must be the new #name's
     }
     if (!why) {
         StrHelper::strncpy(slot.name, clean, sizeof(slot.name)); // the name only: secret and hash stay as they are
