@@ -26,6 +26,6 @@ static console_sub_t const OS_MEM_RULES[] = {
 // "dev on" from the USB console only (#373): the Wi-Fi console's OTA token is not enough, and keys injected into the
 // Console app could type it there; About's taps are the owner's other way in. Off works from anywhere.
 static console_sub_t const OS_DEV_RULES[] = {
-    {"on", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_UART, 0},
+    {"on", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_UART, CON_F_DEV_HINT},
     CONSOLE_SUB_END,
 };

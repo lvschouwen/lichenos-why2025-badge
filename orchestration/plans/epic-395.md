@@ -76,8 +76,8 @@ Prereqs: W1c merged and benched; #235 and the MVP flash not pending in the same 
 
 1. **Parsers:** every parser of bytes from Wi-Fi, LoRa, the C6 link, SD, BLE or the console is a pure ESP-free function with a host test that feeds truncated, overlong, NUL-embedded and mutated input (`host_tests/mutate.h` once W1a lands) under ASan+UBSan; every copy is bounded by an explicit length.
 2. **Repeated or conflicting fields** in a parsed message are refused, not last-wins.
-3. **Console commands:** a debug/test command uses `console_register_dev` or `console_dev_gate`, or is compiled out by Kconfig; `build.sh release` contains none of its strings.
-4. **Origin:** a command that enables developer mode, weakens a guard, burns, erases or wipes storage checks `console_origin() == UART`; LOCAL (Console app) counts as remote because injected keys can type there.
+3. **Console commands:** a debug/test command uses `console_register_dev`, or a `CON_GATE_DEV` row in its command's sub-command table (`console_register_rules`, #464), or is compiled out by Kconfig; `build.sh release` contains none of its strings.
+4. **Origin:** a command that enables developer mode, weakens a guard, burns, erases or wipes storage is a `CON_ORIGIN_UART` row in its command's sub-command table (#464), checked by `run_command`; LOCAL (Console app) counts as remote because injected keys can type there.
 5. **Hand-only:** a DANGER confirm or a raw-key gesture checks `ev->injected` / `lichen_sys_keys_last_injected()`; a new dialog gets a row in `dialog_remote_policy.c` (unknown = REFUSE).
 6. **Transmit:** a new path that makes the badge transmit (LoRa, BLE, 802.15.4, Wi-Fi beyond replies) is reachable from the console or injected keys only within the bench scope (#290/#377) or the #289 allow list; reviewed by Opus.
 7. **Secrets:** passwords, tokens, keys go through `settings_secret_*` or `app_secret_*` (after #288), never plain settings, never in the backup whitelist or keep list, printed only with `console_reply_secret`, never logged (`ESP_LOG*`, log IDs of #328, crash log), buffers zeroed after use.

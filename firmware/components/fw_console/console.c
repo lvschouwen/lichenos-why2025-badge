@@ -196,9 +196,9 @@ void console_register_app_rules(char const *app, char const *name, char const *u
 // Developer mode (#373): read once from the settings service at bind time, then kept here. A release build points at
 // no fw dev, so its image holds no developer mode words at all.
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-#define DEV_OFF_REPLY DEV_MODE_OFF_NOTE
+#define DEV_OFF_REPLY CONSOLE_DEV_OFF_REPLY
 #else
-#define DEV_OFF_REPLY "not in this build"
+#define DEV_OFF_REPLY CONSOLE_DEV_OFF_REPLY
 #endif
 static atomic_bool s_dev_on;
 
@@ -866,22 +866,9 @@ static void run(char *line) {
 
 // The refusals of a sub-command row (#464): "<command> <word>" names it, a REST row names the command alone
 static void rule_refused(console_rule_t rule, char const *name, console_sub_t const *row) {
-    char   what[48];
-    size_t wl = row->word ? strlen(row->word) : 0;
-    wl -= wl && row->word[wl - 1] == ' '; // a PREFIX word's own space
-    snprintf(what, sizeof(what), "%s%s%.*s", name, wl ? " " : "", (int)wl, wl ? row->word : "");
-    switch (rule) {
-        case CON_RULE_DEV: console_reply("%s: " DEV_OFF_REPLY, what); break;
-        case CON_RULE_HOLD: console_reply("%s refused: %s is on; " HOLD_OFF_FIRST, what, console_usb_hold_why() ? console_usb_hold_why() : "?"); break;
-        case CON_RULE_ORIGIN:
-        default:
-            console_reply("%s refused: %s", what,
-                          row->origin == CON_ORIGIN_LOCAL ? "only on the badge (the USB console or the Console app)"
-                          : row->flags & CON_F_ERASE ? "it erases storage, so only the USB console can do it (the "
-                                                        "screen's Settings can too)"
-                                                      : "only from the USB console");
-            break;
-    }
+    char text[CONSOLE_SUB_REFUSAL_MAX];
+    console_sub_refusal(text, sizeof(text), rule, name, row, rule == CON_RULE_HOLD ? console_usb_hold_why() : NULL);
+    console_reply("%s", text);
 }
 
 // The one gate and origin check of a command with a sub-command table, before its own code runs

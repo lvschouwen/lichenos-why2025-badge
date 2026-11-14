@@ -31,7 +31,7 @@ That is 10 open issues (376, 377, 182, 378, 379, 391, 374, 380, 382, 383, 385; #
 - **#374 before everything else.** It is the unpushed head of local main. Every later merge rebases on it.
 - **#377 proven, then #182 closed.** #182 is only the decision record.
 - **#380 after the W0 bench pass.** #380 changes which commands the bench may run, and the W0 pass uses today's set.
-- **#380 before wave 3.** Wave 3's release compile-out of whole files and the release-build gate assume every DM command is registered through `console_register_dev` or `console_dev_gate`.
+- **#380 before wave 3.** Wave 3's release compile-out of whole files and the release-build gate assume every DM command is registered through `console_register_dev` or a `CON_GATE_DEV` row of its sub-command table (#464; `console_dev_gate` before).
 - **Bench docs update in the same wave as #380.** Otherwise the two-chip gate breaks without a sign: `fw tasks`, `psram`, `c6log` and `wifi tx` become DM, and `ui_overflow_sweep.py` needs `fw dev on` first.
 - **Follow-up "release build in the check" before wave 3.** The compile-out work needs a release build that is gated on every commit.
 - **#383, #382 and #385 are independent of #380**, apart from the conflict files. #385 is the last item.
@@ -170,7 +170,7 @@ That is 10 open issues (376, 377, 182, 378, 379, 391, 374, 380, 382, 383, 385; #
   - **c:** radios
     - `wifi_service.c`, `c6link.c` (c6log), `lora.c`, `mesh_task.cpp` (notify test, ident simulate)
   - **d (after a, b and c merge):**
-    - A checker, `tools/check_dev_commands.py`, plus its selftest under `tools/tests`. It holds the DM manifest copied from the epic inventory and fails when a listed subcommand is reachable without `console_register_dev` or `console_dev_gate`. This is #380's "fails before, passes after" test: it would fail on today's main.
+    - A checker, `tools/check_dev_commands.py`, plus its selftest under `tools/tests`. It holds the DM manifest copied from the epic inventory and fails when a listed subcommand is reachable without `console_register_dev` or a `CON_GATE_DEV` row (#464; `console_dev_gate` before). This is #380's "fails before, passes after" test: it would fail on today's main.
     - Wire it into `static_checks.sh` (conflict: `tools/gate_manifest.txt`).
     - Update `.claude/skills/lichen-bench/SKILL.md`, `docs/mvp-bench.md` and the `ui_overflow_sweep.py` header with the `fw dev on` precondition.
 - **Rows marked `?`:** left untouched.

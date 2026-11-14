@@ -31,7 +31,7 @@ mesh_con_t const MESH_CONSOLE_CMDS[MESH_CON_COUNT] = {
 
 mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT + 1] = {
     // whether MeshCore runs or not
-    [MESH_SUB_START]     = {"start", MESH_SUB_EXACT, OPEN, 0},
+    [MESH_SUB_START]     = {"start", MESH_SUB_EXACT, OPEN, TX}, // MeshCore claims the radio and adverts
     [MESH_SUB_STOP]      = {"stop", MESH_SUB_EXACT, OPEN, 0},
     [MESH_SUB_AUTOSTART] = {"autostart", MESH_SUB_WORD, OPEN, 0}, // #115
     [MESH_SUB_HIST]      = {"hist", MESH_SUB_WORD, OPEN, 0},      // the journal's own status

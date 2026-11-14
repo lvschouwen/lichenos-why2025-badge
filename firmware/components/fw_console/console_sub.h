@@ -11,6 +11,7 @@
 #include "dev_mode.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #if __has_include("sdkconfig.h")
@@ -53,6 +54,7 @@ typedef enum {
 #define CON_F_ERASE    0x04 // erases or wipes storage
 #define CON_F_USB_HOLD 0x08 // refused while the USB hold is on (#289), except from the USB console
 #define CON_F_SECRET   0x10 // prints a secret (console_reply_secret)
+#define CON_F_DEV_HINT 0x20 // an origin refusal also names the owner's other way in, About's taps ("dev on")
 #define CON_F_OWNER    0x80 // the owner's own bit for its dispatch (MeshCore: needs MeshCore running)
 
 typedef struct console_sub { // named, so a header can pass a table without including this one
@@ -97,6 +99,19 @@ typedef struct {
 
 // What the console does with row (NULL: no row matched, it runs): the gate first, then the origin, then the hold
 console_rule_t console_sub_rule(console_sub_t const *row, console_ask_t const *ask);
+
+// The developer-mode refusal's words: a release has no developer mode to name
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define CONSOLE_DEV_OFF_REPLY DEV_MODE_OFF_NOTE
+#else
+#define CONSOLE_DEV_OFF_REPLY "not in this build"
+#endif
+
+// The reply to a refused row (rule not RUN) of command name, "<name> <word>: ..." (a REST row: the name alone), cut to
+// cap. why: what holds, for CON_RULE_HOLD (NULL prints "?"). Returns out.
+#define CONSOLE_SUB_REFUSAL_MAX 192
+char *console_sub_refusal(char *out, size_t cap, console_rule_t rule, char const *name, console_sub_t const *row,
+                          char const *why);
 
 #ifdef __cplusplus
 }

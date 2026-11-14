@@ -9,6 +9,8 @@
 // can power the badge off, seen reset erases a flag. A release answers "not in this build".
 static console_sub_t const THERMAL_RULES[] = {
     {"", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 0},
+    // "test shutdown YES" powers the badge off (counted with the restarts); the same gate as every other form
+    {"test", CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, CON_F_RESTART},
     {NULL, CON_MATCH_REST, CON_GATE_DEV, CON_ORIGIN_ANY, 0},
     CONSOLE_SUB_END,
 };

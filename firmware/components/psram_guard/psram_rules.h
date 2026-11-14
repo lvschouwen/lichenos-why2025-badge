@@ -7,6 +7,8 @@
 // The bare status stays open; test, dma, dl, dlboot, speed and carrier change timing or the next boot: developer mode
 static console_sub_t const PSRAM_RULES[] = {
     {"", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, 0},
+    // "speed <80|120> yes" restarts the badge into the other speed (psram_speed.c); the same gate as every other form
+    {"speed", CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, CON_F_RESTART},
     {NULL, CON_MATCH_REST, CON_GATE_DEV, CON_ORIGIN_ANY, 0},
     CONSOLE_SUB_END,
 };

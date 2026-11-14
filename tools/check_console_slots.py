@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Console table guard (#243): count the console_register() and console_register_dev() calls this image reaches and
-fail above 80 % of MAX_COMMANDS in firmware/components/fw_console/console.c. console_register_dev calls count only
+fail above 80 % of MAX_COMMANDS in firmware/components/fw_console/console.c; and the sub-command tables they register
+(#464) against 80 % of MAX_RULE_TABLES (a command whose table finds no room is not registered at all). MeshCore's
+loop over MESH_CONSOLE_CMDS counts every command of that table. console_register_dev calls count only
 with CONFIG_LICHEN_DEV_COMMANDS set (#373): without it they are empty inlines and take no slot.
 
 Why a source count and not a boot check: it fails at build time, on the machine that adds the 40th command, not on
@@ -15,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "firmware"
 LIMIT_PERCENT = 80
-CALL = re.compile(r"(?<![\w])console_register(_dev|_app)?(?:_rules)?\s*\(")  # _rules: with a sub-command table (#464)
+CALL = re.compile(r"(?<![\w])console_register(_dev|_app)?(_rules)?\s*\(")  # _rules: with a sub-command table (#464)
 DECL = re.compile(r"(?:void|int)\s+$")
 
 
@@ -43,10 +45,11 @@ def cond_value(expr, cfg):
     return (not val) if m.group(1) else val
 
 
-def count_calls(text, cfg):
-    """Number of reachable console_register calls in one source text."""
-    n = 0
-    stack = []  # [active_now, parent_active, taken_before]
+def active_lines(text, cfg):
+    """The lines of text (comments stripped) that this sdkconfig compiles; the others are blanked, so lines keep
+    their numbers."""
+    out = []
+    stack = []  # [parent_active, taken_before]
     active = True
     for line in strip_comments(text).splitlines():
         s = line.strip()
@@ -68,15 +71,70 @@ def count_calls(text, cfg):
                 active = top[0] and not top[1]
             elif stack:
                 active = stack.pop()[0]
+            out.append("")
             continue
-        if active:
-            for c in CALL.finditer(line):
-                if DECL.search(line[: c.start()]):
-                    continue
-                if c.group(1) == "_dev" and not cfg.get("CONFIG_LICHEN_DEV_COMMANDS", False):
-                    continue
-                n += 1
-    return n
+        out.append(line if active else "")
+    return out
+
+
+def call_args(text, at):
+    """The text of a call's arguments, from just after its "(" at text[at - 1], strings skipped."""
+    depth, i = 1, at
+    while i < len(text) and depth:
+        c = text[i]
+        if c == '"':
+            i += 1
+            while i < len(text) and (text[i] != '"' or text[i - 1] == "\\"):
+                i += 1
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        i += 1
+    return text[at:i - 1]
+
+
+def reachable_calls(text, cfg, mesh):
+    """(slots, rule tables) the reachable console_register calls of one source text take. mesh: (commands, tables)
+    of MESH_CONSOLE_CMDS, which MeshCore's loop registers with one call (#464)."""
+    lines = active_lines(text, cfg)
+    joined = "\n".join(lines)
+    offsets, pos = [], 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line) + 1
+    slots = tables = 0
+    for no, line in enumerate(lines):
+        for c in CALL.finditer(line):
+            if DECL.search(line[: c.start()]):
+                continue
+            if c.group(1) == "_dev" and not cfg.get("CONFIG_LICHEN_DEV_COMMANDS", False):
+                continue
+            args = call_args(joined, offsets[no] + c.end())
+            if "MESH_CONSOLE_CMDS[" in args:
+                slots += mesh[0]
+                tables += mesh[1]
+                continue
+            slots += 1
+            if c.group(2) and args.rsplit(",", 1)[-1].strip() != "NULL":
+                tables += 1
+    return slots, tables
+
+
+def count_calls(text, cfg, mesh=(1, 0)):
+    """Number of console table slots the reachable console_register calls of one source text take."""
+    return reachable_calls(text, cfg, mesh)[0]
+
+
+def mesh_commands():
+    """(commands, of them with a rule table) in MeshCore's MESH_CONSOLE_CMDS (firmware/components/mesh)."""
+    text = strip_comments((FW / "components/mesh/mesh_cmd_table.c").read_text())
+    m = re.search(r"MESH_CONSOLE_CMDS\s*\[[^\]]*\]\s*=\s*\{(.*?)\n\};", text, re.S)
+    if not m:
+        sys.exit("check_console_slots: MESH_CONSOLE_CMDS not found in mesh_cmd_table.c")
+    entries = re.findall(r"\[\s*MESH_CON_\w+\s*\]\s*=\s*\{(.*?)\}\s*,", m.group(1), re.S)
+    with_table = sum(1 for e in entries if e.rsplit(",", 1)[-1].strip() != "NULL")
+    return len(entries), with_table
 
 
 def sources():
@@ -86,11 +144,15 @@ def sources():
                 yield p
 
 
-def max_commands():
-    m = re.search(r"#define\s+MAX_COMMANDS\s+(\d+)", (FW / "components/fw_console/console.c").read_text())
+def max_of(name):
+    m = re.search(r"#define\s+%s\s+(\d+)" % name, (FW / "components/fw_console/console.c").read_text())
     if not m:
-        sys.exit("check_console_slots: MAX_COMMANDS not found in console.c")
+        sys.exit("check_console_slots: %s not found in console.c" % name)
     return int(m.group(1))
+
+
+def max_commands():
+    return max_of("MAX_COMMANDS")
 
 
 def selftest():
@@ -126,6 +188,11 @@ console_register("j", "u", f);
     assert count_calls(app, {}) == 2  # an app's command counts in a release build too (#423)
     rules = 'console_register_rules("s", "u", f, R);\nconsole_register_app_rules("q", "t", "u", f, R);\n'
     assert count_calls(rules, {}) == 2  # a command with a sub-command table takes a slot too (#464)
+    assert reachable_calls(rules, {}, (1, 0)) == (2, 2)  # and a rule table each
+    none = 'console_register_rules("s", "u (x)", f,\n                       NULL);\n'
+    assert reachable_calls(none, {}, (1, 0)) == (1, 0)  # NULL: no table
+    loop = 'console_register_app_rules("m", MESH_CONSOLE_CMDS[c.id].name, u, f,\n    MESH_CONSOLE_CMDS[c.id].rules);\n'
+    assert reachable_calls(loop, {}, (7, 3)) == (7, 3)  # MeshCore's loop: every command of its table
     print("check_console_slots selftest ok")
 
 
@@ -140,13 +207,19 @@ def main():
             sys.exit("check_console_slots: --sdkconfig needs a path")
         path = Path(sys.argv[at])
     cfg = load_config(path)
-    total = sum(count_calls(p.read_text(errors="replace"), cfg) for p in sources())
-    limit = max_commands()
-    print(f"console commands: {total} reachable of {limit} slots (fail above {LIMIT_PERCENT} % = {limit * LIMIT_PERCENT // 100})")
-    if total * 100 > limit * LIMIT_PERCENT:
-        print("check_console_slots: raise MAX_COMMANDS in firmware/components/fw_console/console.c (12 B per slot)")
-        return 1
-    return 0
+    mesh = mesh_commands()
+    counts = [reachable_calls(p.read_text(errors="replace"), cfg, mesh) for p in sources()]
+    failed = 0
+    for what, total, name, cost in (("console commands", sum(c[0] for c in counts), "MAX_COMMANDS", "12 B per slot"),
+                                    ("rule tables", sum(c[1] for c in counts), "MAX_RULE_TABLES", "4 B per table")):
+        limit = max_of(name)
+        print(f"{what}: {total} reachable of {limit} slots (fail above {LIMIT_PERCENT} % = "
+              f"{limit * LIMIT_PERCENT // 100})")
+        if total * 100 > limit * LIMIT_PERCENT:
+            print(f"check_console_slots: raise {name} in firmware/components/fw_console/console.c ({cost}); an "
+                  "overflow drops the command at boot")
+            failed = 1
+    return failed
 
 
 sys.exit(main())

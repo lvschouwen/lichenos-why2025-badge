@@ -1,5 +1,6 @@
 // Host test (#464): a command's sub-command table: what a row matches and hands on, and the gate, origin and hold
 // decision run_command takes from it
+#include "console_os_rules.h"
 #include "console_sub.h"
 
 #include <stdio.h>
@@ -98,7 +99,50 @@ static void test_rule(void) {
     CHECK(console_sub_rule(&odd_gate, &off) == CON_RULE_DEV); // an unknown gate fails closed
 }
 
+static bool says(char const *got, char const *want) {
+    if (strcmp(got, want) == 0) {
+        return true;
+    }
+    printf("  got  \"%s\"\n  want \"%s\"\n", got, want);
+    return false;
+}
+
+// The refusals run_command prints (console.c rule_refused), word for word
+static void test_refusal(void) {
+    char out[CONSOLE_SUB_REFUSAL_MAX];
+    console_sub_t const *dev_on = console_sub_find(OS_DEV_RULES, "on");
+    CHECK(dev_on != NULL);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_ORIGIN, "dev", dev_on, NULL),
+               "dev on refused: only from the USB console (or About: press Enter 7 times)"));
+#else
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_ORIGIN, "dev", dev_on, NULL),
+               "dev on refused: only from the USB console")); // a release names no developer mode
+#endif
+    console_sub_t const *other = console_sub_find(OS_SLOT_RULES, "other");
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_HOLD, "slot", other, "the on-air allow list"),
+               "slot other refused: the on-air allow list is on; switch it off at the USB console first (fw onair off)"));
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_HOLD, "slot", other, NULL),
+               "slot other refused: ? is on; switch it off at the USB console first (fw onair off)")); // never a NULL
+    console_sub_t const erase = {"format", CON_MATCH_WORD, CON_GATE_OPEN, CON_ORIGIN_UART, CON_F_ERASE};
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_ORIGIN, "sd", &erase, NULL),
+               "sd format refused: it erases storage, so only the USB console can do it (the screen's Settings can too)"));
+    console_sub_t const rest = {NULL, CON_MATCH_REST, CON_GATE_DEV, CON_ORIGIN_ANY, 0};
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_DEV, "psram", &rest, NULL),
+               "psram: " CONSOLE_DEV_OFF_REPLY)); // a REST row names the command alone
+    console_sub_t const prefix = {"crash ", CON_MATCH_PREFIX, CON_GATE_DEV, CON_ORIGIN_ANY, 0};
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_DEV, "app", &prefix, NULL),
+               "app crash: " CONSOLE_DEV_OFF_REPLY)); // without the PREFIX word's own space
+    console_sub_t const local = {"x", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_LOCAL, 0};
+    CHECK(says(console_sub_refusal(out, sizeof(out), CON_RULE_ORIGIN, "c", &local, NULL),
+               "c x refused: only on the badge (the USB console or the Console app)"));
+    char small[12];
+    console_sub_refusal(small, sizeof(small), CON_RULE_ORIGIN, "token", &local, NULL);
+    CHECK(strlen(small) == sizeof(small) - 1); // cut, still a string
+}
+
 int main(void) {
+    test_refusal();
     test_match();
     test_find();
     test_origin();

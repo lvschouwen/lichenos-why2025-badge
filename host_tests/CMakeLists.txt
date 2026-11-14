@@ -2657,3 +2657,12 @@ add_executable(console_sub_test ${CMAKE_CURRENT_SOURCE_DIR}/console_sub_test.c $
 target_include_directories(console_sub_test PRIVATE ${NPT_FW}/fw_console)
 target_compile_options(console_sub_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME console_sub_test COMMAND console_sub_test)
+add_executable(console_sub_dev_test ${CMAKE_CURRENT_SOURCE_DIR}/console_sub_test.c ${NPT_FW}/fw_console/console_sub.c
+    ${NPT_FW}/fw_console/dev_mode.c)
+target_include_directories(console_sub_dev_test PRIVATE ${NPT_FW}/fw_console)
+target_compile_options(console_sub_dev_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(console_sub_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
+add_test(NAME console_sub_dev_test COMMAND console_sub_dev_test)
+
+# #464: the console rule guard's fixtures: open transmitting rows, unreadable tables, and the registration tie
+add_test(NAME check_console_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_console_rules_test.py)
