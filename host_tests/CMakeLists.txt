@@ -2606,7 +2606,7 @@ target_include_directories(ota_route_test PRIVATE ${NPT_FW}/ota ${NPT_FW}/fw_con
 target_compile_options(ota_route_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ota_route_test COMMAND ota_route_test)
 
-add_executable(ota_token_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_token_test.c ${NPT_FW}/ota/ota_token.c
+add_executable(ota_token_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_token_test.c ${NPT_FW}/ota/ota_token.c ${NPT_FW}/storage/file_replace.c
     ${NPT_FW}/ota/ota_os.c ${NPT_FW}/ota/ota_proto.c)
 target_include_directories(ota_token_test PRIVATE ${NPT_FW}/ota ${NPT_FW}/fw_console ${NPT_FW}/lichen_random
     ${NPT_FW}/storage)

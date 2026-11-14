@@ -3,6 +3,7 @@
 // host_tests/ota_token_test.c. Never logged; "fw token" prints it as a secret line (ota_server.c).
 #include "ota_token.h"
 
+#include "file_replace.h"
 #include "lichen_random.h"
 #include "ota_os.h"
 #include "ota_proto.h"
@@ -77,6 +78,15 @@ static bool write_text(char const *path, char const *text) {
     return fclose(f) == 0 && written;
 }
 
+// The same line, swapped in whole (lichen_file_replace writes OTA_TOKEN_NEW and renames it over the file)
+static bool replace_text(char const *path, char const *text) {
+    char line[OTA_TOKEN_LEN + 2];
+    int  n  = snprintf(line, sizeof(line), "%s\n", text);
+    bool ok = n > 0 && (size_t)n < sizeof(line) && lichen_file_replace(path, line, (size_t)n);
+    secure_wipe(line, sizeof(line));
+    return ok;
+}
+
 static bool write_token_file(void) {
     return write_text(OTA_TOKEN_FILE, token);
 }
@@ -118,8 +128,8 @@ void ota_token_forget(void) {
 
 static bool s_rotated; // console task only
 
-// The file is the authority at boot (ota_token_load), so it is swapped first and in one step: written next to it, then
-// renamed over it (LittleFS: a cut leaves the old file or the new one). The NVS copy follows; a cut before that leaves
+// The file is the authority at boot (ota_token_load), so it is swapped first and in one step (lichen_file_replace: a
+// cut leaves the old file or the new one). The NVS copy follows; a cut before that leaves
 // the new file and the old NVS copy, and the next boot's load writes the file's token to NVS.
 // Whether OTA_TOKEN_FILE is surely not there: only ENOENT says so (a file that can't be opened may still win at boot)
 static bool token_file_absent(void) {
@@ -137,9 +147,8 @@ ota_rotate_t ota_token_rotate(char *out, bool storage_up) {
         return OTA_ROTATE_FAILED;
     }
     make_token(out);
-    bool swapped = write_text(OTA_TOKEN_NEW, out) && rename(OTA_TOKEN_NEW, OTA_TOKEN_FILE) == 0;
+    bool swapped = replace_text(OTA_TOKEN_FILE, out);
     if (!swapped) {
-        unlink(OTA_TOKEN_NEW);
         if (!token_file_absent()) { // it would bring the old token back at boot, whatever NVS says
             secure_wipe(out, OTA_TOKEN_LEN + 1);
             return OTA_ROTATE_FAILED;

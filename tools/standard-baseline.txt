@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	288837
+size	<merged-strings>	288785
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -22,7 +22,7 @@ size	libboard.a	12830
 size	libbootloader_support.a	5942
 size	libc.a	47702
 size	libc6link.a	33164
-size	libcrash.a	5718
+size	libcrash.a	5666
 size	libcxx.a	872
 size	libefuse.a	2173
 size	libeh_common.a	144
@@ -105,7 +105,7 @@ size	liblichen_haptics.a	2769
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
 size	liblichen_net.a	24602
-size	liblichen_notify.a	13294
+size	liblichen_notify.a	13144
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	73227
 size	liblichen_random.a	63
@@ -117,11 +117,11 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13367
 size	libmbedtls.a	22
-size	libmesh.a	404715
+size	libmesh.a	404719
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
-size	libota.a	78418
+size	libota.a	78440
 size	libpsram_guard.a	25315
 size	libpthread.a	1229
 size	libriscv.a	1684
@@ -131,7 +131,7 @@ size	libsensors.a	29289
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
-size	libstorage.a	1828
+size	libstorage.a	2908
 size	libtfpsacrypto.a	80464
 size	libvfs.a	4945
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872
