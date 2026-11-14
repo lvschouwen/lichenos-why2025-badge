@@ -290,8 +290,13 @@ static void handle(mn_note_t const *n, mn_switches_t const *s, bool *read) {
     }
 }
 
+// The drain's copy of the queue, off the mesh task's stack (#209: 1.7 KB of a 1.9 KB frame). Static is safe: the mesh
+// task is the only caller and there is one at a time (a resume waits for the old task to exit). Internal RAM, not
+// PSRAM: mn_queue_take writes it under the spinlock (#271).
+static mn_note_t drained[MN_QUEUE_MAX];
+
 bool mesh_notify_drain(void) {
-    mn_note_t notes[MN_QUEUE_MAX];
+    mn_note_t *notes = drained;
     portENTER_CRITICAL(&mux);
     size_t n = mn_queue_take(&queue, notes, MN_QUEUE_MAX);
     portEXIT_CRITICAL(&mux);
