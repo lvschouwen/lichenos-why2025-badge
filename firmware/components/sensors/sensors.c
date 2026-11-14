@@ -270,66 +270,93 @@ static int64_t earliest(int64_t a, int64_t b) {
     return a < b ? a : b;
 }
 
+// The task loop's schedule: when each chip is next due (all in esp_timer microseconds)
+typedef struct {
+    i2c_master_bus_handle_t bus;
+    bool                    running;
+    int64_t                 imu_next, env_next, die_next;
+    int64_t                 env_read_at; // 0 = no measurement running
+} sched_t;
+
+// A start or stop request: switch the chips and restart every period from now
+static void apply_run_request(sched_t *s, int64_t now) {
+    s->running = !s->running;
+    set_power(s->running);
+    s->imu_next = s->env_next = s->die_next = now;
+    imu_last_us                             = now; // a long stop is not a silent chip
+    s->env_read_at                          = 0;
+}
+
+static void init_chips(sched_t *s, int64_t now) {
+    if (!imu.up && now >= imu.retry_us) {
+        chip_init(&imu, s->bus, now);
+    }
+    if (!env.up && now >= env.retry_us) {
+        chip_init(&env, s->bus, now);
+        s->env_read_at = 0;
+    }
+}
+
+// Start a forced BME690 measurement; the read follows once its time has passed
+static void env_trigger(sched_t *s, int64_t now) {
+    uint32_t dur_us = sensors_env_trigger(); // the heater runs while the bus is free
+    if (dur_us) {
+        s->env_read_at = now + dur_us + ENV_MARGIN_US;
+        env_tries      = 0;
+    } else {
+        chip_failed(&env, ENV_FAILS, now);
+    }
+    s->env_next = now + (int64_t)atomic_load(&env_ms) * 1000;
+}
+
+static void run_samples(sched_t *s, int64_t now) {
+    if (imu.up && now >= s->imu_next) {
+        sample_imu(now);
+        s->imu_next = now + (int64_t)atomic_load(&imu_ms) * 1000;
+    }
+    if (env.up && s->env_read_at && now >= s->env_read_at) {
+        s->env_read_at = sample_env(now) ? 0 : now + ENV_RETRY_US;
+    }
+    if (env.up && !s->env_read_at && now >= s->env_next) {
+        env_trigger(s, now);
+    }
+    if (now >= s->die_next) {
+        sample_die(now);
+        s->die_next = now + (int64_t)atomic_load(&env_ms) * 1000;
+    }
+}
+
+// Ticks to sleep until the earliest due chip (forever while stopped); at least one while running
+static TickType_t wait_ticks(sched_t const *s) {
+    if (!s->running) {
+        return portMAX_DELAY;
+    }
+    int64_t wake = earliest(s->die_next, imu.up ? s->imu_next : imu.retry_us);
+    wake         = earliest(wake, env.up ? (s->env_read_at ? s->env_read_at : s->env_next) : env.retry_us);
+    int64_t    ms   = (wake - esp_timer_get_time() + 999) / 1000;
+    TickType_t wait = pdMS_TO_TICKS(ms > 0 ? ms : 0);
+    return wait ? wait : 1;
+}
+
 static void sensors_task(void *arg) {
     (void)arg;
-    i2c_master_bus_handle_t     bus = board_i2c_bus(); // the OS created it; never a bus of our own (#87)
-    temperature_sensor_config_t tc  = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    sched_t                     s  = {.bus = board_i2c_bus()}; // the OS created it; never a bus of our own (#87)
+    temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
     if (temperature_sensor_install(&tc, &tsens) != ESP_OK) {
         ESP_LOGW(TAG, "P4 temperature sensor not available");
         tsens = NULL;
     }
-    bool    running  = false;
-    int64_t imu_next = 0, env_next = 0, env_read_at = 0, die_next = 0; // env_read_at: 0 = no measurement running
     for (;;) {
         int64_t now = esp_timer_get_time();
-        if (atomic_load(&want_run) != running) {
-            running = !running;
-            set_power(running);
-            imu_next = env_next = die_next = now;
-            imu_last_us                    = now; // a long stop is not a silent chip
-            env_read_at                    = 0;
+        if (atomic_load(&want_run) != s.running) {
+            apply_run_request(&s, now);
         }
-        if (running) {
-            if (!imu.up && now >= imu.retry_us) {
-                chip_init(&imu, bus, now);
-            }
-            if (!env.up && now >= env.retry_us) {
-                chip_init(&env, bus, now);
-                env_read_at = 0;
-            }
+        if (s.running) {
+            init_chips(&s, now);
             serve_cfg_ask();
-            now = esp_timer_get_time(); // an init takes a while (the BMI270's config upload)
-            if (imu.up && now >= imu_next) {
-                sample_imu(now);
-                imu_next = now + (int64_t)atomic_load(&imu_ms) * 1000;
-            }
-            if (env.up && env_read_at && now >= env_read_at) {
-                env_read_at = sample_env(now) ? 0 : now + ENV_RETRY_US;
-            }
-            if (env.up && !env_read_at && now >= env_next) {
-                uint32_t dur_us = sensors_env_trigger(); // the heater runs while the bus is free
-                if (dur_us) {
-                    env_read_at = now + dur_us + ENV_MARGIN_US;
-                    env_tries   = 0;
-                } else {
-                    chip_failed(&env, ENV_FAILS, now);
-                }
-                env_next = now + (int64_t)atomic_load(&env_ms) * 1000;
-            }
-            if (now >= die_next) {
-                sample_die(now);
-                die_next = now + (int64_t)atomic_load(&env_ms) * 1000;
-            }
+            run_samples(&s, esp_timer_get_time()); // an init takes a while (the BMI270's config upload)
         }
-        TickType_t wait = portMAX_DELAY;
-        if (running) {
-            int64_t wake = earliest(die_next, imu.up ? imu_next : imu.retry_us);
-            wake         = earliest(wake, env.up ? (env_read_at ? env_read_at : env_next) : env.retry_us);
-            int64_t ms   = (wake - esp_timer_get_time() + 999) / 1000;
-            wait         = pdMS_TO_TICKS(ms > 0 ? ms : 0);
-            wait         = wait ? wait : 1;
-        }
-        ulTaskNotifyTake(pdTRUE, wait); // start, stop and new periods wake it early
+        ulTaskNotifyTake(pdTRUE, wait_ticks(&s)); // start, stop and new periods wake it early
         taskENTER_CRITICAL(&lock);
         stats.stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
         taskEXIT_CRITICAL(&lock);

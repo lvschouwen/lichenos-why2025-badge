@@ -45,28 +45,52 @@ size_t wifi_list_clean(wifi_ap_t *aps, size_t n) {
     return kept;
 }
 
+// Sequence length a lead byte announces (0: not a lead byte; C0, C1 and F5 up are never valid)
+static size_t utf8_lead_len(unsigned char c) {
+    if (c >= 0xC2 && c <= 0xDF) {
+        return 2;
+    }
+    if ((c & 0xF0) == 0xE0) {
+        return 3;
+    }
+    return c >= 0xF0 && c <= 0xF4 ? 4 : 0;
+}
+
+// Every byte after the lead is a continuation; a NUL is not one, so this never reads past the string end
+static bool utf8_tail_ok(unsigned char const *s, size_t n) {
+    for (size_t i = 1; i < n; i++) {
+        if ((s[i] & 0xC0) != 0x80) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The second byte rules out overlongs, surrogates and anything above U+10FFFF
+static bool utf8_second_ok(unsigned char lead, unsigned char second) {
+    return !((lead == 0xE0 && second < 0xA0) || (lead == 0xED && second > 0x9F) || (lead == 0xF0 && second < 0x90) ||
+             (lead == 0xF4 && second > 0x8F));
+}
+
+static uint32_t utf8_decode(unsigned char const *s, size_t n) {
+    uint32_t cp = n == 2 ? s[0] & 0x1Fu : n == 3 ? s[0] & 0x0Fu : s[0] & 0x07u;
+    for (size_t i = 1; i < n; i++) {
+        cp = (cp << 6) | (s[i] & 0x3Fu);
+    }
+    return cp;
+}
+
+// C1 controls (CSI is U+009B) and the bidi and isolate controls
+static bool utf8_cp_unsafe(uint32_t cp) {
+    return (cp >= 0x80 && cp <= 0x9F) || cp == 0x200E || cp == 0x200F || (cp >= 0x202A && cp <= 0x202E) ||
+           (cp >= 0x2066 && cp <= 0x2069);
+}
+
 // Length of a strictly valid UTF-8 sequence (no overlongs, surrogates or above U+10FFFF) at s that is also safe to
 // show (no C1 controls, no bidi or format controls), or 0
 static size_t utf8_len(unsigned char const *s) {
-    unsigned char c = s[0];
-    size_t        n = c >= 0xC2 && c <= 0xDF ? 2 : (c & 0xF0) == 0xE0 ? 3 : c >= 0xF0 && c <= 0xF4 ? 4 : 0;
-    if (n == 0) {
-        return 0;
-    }
-    for (size_t i = 1; i < n; i++) {
-        if ((s[i] & 0xC0) != 0x80) {
-            return 0; // also stops at the NUL
-        }
-    }
-    if ((c == 0xE0 && s[1] < 0xA0) || (c == 0xED && s[1] > 0x9F) || (c == 0xF0 && s[1] < 0x90) ||
-        (c == 0xF4 && s[1] > 0x8F)) {
-        return 0;
-    }
-    uint32_t cp = n == 2 ? ((c & 0x1Fu) << 6) | (s[1] & 0x3Fu)
-                : n == 3 ? ((c & 0x0Fu) << 12) | ((s[1] & 0x3Fu) << 6) | (s[2] & 0x3Fu)
-                         : ((c & 0x07u) << 18) | ((s[1] & 0x3Fu) << 12) | ((s[2] & 0x3Fu) << 6) | (s[3] & 0x3Fu);
-    if ((cp >= 0x80 && cp <= 0x9F) || cp == 0x200E || cp == 0x200F || (cp >= 0x202A && cp <= 0x202E) ||
-        (cp >= 0x2066 && cp <= 0x2069)) {
+    size_t n = utf8_lead_len(s[0]);
+    if (n == 0 || !utf8_tail_ok(s, n) || !utf8_second_ok(s[0], s[1]) || utf8_cp_unsafe(utf8_decode(s, n))) {
         return 0;
     }
     return n;
