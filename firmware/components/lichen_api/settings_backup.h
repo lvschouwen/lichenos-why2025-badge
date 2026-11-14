@@ -76,6 +76,7 @@ typedef enum {
     SB_ERR_DUP,      // the same setting twice
     SB_ERR_TOO_LONG, // a line over SB_LINE_MAX
     SB_ERR_EMPTY,    // no setting from the allow-list in the file at all
+    SB_ERR_INCOMPLETE, // a save in flight (settings.new) without its end line: cut short
 } sb_err_t;
 
 #define SB_LINE_MAX 200
@@ -86,6 +87,8 @@ typedef struct {
     size_t   ignored; // lines of keys that are not in the allow-list
 } sb_result_t;
 
+// SB_OK when text ends with the end line, else SB_ERR_INCOMPLETE: what to report for a settings.new that was cut short
+sb_result_t sb_check_complete(char const *text, size_t len);
 // Parses and validates the whole file: either every line is fine and out gets one value per known setting (at most max,
 // *count of them), or err says what is wrong and nothing may be applied.
 sb_result_t sb_parse(char const *text, size_t len, sb_value_t *out, size_t max, size_t *count);

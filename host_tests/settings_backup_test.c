@@ -81,6 +81,11 @@ static void test_roundtrip(void) {
     CHECK(!sb_complete("badge_fw.x = 1\n", 15));
     CHECK(!sb_complete("x" SB_END_LINE, 1 + sizeof(SB_END_LINE) - 1)); // marker glued to a longer line
     CHECK(sb_complete(SB_END_LINE, sizeof(SB_END_LINE) - 1));
+    CHECK(sb_check_complete(file, flen).err == SB_OK);
+    sb_result_t cut = sb_check_complete(file, flen - 1); // what the screen is told for a cut settings.new
+    char        msg[80];
+    sb_error_text(&cut, msg, sizeof(msg));
+    CHECK(cut.err == SB_ERR_INCOMPLETE && strcmp(msg, "The file was cut short.") == 0);
 }
 
 static void test_bad_values(void) {

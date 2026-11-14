@@ -177,7 +177,9 @@ static sbs_state_t probe_file(void *ctx, sbs_name_t n) {
         return SBS_INVALID;
     }
     l->text[len] = '\0';
-    if (n == SBS_NEW && !sb_complete(l->text, len)) { // a save cut mid-write can still parse as a smaller file
+    sb_result_t whole = sb_check_complete(l->text, len);
+    if (n == SBS_NEW && whole.err != SB_OK) { // a save cut mid-write can still parse as a smaller file
+        note_refused(l, whole);
         return SBS_INVALID;
     }
     sb_result_t r = sb_parse(l->text, len, l->parsed, VALUES_MAX, &l->count);

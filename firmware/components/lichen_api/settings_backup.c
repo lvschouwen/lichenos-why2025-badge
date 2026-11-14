@@ -265,6 +265,10 @@ sb_result_t sb_parse(char const *text, size_t len, sb_value_t *out, size_t max, 
     return r;
 }
 
+sb_result_t sb_check_complete(char const *text, size_t len) {
+    return (sb_result_t){sb_complete(text, len) ? SB_OK : SB_ERR_INCOMPLETE, 0, 0};
+}
+
 void sb_error_text(sb_result_t const *r, char *out, size_t cap) {
     switch (r->err) {
         case SB_OK: snprintf(out, cap, "The file is fine."); break;
@@ -273,6 +277,7 @@ void sb_error_text(sb_result_t const *r, char *out, size_t cap) {
         case SB_ERR_DUP: snprintf(out, cap, "Line %u repeats a setting.", (unsigned)r->line); break;
         case SB_ERR_TOO_LONG: snprintf(out, cap, "Line %u is too long.", (unsigned)r->line); break;
         case SB_ERR_EMPTY: snprintf(out, cap, "The file has no settings Lichen can load."); break;
+        case SB_ERR_INCOMPLETE: snprintf(out, cap, "The file was cut short."); break;
     }
 }
 
