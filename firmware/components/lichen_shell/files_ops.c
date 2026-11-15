@@ -15,15 +15,19 @@
 extern char files_test_root[];
 #endif
 
-static char const *real_path(char const *path, char *buf, size_t cap) {
+// The badge fills buf as well (#443): a caller that keeps the buffer instead of the returned pointer, as the copy's
+// part file does, once opened an unfilled buffer there while the host test passed
+static char const *real_path_with(char const *path, char const *suffix, char *buf, size_t cap) {
 #ifdef FILES_HOST_TEST
-    snprintf(buf, cap, "%s%s", files_test_root, path);
-    return buf;
+    snprintf(buf, cap, "%s%s%s", files_test_root, path, suffix);
 #else
-    (void)buf;
-    (void)cap;
-    return path;
+    snprintf(buf, cap, "%s%s", path, suffix);
 #endif
+    return buf;
+}
+
+static char const *real_path(char const *path, char *buf, size_t cap) {
+    return real_path_with(path, "", buf, cap);
 }
 
 char const *files_result_text(files_result_t r) {
@@ -254,14 +258,14 @@ files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, siz
     if (r != FILES_OK) {
         return r;
     }
-    char part[FILES_PATH_MAX], rpart[FILES_PATH_MAX + 64], rsrc[FILES_PATH_MAX + 64], rdst[FILES_PATH_MAX + 64];
-    snprintf(part, sizeof(part), "%s" FILES_PART_SUFFIX, dst);
-    real_path(part, rpart, sizeof(rpart));
+    // Two path buffers, not four (the stack limit): the part file's name stays, the other holds the source, then the target
+    char rpart[FILES_PATH_MAX + 64], other[FILES_PATH_MAX + 64];
+    real_path_with(dst, FILES_PART_SUFFIX, rpart, sizeof(rpart));
     struct stat st;
     if (stat(rpart, &st) == 0 && unlink(rpart) != 0) { // our own leftover of a copy that lost power
         return errno_result(errno, FILES_ERR_IO);
     }
-    FILE *in  = fopen(real_path(src, rsrc, sizeof(rsrc)), "rb");
+    FILE *in  = fopen(real_path(src, other, sizeof(other)), "rb");
     FILE *out = in ? fopen(rpart, "wb") : NULL;
     if (!out) {
         r = in ? fail_at(fail, FILES_STEP_DST_OPEN, files_dest_result(errno)) : fail_at(fail, FILES_STEP_SRC_OPEN, FILES_ERR_SRC);
@@ -276,7 +280,7 @@ files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, siz
     if (fclose(out) != 0 && r == FILES_OK) {
         r = note_fail(fail, FILES_STEP_DST_WRITE) == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
     }
-    if (r == FILES_OK && rename(rpart, real_path(dst, rdst, sizeof(rdst))) != 0) {
+    if (r == FILES_OK && rename(rpart, real_path(dst, other, sizeof(other))) != 0) {
         r = errno_result(note_fail(fail, FILES_STEP_DST_WRITE), FILES_ERR_IO);
     }
     if (r != FILES_OK) {

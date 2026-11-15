@@ -1969,6 +1969,12 @@ target_compile_definitions(files_ops_test PRIVATE FILES_HOST_TEST)
 target_compile_options(files_ops_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME files_ops_test COMMAND files_ops_test)
 
+# #443: the same file built as on the badge (no FILES_HOST_TEST)
+add_executable(files_real_path_test ${CMAKE_CURRENT_SOURCE_DIR}/files_real_path_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c ${CMAKE_CURRENT_SOURCE_DIR}/walk_pace_host.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/walk_slice.c)
+target_include_directories(files_real_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(files_real_path_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME files_real_path_test COMMAND files_real_path_test)
+
 add_executable(weather_series_test
     ${CMAKE_CURRENT_SOURCE_DIR}/weather_series_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/weather_series.c
@@ -2245,6 +2251,7 @@ add_custom_target(run_tests
     lichen_sys_pure_view_test
     files_model_test
     files_ops_test
+    files_real_path_test
     radio_state_test
     ui_call_queue_test
     raw_hooks_test
