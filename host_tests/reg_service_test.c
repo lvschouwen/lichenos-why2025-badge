@@ -445,8 +445,10 @@ static void test_mismatch(void) {
     CHECK(!reg_proxy_mismatch(&q, REG_ID_BL_DISPLAY, &dim, 10001));
 }
 
-// #468: disp.engine is the display domain's one settable key, by name, and only to cpu and ppa-async (the blocking ppa is gone, #475)
+// #468: disp.engine is the display domain's one settable key, by name, and only to cpu and ppa-async (#475: no
+// blocking ppa any more)
 extern unsigned disp_engine_sets;
+extern bool     disp_engine_refuse;
 
 static void test_disp_engine(void) {
     char               reply[160];
@@ -461,6 +463,10 @@ static void test_disp_engine(void) {
     CHECK(set("disp.engine 2", reply, sizeof(reply)) == RC_RANGE);
     CHECK(set("disp.engine cpu", reply, sizeof(reply)) == RC_OK);
     CHECK(disp_engine_sets == 2);
+    disp_engine_refuse = true; // #475: a refusal names its reason, not "applied not read back"
+    CHECK(set("disp.engine cpu", reply, sizeof(reply)) == RC_FAILED);
+    CHECK(strstr(reply, "developer mode is off") != NULL && strstr(reply, "not read back") == NULL);
+    disp_engine_refuse = false;
     CHECK(set("disp.pclk 1", reply, sizeof(reply)) == RC_RO); // the rest of the domain stays read-only
 }
 

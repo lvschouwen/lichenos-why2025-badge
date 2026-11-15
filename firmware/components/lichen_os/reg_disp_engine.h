@@ -9,7 +9,7 @@
 // between two frames).
 typedef enum {
     REG_DISP_ENGINE_SET,     // applied (the read-back says which)
-    REG_DISP_ENGINE_RELEASE, // a release image has no PPA engine
+    REG_DISP_ENGINE_RELEASE, // a release image has no bench switch
     REG_DISP_ENGINE_DEV_OFF, // developer mode is off
     REG_DISP_ENGINE_BAD,     // not an engine id
     REG_DISP_ENGINE_NO_LOCK, // the LVGL lock was not free in time

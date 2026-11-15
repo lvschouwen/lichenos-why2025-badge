@@ -32,10 +32,10 @@ typedef struct {
     bool     strict;       // fell_back does not stop the fake PPA: only its done does
     bool     ready_in_isr; // what the last start asked for
     uint32_t now;
-    uint32_t rotate_us;    // how long a fake transfer takes
-    uint32_t frames;       // the scan-out's end-of-frame count
-    int      fell_back[2]; // by reason
-    int      cpu_fb_last;  // buffer of the last CPU turn
+    uint32_t rotate_us;                         // how long a fake transfer takes
+    uint32_t frames;                            // the scan-out's end-of-frame count
+    int      fell_back[DISPLAY_FALLBACK_COUNT]; // by reason
+    int      cpu_fb_last;                       // buffer of the last CPU turn
     display_strip_t cpu_last;
     uint32_t        gen_last; // tag of the last start
 } fake_t;
@@ -373,15 +373,107 @@ static void test_late_done_waits(void) {
     display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
     fk.late_done = true;
     fk.strict    = true;
-    CHECK(refresh(&e, &f, 2) == 1); // strip 0 in the background (readied by the redo path, not counted), strip 1 on the CPU
+    CHECK(
+        refresh(&e, &f, 2) == 1
+    ); // strip 0 in the background (readied by the redo path, not counted), strip 1 on the CPU
     CHECK(strcmp(fk.log, "STLCCR") == 0); // the redo (C) only after the late done (L)
     CHECK(fk.overlaps == 0);
     CHECK(!display_engine_ppa_hung(&e));
-    CHECK(fk.fell_back[DISPLAY_FALLBACK_TIMEOUT] == 1 && display_engine_active(&e) == DISPLAY_ENGINE_CPU);
+    CHECK(fk.fell_back[DISPLAY_FALLBACK_LATE] == 1 && display_engine_active(&e) == DISPLAY_ENGINE_CPU);
+}
+
+// The same on the last (foreground) strip: the redo waits for the late done, and only then the swap is requested
+static void test_late_done_last_strip(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    fk.late_done = true;
+    fk.strict    = true;
+    CHECK(refresh(&e, &f, 1) == 1);
+    CHECK(strcmp(fk.log, "STLCR") == 0);
+    CHECK(fk.overlaps == 0 && !display_engine_ppa_hung(&e));
+}
+
+// One late fallback: on the CPU for DISPLAY_ENGINE_REARM_US, then ppa-async again at the first strip of a refresh
+static void late_fallback(fake_t *fk, display_engine_t *e, display_flip_t *f) {
+    fk->late_done = true;
+    refresh(e, f, 2);
+    fk->late_done = false;
+}
+
+static void test_late_rearm(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    late_fallback(&fk, &e, &f);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU && e.rearm);
+    fk.now += DISPLAY_ENGINE_REARM_US - 100000;
+    refresh(&e, &f, 1);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU && e.rearms == 0); // not yet
+    fk.now += 200000;
+    fk.n    = 0;
+    refresh(&e, &f, 2);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA_ASYNC && e.rearms == 1);
+    CHECK(fk.fell_back[DISPLAY_EVENT_REARM] == 1);
+    CHECK(strstr(fk.log, "SW") != NULL && !e.rearm);
+}
+
+// Never done: hung, the CPU for the boot
+static void test_hung_no_rearm(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    fk.never_done = true;
+    refresh(&e, &f, 2);
+    CHECK(display_engine_ppa_hung(&e) && !e.rearm);
+    fk.never_done  = false;
+    fk.now        += 60u * 1000000u;
+    refresh(&e, &f, 2);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU && e.rearms == 0);
+}
+
+// The third late fallback of a boot is final
+static void test_late_cap(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    for (int i = 0; i < DISPLAY_ENGINE_LATE_MAX - 1; i++) {
+        late_fallback(&fk, &e, &f);
+        fk.now += DISPLAY_ENGINE_REARM_US + 1000;
+        refresh(&e, &f, 1);
+        CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA_ASYNC);
+    }
+    late_fallback(&fk, &e, &f);
+    CHECK(fk.fell_back[DISPLAY_FALLBACK_LATE_FINAL] == 1 && !e.rearm);
+    fk.now += 600u * 1000000u;
+    refresh(&e, &f, 2);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU);
+    CHECK(e.rearms == DISPLAY_ENGINE_LATE_MAX - 1 && e.late_fallbacks == DISPLAY_ENGINE_LATE_MAX);
+}
+
+// A disp.engine cpu set by hand (developer mode) is not overridden by the re-arm
+static void test_manual_cpu_stands(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    late_fallback(&fk, &e, &f);
+    CHECK(display_engine_select(&e, DISPLAY_ENGINE_CPU));
+    fk.now += 60u * 1000000u;
+    refresh(&e, &f, 2);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU && e.rearms == 0);
 }
 
 int main(void) {
-    test_late_done_waits();
     test_gen();
     test_gen_per_transfer();
     test_hung_blocks_rearm();
@@ -394,6 +486,12 @@ int main(void) {
     test_refused_start();
     test_hung_transfer();
     test_hung_redo_target();
+    test_late_done_waits();
+    test_late_done_last_strip();
+    test_late_rearm();
+    test_hung_no_rearm();
+    test_late_cap();
+    test_manual_cpu_stands();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

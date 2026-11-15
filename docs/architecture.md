@@ -299,8 +299,9 @@ The rule: **core 1 draws, core 0 talks to the world.**
 
 ## Using the hardware better
 
-- **PPA (2D accelerator):** let it do the 90° rotation instead of LVGL's software rotate, freeing core 1. An
-  experiment: the earlier attempt with the DSI ISR / DMA2D IRAM options broke esp_lvgl_port 2.9.
+- **PPA (2D accelerator):** does the 90° rotation of each LVGL strip in the background while LVGL renders the next
+  one (`ppa-async`, the engine after every boot since #475, with a fallback to the CPU; the earlier attempt through
+  esp_lvgl_port's second buffer was slower). `display_engine.c` holds the order of strip, transfer and buffer swap.
 - **Hardware SHA, AES and ECC exist, but MeshCore's crypto is Ed25519/X25519,** which they don't cover. Not worth it
   now.
 - **Memory:** large state in PSRAM, internal DMA-capable RAM at 150 KB or more free.

@@ -239,11 +239,12 @@ reg_status_t reg_p4_disp_engine_set(reg_entry_t const *e, reg_value_t const *v) 
 #if CONFIG_LICHEN_DEV_COMMANDS
     bool const dev_build = true;
 #else
-    bool const dev_build = false; // a release image has no PPA engine
+    bool const dev_build = false; // a release image has no bench switch
 #endif
     reg_disp_engine_why_t const why = reg_disp_engine_set(v->u, dev_build);
     if (why != REG_DISP_ENGINE_SET) {
         ESP_LOGW(TAG, "%s: %s", e->name, reg_disp_engine_why_text(why));
+        reg_cmd_set_why(reg_disp_engine_why_text(why)); // the console reply names it
         return REG_FAILED;
     }
     return REG_OK;

@@ -179,11 +179,12 @@ static void flip_log_stats(void) {
     uint32_t const strips = es->strips ? es->strips : 1;
     ESP_LOGI(TAG,
              "flip: %u swaps, %u timeouts, %u refused; wait avg %u max %u us; copy avg %u max %u us; "
-             "%s rotate avg %u max %u us, %u strips, %u fallbacks",
+             "%s rotate avg %u max %u us, %u strips, %u fallbacks (%u late), %u re-arms",
              (unsigned)st->swaps, (unsigned)st->timeouts, (unsigned)st->refusals, (unsigned)(st->wait_us / n),
              (unsigned)st->wait_max_us, (unsigned)(st->copy_us / n), (unsigned)st->copy_max_us,
              display_engine_name(display_engine_active(&engine)), (unsigned)(es->rotate_us / strips),
-             (unsigned)es->rotate_max_us, (unsigned)es->strips, (unsigned)es->fallbacks);
+             (unsigned)es->rotate_max_us, (unsigned)es->strips, (unsigned)es->fallbacks,
+             (unsigned)engine.late_fallbacks, (unsigned)engine.rearms);
     memset(st, 0, sizeof(*st));
     memset(es, 0, sizeof(*es));
 #endif
@@ -203,7 +204,8 @@ static void cpu_turn(void *ctx, display_strip_t const *s, unsigned fb) {
 
 // PSRAM ECC (CONFIG_SPIRAM_ECC_ENABLE, the open IDF bug with PPA reads from ECC PSRAM) is off in sdkconfig.defaults:
 // accepted, nothing to guard (#475).
-// The PPA engine (#468, #475, experiments e1/e2 of #95). What the IDF 6.1 driver does (esp_driver_ppa, read, not changed):
+// The PPA engine (#468, #475, experiments e1/e2 of #95). What the IDF 6.1 driver does (esp_driver_ppa, read, not
+// changed):
 // - Cache, both modes, before the transfer and in the caller's task: the input window is written back (C2M,
 //   unaligned allowed, ppa_srm.c:276) and the output window invalidated (M2C, ppa_srm.c:285); nothing after it. The
 //   output window is whole rows (block_offset_y .. + block_h, full pic_w), and our turned strip spans all 720 rows,
@@ -215,8 +217,8 @@ static void cpu_turn(void *ctx, display_strip_t const *s, unsigned fb) {
 // - The done callback runs from the DMA2D RX channel's EOF interrupt (ppa_transaction_done_cb, ppa_core.c:547, set
 //   as on_recv_eof in ppa_srm.c:126), after the driver recycled the transaction (ppa_core.c:572; done_cb at :592),
 //   so the next start cannot find the client busy. Only a successful EOF gets there: dma2d_rx_isr delivers on_recv_eof
-//   only for RX_SUC_EOF (dma2d.c:363, the only EOF event unmasked, :775); an error EOF frees the channels (:345-:358)
-//   and calls nobody. A 2D-DMA error therefore never reads as a done, it ends as a timeout below (#475: the
+//   only for RX_SUC_EOF (dma2d.c:363, the only EOF event unmasked, :773-775); an error EOF frees the channels
+//   (:345-:358) and calls nobody. A 2D-DMA error therefore never reads as a done, it ends as a timeout below (#475: the
 //   old "an error looks like a done" risk does not exist in 6.1, the driver's own TODO at ppa_core.c:116 says the
 //   same, a stuck transfer). That interrupt is not IRAM
 //   (DMA2D_ISR_IRAM_SAFE off), so neither is ours: a flash write holds it back, and one longer than the bound
@@ -346,11 +348,20 @@ static void ppa_on_demand(void) {
     }
 }
 
-// Once per failure: the engine stays on the CPU until it is selected again
+// Once per event, never per strip. A refused start or a hung PPA keeps the CPU until selected again (or for the boot);
+// a late done re-arms ppa-async by itself (display_engine.h), the third one does not.
 static void engine_fell_back(void *ctx, display_engine_id_t from, display_fallback_t why) {
     (void)ctx;
-    ESP_LOGW(TAG, "rotate: %s -> cpu, %s", display_engine_name(from),
-             why == DISPLAY_FALLBACK_START ? "the PPA refused the transfer" : "no PPA done in time");
+    static char const *const text[DISPLAY_FALLBACK_COUNT] = {
+        [DISPLAY_FALLBACK_START]      = "the PPA refused the transfer",
+        [DISPLAY_FALLBACK_TIMEOUT]    = "no PPA done in time (hung, cpu until reboot)",
+        [DISPLAY_FALLBACK_LATE]       = "PPA done late, ppa-async again in 5 s",
+        [DISPLAY_FALLBACK_LATE_FINAL] = "PPA done late again, staying on cpu this boot",
+        [DISPLAY_EVENT_REARM]         = "ppa-async again after a late PPA done",
+    };
+    ESP_LOGW(TAG, "rotate: %s -> %s, %s", display_engine_name(from),
+             why == DISPLAY_EVENT_REARM ? "ppa-async" : "cpu",
+             text[why < DISPLAY_FALLBACK_COUNT ? why : DISPLAY_FALLBACK_TIMEOUT]);
 }
 
 static display_engine_ops_t const engine_ops = {cpu_turn, ppa_start, ppa_wait, engine_fell_back, flip_now_us, NULL};
@@ -507,8 +518,8 @@ bool display_start(lv_display_t **out) {
         bool const swap_on = direct_flush_callbacks(panel);
         display_flip_init(&flip, &flip_ops, swap_on); // front = fbs[0], where dpi_panel_init starts the DMA
         display_engine_init(&engine, &engine_ops);
-        display_engine_select(&engine, DISPLAY_ENGINE_PPA_ASYNC); // every boot (#475: disp.engine is not saved); the
-                                                                  // first strip sets the client up, a failure falls back
+        // Every boot (#475: disp.engine is not saved); the first strip sets the client up, a failure falls back
+        display_engine_select(&engine, DISPLAY_ENGINE_PPA_ASYNC);
         direct_disp = *out;
         lv_display_set_flush_cb(*out, flush_direct);
         lv_display_set_flush_wait_cb(*out, flush_wait);

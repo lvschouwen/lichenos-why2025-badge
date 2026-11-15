@@ -176,6 +176,12 @@ static size_t applied_suffix(reg_entry_t const *e, reg_value_t const *applied, b
     return done(snprintf(buf, cap, "applied %s%s%s", v, e->unit ? " " : "", e->unit ? e->unit : ""), cap);
 }
 
+static char const *set_why; // one console task sets and replies in turn
+
+void reg_cmd_set_why(char const *why) {
+    set_why = why;
+}
+
 size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t const *applied, bool have_applied,
                          char const *args, char *buf, size_t cap) {
     char tail[48];
@@ -208,6 +214,11 @@ size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t c
                                  (long long)e->max, tail),
                         cap);
         default: break;
+    }
+    char const *const why = set_why;
+    set_why               = NULL;
+    if (r == RC_FAILED && why) {
+        return done(snprintf(buf, cap, "ERR refused: %s set, %s", e->name, why), cap);
     }
     return done(snprintf(buf, cap, "ERR failed: %s set, applied not read back", e->name), cap);
 }

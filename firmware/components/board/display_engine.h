@@ -30,9 +30,17 @@ typedef struct {
 } display_strip_t;
 
 typedef enum {
-    DISPLAY_FALLBACK_START,   // the driver refused the transfer
-    DISPLAY_FALLBACK_TIMEOUT, // no done within the hook's bound
+    DISPLAY_FALLBACK_START,      // the driver refused the transfer
+    DISPLAY_FALLBACK_TIMEOUT,    // no done even in the late wait: the PPA is hung, the engine stays on the CPU
+    DISPLAY_FALLBACK_LATE,       // a done after the first bound only: back on the CPU, re-armed after
+                                 // DISPLAY_ENGINE_REARM_US
+    DISPLAY_FALLBACK_LATE_FINAL, // the third late done of this boot: stays on the CPU for good
+    DISPLAY_EVENT_REARM,         // not a fallback: ppa-async was re-armed (the same hook, for one log line)
+    DISPLAY_FALLBACK_COUNT,
 } display_fallback_t;
+
+#define DISPLAY_ENGINE_REARM_US 5000000u // on the CPU after a late done this long, then ppa-async again
+#define DISPLAY_ENGINE_LATE_MAX 3        // late fallbacks per boot; the last one is final
 
 typedef struct {
     // Turn the strip into buffer fb on the CPU, written back before it returns
@@ -64,6 +72,9 @@ typedef struct {
     uint32_t               gen;       // the last transfer's tag, never 0
     uint32_t               hung_gen;  // the tag of the transfer that timed out
     bool                   mid_frame; // a strip of an unfinished refresh went out
+    bool                   rearm;     // fell back on a late done (not hung, not set by hand): re-arm after a while
+    uint32_t               cpu_since_us;
+    uint32_t               late_fallbacks, rearms; // per boot, kept across engine changes (stats are not)
     uint32_t               start_us;
     unsigned               flight_fb; // where the transfer in flight writes, for the CPU redo after a timeout
     display_strip_t        flight;
@@ -72,6 +83,9 @@ typedef struct {
 
 void display_engine_init(display_engine_t *e, display_engine_ops_t const *ops);
 
+// After a late (not hung) fallback the engine re-arms ppa-async by itself at the first strip of a refresh once it
+// has been on the CPU DISPLAY_ENGINE_REARM_US, i.e. at a frame boundary like a select, so the PPA turns that frame
+// into the back buffer and the swap at its last strip shows it. A select, by hand, cancels a pending re-arm.
 // Ask for an engine. Applied at once at a frame boundary with nothing in flight (always so under the LVGL lock, as
 // the registry setter calls it), else at the first strip of the next refresh. Clears the rotate stats. False = unknown,
 // or a PPA engine while the PPA has not finished a transfer that timed out (display_engine_ppa_hung): a re-armed PPA
@@ -92,7 +106,8 @@ display_engine_id_t display_engine_active(display_engine_t const *e);
 
 // Take the done of a transfer in flight (bounded, twice); on a timeout fall back to the CPU and redo that strip, whose
 // pixels LVGL keeps until the next flush returns. The redo waits for a late done first (#475), so a slow transfer
-// does not write its old strip over what the CPU path draws next; a PPA that gives none even then is `hung`. LVGL's flush_wait_cb, and the start of every strip.
+// does not write its old strip over what the CPU path draws next; a PPA that gives none even then is `hung`. LVGL's
+// flush_wait_cb, and the start of every strip.
 void display_engine_settle(display_engine_t *e);
 
 // One strip, the flush callback's body. Order: settle the previous transfer, then the swap state machine's write
