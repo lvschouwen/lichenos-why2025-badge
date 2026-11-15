@@ -2731,3 +2731,10 @@ add_test(NAME check_console_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE
 # #476: the use-soak plan and driver against a fake badge and clock, and the soak report split by segment
 add_test(NAME soak_driver_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_driver_test.py)
 add_test(NAME soak_segment_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_segment_test.py)
+
+# "crash test twdt" argument parsing and claim (#479)
+add_executable(crash_twdt_test ${CMAKE_CURRENT_SOURCE_DIR}/crash_twdt_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash/crash_twdt.c)
+target_include_directories(crash_twdt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash)
+target_compile_definitions(crash_twdt_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
+target_compile_options(crash_twdt_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME crash_twdt_test COMMAND crash_twdt_test)

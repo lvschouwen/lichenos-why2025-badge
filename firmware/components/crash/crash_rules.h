@@ -11,5 +11,7 @@ static console_sub_t const CRASH_RULES[] = {
     {"clear", CON_MATCH_EXACT, CON_GATE_OPEN, CON_ORIGIN_ANY, CON_F_ERASE},
     {CON_DEV_WORD("test panic"), CON_MATCH_EXACT, CON_GATE_DEV, CON_ORIGIN_ANY, CON_F_RESTART},
     {CON_DEV_WORD("test wdt"), CON_MATCH_EXACT, CON_GATE_DEV, CON_ORIGIN_ANY, CON_F_RESTART},
+    // a task that spins for ~7 s until the task watchdog warns (#479): no restart, nothing erased or transmitted
+    {CON_DEV_WORD("test twdt"), CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, 0},
     CONSOLE_SUB_END,
 };

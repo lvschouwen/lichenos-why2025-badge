@@ -14,15 +14,15 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	297477
+size	<merged-strings>	297697
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	18259
 size	libbootloader_support.a	5942
 size	libc.a	47702
-size	libc6link.a	33272
-size	libcrash.a	5786
+size	libc6link.a	33284
+size	libcrash.a	6245
 size	libcxx.a	872
 size	libefuse.a	2173
 size	libeh_common.a	148
@@ -119,7 +119,7 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13423
 size	libmbedtls.a	22
-size	libmesh.a	422186
+size	libmesh.a	422194
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2

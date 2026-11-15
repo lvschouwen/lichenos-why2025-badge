@@ -2,6 +2,7 @@
 
 #include "crash_log.h"
 #include "crash_rules.h"
+#include "crash_twdt.h"
 #include "esp_core_dump.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -11,6 +12,7 @@
 #include "esp_partition.h"
 #include "esp_rom_crc.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "file_replace.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -382,6 +384,57 @@ static void crash_test_wdt(void) {
         __asm__ volatile("nop");
     }
 }
+
+// The deepest helper spins the core for about 7 s, longer than the task watchdog's 5 s, so the idle task of this core
+// cannot feed it and the watchdog warns (CONFIG_ESP_TASK_WDT_PANIC is off). The levels are noinline and do work after
+// the call, so the warning's backtrace shows more than two frames (#479).
+#define TWDT_SPIN_US 7000000
+#define TWDT_STACK   3072 // internal RAM, held for the test only: the task frees it when it deletes itself
+#define TWDT_PRIO    2    // above the idle task (0) and psram_guard (1), below everything that matters
+
+static volatile int s_twdt_sink;
+
+static void __attribute__((noinline)) twdt_spin(void) {
+    int64_t const end = esp_timer_get_time() + TWDT_SPIN_US;
+    while (esp_timer_get_time() < end) {
+        s_twdt_sink++;
+    }
+}
+
+static void __attribute__((noinline)) twdt_level2(void) {
+    twdt_spin();
+    s_twdt_sink++;
+}
+
+static void __attribute__((noinline)) twdt_level1(void) {
+    twdt_level2();
+    s_twdt_sink++;
+}
+
+static void twdt_task(void *arg) {
+    (void)arg;
+    twdt_level1();
+    crash_twdt_release();
+    vTaskDelete(NULL);
+}
+
+static void crash_test_twdt(char const *rest) {
+    int core;
+    if (!crash_twdt_parse(rest, &core)) {
+        console_reply("crash test twdt [0|1]");
+        return;
+    }
+    if (!crash_twdt_claim()) {
+        console_reply("crash: test twdt already running");
+        return;
+    }
+    if (xTaskCreatePinnedToCore(twdt_task, "twdt_test", TWDT_STACK, NULL, TWDT_PRIO, NULL, core) != pdPASS) {
+        crash_twdt_release();
+        console_reply("crash: test twdt, no memory for the task");
+        return;
+    }
+    console_reply("crash: test twdt started, the task watchdog warns in about 5 s (no restart)");
+}
 #endif
 
 bool crash_clear_all(void) {
@@ -413,8 +466,10 @@ static void crash_command(char const *args) {
         crash_test_panic(); // developer mode: its row in crash_rules.h, checked before this runs (#464)
     } else if (strcmp(args, "test wdt") == 0) {
         crash_test_wdt();
+    } else if (strncmp(args, "test twdt", 9) == 0 && (args[9] == '\0' || args[9] == ' ')) {
+        crash_test_twdt(args + 9);
     } else {
-        console_reply("crash [dump | clear | test panic|wdt]");
+        console_reply("crash [dump | clear | test panic|wdt|twdt [core]]");
 #else
     } else {
         console_reply("crash [dump | clear]"); // a release names no test subcommand (build.sh release_checks)
@@ -454,7 +509,7 @@ void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register_rules("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump; test: developer mode)",
+    console_register_rules("crash", "crash [dump | clear | test panic|wdt|twdt] (crash log and core dump; test: developer mode)",
                            crash_command, CRASH_RULES);
 #else
     console_register_rules("crash", "crash [dump | clear] (crash log and core dump)", crash_command, CRASH_RULES);

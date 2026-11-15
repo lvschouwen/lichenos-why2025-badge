@@ -146,6 +146,9 @@ static pin_t const PINS[] = {
     {"crash clear",                "RRR", "RRR", "RRR", false},
     {"crash test panic",           "RRR", "DDD", "RRR", false}, // release: usage
     {"crash test wdt",             "RRR", "DDD", "RRR", false},
+    {"crash test twdt",            "RRR", "DDD", "RRR", false}, // #479
+    {"crash test twdt 1",          "RRR", "DDD", "RRR", false},
+    {"crash test twdtx",           "RRR", "RRR", "RRR", false}, // usage
     {"crash test",                 "RRR", "RRR", "RRR", false}, // usage
     {"sd",                         "RRR", "RRR", "RRR", false},
     {"sd status",                  "RRR", "RRR", "RRR", false},
