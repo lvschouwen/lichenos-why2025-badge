@@ -82,6 +82,7 @@ static void cmd_mesh_status(void) {
                   (unsigned long)sent, (unsigned long)send_failed, (unsigned long)timeouts, (unsigned long)refused,
                   contacts, (unsigned)msgs);
     console_reply("identity: %s", mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
+    mesh_advtab_run_console(); // #469
     mesh_radio_console(); // mesh_radio_line.c
 }
 

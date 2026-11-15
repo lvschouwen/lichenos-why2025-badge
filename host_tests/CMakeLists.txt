@@ -1080,11 +1080,11 @@ target_include_directories(advert_limit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(advert_limit_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME advert_limit_test COMMAND advert_limit_test)
 
-add_executable(mesh_blobq_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_blobq_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_blobq.c)
-target_include_directories(mesh_blobq_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
-target_compile_options(mesh_blobq_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME mesh_blobq_test COMMAND mesh_blobq_test)
+add_executable(mesh_advtab_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_advtab_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advtab.c)
+target_include_directories(mesh_advtab_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_advtab_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_advtab_test COMMAND mesh_advtab_test)
 
 add_executable(mesh_advert_cfg_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_advert_cfg_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c)
@@ -1254,7 +1254,7 @@ add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp ${L
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_outbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/advert_limit.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_blobq.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advtab.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_scope.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_trace.c
@@ -2235,7 +2235,7 @@ add_custom_target(run_tests
     app_page_model_test
     mesh_contact_fmt_test
     advert_limit_test
-    mesh_blobq_test
+    mesh_advtab_test
     mesh_advert_cfg_test
     mesh_scope_test
     mesh_onair_test

@@ -1080,52 +1080,42 @@ static void remove_node(BadgeMesh &mesh, uint8_t const *key) {
     CHECK(mesh.getNumContacts() == 0);
 }
 
-static void readd_node(BadgeMesh &mesh, std::vector<uint8_t> const &advert) {
+static void readd_node(BadgeMesh &mesh, std::vector<uint8_t> const &advert, mesh_advtab_t const &adverts) {
     CHECK(mesh.importContact(advert.data(), (uint8_t)advert.size()));
     settle(mesh, 5);
-    CHECK(mesh.getNumContacts() == 1 && mesh.blobsQueued() == 1);
+    CHECK(mesh.getNumContacts() == 1 && adverts.count == 1);
 }
 
-// #257 review: a removed contact's queued blob is never written, also when it was taken just before the removal; a
-// stop writes what is queued
-static void blob_lifecycle_checks(BadgeMesh &mesh, std::vector<uint8_t> const &advert, char const *root) {
+// #469: a removed contact's advert leaves the table at the prune before a snapshot, and no file is ever written
+static void blob_lifecycle_checks(BadgeMesh &mesh, std::vector<uint8_t> const &advert, char const *root,
+                                  mesh_advtab_t &adverts) {
     ContactsIterator it = mesh.startContactsIterator();
     ContactInfo      c;
+    uint8_t          out[MAX_TRANS_UNIT];
     CHECK(it.hasNext(&mesh, c));
     remove_node(mesh, c.id.pub_key);
-    CHECK(blob_files(root) == 0); // MyMesh deleted the file
+    CHECK(adverts.count == 1); // MyMesh deletes a file that is not there; the table still holds the advert
+    mesh.pruneAdverts();
+    CHECK(adverts.count == 0 && blob_files(root) == 0);
 
-    readd_node(mesh, advert); // queued, then removed before its write
-    remove_node(mesh, c.id.pub_key);
-    mesh.takeBlob(true);
-    mesh.writeTakenBlob();
-    CHECK(blob_files(root) == 0 && mesh.blobsQueued() == 0);
-
-    readd_node(mesh, advert); // taken, then removed by MyMesh's loop before the write after the unlock
-    mesh.takeBlob(true);
-    remove_node(mesh, c.id.pub_key);
-    mesh.writeTakenBlob();
+    readd_node(mesh, advert, adverts);
+    mesh.pruneAdverts(); // a known contact's advert stays
+    it = mesh.startContactsIterator();
+    CHECK(adverts.count == 1 && it.hasNext(&mesh, c) && mesh.exportContact(c, out) > 0);
+    mesh.saveAll(); // MeshCore's own reboot: prefs, contacts, channels, and still no advert file
     CHECK(blob_files(root) == 0);
-    mesh.takeBlob(true);
-    CHECK(mesh.blobsQueued() == 0);
 
-    readd_node(mesh, advert); // a stop: written at once, the queue empty
-    mesh.flushBlobs();
-    CHECK(blob_files(root) == 1 && mesh.blobsQueued() == 0);
-    mesh.takeBlob(true);
-    mesh.writeTakenBlob();
-    CHECK(blob_files(root) == 1);
-
-    remove_node(mesh, c.id.pub_key); // a factory reset: nothing queued comes back
-    readd_node(mesh, advert);
-    mesh.dropBlobs();
-    mesh.takeBlob(true);
-    mesh.writeTakenBlob();
-    CHECK(blob_files(root) == 0 && mesh.blobsQueued() == 0);
+    mesh.attachAdverts(nullptr); // no memory for the table: nothing kept, nothing shared, no file
+    remove_node(mesh, c.id.pub_key);
+    CHECK(mesh.importContact(advert.data(), (uint8_t)advert.size()));
+    settle(mesh, 5);
+    it = mesh.startContactsIterator();
+    CHECK(mesh.getNumContacts() == 1 && it.hasNext(&mesh, c) && mesh.exportContact(c, out) == 0);
+    mesh.pruneAdverts();
+    CHECK(blob_files(root) == 0);
 }
 
-// #257: an advert's blob waits in RAM and is written after the loop, as the mesh task does after the unlock; until then
-// "share" reads the queued copy
+// #469: an advert's raw packet is kept in the table, never in a file; "share" and "export" read it from there
 static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char const *old_root) {
     char root[] = "/tmp/companion_blobs.XXXXXX";
     CHECK(mkdtemp(root) != NULL);
@@ -1137,11 +1127,15 @@ static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char c
     static mt_t             mt;
     static rr_t             rr;
     static BadgeMesh        mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
+    static mesh_advtab_t    adverts;
+    static std::vector<uint8_t> adverts_mem(mesh_advtab_bytes(4));
+    mesh_advtab_init(&adverts, adverts_mem.data(), 4);
     ob_init(&ob);
     mt_init(&mt);
     rr_init(&rr);
     mesh.attachTrace(&mt);
     mesh.attachRemote(&rr);
+    mesh.attachAdverts(&adverts);
     store.begin();
     mesh.begin();
     mesh.startPipe();
@@ -1149,21 +1143,13 @@ static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char c
     test_radio.pending = packets[0]; // an advert of a new node
     settle(mesh, 10);
     CHECK(mesh.getNumContacts() == 1);
-    CHECK(mesh.blobsQueued() == 1);
-    CHECK(blob_files(root) == 0); // nothing written inside the loop
+    CHECK(adverts.count == 1);
+    CHECK(blob_files(root) == 0); // no file, inside the loop or after it
     ContactInfo c;
     uint8_t     out[MAX_TRANS_UNIT];
     ContactsIterator it = mesh.startContactsIterator();
-    CHECK(it.hasNext(&mesh, c) && mesh.exportContact(c, out) > 0); // the queued copy
-    mesh.takeBlob(false);                                               // a packet came in: not yet
-    mesh.writeTakenBlob();
-    CHECK(blob_files(root) == 0);
-    mesh.takeBlob(true); // quiet: written after the "unlock", taken off at the next take
-    mesh.writeTakenBlob();
-    CHECK(blob_files(root) == 1 && mesh.blobsQueued() == 1);
-    mesh.takeBlob(true);
-    CHECK(mesh.blobsQueued() == 0 && mesh.exportContact(c, out) > 0); // now from the file
-    blob_lifecycle_checks(mesh, packets[0], root);
+    CHECK(it.hasNext(&mesh, c) && mesh.exportContact(c, out) > 0); // from the table
+    blob_lifecycle_checks(mesh, packets[0], root, adverts);
     fs_shim_set_root(old_root);
 }
 

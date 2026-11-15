@@ -1,0 +1,209 @@
+// Host test: the advert table in PSRAM and its snapshot (#469)
+#include "mesh_advtab.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int failures;
+
+#define CHECK(cond)                                                                                                    \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                                     \
+            failures++;                                                                                                \
+        }                                                                                                              \
+    } while (0)
+
+#define CAP 6
+
+static mesh_advtab_t t;
+static void         *mem;
+
+static void fresh(size_t cap) {
+    free(mem);
+    mem = malloc(mesh_advtab_bytes(cap));
+    mesh_advtab_init(&t, mem, cap);
+}
+
+static void key_of(uint8_t *key, uint8_t n) {
+    memset(key, 0, 32);
+    key[0] = n;
+    key[7] = (uint8_t)(n ^ 0x5a);
+}
+
+static bool put_n(uint8_t n, uint8_t fill, size_t len) {
+    uint8_t key[32], data[MESH_ADVTAB_DATA];
+    key_of(key, n);
+    memset(data, fill, sizeof(data));
+    return mesh_advtab_put(&t, key, 32, data, len);
+}
+
+static uint8_t get_n(uint8_t n, uint8_t *out) {
+    uint8_t key[32];
+    key_of(key, n);
+    return mesh_advtab_get(&t, key, 32, out);
+}
+
+static void put_reads_back_and_replaces(void) {
+    uint8_t out[MESH_ADVTAB_DATA];
+    fresh(CAP);
+    CHECK(get_n(1, out) == 0);
+    CHECK(put_n(1, 0xa1, 100));
+    CHECK(get_n(1, out) == 100 && out[0] == 0xa1 && out[99] == 0xa1);
+    uint32_t before = t.changes;
+    CHECK(put_n(1, 0xb2, 255)); // the same node again: one entry, the newer packet
+    CHECK(t.count == 1 && t.changes != before);
+    CHECK(get_n(1, out) == 255 && out[254] == 0xb2);
+    // Only the first 8 bytes name it
+    uint8_t other[32];
+    key_of(other, 1);
+    other[20] = 0xff;
+    CHECK(mesh_advtab_get(&t, other, 32, out) == 255);
+}
+
+static void refuses_bad_sizes_and_a_full_table(void) {
+    uint8_t key[32], data[MESH_ADVTAB_DATA + 1] = {0};
+    fresh(CAP);
+    key_of(key, 1);
+    CHECK(!mesh_advtab_put(&t, key, 7, data, 120));
+    CHECK(!mesh_advtab_put(&t, key, 32, data, MESH_ADVTAB_MIN - 1));
+    CHECK(!mesh_advtab_put(&t, key, 32, data, MESH_ADVTAB_DATA + 1));
+    CHECK(t.count == 0 && t.refused == 0);
+    for (uint8_t n = 1; n <= CAP; n++) {
+        CHECK(put_n(n, n, 110));
+    }
+    CHECK(!put_n(CAP + 1, 9, 110) && t.refused == 1);
+    CHECK(put_n(3, 0x33, 120)); // a known node still updates when full
+    CHECK(t.count == CAP);
+}
+
+static void removed_slot_is_used_again(void) {
+    uint8_t key[32], out[MESH_ADVTAB_DATA];
+    fresh(CAP);
+    for (uint8_t n = 1; n <= CAP; n++) {
+        put_n(n, n, 110);
+    }
+    key_of(key, 2);
+    CHECK(mesh_advtab_remove(&t, key, 32));
+    CHECK(!mesh_advtab_remove(&t, key, 32));
+    CHECK(get_n(2, out) == 0 && t.count == CAP - 1);
+    CHECK(put_n(9, 0x99, 130));
+    CHECK(get_n(9, out) == 130 && t.count == CAP);
+    mesh_advtab_clear(&t);
+    CHECK(t.count == 0 && get_n(9, out) == 0 && put_n(9, 1, 100));
+}
+
+static bool keep_odd(uint8_t const key[MESH_ADVTAB_KEY], void *ctx) {
+    (*(int *)ctx)++;
+    return key[0] & 1;
+}
+
+static void prune_drops_unknown_nodes(void) {
+    uint8_t out[MESH_ADVTAB_DATA];
+    int     asked = 0;
+    fresh(CAP);
+    for (uint8_t n = 1; n <= 5; n++) {
+        put_n(n, n, 110);
+    }
+    CHECK(mesh_advtab_prune(&t, keep_odd, &asked) == 2 && asked == 5);
+    CHECK(t.count == 3 && get_n(2, out) == 0 && get_n(4, out) == 0 && get_n(5, out) == 110);
+}
+
+static void snapshot_round_trip(void) {
+    uint8_t buf[4096], out[MESH_ADVTAB_DATA];
+    fresh(CAP);
+    put_n(1, 0x11, 100);
+    put_n(2, 0x22, 255);
+    put_n(3, 0x33, 140);
+    uint8_t key[32];
+    key_of(key, 2);
+    mesh_advtab_remove(&t, key, 32); // a hole is not written
+    size_t n = mesh_advtab_pack_size(&t);
+    CHECK(n == MESH_ADVTAB_HEAD + 2 * MESH_ADVTAB_REC + 100 + 140);
+    CHECK(mesh_advtab_pack(&t, 7, buf, n - 1) == 0);
+    CHECK(mesh_advtab_pack(&t, 7, buf, sizeof(buf)) == n);
+    uint32_t gen = 0;
+    CHECK(!mesh_advtab_valid(buf, n, &gen)); // not sealed yet
+    mesh_advtab_seal(buf, n);
+    CHECK(mesh_advtab_valid(buf, n, &gen) && gen == 7);
+
+    fresh(CAP);
+    put_n(8, 0x88, 100); // what the table held before a load goes
+    CHECK(mesh_advtab_unpack(&t, buf, n) == 2);
+    CHECK(get_n(1, out) == 100 && out[50] == 0x11);
+    CHECK(get_n(3, out) == 140 && out[139] == 0x33);
+    CHECK(get_n(8, out) == 0 && get_n(2, out) == 0);
+
+    fresh(1); // a smaller table (no card): what fits is loaded
+    CHECK(mesh_advtab_unpack(&t, buf, n) == 1);
+
+    fresh(CAP); // an empty table is a valid snapshot too
+    n = mesh_advtab_pack(&t, 8, buf, sizeof(buf));
+    mesh_advtab_seal(buf, n);
+    CHECK(n == MESH_ADVTAB_HEAD && mesh_advtab_valid(buf, n, &gen) && gen == 8);
+}
+
+static void damaged_snapshots_are_refused(void) {
+    uint8_t buf[4096], copy[4096];
+    uint32_t gen;
+    fresh(CAP);
+    put_n(1, 0x11, 100);
+    put_n(2, 0x22, 150);
+    size_t n = mesh_advtab_pack(&t, 3, buf, sizeof(buf));
+    mesh_advtab_seal(buf, n);
+    CHECK(mesh_advtab_valid(buf, n, &gen));
+    CHECK(!mesh_advtab_valid(buf, n - 1, &gen)); // cut short
+    CHECK(!mesh_advtab_valid(buf, n + 1, &gen)); // trailing bytes
+    CHECK(!mesh_advtab_valid(buf, MESH_ADVTAB_HEAD - 1, &gen));
+    CHECK(!mesh_advtab_valid(buf, 0, &gen));
+    for (size_t i = 0; i < n; i++) { // any flipped byte but the generation's shows
+        if (i >= 20 && i < 24) {
+            continue;
+        }
+        if (i == 6 || i == 7) {
+            continue; // reserved
+        }
+        memcpy(copy, buf, n);
+        copy[i] ^= 0x40;
+        CHECK(!mesh_advtab_valid(copy, n, &gen));
+    }
+    // A record length that lies, with a checksum that agrees: the record walk refuses it
+    memcpy(copy, buf, n);
+    copy[MESH_ADVTAB_HEAD + MESH_ADVTAB_KEY] = 250;
+    mesh_advtab_seal(copy, n);
+    CHECK(!mesh_advtab_valid(copy, n, &gen));
+    put_n(5, 5, 100);
+    CHECK(mesh_advtab_unpack(&t, copy, n) == 0 && t.count == 0); // a bad snapshot: an empty table
+}
+
+static void due_and_names(void) {
+    CHECK(!mesh_advtab_due(false, true, 100000, 0));
+    CHECK(!mesh_advtab_due(true, true, 1000 + MESH_ADVTAB_CARD_S - 1, 1000));
+    CHECK(mesh_advtab_due(true, true, 1000 + MESH_ADVTAB_CARD_S, 1000));
+    CHECK(!mesh_advtab_due(true, false, 1000 + MESH_ADVTAB_CARD_S, 1000));
+    CHECK(mesh_advtab_due(true, false, 1000 + MESH_ADVTAB_INTERNAL_S, 1000));
+    uint8_t key[MESH_ADVTAB_KEY];
+    CHECK(mesh_advtab_key_from_name("0123456789abCDEF", key) && key[0] == 0x01 && key[7] == 0xef);
+    CHECK(!mesh_advtab_key_from_name("0123456789abCDE", key));
+    CHECK(!mesh_advtab_key_from_name("0123456789abCDEFF", key));
+    CHECK(!mesh_advtab_key_from_name("0123456789abCDEG", key));
+    CHECK(!mesh_advtab_key_from_name("adverts.bin", key));
+}
+
+int main(void) {
+    put_reads_back_and_replaces();
+    refuses_bad_sizes_and_a_full_table();
+    removed_slot_is_used_again();
+    prune_drops_unknown_nodes();
+    snapshot_round_trip();
+    damaged_snapshots_are_refused();
+    due_and_names();
+    free(mem);
+    if (failures) {
+        printf("%d failure(s)\n", failures);
+        return 1;
+    }
+    printf("mesh_advtab_test: ok\n");
+    return 0;
+}

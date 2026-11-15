@@ -20,6 +20,7 @@
 #include "mesh_frame.h"
 #include "mesh_hist_crypto.h"
 #include "mesh_ident.h"
+#include "mesh_advtab_run.h"
 #include "mesh_journal.h"
 #include "meshcore_run.h"
 #include "mesh_rset_run.h"

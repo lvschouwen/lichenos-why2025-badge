@@ -7,7 +7,7 @@
 // defined by the platform: mesh_task.cpp on the badge, a no-op in the host test).
 #include "advert_limit.h"
 #include "mesh_airlog.h"
-#include "mesh_blobq.h"
+#include "mesh_advtab.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_health.h"
@@ -172,36 +172,22 @@ class BadgeMesh : public MyMesh {
         : MyMesh(radio, rng, rtc, tables, store), radio_(radio), ob_(ob), store_(store) {
         pipe_.attach(this, ob);
         advert_limit_init(&advert_limit_);
-        mesh_blobq_init(&blobs_);
-        blob_taken_.len = 0;
     }
     // MyMesh's own filter for the contacts file: not the transient entries
     static bool keepContact(ContactInfo const &c) {
         return c.type != ADV_TYPE_NONE;
     }
-    // Advert blobs written after the mesh lock (#257, mesh_blobq.h). takeBlob at the end of the mesh task's locked part
-    // (no packet in this loop: quiet) picks one and first takes the one written last time off the queue;
-    // writeTakenBlob then writes it without the lock, on the mesh task (a no-op when none was picked). The queued copy
-    // stays readable meanwhile; the queue is only touched under the mesh lock, and the copy being written is the mesh
-    // task's own.
-    void   takeBlob(bool quiet);
-    void   writeTakenBlob();
-    // Under the lock, before a stop or a restart: everything queued goes to flash now
-    void   flushBlobs();
-    // MeshCore's files were erased (factory reset, "erase", "rebuild"): a queued blob must not bring one back
-    void   dropBlobs();
-    size_t blobsQueued() const {
-        return mesh_blobq_count(&blobs_);
+    // The contacts' last raw adverts live in a PSRAM table (#469, mesh_advtab.h); the mesh task owns its snapshot.
+    // Without a table (no memory) nothing is kept: sharing and exporting a contact then say it has no advert.
+    void attachAdverts(mesh_advtab_t *t) {
+        adverts_ = t;
     }
-    // Prefs, contacts, channels and the queued blobs, under the lock: MeshCore's own reboot
+    // Under the lock, before a snapshot: adverts of contacts that were removed or overwritten since go
+    void pruneAdverts();
+    // Prefs, contacts and channels, under the lock: MeshCore's own reboot
     void saveAll();
-    // MyMesh's loop (hides it: not virtual, the mesh task calls it through BadgeMesh). MyMesh deletes a blob file only
-    // in its loop (a removed or overwritten contact; DataStore::deleteBlobByKey is not virtual), so a blob taken but
-    // not yet written may belong to a contact that is gone after it: it is not written then, and takeBlob checks again.
+    // MyMesh's loop (hides it: not virtual, the mesh task calls it through BadgeMesh)
     void loop() {
-        if (!blob_written_) {
-            blob_taken_.len = 0;
-        }
         MyMesh::loop();
         pipe_.endConsole();
     }
@@ -306,7 +292,7 @@ class BadgeMesh : public MyMesh {
     void onMessageRecv(
         ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp, char const *text
     ) override;
-    // The raw advert of a contact (BaseChatMesh, for "share"): queued instead of written inside the loop (#257)
+    // The raw advert of a contact (BaseChatMesh, for "share"): kept in the PSRAM table, never a file (#469)
     bool putBlobByKey(uint8_t const key[], int key_len, uint8_t const src_buf[], int len) override;
     int  getBlobByKey(uint8_t const key[], int key_len, uint8_t dest_buf[]) override;
 
@@ -315,14 +301,10 @@ class BadgeMesh : public MyMesh {
     bool               floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis);
     int                scanChannels(uint8_t const *want, uint32_t *damaged, size_t *n_damaged);
     bool               saveChannelScopes();
-    bool               blobWanted(mesh_blobq_entry_t const &e);
-    void               blobDone();
     BadgeRadio        &radio_; // MeshCore's _radio, with the badge's own calls (lastTxResult, #408)
     ob_t              *ob_;
     DataStore         &store_;
-    mesh_blobq_t       blobs_;
-    mesh_blobq_entry_t blob_taken_;           // the one writeTakenBlob writes; len 0: none
-    bool               blob_written_ = false; // blob_taken_ is on flash: off the queue at the next takeBlob
+    mesh_advtab_t     *adverts_ = nullptr;
     CompanionPipe      pipe_;
     advert_limit_t     advert_limit_;
     char               console_scope_name_[MESH_SCOPE_MAX + 1] = {};

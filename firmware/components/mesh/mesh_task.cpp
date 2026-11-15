@@ -82,7 +82,7 @@ volatile int      mesh_int::offline_queue_len; // MyMesh's offline queue, from t
 // shim's format()), the rest of NVS stays
 extern "C" esp_err_t mesh_nvs_flash_erase(void) {
     ESP_LOGI(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
-    node->dropBlobs(); // only MyMesh formats (in its loop, so node is set): no queued blob comes back (#257)
+    mesh_advtab_run_wiped(); // only MyMesh formats (in its loop, under the lock): no advert comes back (#469)
     return ESP_OK;
 }
 
@@ -285,6 +285,8 @@ void BadgeBoard::reboot() {
         contacts_hold_off_locked(); // the restart comes before the loop would write a held save
         if (!fs_shim_wiped()) { // a factory reset formats, then reboots: its erase stays erased (#426)
             node->saveAll();
+            node->pruneAdverts();
+            mesh_advtab_run_save_locked();
         }
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
@@ -465,7 +467,10 @@ static void mesh_task(void *arg) {
         airlog_prepare(); // #408: only after a failed allocation, at most every 30 s
         mesh_rhist_tick(); // the status history's poll (#168): only repeaters the person switched on
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
-        node->takeBlob(rx == 0); // an advert's blob (#257): written after the unlock as well, while the radio is quiet
+        if (mesh_advtab_run_due()) { // the advert table's snapshot (#469): copied here, written after the unlock
+            node->pruneAdverts();
+            mesh_advtab_run_take_locked();
+        }
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
             // (16 KB, the saves keep File objects on it) is the one that is big enough
@@ -493,7 +498,8 @@ static void mesh_task(void *arg) {
                 store.saveContacts(node, keep_contact);
                 contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
                 store.saveChannels(node);
-                node->flushBlobs();
+                node->pruneAdverts();
+                mesh_advtab_run_save_locked();
             }
             long long save_ms = (esp_timer_get_time() - save_started) / 1000;
             mesh_journal_stop_locked(final);
@@ -515,7 +521,7 @@ static void mesh_task(void *arg) {
         int64_t took_ms  = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
-        node->writeTakenBlob();
+        mesh_advtab_run_write();
         contacts_write_taken();
         contacts_full_post();
         if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
@@ -823,6 +829,7 @@ static bool start_locked(char const *files_dir) {
     trace_req = (mt_t *)mt_mem;
     rr_init((rr_t *)rr_mem);
     n->attachRemote((rr_t *)rr_mem);
+    n->attachAdverts(mesh_advtab_run_boot(files_dir)); // #469: NULL without memory, then no adverts are kept
     remote_req = (rr_t *)rr_mem;
     tl_rate_init(&telem_rate);
 
