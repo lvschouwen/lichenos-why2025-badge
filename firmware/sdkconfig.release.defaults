@@ -5,3 +5,7 @@ CONFIG_LICHEN_DEV_COMMANDS=n
 CONFIG_LICHEN_UI_LOCK_CHECK_OFF=y
 # The irreversible eFuse burn command: off in sdkconfig.defaults too, said here so a release never gets it
 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=n
+# #474: the developer build keeps frame pointers for the watchdog backtrace; the release image does not pay for them.
+# FRAME_POINTER sits in the ESP_BACKTRACING_METHOD choice: a "# ... is not set" line does not undo the =y of
+# sdkconfig.defaults there (measured), so the release picks the other member.
+CONFIG_ESP_SYSTEM_NO_BACKTRACE=y

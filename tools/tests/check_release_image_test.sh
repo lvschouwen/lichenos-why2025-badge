@@ -25,6 +25,9 @@ expect 0 config "$tmp/off.cfg"
 expect 1 config "$tmp/on.cfg"
 expect 1 config "$tmp/empty.cfg"
 expect 1 config "$tmp/other.cfg"
+# #474: frame pointers belong to the developer build only
+printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y\n' > "$tmp/fp.cfg"
+expect 1 config "$tmp/fp.cfg"
 expect 2 bogus "$tmp/clean.bin"
 expect 2
 expect 2 release

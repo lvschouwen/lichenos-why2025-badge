@@ -233,3 +233,8 @@ CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
 # CONFIG_MDNS_PREDEF_NETIF_ETH is not set
 CONFIG_MDNS_MAX_INTERFACES=2
 CONFIG_MDNS_MAX_SERVICES=2
+
+# #474: a task watchdog report prints a full backtrace (esp_system/port/arch/riscv/debug_helpers.c esp_backtrace_print ->
+# fp_unwind.c) instead of two frames: -fno-omit-frame-pointer for every component. The release build turns it off again
+# in sdkconfig.release.defaults (bigger and slightly slower code); a panic does not need it (core dump + ELF).
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y

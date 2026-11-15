@@ -13,9 +13,11 @@ CANARIES=("fw dev on" "debug ones hidden" "ident simulate")
 # Every Kconfig symbol that compiles a debug or test command (grep "config LICHEN_" firmware/components/*/Kconfig*):
 # LICHEN_NVS_ENCRYPT_BURN_CMD (irreversible eFuse burn) and LICHEN_NVS_DEBUG_FORCE_DOWN (fw nvs-down) are commands;
 # LICHEN_UI_LOCK_CHECK_COUNT and _ASSERT are the LVGL lock-owner debug checks (release carries _OFF).
+# ESP_SYSTEM_USE_FRAME_POINTER (#474) is no command but a developer-build cost (code size and speed): the release
+# config pins it off.
 # Not listed, release-neutral: LICHEN_CLOCK_PSRAM_RECORD, LICHEN_DISPLAY_DIRECT_FLUSH*, LICHEN_SENSORS_*, LICHEN_NVS_*.
 DEBUG_SYMBOLS=(LICHEN_DEV_COMMANDS LICHEN_NVS_ENCRYPT_BURN_CMD LICHEN_NVS_DEBUG_FORCE_DOWN
-               LICHEN_UI_LOCK_CHECK_COUNT LICHEN_UI_LOCK_CHECK_ASSERT)
+               LICHEN_UI_LOCK_CHECK_COUNT LICHEN_UI_LOCK_CHECK_ASSERT ESP_SYSTEM_USE_FRAME_POINTER)
 
 usage() { echo "usage: $0 <release|dev> <image.bin> | config <sdkconfig> | --selftest" >&2; return 2; }
 
@@ -79,6 +81,7 @@ selftest() {
     ! run dev "$tmp/clean.bin" 2>/dev/null || { echo "selftest: unmarked dev image accepted" >&2; exit 1; }
     printf 'CONFIG_LICHEN_UI_LOCK_CHECK_OFF=y\n# CONFIG_LICHEN_DEV_COMMANDS is not set\n' > "$tmp/off.cfg"
     printf 'CONFIG_LICHEN_DEV_COMMANDS=y\n' > "$tmp/on.cfg"
+    printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y\n' > "$tmp/fp.cfg"
     : > "$tmp/empty.cfg"; printf 'CONFIG_FOO=y\n' > "$tmp/other.cfg"
     ! run config "$tmp/empty.cfg" 2>/dev/null || { echo "selftest: empty config accepted" >&2; exit 1; }
     ! run config "$tmp/other.cfg" 2>/dev/null || { echo "selftest: config without the symbol accepted" >&2; exit 1; }
@@ -86,6 +89,7 @@ selftest() {
     run config "$tmp/off.cfg" >/dev/null || { echo "selftest: clean config rejected" >&2; exit 1; }
     ! run config "$tmp/on.cfg" 2>/dev/null || { echo "selftest: dev commands config accepted" >&2; exit 1; }
     ! run config "$tmp/on2.cfg" 2>/dev/null || { echo "selftest: force-down config accepted" >&2; exit 1; }
+    ! run config "$tmp/fp.cfg" 2>/dev/null || { echo "selftest: frame-pointer config accepted" >&2; exit 1; }
     echo "check_release_image selftest ok"
 }
 
