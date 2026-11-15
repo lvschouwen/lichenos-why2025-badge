@@ -37,17 +37,18 @@ OTA-1 -> remote sweep S1 -> #208 + #211 merged -> OTA-2 + hands sitting H1 -> so
 ## Deviations from the program brief (recorded on purpose)
 - Phases A and B ran as one pass per epic (seven Opus planners) plus one Opus consolidation: eight agents, not fifteen.
 - No wave-coordinator agents: spawn depth is 1, so main launches and tracks every worker.
-- Reviewers: `lichen-reviewer` on Sonnet by default, Opus where the change touches security, memory, concurrency or protocols.
+- Reviewers: `lichen-reviewer` on Sonnet only (forced since 2026-11-15); risk-area changes get a tighter brief and always a review pass, or stay in main.
 
 ## Agents and models
 | Role | Model |
 |---|---|
-| Lead orchestrator (main) | Fable 5.2, low effort |
+| Lead orchestrator (main) | Opus 5.5 (from 2026-11-15; was Fable 5.2 before) |
+| Advisor | Fable 5.2, called by main before an approach and before done (sparingly in long runs) |
 | Planners, consolidation | Opus (finished, stopped) |
-| `lichen-implementer` | Sonnet; Opus on the CLAUDE.md Opus triggers |
-| `lichen-reviewer` | Sonnet; Opus for security, memory, concurrency, protocol |
+| `lichen-implementer` | Sonnet, always |
+| `lichen-reviewer` | Sonnet, always |
 
-Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
+Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonnet` + `..._FORCE=1`, lvschouwen/.claude#28): an agent's `model:` line and any "Opus trigger" are void. At most 6 concurrent, spawn depth 1.
 
 ## Waves
 | Wave | Issues | Image | State |
@@ -64,7 +65,14 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-15 about 16:00 UTC; NEWEST, read this one first)
+### RESUME HERE (written 2026-11-15 evening; NEWEST, read this one first)
+
+Main is now Opus 5.5 with Fable 5.2 as advisor (see "Agents and models"). State at this point, everything else as in the section below:
+- **#476** (soak driver) is merged on main with both review rounds (ed77bbdf, 695195e8, 9433e1df); pushed with this record. Its 1 h rehearsal waits on the owner: `~/.config/why2025-badge/soak-driver.conf` (`scope_zero_hop=`, `scope_regional=`) does not exist yet.
+- **#474**: the off-by-default switch `BADGE_FRAME_POINTERS=1` (own build dir `firmware/build-fp`, exits 3, no gates or baseline writes) was half done and uncommitted in wt-2 when its agent was lost; a new `lichen-implementer` finishes it on `feat/474-dev-frame-pointers`. Then a reviewer, `merge-one.sh`, and a bench: a provoked watchdog report from the switch image shows a backtrace.
+- **#475** merged and benched (below); open for the owner's eyes only.
+
+### RESUME HERE (written 2026-11-15 about 16:00 UTC; superseded by the section above)
 
 **Owner away for some hours (said 2026-11-15 about 15:00 UTC). His word for this session:** the badge may be driven and may send to the test channel or the Huygenhoek test nodes; disruptive bench work is allowed as long as the MeshCore key and the Wi-Fi name and password are saved first and restored after; "forget the baseline growth for now" (read by main as: size baseline growth does not block #475 / #474; the numbers go on the issues).
 - **Merged and pushed (main at 00d95ad7, 278 host tests):** #450 bench guard (radio, name, position, path, auto-add values, channel add/rm/rename, contact import, factory reset, nvs lines, C6 reflash refused; `badge.sh restore` asks; more routes seen; a file body toward port 8080 refused) and #470 (closed: the test's fake curl did not read stdin). #450 stays open, `needs-lucas`: whether `keys`, `slot`, `dev`, MeshCore `start` / `autostart` are judged too (every remote bench uses them). **Consequence: step B1 of the post-soak script (remove and re-add the test channel over USB) is refused for main now: hands, or an exception.**
