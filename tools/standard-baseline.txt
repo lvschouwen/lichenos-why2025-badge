@@ -14,18 +14,18 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	294813
+size	<merged-strings>	297277
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	17975
 size	libbootloader_support.a	5942
 size	libc.a	47702
-size	libc6link.a	33264
-size	libcrash.a	5762
+size	libc6link.a	33268
+size	libcrash.a	5786
 size	libcxx.a	872
 size	libefuse.a	2173
-size	libeh_common.a	144
+size	libeh_common.a	148
 size	libeh_frame.a	488
 size	libeh_host_autoinit.a	1202
 size	libeh_host_core.a	1232
@@ -49,7 +49,7 @@ size	libesp_driver_ledc.a	6320
 size	libesp_driver_ppa.a	12365
 size	libesp_driver_sd_intf.a	866
 size	libesp_driver_sdmmc.a	18051
-size	libesp_driver_tsens.a	2343
+size	libesp_driver_tsens.a	2351
 size	libesp_driver_uart.a	19682
 size	libesp_driver_usb_serial_jtag.a	2492
 size	libesp_event.a	4395
@@ -98,8 +98,8 @@ size	libfw_console.a	16422
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
-size	libjoltwallet__littlefs.a	34390
-size	liblichen_api.a	42234
+size	libjoltwallet__littlefs.a	34394
+size	liblichen_api.a	42258
 size	liblichen_apps.a	51552
 size	liblichen_boot.a	13120
 size	liblichen_clock.a	11176
@@ -107,19 +107,19 @@ size	liblichen_haptics.a	2793
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
 size	liblichen_net.a	24614
-size	liblichen_notify.a	13358
+size	liblichen_notify.a	13378
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	73655
+size	liblichen_os.a	73687
 size	liblichen_random.a	63
 size	liblichen_shell.a	192193
 size	liblog.a	2726
-size	liblora.a	36261
+size	liblora.a	36265
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13423
 size	libmbedtls.a	22
-size	libmesh.a	408839
+size	libmesh.a	422182
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2

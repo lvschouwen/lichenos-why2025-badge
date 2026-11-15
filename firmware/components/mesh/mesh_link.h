@@ -9,6 +9,7 @@
 #include "mesh_airlog.h"
 #include "mesh_advtab.h"
 #include "mesh_contact_fmt.h"
+#include "mesh_ctab_run.h"
 #include "mesh_frame.h"
 #include "mesh_health.h"
 #include "mesh_onair.h"
@@ -181,6 +182,10 @@ class BadgeMesh : public MyMesh {
     // Without a table (no memory) nothing is kept: sharing and exporting a contact then say it has no advert.
     void attachAdverts(mesh_advtab_t *t) {
         adverts_ = t;
+    }
+    // The table takes 4000 contacts while this badge's card file holds the list, else 1000 (#472, mesh_ctab_run.h)
+    int getMaxContacts() const override {
+        return mesh_ctab_run_cap();
     }
     // Under the lock, before a snapshot: adverts of contacts that were removed or overwritten since go
     void pruneAdverts();

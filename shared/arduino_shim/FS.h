@@ -164,6 +164,8 @@ void fs_shim_hold(char const *path);
 void fs_shim_take_held(fs_shim_held_t *out);
 // Forgets what is held, unwritten (a save of the newest state follows)
 void fs_shim_drop_held(void);
+// Frees a save that was taken and is not written after all (#472); h is emptied
+void fs_shim_free_held(fs_shim_held_t *h);
 // The buffer a held save reserves at its first write (#425): the file's last size plus one chunk of headroom (26
 // contacts), at most FS_SHIM_MAX_FILE; 0 (no reserve: one chunk, doubling) when the size is not known. Pure.
 size_t fs_shim_reserve(size_t last_len);

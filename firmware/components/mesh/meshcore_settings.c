@@ -20,6 +20,7 @@
 #include "lichen_notify.h"
 #include "mesh_share.h"
 #include "qr_screen.h"
+#include "meshcore_card.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -562,6 +563,7 @@ static void on_page_delete(lv_event_t *e) {
         run_timer = NULL;
     }
     meshcore_advert_forget(advert_row_status);
+    meshcore_card_row_forget();
 }
 
 static void open_notify_page(void *arg) {
@@ -587,6 +589,7 @@ void meshcore_settings(lv_obj_t *page) {
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
     menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Advert & contacts", "", meshcore_advert_settings_open, NULL), MENU_OPEN);
+    meshcore_card_row(page);
     menu_set_kind(menu_add(page, "Radio health", "", meshcore_health_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Air log", "", meshcore_airlog_open, NULL), MENU_OPEN);
     order_rows(page);

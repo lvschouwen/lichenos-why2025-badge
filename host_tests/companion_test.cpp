@@ -130,6 +130,16 @@ extern "C" void mesh_advert_limited(uint32_t refused) {
     (void)refused;
 }
 extern "C" void mesh_contacts_full(void) {}
+// The contact store's glue (#472, mesh_ctab_run.cpp) is the badge's; here only the cap it gives the table
+static int test_contact_cap = MAX_CONTACTS;
+extern "C" int mesh_ctab_run_cap(void) {
+    return test_contact_cap;
+}
+static int test_deleted_notes;
+extern "C" void mesh_ctab_run_deleted_locked(uint8_t const *) {
+    test_deleted_notes++;
+}
+extern "C" void mesh_ctab_run_owner_change(void) {}
 // The on-air allow list (#289): the badge's live copy is mesh_onair_run.c; here a list the test sets, with the same
 // pure decision, so the pipe's frame check runs on the real MyMesh
 static onair_list_t test_onair;
@@ -852,6 +862,35 @@ static bool sent_has_type(size_t from, uint8_t want_type) {
 // A RESPONSE too long for the app's frame is dropped before it is copied (#448). MyMesh builds the frame in
 // out_frame (MAX_FRAME_SIZE bytes of frame); an unasked response from any contact reached the copy with up to 176
 // bytes behind a 2-byte header, and the pipe was then handed a frame longer than the buffer it sits in
+static bool add_peer(BadgeMesh &mesh, char const *name) {
+    static Rng          peer_rng;
+    mesh::LocalIdentity peer(&peer_rng);
+    ContactInfo         ci{};
+    ci.id           = mesh::Identity(peer.pub_key);
+    ci.type         = ADV_TYPE_CHAT;
+    ci.out_path_len = OUT_PATH_UNKNOWN;
+    ci.lastmod      = rtc_clock.getCurrentTime();
+    strcpy(ci.name, name);
+    return mesh.addContact(ci);
+}
+
+// #472: the table takes what getMaxContacts() says at that moment (the fork's one hook), not the array's size; a cap
+// lowered below the count (the card was pulled) drops nothing
+static void contact_cap_checks(BadgeMesh &mesh) {
+    int before       = mesh.getNumContacts();
+    test_contact_cap = before + 1;
+    CHECK(add_peer(mesh, "Cap one"));
+    CHECK(!add_peer(mesh, "Cap two")); // full at the cap, far below MAX_CONTACTS
+    CHECK(mesh.getNumContacts() == before + 1);
+    test_contact_cap = before + 2;
+    CHECK(add_peer(mesh, "Cap two"));
+    test_contact_cap = before;
+    CHECK(mesh.getNumContacts() == before + 2);
+    CHECK(!add_peer(mesh, "Cap three"));
+    test_contact_cap = MAX_CONTACTS;
+    CHECK(add_peer(mesh, "Cap three"));
+}
+
 static void long_response_checks(BadgeMesh &mesh) {
     static Rng          peer_rng;
     mesh::LocalIdentity peer(&peer_rng);
@@ -1329,6 +1368,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     long_response_checks(mesh);
+    contact_cap_checks(mesh);
     short_login_checks(mesh, rr);
     contact_action_checks(mesh);
     import_checks(mesh);

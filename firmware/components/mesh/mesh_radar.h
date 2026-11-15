@@ -12,7 +12,7 @@ extern "C" {
 // (#52). Pure logic, no ESP headers; the screen is meshcore_radar.c.
 
 #define RADAR_MAX    100  // contacts plotted and listed: the closest ones
-#define RADAR_IN_MAX 1000 // contacts read from the table (the firmware's MAX_CONTACTS)
+#define RADAR_IN_MAX 4000 // contacts read from the table (the firmware's MAX_CONTACTS, #472)
 #define RADAR_NAME 33 // MESH_NAME_MAX + 1
 
 // One contact as the mesh task hands it over (mesh_contacts_positions); 0/0 = it shares no position

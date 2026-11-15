@@ -458,7 +458,15 @@ BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX
         break;
     case MESH_CO_REMOVE: n = mf_encode_remove_contact(f, c->id.pub_key); break;
     }
-    return n && pipe_.queue_cmd(f, n) ? CONTACT_QUEUED : CONTACT_QUEUE_FULL;
+    if (!n || !pipe_.queue_cmd(f, n)) {
+        return CONTACT_QUEUE_FULL;
+    }
+    if (op == MESH_CO_REMOVE) {
+        mesh_ctab_run_deleted_locked(c->id.pub_key); // #472: the card's copy must not bring it back
+    } else if (op != MESH_CO_RESET_PATH) {
+        mesh_ctab_run_owner_change(); // a favourite: /storage is written at once
+    }
+    return CONTACT_QUEUED;
 }
 
 // The live entry for a copy from the iterator when its route is stale

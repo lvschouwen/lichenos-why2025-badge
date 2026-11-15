@@ -284,10 +284,13 @@ extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char 
         why = "that is this badge's own contact";
     } else if (node->lookupContactByPubKey(pub, PUB_KEY_SIZE)) {
         why = "already a contact (left as it is)";
-    } else if (node->getNumContacts() >= MAX_CONTACTS) {
+    } else if (node->getNumContacts() >= mesh_ctab_run_cap()) {
         why = "the contact list is full (MeshCore would replace the oldest contact)";
     } else if (!node->importContact(pkt, (uint8_t)len)) {
         why = "MeshCore did not take it (busy, or not an advert)";
+    }
+    if (!why) {
+        mesh_ctab_run_owner_change(); // #472: added by hand, /storage is written at once
     }
     mesh_unlock();
     if (why) {

@@ -1095,6 +1095,15 @@ target_include_directories(mesh_advtab_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(mesh_advtab_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_advtab_test COMMAND mesh_advtab_test)
 
+add_executable(mesh_ctab_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_ctab_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_ctab.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_crypto.cpp)
+target_include_directories(mesh_ctab_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+# The card file's encryption (#472) uses the journal's primitives: rweather's Crypto on the host
+target_link_libraries(mesh_ctab_test PRIVATE meshcore_host)
+target_compile_options(mesh_ctab_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_ctab_test COMMAND mesh_ctab_test)
+
 add_executable(mesh_advert_cfg_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_advert_cfg_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c)
 target_include_directories(mesh_advert_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
@@ -2247,6 +2256,7 @@ add_custom_target(run_tests
     mesh_contact_fmt_test
     advert_limit_test
     mesh_advtab_test
+    mesh_ctab_test
     mesh_advert_cfg_test
     mesh_scope_test
     mesh_onair_test

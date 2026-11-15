@@ -349,6 +349,11 @@ void fs_shim_take_held(fs_shim_held_t *out) {
     held_slot = fs_shim_held_t{};
 }
 
+void fs_shim_free_held(fs_shim_held_t *h) {
+    buf_free(h->buf);
+    *h = fs_shim_held_t{};
+}
+
 
 // Raised by a format() and lowered by the next save or start: the owner skips its own saves while it is up (#426).
 // Touched under the owner's lock (the badge: the mesh lock), as every open and format.

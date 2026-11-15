@@ -83,6 +83,7 @@ volatile int      mesh_int::offline_queue_len; // MyMesh's offline queue, from t
 extern "C" esp_err_t mesh_nvs_flash_erase(void) {
     ESP_LOGI(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
     mesh_advtab_run_wiped(); // only MyMesh formats (in its loop, under the lock): no advert comes back (#469)
+    mesh_ctab_run_wiped();   // nor a contact from the card or the deleted keys (#472)
     return ESP_OK;
 }
 
@@ -282,10 +283,16 @@ static bool rebooting;
 
 void BadgeBoard::reboot() {
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
-        contacts_hold_off_locked(); // the restart comes before the loop would write a held save
-        if (!fs_shim_wiped()) { // a factory reset formats, then reboots: its erase stays erased (#426)
-            node->saveAll();
+        // The restart comes before the loop would write a held save. A factory reset formats, then reboots: its erase
+        // stays erased (#426); the contact files' part of that is in mesh_ctab_run_stop_locked (#472)
+        if (!fs_shim_wiped()) { // as BadgeMesh::saveAll, with the contacts by the card's rules
+            store.savePrefs(*node->getNodePrefs());
+            mesh_ctab_run_stop_locked(false);
+            store.saveChannels(node);
+        } else {
+            mesh_ctab_run_stop_locked(false);
         }
+        contacts_hold_off_locked();
         node->pruneAdverts();
         mesh_advtab_run_save_locked(); // after a factory reset: removes the snapshots, the card's too (#469)
         mesh_journal_stop_locked(true);
@@ -391,15 +398,6 @@ static bool sync_outgoing(void) {
     return added;
 }
 
-static void contacts_write_taken(void) {
-    if (!contacts_taken.set) {
-        return;
-    }
-    fs_shim_wrote_t w = File::writeHeld(&contacts_taken);
-    ESP_LOGI(TAG, "contacts saved after the unlock: %d contacts, %u B, %u B rewritten, %lu ms%s", contacts_taken_n,
-             (unsigned)w.len, (unsigned)w.rewritten, (unsigned long)(w.us / 1000), w.ok ? "" : " (failed)");
-}
-
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
 // Where a slow loop's time under the lock went (#425), a bench diagnostic: developer build only. Copied under the lock
 // before fs_shim_take_busy_us, which forgets the shim's notes (and the writes after the unlock add calls of their own).
@@ -467,6 +465,7 @@ static void mesh_task(void *arg) {
         airlog_prepare(); // #408: only after a failed allocation, at most every 30 s
         mesh_rhist_tick(); // the status history's poll (#168): only repeaters the person switched on
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
+        mesh_ctab_run_tick_locked(); // #472: a card file's merge, and the contact save the card is due
         if (mesh_advtab_run_due()) { // the advert table's snapshot (#469): copied here, written after the unlock
             node->pruneAdverts();
             mesh_advtab_run_take_locked();
@@ -488,17 +487,19 @@ static void mesh_task(void *arg) {
                 ESP_LOGI(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
                          dropped);
             }
-            contacts_hold_off_locked();
             bool      wiped        = fs_shim_wiped(); // MeshCore's files were erased and not saved since (#426)
             int64_t   save_started = esp_timer_get_time();
             long long contacts_ms  = 0;
             if (!wiped) {
                 store.savePrefs(*node->getNodePrefs());
                 int64_t contacts_started = esp_timer_get_time();
-                store.saveContacts(node, keep_contact);
+                mesh_ctab_run_stop_locked(final); // #472: parked by the hold, written to /storage and the card
                 contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
                 store.saveChannels(node);
+            } else {
+                mesh_ctab_run_stop_locked(final); // erased files: this badge's card file goes too
             }
+            contacts_hold_off_locked();
             node->pruneAdverts();
             mesh_advtab_run_save_locked(); // erased files: only removes the snapshots (#469)
             long long save_ms = (esp_timer_get_time() - save_started) / 1000;
@@ -516,13 +517,17 @@ static void mesh_task(void *arg) {
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
         fs_shim_take_held(&contacts_taken);
+        if (contacts_taken.set) {
+            mesh_ctab_run_taken_locked();
+        }
         SLOW_NOTES_TAKE_HELD();
         contacts_taken_n = node->getNumContacts();
         int64_t took_ms  = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
         mesh_advtab_run_write();
-        contacts_write_taken();
+        mesh_ctab_run_saved(&contacts_taken, contacts_taken_n); // contacts3 and the card's list (#472)
+        mesh_ctab_run_work();
         contacts_full_post();
         if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
             mesh_lock();
@@ -856,6 +861,8 @@ static bool start_locked(char const *files_dir) {
         ESP_LOGE(TAG, "identity key not readable or damaged: message history off");
     }
     mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, have_prv ? prv : NULL, sizeof(prv));
+    // The contact list's card file (#472), after begin() loaded contacts3 and before the task: same key rule
+    mesh_ctab_run_boot(n, files_dir, have_prv ? prv : NULL, sizeof(prv));
     mh_wipe(prv, sizeof(prv));
     n->setListener(&screen_feed);
     airlog_prepare(); // #408: before anything can transmit, so no note ever allocates
