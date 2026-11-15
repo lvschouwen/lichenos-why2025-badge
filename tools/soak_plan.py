@@ -34,7 +34,7 @@ HOUR_S = 3600
 CHECKED_PREFIXES = ("keys send", "ui open", "ui lock on", "mesh chat")
 CONTACTS_ENTER = "keys send needlock focus:Contacts| enter"  # the only Enter of the plan
 APP_IDS = ("home", "meshcore", "clock", "timer", "calc", "weather", "notes", "qrcode", "lora_spectrum", "settings", "files")
-KEY_WORDS = ("up", "down", "left", "right", "wait", "triangle")
+KEY_WORDS = ("up", "down", "right", "wait")
 
 
 @dataclass(frozen=True)
@@ -172,11 +172,13 @@ def line_allowed(line: str, scope_names: Tuple[str, ...]) -> bool:
     """The driver's allowlist, a second guard behind the plan: only the console lines the plan can produce. No Enter
     except CONTACTS_ENTER, no dm, advert, remote, trace, discover, telemetry, history; `mesh scope console` only with
     one of the two configured names."""
+    if not line or line != " ".join(line.split()) or any(ord(c) < 32 or ord(c) == 127 for c in line):
+        return False  # one line, single spaces, no control character
     if line in ("idle test 0", "ui lock off", "ui", "ui perf", "soak", "mem", "tasks", "c6", "mesh scope",
                 "mesh chat close", "mesh chat open " + TEST_CHANNEL, CONTACTS_ENTER):
         return True
     w = line.split()
-    if len(w) == 4 and w[:3] == ["ui", "lock", "on"] and w[3].isdigit():
+    if len(w) == 4 and w[:3] == ["ui", "lock", "on"] and w[3].isdigit() and 1 <= int(w[3]) <= 600:
         return True
     if len(w) == 3 and w[:2] == ["ui", "open"] and w[2] in APP_IDS:
         return True

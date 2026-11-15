@@ -8,8 +8,11 @@ import csv
 import io
 import os
 import re
+import signal
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -44,7 +47,8 @@ class FakeBadge:
         self.clock, self.hook, self.line_s = clock, hook, line_s
         self.address = "badge.example.lan"
         self.boot, self.crash, self.slot, self.c6rs, self.mtx = 54, 0, 0, 0, 0
-        self.scope, self.lock, self.stack = "none", False, "0"
+        self.scope, self.lock, self.stack, self.focus = "none", False, "0", "Home"
+        self.right_stuck = False
         self.ignore_scope_set, self.stuck_stack = False, False
         self.log, self.sent_at = [], []
 
@@ -82,10 +86,21 @@ class FakeBadge:
             return 0, "ui lock: off\n"
         if line.startswith("ui open "):
             if not self.stuck_stack or w[2] != "home":
-                self.stack = "0" if w[2] == "home" else "0 > 3"
+                self.stack = {"home": "0", "meshcore": "0 > 2"}.get(w[2], "0 > 3")
+                self.focus = {"home": "Home", "meshcore": "Chat"}.get(w[2], "x")
             return 0, "ui open: %s\n" % w[2]
         if line == "ui":
-            return 0, "ui stack: %s | focus: x\nui lock: %s\n" % (self.stack, "on, 100 s left" if self.lock else "off")
+            return 0, "ui stack: %s | focus: %s\nui lock: %s\n" % (self.stack, self.focus,
+                                                                  "on, 100 s left" if self.lock else "off")
+        if line == "keys send needlock right":
+            if self.focus == "Chat" and not self.right_stuck:
+                self.focus = "Contacts"
+            return 0, "ok\n"
+        if line == sp.CONTACTS_ENTER:
+            if self.focus != "Contacts":
+                return 0, "keys send: guard 1 failed: focus '%s'; 0 of 3 sent\n" % self.focus
+            self.stack, self.focus = "0 > 2 > 5", "row"
+            return 0, "ok\n"
         if line.startswith("mesh chat open"):
             return 0, "chat opened: #badgetest\n"
         return 0, "ok\n"
@@ -107,12 +122,12 @@ class Env:
         self.driver.read_state()
 
     def ledger(self):
-        with open(os.path.join(self.dir, "ledger.csv"), newline="") as f:
+        with open(self.driver.ledger_path(), newline="") as f:
             return list(csv.DictReader(f))
 
     def seed_ledger(self, rows):
         """rows: (seq, age_s, scope, result); the ages are before the run's start."""
-        with open(os.path.join(self.dir, "ledger.csv"), "w", newline="") as f:
+        with open(self.driver.ledger_path(), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["seq", "time", "scope", "id", "tx_before", "tx_after", "result"])
             for seq, age, scope, result in rows:
@@ -704,11 +719,44 @@ class BadgeShellTest(unittest.TestCase):
         rc, out = b.run("mesh send #badgetest soak a 1; echo pwned")
         self.assertEqual((rc, out), (0, "fw|192.0.2.9|mesh send #badgetest soak a 1; echo pwned|"))
 
+    def child_script(self, pidfile):
+        return '#!/bin/sh\nsleep 30 &\necho $! > "%s"\nwait\n' % pidfile
+
+    def gone(self, pidfile):
+        with open(pidfile) as f:
+            pid = int(f.read())
+        for _ in range(60):  # up to 3 s for the kernel to reap it
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            time.sleep(0.05)
+        os.kill(pid, 9)
+        return False
+
     def test_timeout_kills_the_children(self):
-        repo = self.tree("#!/bin/sh\nsleep 30 &\nwait\n")
-        b = sd.BadgeShell(self.ipfile("192.0.2.9"), repo)
-        with mock.patch.object(sd, "CALL_TIMEOUT_S", 0.3):
+        pidfile = os.path.join(tempfile.mkdtemp(), "pid")
+        b = sd.BadgeShell(self.ipfile("192.0.2.9"), self.tree(self.child_script(pidfile)))
+        with mock.patch.object(sd, "CALL_TIMEOUT_S", 0.5):
             self.assertEqual(b.run("x"), (124, "timeout"))
+        self.assertTrue(self.gone(pidfile))
+
+    def test_interrupt_kills_the_call_under_way(self):
+        pidfile = os.path.join(tempfile.mkdtemp(), "pid")
+        b = sd.BadgeShell(self.ipfile("192.0.2.9"), self.tree(self.child_script(pidfile)))
+        timer = threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGINT))
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with self.assertRaises(KeyboardInterrupt):
+            b.run("x")
+        self.assertTrue(self.gone(pidfile))
+
+    def test_sigterm_is_an_interrupt(self):
+        old = signal.getsignal(signal.SIGTERM)
+        self.addCleanup(lambda: signal.signal(signal.SIGTERM, old))
+        sd.install_signal_handlers()
+        with self.assertRaises(KeyboardInterrupt):
+            signal.raise_signal(signal.SIGTERM)
 
     def test_the_address_file_must_hold_one_ipv4_address(self):
         for bad in ("badge.example.lan", "192.0.2.9 extra", "::1", "", "192.0.2.9\n192.0.2.10"):
@@ -731,6 +779,165 @@ class TimelineSegmentTest(unittest.TestCase):
             lo, hi = starts[k + 1], starts.get(k + 2, float("inf"))
             self.assertEqual(got, [t for t in epochs if lo < t <= hi] if k + 1 < 6 else [t for t in epochs if t > lo], block)
         self.assertEqual([r["epoch"] for r in seg.select(rows, m, "chat")], [T0 + 300, T0 + 600])
+
+class ContactsGateTest(unittest.TestCase):
+    def contacts(self, e):
+        e.driver.session(sp.Session(1, "contacts", 0, "awake", ()))
+
+    def test_no_enter_unless_the_contacts_tile_is_focused(self):
+        for why, fix in (("right missed", lambda b: setattr(b, "focus", "Chat")),
+                         ("row containing the word", lambda b: setattr(b, "focus", "Contacts on the card")),
+                         ("wrong stack", lambda b: setattr(b, "stack", "0"))):
+            with self.subTest(why):
+                e = Env(self)
+                e.start()
+                orig = e.badge.run
+
+                def run(line, orig=orig, fix=fix, e=e):
+                    rc, out = orig(line)
+                    if line == "keys send needlock right":
+                        fix(e.badge)
+                        if "wrong stack" in why:
+                            e.badge.focus = "Contacts"
+                    return rc, out
+
+                e.badge.run = run
+                self.contacts(e)
+                self.assertNotIn(sp.CONTACTS_ENTER, e.badge.log)
+                self.assertEqual(e.badge.log[-4:-2], ["ui open home", "ui lock off"])  # the tail still went out
+                self.assertIn("no Enter sent", e.read("transcript.txt") + e.read("state.txt"))
+
+    def test_the_enter_goes_when_the_grid_is_right(self):
+        e = Env(self)
+        e.start()
+        self.contacts(e)
+        self.assertEqual(e.badge.log.count(sp.CONTACTS_ENTER), 1)
+        self.assertTrue(e.driver.contacts_opened)
+
+    def test_three_blocks_in_a_row_that_could_not_open_are_a_blocker(self):
+        e = Env(self)
+        e.start()
+        e.badge.right_stuck = True
+        self.contacts(e)
+        self.contacts(e)
+        with self.assertRaises(sd.Blocker):
+            self.contacts(e)
+        self.assertEqual(e.badge.log[-4:-2], ["ui open home", "ui lock off"])
+
+    def test_a_good_block_resets_the_count(self):
+        e = Env(self)
+        e.start()
+        e.badge.right_stuck = True
+        self.contacts(e)
+        self.contacts(e)
+        e.badge.right_stuck = False
+        self.contacts(e)
+        e.badge.right_stuck = True
+        self.contacts(e)
+        self.assertEqual(e.driver.contacts_bad, 1)
+
+
+class LedgerTest(unittest.TestCase):
+    def test_pending_row_is_written_before_the_line_and_counts_on_reload(self):
+        seen = []
+
+        def hook(b, line):
+            if line.startswith("mesh send "):
+                with open(env.driver.ledger_path()) as f:
+                    seen.append(f.read())
+                b.boot = 99  # the badge restarts right after the send
+
+        env = Env(self, hook=hook)
+        self.assertEqual(env.driver.run(), 1)
+        self.assertIn("pending", seen[0])
+        self.assertEqual(env.ledger()[0]["result"], "pending")  # the outcome never came: the row stays pending
+        again = sd.Driver(sp.FULL, sd.Config(ZERO, REGION), FakeBadge(env.clock), env.clock, env.dir)
+        again.load_ledger()
+        self.assertEqual(len(again.attempts), 1)
+        self.assertEqual(again.attempts[0][1], sp.REGIONAL)
+
+    def test_the_row_is_updated_in_place_after_the_send(self):
+        e = Env(self)
+        e.start()
+        e.driver.send(sp.ZERO_HOP)
+        rows = e.ledger()
+        self.assertEqual((len(rows), rows[0]["result"], rows[0]["tx_after"]), (1, "sent", "1"))
+
+    def test_corrupt_rows_are_a_blocker_not_a_crash(self):
+        head = "seq,time,scope,id,tx_before,tx_after,result\n"
+        for why, body in (("cut result", "1,%d,zero_hop,x,0,0,sen\n" % T0), ("garbage seq", "zz,%d,zero_hop,x,0,0,sent\n" % T0),
+                          ("short row", "2,%d\n" % T0), ("unknown scope", "1,%d,mars,x,0,0,sent\n" % T0)):
+            with self.subTest(why):
+                e = Env(self)
+                os.makedirs(e.dir, exist_ok=True)
+                with open(e.driver.ledger_path(), "w") as f:
+                    f.write(head + body)
+                self.assertEqual(e.driver.run(), 1)
+                self.assertIn("ledger", e.read("BLOCKER"))
+                self.assertFalse(any(x.startswith(("mesh send", "keys", "ui")) for x in e.badge.log))
+
+    def test_ledgers_are_per_profile_and_the_other_one_is_refused(self):
+        e = Env(self, profile=sp.REHEARSAL)
+        e.seed_ledger([(1, 10, "zero_hop", "sent")])
+        full = sd.Driver(sp.FULL, sd.Config(ZERO, REGION), e.badge, e.clock, e.dir)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(full.run(), 2)
+        self.assertIn("another profile", err.getvalue())
+        self.assertEqual(e.badge.log, [])
+        self.assertNotEqual(e.driver.ledger_path(), full.ledger_path())
+
+
+class RestoreFailureTest(unittest.TestCase):
+    def test_failed_restore_line_leaves_the_next_send_to_fix_or_skip(self):
+        fails = []
+
+        def hook(b, line):
+            if line == "mesh scope console %s YES" % ZERO and len(fails) < 1 and any(
+                    x.startswith("mesh send ") for x in b.log):
+                fails.append(1)
+                b.ignore_scope_set = True  # the restore line does not take
+
+        e = Env(self, hook=hook)
+        e.start()
+        e.driver.send(sp.REGIONAL)
+        self.assertTrue(e.driver.scope_dirty)
+        self.assertEqual(e.badge.scope, REGION)
+        e.badge.ignore_scope_set = False
+        e.driver.send(sp.ZERO_HOP)  # the next 0-hop send re-sets the scope first
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertFalse(e.driver.scope_dirty)
+        self.assertEqual(sum(1 for x in e.badge.log if x.startswith("mesh send ")), 2)
+
+    def test_a_scope_that_will_not_go_back_means_no_send(self):
+        e = Env(self)
+        e.start()
+        e.driver.send(sp.REGIONAL)
+        e.badge.scope, e.badge.ignore_scope_set = REGION, True
+        e.driver.scope_dirty = True
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(sum(1 for x in e.badge.log if x.startswith("mesh send ")), 1)  # only the regional one
+
+    def test_restore_failing_does_not_replace_the_original_exception(self):
+        e = Env(self, hook=lambda b, line: (_ for _ in ()).throw(KeyboardInterrupt()) if line.startswith("mesh send ") else None)
+        e.start()
+        e.driver.restore_scope = mock.Mock(side_effect=sd.Blocker("x"))
+        with self.assertRaises(KeyboardInterrupt):
+            e.driver.send(sp.REGIONAL)
+
+    def test_blocker_text_says_the_scope_may_be_regional(self):
+        e = Env(self, hook=lambda b, line: setattr(b, "boot", 99) if line.startswith("mesh send ") else None)
+        self.assertEqual(e.driver.run(), 1)
+        self.assertIn("may still be the regional one", e.read("BLOCKER"))
+
+
+class AllowlistLinesTest(unittest.TestCase):
+    def test_control_characters_and_odd_spacing_are_refused(self):
+        names = (ZERO, REGION)
+        for bad in ("keys send needlock up\ndown", "mesh send #badgetest soak ab 3\n", "keys send  needlock up",
+                    "mesh send #badgetest soak ab 3 ", "ui open\thome", "ui lock on 601", "ui lock on 0", "ui lock on 99999",
+                    "keys send needlock left", "keys send needlock triangle", "mesh send #badgetest soak ab 3\x00"):
+            self.assertFalse(sp.line_allowed(bad, names), repr(bad))
+        self.assertTrue(sp.line_allowed("ui lock on 600", names))
 
 
 if __name__ == "__main__":

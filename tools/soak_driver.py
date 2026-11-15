@@ -12,8 +12,10 @@ goes into the transcript is redacted (the address, MACs, the configured scope na
 names the scopes; without it the driver refuses to start. Run directory: transcript.txt (the baseline soak's `## sample`
 blocks, plus `## segment`, `## session` and `## state` marker lines), ledger.csv, state.txt, and on a stop BLOCKER. A
 file named STOP in it ends the run cleanly; a STOP or a BLOCKER left from an earlier run ends or refuses the next one,
-so remove them first. A rerun in the same directory continues the send count from ledger.csv (the caps hold per run
-directory, not per process).
+so remove them first. The ledger is ledger-<profile>.csv: a rerun in the same directory continues the send count from
+it (the caps hold per run directory and profile, not per process; a `pending` row, written before a send goes out,
+counts as an attempt; an unreadable row is a blocker), and a directory that holds the other profile's ledger (a
+rehearsal, then the 24 h run) is refused: use a new --run-dir for each run.
 
 Stop rule: after every state read the boot count, crash count, slot and C6 restart counter are compared with the start
 values (a state read also follows the block, before the tail). A change, a badge that stops answering, a session that
@@ -21,7 +23,7 @@ does not end on home with the lock off, three failed or skipped sends in a row, 
 the reason (fixed text, never badge output), one comment goes to the issue (a failed comment is noted in BLOCKER), exit
 1. After a change of the counters or no answer no further line is sent at all (the key lock runs out by itself after
 LOCK_S seconds); after any other stop the session's tail (console scope back to the 0-hop scope, home, lock off) still
-goes out. Ctrl-C does the tail and exits 130. No self-repair.
+goes out. Ctrl-C and SIGTERM do the tail and exit 130 (the badge.sh call under way is killed). No self-repair.
 Exit: 0 finished or STOP, 1 blocker, 2 bad usage or config, 130 interrupted."""
 import argparse
 import csv
@@ -42,14 +44,18 @@ DEFAULT_CONFIG = os.path.expanduser("~/.config/why2025-badge/soak-driver.conf")
 SCOPE_RX = re.compile(r"^[a-z0-9][a-z0-9-]{2,}$")
 SCOPE_LINE_RX = re.compile(r"^(?:fw: )?default [^ |]+ \| console ([^ |]+|not set)\s*$", re.M)
 STACK_RX = re.compile(r"^(?:fw: )?ui stack: (.*?) \|", re.M)
+FOCUS_RX = re.compile(r"^(?:fw: )?ui stack: (.*?) \| focus: (.*?)\s*$", re.M)
+GRID_STACK_RX = re.compile(r"^0 > \d+$")  # home, then the MeshCore app (its grid on top)
 FAILED_RX = re.compile(r"not now|did not open|no app|guard \d+ failed|key lock is off|refused|not opened|"
                        r"not confirmed|dropped|developer mode is off|refusing: ", re.I)
 MAC_RX = re.compile(r"([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
 IP_RX = re.compile(r"(\d{1,3}\.){3}\d{1,3}")
 STATE_KEYS = ("boot", "crash", "slot", "c6rs")
+LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result"]
+ATTEMPT_RESULTS = ("sent", "failed", "pending")  # a pending row: the line may have gone out, so it counts
 RETRIES, RETRY_WAIT_S = 3, 20
 SAMPLE_MISSES_MAX, SAMPLE_RETRY_S = 5, 60
-BAD_MAX = 3            # failed or skipped sends in a row
+BAD_MAX = 3            # failed or skipped sends in a row, or Contacts blocks that did not open, in a row
 SETTLE_S = 3           # for the badge's tx counter to follow the send
 REGIONAL_TOL_S = 900   # a reloaded regional attempt is compared on real time, with this much slack
 CALL_TIMEOUT_S = 150
@@ -107,7 +113,8 @@ class RealClock:
         return time.time()
 
     def mono(self) -> float:
-        return time.monotonic()
+        # CLOCK_BOOTTIME keeps counting while the host is suspended, so the lateness rule sees it (Linux)
+        return time.clock_gettime(getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC))
 
     def sleep(self, s: float) -> None:
         time.sleep(s)
@@ -132,10 +139,27 @@ class BadgeShell:
         try:
             out, _ = p.communicate(timeout=CALL_TIMEOUT_S)
         except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)  # badge.sh and the curl under it, so no child holds the pipe
-            p.communicate()
+            self.kill(p)  # badge.sh and the curl under it, so no child holds the pipe
             return 124, "timeout"
+        except BaseException:  # Ctrl-C, SIGTERM: no call may go on unattended after the driver stops
+            self.kill(p)
+            raise
         return p.returncode, out
+
+    @staticmethod
+    def kill(p) -> None:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.communicate()
+
+
+def install_signal_handlers() -> None:
+    """SIGTERM ends the run like Ctrl-C: the tail goes out, the call under way is killed."""
+    def stop(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop)
 
 
 def repo_slug(repo: str) -> str:
@@ -173,6 +197,8 @@ class Driver:
         # every send that reached `mesh send`: (monotonic time, scope kind, plan slot or None when reloaded)
         self.attempts: List[Tuple[float, str, Optional[int]]] = []
         self.bad = 0                # failed or skipped sends in a row
+        self.contacts_bad = 0       # Contacts blocks in a row that could not open the list
+        self.contacts_opened = False
         self.slot: Optional[int] = None
         self.scope_dirty = False    # the console scope may still be the regional one
         self.session_n = 0
@@ -272,28 +298,50 @@ class Driver:
             raise Blocker("the session did not end on home with the key lock off")
 
     # ---- sends -----------------------------------------------------------------------------------------------------
+    def ledger_path(self, profile: Optional[str] = None) -> str:
+        return self.path("ledger-%s.csv" % (profile or self.profile.name))
+
     def ledger(self, row: List[object]) -> None:
-        path = self.path("ledger.csv")
+        path = self.ledger_path()
         new = not os.path.exists(path)
         with open(path, "a", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             if new:
-                w.writerow(["seq", "time", "scope", "id", "tx_before", "tx_after", "result"])
+                w.writerow(LEDGER_HEAD)
             w.writerow(row)
+
+    def ledger_update(self, row: List[object]) -> None:
+        """Replace the row of this sequence number (the `pending` row of an attempt) by its outcome."""
+        path = self.ledger_path()
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        rows = [[str(x) for x in row] if r[:1] == [str(row[0])] else r for r in rows]
+        tmp = path + ".tmp"
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows(rows)
+        os.replace(tmp, path)
 
     def load_ledger(self) -> None:
         """A rerun in the same run directory continues the count: every attempt (sent or failed) of the ledger counts
         toward the caps and the regional interval, at its own age."""
-        path = self.path("ledger.csv")
+        path = self.ledger_path()
         if not os.path.exists(path):
             return
         now_wall, now_mono = self.clock.now(), self.clock.mono()
-        with open(path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                self.seq = max(self.seq, int(row["seq"]))
-                if row["result"] in ("sent", "failed"):
-                    age = max(0.0, now_wall - float(row["time"]))
-                    self.attempts.append((now_mono - age, row["scope"], None))
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            for row in rows:
+                seq, when, scope, result = int(row["seq"]), float(row["time"]), row["scope"], row["result"]
+                if scope not in (sp.ZERO_HOP, sp.REGIONAL) or not (result in ATTEMPT_RESULTS or
+                                                                   result.startswith("skipped: ")):
+                    raise ValueError(result)
+                self.seq = max(self.seq, seq)
+                if result in ATTEMPT_RESULTS:
+                    self.attempts.append((now_mono - max(0.0, now_wall - when), scope, None))
+        except (ValueError, TypeError, KeyError, AttributeError, OSError, UnicodeError):
+            raise Blocker("the ledger of an earlier run could not be read (a corrupt or cut row): the caps cannot be "
+                          "trusted", silent=True)
 
     def cap_problem(self, kind: str, now: float, slot: Optional[int] = None) -> str:
         """now: monotonic. The regional interval is judged on the plan's slot times (jitter in when a send really
@@ -347,12 +395,19 @@ class Driver:
             self.send_one(kind)
         except Blocker as b:
             if not b.silent:
-                self.restore_scope()
+                self.safe_restore()
             raise
         except BaseException:
-            self.restore_scope()
+            self.safe_restore()
             raise
         self.restore_scope()
+
+    def safe_restore(self) -> None:
+        """restore_scope on the way out of an exception: whatever it raises must not replace that exception."""
+        try:
+            self.restore_scope()
+        except Exception as e:  # noqa: BLE001
+            self.note("scope restore failed (%s)" % type(e).__name__)
 
     def skip(self, ident: str, kind: str, why: str) -> None:
         self.ledger([self.seq, int(self.clock.now()), kind, ident, "", "", "skipped: " + why])
@@ -376,19 +431,28 @@ class Driver:
         before = self.read_state()
         now = self.clock.now()
         self.attempts.append((self.clock.mono(), kind, self.slot))
+        row = [self.seq, int(now), kind, ident, before.get("mtx", ""), "", "pending"]
+        self.ledger(row)  # before the line goes out: a restart or Ctrl-C after it still leaves the attempt on record
         try:
             result = "sent" if "queued #" in self.line(text, judged=False) else "failed"
         except StepError:
             result = "failed"
         self.clock.sleep(SETTLE_S)
         after = self.read_state()
-        self.ledger([self.seq, int(now), kind, ident, before.get("mtx", ""), after.get("mtx", ""), result])
+        self.ledger_update(row[:5] + [after.get("mtx", ""), result])
         if result == "sent":
             self.bad = 0
         else:
             self.bad_send()
 
     # ---- sessions and samples --------------------------------------------------------------------------------------
+    def contacts_gate(self) -> None:
+        """Before the one Enter: the focus is exactly the Contacts tile and the stack is home > MeshCore (the grid on
+        top). The firmware's own guard matches a substring, so a row like 'Contacts on the card' would pass it."""
+        m = FOCUS_RX.search(self.scrub(self.line("ui", judged=False)))
+        if m is None or GRID_STACK_RX.match(m.group(1).strip()) is None or m.group(2).strip() != "Contacts":
+            raise StepError("the Contacts tile is not focused on the MeshCore grid: no Enter sent")
+
     def run_body(self, session: sp.Session) -> None:
         self.slot = session.start_s
         for step in sp.session_steps(session)[:-2]:
@@ -396,6 +460,10 @@ class Driver:
                 return
             if step.kind == "send":
                 self.send(step.scope)
+            elif step.text == sp.CONTACTS_ENTER:
+                self.contacts_gate()
+                self.line(step.text)
+                self.contacts_opened = True
             else:
                 self.line(step.text)
         self.read_state()  # a restart during the body ends the session here, before its tail
@@ -417,6 +485,7 @@ class Driver:
     def session(self, s: sp.Session) -> None:
         self.write("## session %d %s start %d" % (s.n, s.block, self.clock.now()))
         error, pending = "", None
+        self.contacts_opened = False
         try:
             self.run_body(s)
         except StepError as e:
@@ -433,6 +502,15 @@ class Driver:
             self.write("## session %d %s error %s" % (s.n, s.block, error))
             self.note("session %d %s: %s" % (s.n, s.block, error))
         self.write("## session %d %s end %d" % (s.n, s.block, self.clock.now()))
+        self.count_contacts(s)
+
+    def count_contacts(self, s: sp.Session) -> None:
+        """A Contacts block that never opened the list does nothing useful: three in a row stop the run, as sends do."""
+        if s.block != "contacts" or self.stop_requested():
+            return
+        self.contacts_bad = 0 if self.contacts_opened else self.contacts_bad + 1
+        if self.contacts_bad >= BAD_MAX:
+            raise Blocker("the Contacts list could not be opened three times in a row")
 
     def sample(self) -> None:
         self.samples += 1
@@ -484,6 +562,11 @@ class Driver:
         if os.path.exists(self.path("BLOCKER")):
             print("soak_driver: a BLOCKER file is in the run directory: look at it and remove it first", file=sys.stderr)
             return 2
+        other = [n for n in os.listdir(self.dir) if re.fullmatch(r"ledger-.*\.csv", n) and n != os.path.basename(self.ledger_path())]
+        if other:
+            print("soak_driver: the run directory holds another profile's ledger: use a new --run-dir for each run",
+                  file=sys.stderr)
+            return 2
         try:
             self.read_state()  # the start values; a dead badge or developer mode off ends here
         except Blocker:
@@ -491,9 +574,10 @@ class Driver:
             return 2
         self.start_wall, self.start_mono = self.clock.now(), self.clock.mono()
         self.run_id = "%x" % int(self.start_wall)
-        self.load_ledger()
-        self.note("start: %s, run %s, %d earlier send attempts" % (self.profile.name, self.run_id, len(self.attempts)))
+        self.note("start: %s, run %s" % (self.profile.name, self.run_id))
         try:
+            self.load_ledger()
+            self.note("earlier send attempts: %d" % len(self.attempts))
             return self.run_timeline()
         except Blocker as e:
             return self.block(str(e))
@@ -526,6 +610,8 @@ class Driver:
 
     def block(self, reason: str) -> int:
         stamp = int(self.clock.now())
+        if self.scope_dirty:
+            reason += " (the console scope may still be the regional one: check `mesh scope`)"
         text = ("Use soak stopped by its driver at epoch %d, session %d: %s. The evidence is in the run directory "
                 "on the bench host; nothing was changed on the badge." % (stamp, self.session_n, reason))
         try:
@@ -576,6 +662,7 @@ def main(argv: List[str]) -> int:
     except (ValueError, OSError) as e:
         print("soak_driver: %s" % (e if isinstance(e, ValueError) else "cannot read the address file"), file=sys.stderr)
         return 2
+    install_signal_handlers()
     d = Driver(sp.profile_by_name(a.rehearsal), cfg, badge, RealClock(), a.run_dir,
                lambda text: post_issue_comment(a.issue, text))
     return d.run()
