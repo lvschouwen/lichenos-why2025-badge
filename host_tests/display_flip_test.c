@@ -132,6 +132,9 @@ static void test_swap_proven(void) {
     CHECK(!display_swap_proven(req, mark(11, 1000), guard)); // the first one, too close: may have read the old index
     CHECK(!display_swap_proven(req, mark(11, 1200), guard)); // still inside the guard
     CHECK(display_swap_proven(req, mark(11, 1201), guard));  // read the index after the request
+    CHECK(!display_swap_proven(req, mark(11, 1050), guard)); // first callback 50 us after the request time: may race
+    CHECK(display_swap_proven(req, mark(11, 1250), guard));  // 250 us after: it read the new index
+    CHECK(display_swap_proven(req, mark(12, 1050), guard));  // a second callback always proves
     CHECK(display_swap_proven(req, mark(12, 1100), guard));  // a second callback proves it whatever its stamp says
     CHECK(display_swap_proven(req, mark(5000000, 1000), guard)); // a long idle: the stamp has wrapped, the count settles it
     CHECK(!display_swap_proven(req, mark(9, 99999), guard));     // a mark from before the request (torn read)
@@ -169,48 +172,87 @@ static void test_dirty_edges(void) {
 }
 
 // ---- the state machine, against a fake scan-out with two 8x8 buffers ----
-enum { FW = 8, FH = 8 };
+// The fake follows the driver: request sets the index, an end of frame restarts the DMA on the index it read and then
+// runs the callback (count + stamp). Any strip or copy-back into the buffer being scanned out is a violation, except
+// where a test says it is the documented behaviour (swap off, refused request).
+enum { FW = 8, FH = 8, GUARD_US = 200, FRAME_US = 16000 };
 
 typedef struct {
     uint16_t buf[2][FW * FH];
-    bool     refuse;   // request fails (draw_bitmap error)
-    bool     prove;    // wait succeeds
-    int      requests; // calls of request
-    int      waits;
-    unsigned requested; // buffer last requested
-    int      copies;
+    unsigned index;   // the driver's cur_fb_index
+    unsigned scanned; // the buffer the DMA reads
+    uint32_t count, stamp, clock;
+    int      frames_in_wait; // ends of frame that arrive while the state machine waits (0 = stalled scan-out)
+    bool     race_next;      // the next request races an interrupt that already read the old index
+    bool     race_armed;
+    unsigned race_latched;
+    bool     refuse;        // request fails (draw_bitmap error)
+    bool     allow_scanned; // writing the shown buffer is the documented behaviour in this test
+    int      violations, requests, waits, copies;
     unsigned copy_dst[8], copy_src[8];
-    uint32_t clock;
 } fake_t;
 
-static bool fake_request(void *ctx, unsigned fb, display_frame_mark_t *m) {
-    fake_t *const f = ctx;
-    f->requests++;
-    if (f->refuse) {
+static void fake_isr(fake_t *fk, unsigned latched) {
+    fk->scanned = latched; // restart on what it read
+    fk->stamp   = fk->clock;
+    fk->count++;
+}
+
+static void fake_end_of_frame(fake_t *fk) {
+    fk->clock += FRAME_US;
+    fake_isr(fk, fk->index);
+}
+
+static bool fake_request(void *ctx, unsigned fb) {
+    fake_t *const fk = ctx;
+    fk->requests++;
+    if (fk->refuse) {
         return false;
     }
-    f->requested = fb;
-    *m           = mark((uint32_t)f->requests, f->clock);
+    if (fk->race_next) { // the interrupt read the index just before this store and finishes after the mark
+        fk->race_next    = false;
+        fk->race_armed   = true;
+        fk->race_latched = fk->index;
+    }
+    fk->index = fb;
     return true;
 }
 
-static bool fake_wait(void *ctx, display_frame_mark_t m) {
-    fake_t *const f = ctx;
-    (void)m;
-    f->waits++;
-    f->clock += 5000;
-    return f->prove;
+static uint32_t fake_frame_count(void *ctx) {
+    return ((fake_t *)ctx)->count;
+}
+
+static bool fake_wait(void *ctx, display_frame_mark_t req) {
+    fake_t *const fk = ctx;
+    fk->waits++;
+    if (fk->race_armed) {
+        fk->race_armed = false;
+        fk->clock += 50;
+        fake_isr(fk, fk->race_latched); // stamped 50 us after the request, restarted on the OLD buffer
+    }
+    while (!display_swap_proven(req, mark(fk->count, fk->stamp), GUARD_US)) {
+        if (fk->frames_in_wait <= 0) {
+            fk->clock += 100000; // the timeout
+            return false;
+        }
+        fk->frames_in_wait--;
+        fake_end_of_frame(fk);
+    }
+    return true;
 }
 
 static void fake_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
-    fake_t *const f = ctx;
-    if (f->copies < 8) {
-        f->copy_dst[f->copies] = dst;
-        f->copy_src[f->copies] = src;
+    fake_t *const fk = ctx;
+    if (dst == fk->scanned && !fk->allow_scanned) {
+        fk->violations++;
     }
-    f->copies++;
-    f->clock += 100;
-    display_copy_rect(f->buf[dst], f->buf[src], FW, r);
+    if (fk->copies < 8) {
+        fk->copy_dst[fk->copies] = dst;
+        fk->copy_src[fk->copies] = src;
+    }
+    fk->copies++;
+    fk->clock += 100;
+    display_copy_rect(fk->buf[dst], fk->buf[src], FW, r);
 }
 
 static uint32_t fake_now(void *ctx) {
@@ -219,8 +261,9 @@ static uint32_t fake_now(void *ctx) {
 
 static void fake_setup(fake_t *fk, display_flip_t *f, bool swap_on) {
     memset(fk, 0, sizeof(*fk));
-    fk->prove                    = true;
-    display_flip_ops_t const ops = {fake_request, fake_wait, fake_copy, fake_now, fk};
+    fk->clock                    = 1000;
+    fk->frames_in_wait           = 1;
+    display_flip_ops_t const ops = {fake_request, fake_frame_count, fake_wait, fake_copy, fake_now, fk};
     display_flip_init(f, &ops, swap_on);
 }
 
@@ -229,6 +272,9 @@ static unsigned draw_frame(display_flip_t *f, fake_t *fk, display_rect_t const *
     unsigned fb = 0;
     for (int i = 0; i < n; i++) {
         fb = display_flip_write_target(f);
+        if (fb == fk->scanned && !fk->allow_scanned) {
+            fk->violations++;
+        }
         for (int32_t y = areas[i].y1; y <= areas[i].y2; y++) {
             for (int32_t x = areas[i].x1; x <= areas[i].x2; x++) {
                 fk->buf[fb][y * FW + x] = colour;
@@ -252,12 +298,29 @@ static void test_flip_basic(void) {
     display_flip_t f;
     fake_setup(&fk, &f, true);
     CHECK(draw_frame(&f, &fk, &AREA_A, 1, 7) == 1); // drawn into the back buffer
-    CHECK(f.pending && fk.requested == 1 && fk.waits == 0 && fk.copies == 0 && f.front == 0);
-    CHECK(display_flip_write_target(&f) == 0); // proven: 1 is shown, 0 is the new back
-    CHECK(f.front == 1 && !f.pending && fk.waits == 1);
+    CHECK(f.pending && fk.index == 1 && fk.waits == 0 && fk.copies == 0 && f.front == 0 && fk.scanned == 0);
+    CHECK(display_flip_write_target(&f) == 0); // one end of frame: 1 is shown, 0 is the new back
+    CHECK(f.front == 1 && fk.scanned == 1 && !f.pending && fk.waits == 1);
     CHECK(fk.copies == 1 && fk.copy_dst[0] == 0 && fk.copy_src[0] == 1);
-    CHECK(buffers_equal(&fk) && f.dirty.n == 0);
-    CHECK(f.stats.swaps == 1 && f.stats.wait_us == 5000 && f.stats.copy_us == 100 && f.stats.copy_max_us == 100);
+    CHECK(buffers_equal(&fk) && f.dirty.n == 0 && fk.violations == 0);
+    CHECK(f.stats.swaps == 1 && f.stats.wait_us == FRAME_US && f.stats.copy_us == 100 && f.stats.copy_max_us == 100);
+}
+
+// The M3 race: an interrupt read the old index just before the request and runs its callback 50 us after it. That
+// callback must not count as the proof (the DMA restarted on the old buffer); the next end of frame does.
+static void test_flip_race(void) {
+    fake_t         fk;
+    display_flip_t f;
+    fake_setup(&fk, &f, true);
+    fk.clock = 50000;
+    fake_end_of_frame(&fk); // an ordinary frame: its callback stamp is 8 ms older than the request
+    fk.clock += 8000;
+    fk.race_next      = true;
+    fk.frames_in_wait = 1;
+    draw_frame(&f, &fk, &AREA_A, 1, 9);
+    CHECK(display_flip_write_target(&f) == 0);
+    CHECK(fk.scanned == 1 && f.front == 1 && fk.violations == 0 && buffers_equal(&fk));
+    CHECK(f.stats.swaps == 1 && f.stats.wait_us == 50 + FRAME_US); // waited out the racing callback
 }
 
 // Two frames back to back: each resolves the previous one before its first strip
@@ -267,59 +330,67 @@ static void test_flip_back_to_back(void) {
     fake_setup(&fk, &f, true);
     CHECK(draw_frame(&f, &fk, &AREA_A, 1, 1) == 1);
     CHECK(draw_frame(&f, &fk, &AREA_B, 1, 2) == 0); // frame A proven, copied 1 -> 0, then B drawn into 0
-    CHECK(fk.requested == 0 && f.front == 1 && fk.copies == 1);
+    CHECK(fk.index == 0 && f.front == 1 && fk.copies == 1);
+    fk.frames_in_wait = 1;
     CHECK(display_flip_write_target(&f) == 1); // B proven: copied 0 -> 1
-    CHECK(f.front == 0 && fk.copies == 2 && fk.copy_dst[1] == 1 && fk.copy_src[1] == 0);
-    CHECK(buffers_equal(&fk) && fk.buf[0][0] == 1 && fk.buf[0][2 * FW + 4] == 2);
+    CHECK(f.front == 0 && fk.scanned == 0 && fk.copies == 2 && fk.copy_dst[1] == 1 && fk.copy_src[1] == 0);
+    CHECK(buffers_equal(&fk) && fk.buf[0][0] == 1 && fk.buf[0][2 * FW + 4] == 2 && fk.violations == 0);
 }
 
-// A frame followed by nothing: the requested buffer holds the whole picture; the other is levelled at the next write
+// A frame followed by nothing: the panel switches on its own, the other buffer is levelled at the next write
+// without waiting (the proof is already there)
 static void test_flip_idle(void) {
     fake_t         fk;
     display_flip_t f;
     fake_setup(&fk, &f, true);
     draw_frame(&f, &fk, &AREA_A, 1, 3);
-    CHECK(fk.requested == 1 && fk.buf[1][0] == 3 && fk.copies == 0 && fk.waits == 0); // nothing blocks while idle
-    CHECK(!buffers_equal(&fk));
-    display_flip_write_target(&f);
-    CHECK(buffers_equal(&fk));
+    CHECK(fk.copies == 0 && fk.waits == 0 && !buffers_equal(&fk)); // nothing blocks while idle
+    for (int i = 0; i < 300; i++) {
+        fake_end_of_frame(&fk); // five seconds of scan-out
+    }
+    CHECK(fk.scanned == 1 && fk.buf[1][0] == 3); // the whole picture is on screen
+    fk.frames_in_wait = 0;
+    CHECK(display_flip_write_target(&f) == 0);
+    CHECK(buffers_equal(&fk) && f.stats.swaps == 1 && f.stats.wait_us == 0 && fk.violations == 0);
 }
 
-// A wait that runs out: no flip, no copy into a buffer that may be on screen, same back buffer again, areas kept,
-// requested again at the next frame end; once proven everything drawn meanwhile reaches the other buffer
+// A stalled scan-out: no flip, no copy into a buffer that may be on screen, the same back buffer again, the areas
+// kept and requested again at the next frame end; once it resumes everything reaches the other buffer
 static void test_flip_timeout(void) {
     fake_t         fk;
     display_flip_t f;
     fake_setup(&fk, &f, true);
     draw_frame(&f, &fk, &AREA_A, 1, 4);
-    fk.prove = false;
+    fk.frames_in_wait = 0;
     CHECK(draw_frame(&f, &fk, &AREA_B, 1, 5) == 1); // still the same back buffer
-    CHECK(f.front == 0 && fk.copies == 0 && f.stats.timeouts == 1 && f.dirty.n == 2);
-    CHECK(f.pending && fk.requested == 1 && fk.requests == 2); // asked again
-    fk.prove = true;
+    CHECK(f.front == 0 && fk.scanned == 0 && fk.copies == 0 && f.stats.timeouts == 1 && f.dirty.n == 2);
+    CHECK(f.pending && fk.index == 1 && fk.requests == 2); // asked again
+    fk.frames_in_wait = 1;
     CHECK(display_flip_write_target(&f) == 0);
-    CHECK(f.front == 1 && fk.copies == 2 && fk.copy_dst[0] == 0 && fk.copy_dst[1] == 0);
+    CHECK(f.front == 1 && fk.scanned == 1 && fk.copies == 2 && fk.copy_dst[0] == 0 && fk.copy_dst[1] == 0);
     CHECK(buffers_equal(&fk) && fk.buf[0][0] == 4 && fk.buf[0][2 * FW + 4] == 5);
-    CHECK(f.stats.swaps == 1 && f.stats.timeouts == 1);
+    CHECK(f.stats.swaps == 1 && f.stats.timeouts == 1 && fk.violations == 0);
 }
 
-// draw_bitmap refused: the frame is copied into the shown buffer at once, nothing pending
+// draw_bitmap refused: the frame is copied into the shown buffer at once (documented), nothing pending
 static void test_flip_refused(void) {
     fake_t         fk;
     display_flip_t f;
     fake_setup(&fk, &f, true);
-    fk.refuse = true;
+    fk.refuse        = true;
+    fk.allow_scanned = true;
     draw_frame(&f, &fk, &AREA_A, 1, 6);
     CHECK(!f.pending && f.front == 0 && f.stats.refusals == 1);
     CHECK(fk.copies == 1 && fk.copy_dst[0] == 0 && fk.copy_src[0] == 1 && buffers_equal(&fk));
     CHECK(display_flip_write_target(&f) == 1 && fk.waits == 0);
 }
 
-// No swap at all (the frame callback is not ours): strips go straight into the shown buffer
+// No swap at all (the frame callback is not ours): strips go straight into the shown buffer (documented)
 static void test_flip_off(void) {
     fake_t         fk;
     display_flip_t f;
     fake_setup(&fk, &f, false);
+    fk.allow_scanned = true;
     CHECK(draw_frame(&f, &fk, &AREA_A, 1, 8) == 0);
     CHECK(fk.requests == 0 && fk.copies == 0 && fk.waits == 0 && f.dirty.n == 0);
 }
@@ -334,6 +405,7 @@ int main(void) {
     test_swap_proven();
     test_dirty_edges();
     test_flip_basic();
+    test_flip_race();
     test_flip_back_to_back();
     test_flip_idle();
     test_flip_timeout();

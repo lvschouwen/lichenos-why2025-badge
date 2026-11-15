@@ -27,8 +27,8 @@ void display_dirty_add(display_dirty_t *d, display_rect_t r);
 // Copy one rectangle between two frame buffers of `stride_px` pixels per row
 void display_copy_rect(uint16_t *dst, uint16_t const *src, int32_t stride_px, display_rect_t r);
 
-// The end-of-frame callback's count and the low 32 bits of a microsecond clock at its last run, or the same pair read
-// right after a switch was requested.
+// The end-of-frame callback's count and the low 32 bits of a microsecond clock at its last run; for a request, the
+// count and the clock itself (not the last callback's stamp) read right after the switch was asked for.
 typedef struct {
     uint32_t count;
     uint32_t us;
@@ -36,14 +36,16 @@ typedef struct {
 
 // Whether the frame callbacks seen by `now` prove the DMA restarted on the buffer requested at `req`. The driver reads
 // its buffer index a few instructions before it runs the callback, so the first callback after the request may still
-// have read the old index unless it ran more than `guard_us` later; the second one cannot have. Differences are taken
+// have read the old index unless it was stamped more than `guard_us` after the request time; the second cannot have. Differences are taken
 // modulo 2^32, the count settles a long idle, the stamp only the first frame.
 bool display_swap_proven(display_frame_mark_t req, display_frame_mark_t now, uint32_t guard_us);
 
 // The hardware side, injected so the state machine below runs on the host
 typedef struct {
-    // Ask the scan-out to switch to buffer `fb` at the next end of frame; fill `mark` right after. False = refused.
-    bool (*request)(void *ctx, unsigned fb, display_frame_mark_t *mark);
+    // Ask the scan-out to switch to buffer `fb` at the next end of frame. False = refused.
+    bool (*request)(void *ctx, unsigned fb);
+    // How many end-of-frame callbacks have run (the request mark is this, then now_us, read after request)
+    uint32_t (*frame_count)(void *ctx);
     // Bounded wait until the switch requested at `mark` is proven. False = not proven in time.
     bool (*wait)(void *ctx, display_frame_mark_t mark);
     // Copy one rectangle from buffer `src` to buffer `dst`, written back so the scan-out sees it

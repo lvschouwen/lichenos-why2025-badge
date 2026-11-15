@@ -149,8 +149,12 @@ void display_flip_frame_end(display_flip_t *f) {
         return;
     }
     unsigned const back = display_back_fb(f->front);
-    if (f->ops.request(f->ops.ctx, back, &f->req)) {
-        f->pending = true;
+    if (f->ops.request(f->ops.ctx, back)) {
+        // Count first, then the clock: a callback that lands between the two is counted as after the request but
+        // stamped before it, so it proves nothing (the safe side)
+        f->req.count = f->ops.frame_count(f->ops.ctx);
+        f->req.us    = f->ops.now_us(f->ops.ctx);
+        f->pending   = true;
         return;
     }
     f->stats.refusals++;

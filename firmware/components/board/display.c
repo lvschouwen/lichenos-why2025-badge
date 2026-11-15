@@ -128,19 +128,24 @@ static uint32_t flip_now_us(void *ctx) {
 }
 
 // Row 0 is the cache write-back the driver does for a 1x1 area; every strip was written back already
-static bool flip_request(void *ctx, unsigned fb, display_frame_mark_t *mark) {
+static bool flip_request(void *ctx, unsigned fb) {
     (void)ctx;
     esp_err_t const err = esp_lcd_panel_draw_bitmap(lcd_panel, 0, 0, 1, 1, panel_fbs[fb]);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "frame buffer swap: %s", esp_err_to_name(err));
         return false;
     }
-    *mark = frame_mark();
     return true;
 }
 
+static uint32_t flip_frame_count(void *ctx) {
+    (void)ctx;
+    return fb_done_count;
+}
+
 // Bounded: a stalled scan-out (flash erase, panel off) costs SWAP_TIMEOUT_MS and a log line, never a hung UI. After an
-// idle spell the proof is already there and nothing waits.
+// idle spell the proof is already there and nothing waits. The semaphore is not drained at the request, so a give
+// left from an earlier frame returns at once and the loop goes round once more: harmless, the marks decide.
 static bool flip_wait(void *ctx, display_frame_mark_t req) {
     (void)ctx;
     TickType_t const until = xTaskGetTickCount() + pdMS_TO_TICKS(SWAP_TIMEOUT_MS);
@@ -165,7 +170,7 @@ static void flip_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
-static display_flip_ops_t const flip_ops = {flip_request, flip_wait, flip_copy, flip_now_us, NULL};
+static display_flip_ops_t const flip_ops = {flip_request, flip_frame_count, flip_wait, flip_copy, flip_now_us, NULL};
 
 // Bench figure (#467): the time spent waiting for the swap proof and copying back, developer builds only
 static void flip_log_stats(void) {
