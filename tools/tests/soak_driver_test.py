@@ -108,14 +108,15 @@ class FakeBadge:
 
 
 class Env:
-    def __init__(self, test, profile=sp.FULL, hook=None, notify=None, line_s=0.0):
+    def __init__(self, test, profile=sp.FULL, hook=None, notify=None, line_s=0.0, allowed=None):
         self.dir = tempfile.mkdtemp()
         test.addCleanup(lambda: __import__("shutil").rmtree(self.dir, ignore_errors=True))
         self.clock = FakeClock()
         self.badge = FakeBadge(self.clock, hook, line_s)
         self.notes = []
         self.driver = sd.Driver(profile, sd.Config(ZERO, REGION), self.badge, self.clock, self.dir,
-                                self.notes.append if notify is None else notify)
+                                self.notes.append if notify is None else notify,
+                                allowed or (lambda: []))
 
     def start(self):
         self.driver.start = self.clock.now()
@@ -931,8 +932,7 @@ class RestoreFailureTest(unittest.TestCase):
         self.assertIn("may still be the regional one", e.read("BLOCKER"))
 
 
-class ScopeNamesTest(unittest.TestCase):
-    """#477: no scope name, configured or read from the badge, anywhere in the run directory."""
+class ScopeHelpers:
     START, DEFAULT = "zz-start", "zz-default"
 
     def all_text(self, e):
@@ -941,6 +941,10 @@ class ScopeNamesTest(unittest.TestCase):
             with open(os.path.join(e.dir, name), encoding="utf-8") as f:
                 out.append(f.read())
         return "\n".join(out).lower()
+
+
+class ScopeNamesTest(ScopeHelpers, unittest.TestCase):
+    """#477: no scope name, configured or read from the badge, anywhere in the run directory."""
 
     def test_no_scope_name_is_written_anywhere(self):
         e = Env(self, profile=sp.REHEARSAL)
@@ -959,6 +963,77 @@ class ScopeNamesTest(unittest.TestCase):
         for name in (ZERO, REGION, self.START):
             self.assertNotIn(name, self.all_text(e))
         self.assertTrue(os.path.exists(os.path.join(e.dir, "BLOCKER")))
+
+
+class StartScopeTest(ScopeHelpers, unittest.TestCase):
+    """#478: the console scope before the run goes back at the end when the bench guard allows it."""
+    NOTE = "start scope not restored: not in the allow list"
+
+    def env(self, start, allowed, **kw):
+        e = Env(self, profile=sp.REHEARSAL, allowed=lambda: allowed, **kw)
+        e.badge.scope = start
+        return e
+
+    def restore_lines(self, e):
+        return [x for x in e.badge.log if x.startswith("mesh scope console ")]
+
+    def test_an_allowed_start_scope_is_set_back(self):
+        e = self.env(self.START, ["#" + self.START.upper()])
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, self.START)
+        self.assertEqual(e.driver.start_note, "")
+        self.assertNotIn("not restored", e.read("state.txt"))
+        for name in (ZERO, REGION, self.START):
+            self.assertNotIn(name, self.all_text(e))
+
+    def test_a_start_scope_outside_the_allow_list_leaves_the_zero_hop_scope(self):
+        e = self.env(self.START, ["zz-other"])
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertNotIn("mesh scope console %s YES" % self.START, e.badge.log)
+        self.assertIn(self.NOTE, e.read("state.txt"))
+        self.assertEqual(e.driver.start_note, self.NOTE)
+        for name in (ZERO, REGION, self.START, "zz-other"):
+            self.assertNotIn(name, self.all_text(e))
+
+    def test_not_set_gets_the_same_note(self):
+        e = self.env("not set", [self.START])
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertIn(self.NOTE, e.read("state.txt"))
+
+    def test_a_start_on_the_zero_hop_scope_needs_no_restore_line(self):
+        e = self.env(ZERO, [ZERO])
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertNotIn("not restored", e.read("state.txt"))
+
+    def test_stop_file_interrupt_and_loud_blocker_restore(self):
+        def interrupt(b, line):
+            if line.startswith("mesh send "):
+                raise KeyboardInterrupt()
+
+        for how, rc_want in (("stop", 0), ("interrupt", 130), ("blocker", 1)):
+            e = self.env(self.START, [self.START], hook=interrupt if how == "interrupt" else None)
+            if how == "stop":
+                open(os.path.join(e.dir, "STOP"), "w").close()
+            if how == "blocker":
+                e.badge.stuck_stack = True  # a session that does not end on home: a loud blocker
+            self.assertEqual(e.driver.run(), rc_want, how)
+            self.assertEqual(e.badge.scope, self.START, how)
+
+    def test_a_silent_blocker_sends_nothing_after_it(self):
+        e = self.env(self.START, [self.START], hook=lambda b, line: setattr(b, "boot", 99) if line.startswith("mesh send ") else None)
+        self.assertEqual(e.driver.run(), 1)
+        self.assertNotEqual(e.badge.scope, self.START)
+        self.assertNotEqual(e.badge.log[-1], "mesh scope console %s YES" % self.START)
+
+    def test_the_start_scope_is_not_a_line_the_allowlist_would_pass_unless_the_guard_allows_it(self):
+        e = self.env(self.START, [])
+        e.start()
+        e.driver.start_scope = self.START
+        with self.assertRaises(sd.Blocker):
+            e.driver.line("mesh scope console %s YES" % self.START)
 
 
 class AllowlistLinesTest(unittest.TestCase):

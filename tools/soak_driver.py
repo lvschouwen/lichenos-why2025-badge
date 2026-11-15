@@ -24,6 +24,10 @@ the reason (fixed text, never badge output), one comment goes to the issue (a fa
 1. After a change of the counters or no answer no further line is sent at all (the key lock runs out by itself after
 LOCK_S seconds); after any other stop the session's tail (console scope back to the 0-hop scope, home, lock off) still
 goes out. Ctrl-C and SIGTERM do the tail and exit 130 (the badge.sh call under way is killed). No self-repair.
+Scope names: the console scope before the run is read once and kept in memory only (#478). At the end of the run
+(finished, STOP, a non-silent blocker, Ctrl-C, SIGTERM) it is set back when the bench guard's allow file has it as a
+`scope` line; otherwise (not allowed, or `not set`) the 0-hop scope stays and state.txt and the summary say so, without
+a name. Every scope name a `mesh scope` reply shows is redacted too, in the echoed lines as well (#477).
 Exit: 0 finished or STOP, 1 blocker, 2 bad usage or config, 130 interrupted."""
 import argparse
 import csv
@@ -163,6 +167,18 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, stop)
 
 
+def guard_allowed_scopes() -> List[str]:
+    """The console scopes the bench guard allows (tools/onair_guard.sh onair_allowed_scopes), read through the guard's
+    own function so the allow file is neither opened nor printed here. Empty when it cannot be asked."""
+    guard = os.path.join(os.path.dirname(os.path.abspath(__file__)), "onair_guard.sh")
+    try:
+        p = subprocess.run(["bash", "-c", 'source "$1" && onair_allowed_scopes', "bash", guard], capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return p.stdout.split() if p.returncode == 0 else []
+
+
 def repo_slug(repo: str) -> str:
     """owner/name of the repo's origin remote, '' when it cannot be told."""
     try:
@@ -189,10 +205,16 @@ def post_issue_comment(issue: int, text: str) -> bool:
 
 class Driver:
     def __init__(self, profile: sp.Profile, cfg: Config, badge, clock, run_dir: str,
-                 notify: Callable[[str], Optional[bool]] = lambda text: True):
+                 notify: Callable[[str], Optional[bool]] = lambda text: True,
+                 allowed_scopes: Optional[Callable[[], List[str]]] = None):
         self.profile, self.cfg, self.badge, self.clock, self.dir, self.notify = profile, cfg, badge, clock, run_dir, notify
-        # Scope names the badge reported in a `mesh scope` reply: in memory only, never written anywhere (#477)
+        self.allowed_scopes = allowed_scopes or guard_allowed_scopes
+        # Scope names the badge reported in a `mesh scope` reply, and the console scope before the run: in memory only,
+        # never written anywhere (#477, #478). extra_names: the start scope once the bench guard allows it.
         self.seen_scopes: set = set()
+        self.start_scope: Optional[str] = None
+        self.extra_names: Tuple[str, ...] = ()
+        self.start_note = ""
         self.start_wall = self.start_mono = 0.0
         self.run_id = ""
         self.base: Dict[str, int] = {}
@@ -244,10 +266,10 @@ class Driver:
     def line(self, text: str, judged: Optional[bool] = None) -> str:
         """Send one console line, record it, return the redacted reply. StepError when the badge or the guard refused
         it (judged lines only: the reply of `mem` says 'refused 0' in a row). A line outside the allowlist never goes."""
-        if not sp.line_allowed(text, self.cfg.names()):
+        if not sp.line_allowed(text, self.cfg.names() + self.extra_names):
             raise Blocker("the plan produced a console line outside the driver's allowlist")
         rc, raw = self.badge.run(text)
-        self.last_raw = raw  # unscrubbed, for the one reader that needs the scope name (scope_ready)
+        self.last_raw = raw  # unscrubbed, for the readers that need the scope name (scope_ready, the start scope)
         if text == "mesh scope":
             self.learn_scopes(raw)
         out = self.scrub(raw)
@@ -400,6 +422,38 @@ class Driver:
             self.scope_dirty = False
         else:
             self.note("could not put the console scope back to the 0-hop scope")
+
+    def read_start_scope(self) -> None:
+        """The console scope before the run, kept in memory only; None for `not set` or a read that failed."""
+        try:
+            self.line("mesh scope", judged=False)
+        except StepError:
+            return
+        found = SCOPE_LINE_RX.findall(self.last_raw.replace("\r", ""))
+        name = norm_scope(found[0]) if len(found) == 1 else ""
+        self.start_scope = name if SCOPE_RX.match(name) else None
+
+    def end_restore(self) -> None:
+        """At the end of the run: the console scope back to the start value when the bench guard allows it, else the
+        0-hop scope stays, with a note (no name). Never raises; nothing is sent after a silent blocker (not called)."""
+        try:
+            self.restore_scope()  # the tail normally did this; a run that ended between sessions is already there
+            want = self.start_scope
+            if want is not None and want == self.cfg.scopes[sp.ZERO_HOP]:
+                return
+            if want is None or want not in [norm_scope(x) for x in self.allowed_scopes()]:
+                self.start_note = "start scope not restored: not in the allow list"
+            else:
+                self.extra_names = (want,)
+                self.line("mesh scope console %s YES" % want, judged=False)
+                self.line("mesh scope", judged=False)
+                found = SCOPE_LINE_RX.findall(self.last_raw.replace("\r", ""))
+                if len(found) == 1 and norm_scope(found[0]) == want:
+                    return
+                self.start_note = "start scope not restored: the badge did not take it"
+        except Exception as e:  # noqa: BLE001 - best effort at the very end
+            self.start_note = "start scope not restored: error (%s)" % type(e).__name__
+        self.note(self.start_note)
 
     def send(self, kind: str) -> None:
         if kind == sp.REGIONAL:
@@ -589,16 +643,23 @@ class Driver:
         self.run_id = "%x" % int(self.start_wall)
         self.note("start: %s, run %s" % (self.profile.name, self.run_id))
         try:
+            self.read_start_scope()
             self.load_ledger()
             self.note("earlier send attempts: %d" % len(self.attempts))
-            return self.run_timeline()
+            rc = self.run_timeline()
         except Blocker as e:
+            if not e.silent:
+                self.end_restore()
             return self.block(str(e))
         except KeyboardInterrupt:
             self.note("interrupted")
+            self.end_restore()
             return 130
         except Exception as e:  # noqa: BLE001 - the stop rule covers what nobody foresaw too
+            self.end_restore()
             return self.block("unexpected error (%s)" % type(e).__name__)
+        self.end_restore()
+        return rc
 
     def run_timeline(self) -> int:
         for t, _, kind, payload in self.timeline():
@@ -678,7 +739,10 @@ def main(argv: List[str]) -> int:
     install_signal_handlers()
     d = Driver(sp.profile_by_name(a.rehearsal), cfg, badge, RealClock(), a.run_dir,
                lambda text: post_issue_comment(a.issue, text))
-    return d.run()
+    rc = d.run()
+    if d.start_note:
+        print("soak_driver: " + d.start_note)
+    return rc
 
 
 if __name__ == "__main__":
