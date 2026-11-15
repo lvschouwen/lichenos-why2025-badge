@@ -6,6 +6,9 @@
 # The full check (./firmware/build.sh build) ends with that release build and its checks (#401), so a release-only
 # break fails the gate. BADGE_SKIP_RELEASE=1 (exactly 1) leaves it out on purpose and then exits 3 at the end, so agent-check never
 # stamps a partial check as green (the dev image is still fully built and checked by then).
+# BADGE_FRAME_POINTERS=1 (exactly 1, #474) builds the developer image with frame pointers (sdkconfig.frame-pointers.defaults)
+# in firmware/build-fp with its own sdkconfig, for a watchdog backtrace on the bench: no layer, size or release gate, no
+# baseline write, and it exits 3 so it never stamps green.
 set -euo pipefail
 
 # --plan (first argument) prints which steps this invocation would run and exits: for tests/build_plan_test.sh only,
@@ -36,6 +39,18 @@ if [ "$nested" = 1 ] && [ "$release" = 0 ]; then
     exit 2
 fi
 
+# The frame-pointer build (#474) is a bench variant of the developer build: off unless exactly 1, never with release
+fp=0
+case "${BADGE_FRAME_POINTERS:-}" in
+    '') ;;
+    1) fp=1 ;;
+    *) echo "BADGE_FRAME_POINTERS must be 1 or unset, not '$BADGE_FRAME_POINTERS'" >&2; exit 2 ;;
+esac
+if [ "$fp" = 1 ] && [ "$release" = 1 ]; then
+    echo "BADGE_FRAME_POINTERS is for the developer build, not the release build" >&2
+    exit 2
+fi
+
 # The two decisions, each in one place: --plan prints them and the real run acts on them (#401)
 is_building() { # commands that build need the C6 image, the host tests and fresh sdkconfigs; monitor, menuconfig etc. don't
     local a
@@ -61,8 +76,10 @@ if want_release_step "$@"; then
         *) echo "BADGE_SKIP_RELEASE must be 1 or unset, not '$BADGE_SKIP_RELEASE'" >&2; exit 2 ;;
     esac
 fi
+fp_plan=""
+[ "$fp" = 0 ] || fp_plan=" frame_pointers=yes"
 if [ "$plan" = 1 ]; then
-    echo "prechecks=$(want_prechecks "$@" && echo yes || echo no) release_step=$(want_release_step "$@" && [ -z "${BADGE_SKIP_RELEASE:-}" ] && echo yes || echo no)"
+    echo "prechecks=$(want_prechecks "$@" && echo yes || echo no) release_step=$(want_release_step "$@" && [ -z "${BADGE_SKIP_RELEASE:-}" ] && [ "$fp" = 0 ] && echo yes || echo no)${fp_plan}"
     exit 0
 fi
 if [ "$nested" = 1 ]; then
@@ -92,6 +109,13 @@ if [ "$release" = 1 ]; then
     sdkconfig=$bdir/sdkconfig
     mkdir -p "$bdir"
     idf_args=(-B "$bdir" -D "SDKCONFIG=$sdkconfig" -D "SDKCONFIG_DEFAULTS=$here/sdkconfig.defaults;$here/sdkconfig.release.defaults")
+fi
+
+if [ "$fp" = 1 ]; then
+    bdir=$here/build-fp
+    sdkconfig=$bdir/sdkconfig
+    mkdir -p "$bdir"
+    idf_args=(-B "$bdir" -D "SDKCONFIG=$sdkconfig" -D "SDKCONFIG_DEFAULTS=$here/sdkconfig.defaults;$here/sdkconfig.frame-pointers.defaults")
 fi
 
 building=0
@@ -128,6 +152,11 @@ if [ "$building" = 1 ]; then
             mv -f "$dir/sdkconfig" "$dir/sdkconfig.old"
         fi
     done
+    if [ "$fp" = 1 ] && [ -f "$sdkconfig" ] &&
+       { [ "$here/sdkconfig.defaults" -nt "$sdkconfig" ] || [ "$here/sdkconfig.frame-pointers.defaults" -nt "$sdkconfig" ]; }; then
+        echo "the frame-pointer defaults are newer than $sdkconfig, regenerating it (old one: sdkconfig.old)"
+        mv -f "$sdkconfig" "$bdir/sdkconfig.old"
+    fi
     if [ "$release" = 1 ] && [ -f "$sdkconfig" ] &&
        { [ "$here/sdkconfig.defaults" -nt "$sdkconfig" ] || [ "$here/sdkconfig.release.defaults" -nt "$sdkconfig" ]; }; then
         echo "the release defaults are newer than $sdkconfig, regenerating it (old one: sdkconfig.old)"
@@ -166,6 +195,13 @@ if [ "$building" = 1 ] && [ "$release" = 1 ]; then
         case $arg in build|all|app) release_checks; break ;; esac
     done
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
+elif [ "$building" = 1 ] && [ "$fp" = 1 ]; then
+    idf.py -C "$here" "${idf_args[@]}" "$@"
+    for arg in "$@"; do
+        case $arg in build|all|app) "$repo/tools/check_release_image.sh" dev "$bdir/badge_fw.bin"; break ;; esac
+    done
+    echo "BADGE_FRAME_POINTERS=1: bench image in $bdir, no layer, size or release gate ran, this is not a full check (exit 3)" >&2
+    exit 3
 elif [ "$building" = 1 ]; then
     idf.py -C "$here" "$@"
     # Layers: requires, includes and undefined symbols of every component against tools/layers.conf, ratcheted by

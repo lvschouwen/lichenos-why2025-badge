@@ -2,6 +2,7 @@
 # Host test for firmware/build.sh's step plan (#401), no firmware built: the nested argument is refused on the developer
 # path, the old BADGE_RELEASE_NESTED variable changes nothing, BADGE_SKIP_RELEASE only skips on exactly 1.
 set -euo pipefail
+unset BADGE_FRAME_POINTERS BADGE_SKIP_RELEASE # the plans below set what they test (a bench build runs ctest with the switch on)
 sh=$(dirname "$0")/../../firmware/build.sh
 fail() { echo "FAIL: $*" >&2; exit 1; }
 r=0; out=$(bash "$sh" --plan build --nested-from-check 2>&1) || r=$?
@@ -22,4 +23,13 @@ for c in "build:yes:yes" "all:yes:yes" "app:yes:yes" "reconfigure:yes:no" "flash
 done
 r=0; BADGE_SKIP_RELEASE=0 bash "$sh" --plan monitor >/dev/null 2>&1 || r=$?
 [ "$r" = 0 ] || fail "BADGE_SKIP_RELEASE=0 refused for monitor ($r)"
+# #474: the frame-pointer bench build never runs the release step and only switches on with exactly 1
+[ "$(BADGE_FRAME_POINTERS=1 bash "$sh" --plan build)" = "prechecks=yes release_step=no frame_pointers=yes" ] || fail "frame pointers plan"
+[ "$(BADGE_FRAME_POINTERS='' bash "$sh" --plan build)" = "prechecks=yes release_step=yes" ] || fail "empty frame pointers switch"
+for v in 0 yes 2; do
+    r=0; BADGE_FRAME_POINTERS=$v bash "$sh" --plan build >/dev/null 2>&1 || r=$?
+    [ "$r" = 2 ] || fail "BADGE_FRAME_POINTERS=$v not refused ($r)"
+done
+r=0; BADGE_FRAME_POINTERS=1 bash "$sh" --plan release build >/dev/null 2>&1 || r=$?
+[ "$r" = 2 ] || fail "frame pointers accepted for the release build ($r)"
 echo "build_plan_test ok"

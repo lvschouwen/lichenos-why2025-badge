@@ -1,0 +1,6 @@
+# #474: BADGE_FRAME_POINTERS=1 ./firmware/build.sh build appends this to sdkconfig.defaults, in its own build directory
+# (firmware/build-fp). -fno-omit-frame-pointer for every component, so a task watchdog report prints a full backtrace
+# (esp_system/port/arch/riscv/debug_helpers.c esp_backtrace_print -> fp_unwind.c) instead of two frames. About +8 % image
+# size and slightly slower code: a bench tool, never the everyday developer image, never the release (tools/check_release_image.sh pins
+# it off there; the release build does not read this file).
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
