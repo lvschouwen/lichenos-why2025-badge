@@ -19,9 +19,11 @@
 #include "lichen_sys_thermal.h"
 #include "lora_os.h"
 #include "reg_cmd.h"
+#include "reg_disp_engine.h"
 #include "reg_p4.h"
 #include "reg_proxy.h"
 #include "reg_wifi.h"
+#include "sdkconfig.h"
 #include "ui_service.h"
 #include "wifi_service.h"
 
@@ -230,6 +232,21 @@ reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
 reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
     return wifi_set_ps(v->u == 1) ? REG_OK : REG_FAILED;
+}
+
+// disp.engine (#468): the gate and the switch are reg_disp_engine.c (host-tested); here the log line
+reg_status_t reg_p4_disp_engine_set(reg_entry_t const *e, reg_value_t const *v) {
+#if CONFIG_LICHEN_DEV_COMMANDS
+    bool const dev_build = true;
+#else
+    bool const dev_build = false; // a release image has no PPA engine
+#endif
+    reg_disp_engine_why_t const why = reg_disp_engine_set(v->u, dev_build);
+    if (why != REG_DISP_ENGINE_SET) {
+        ESP_LOGW(TAG, "%s: %s", e->name, reg_disp_engine_why_text(why));
+        return REG_FAILED;
+    }
+    return REG_OK;
 }
 
 reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v) {

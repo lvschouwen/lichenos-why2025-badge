@@ -14,14 +14,14 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	289045
+size	<merged-strings>	294113
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
-size	libboard.a	15636
+size	libboard.a	17975
 size	libbootloader_support.a	5942
 size	libc.a	47702
-size	libc6link.a	33220
+size	libc6link.a	33264
 size	libcrash.a	5762
 size	libcxx.a	872
 size	libefuse.a	2173
@@ -42,10 +42,11 @@ size	libeh_host_port_idf.a	6107
 size	libeh_proto_v2.a	80331
 size	libesp_app_format.a	742
 size	libesp_common.a	1816
-size	libesp_driver_dma.a	16665
+size	libesp_driver_dma.a	26000
 size	libesp_driver_gpio.a	10656
 size	libesp_driver_i2c.a	15991
 size	libesp_driver_ledc.a	6320
+size	libesp_driver_ppa.a	12365
 size	libesp_driver_sd_intf.a	866
 size	libesp_driver_sdmmc.a	18051
 size	libesp_driver_tsens.a	2339
@@ -54,13 +55,14 @@ size	libesp_driver_usb_serial_jtag.a	2492
 size	libesp_event.a	4395
 size	libesp_hal_ana_conv.a	636
 size	libesp_hal_clock.a	856
-size	libesp_hal_dma.a	5150
+size	libesp_hal_dma.a	5524
 size	libesp_hal_gpio.a	1645
 size	libesp_hal_i2c.a	936
 size	libesp_hal_lcd.a	2323
 size	libesp_hal_ledc.a	456
 size	libesp_hal_mspi.a	5480
 size	libesp_hal_pmu.a	628
+size	libesp_hal_ppa.a	18
 size	libesp_hal_regi2c.a	722
 size	libesp_hal_sd.a	218
 size	libesp_hal_security.a	2437
@@ -89,7 +91,7 @@ size	libesp_wifi_remote_glue.a	617
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	38933
+size	libespressif__mdns.a	39129
 size	libfatfs.a	30649
 size	libfreertos.a	33118
 size	libfw_console.a	16110
@@ -100,24 +102,24 @@ size	libjoltwallet__littlefs.a	34390
 size	liblichen_api.a	42186
 size	liblichen_apps.a	51552
 size	liblichen_boot.a	13084
-size	liblichen_clock.a	11160
+size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2793
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
-size	liblichen_net.a	24602
+size	liblichen_net.a	24614
 size	liblichen_notify.a	13358
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	73251
+size	liblichen_os.a	73611
 size	liblichen_random.a	63
 size	liblichen_shell.a	192155
 size	liblog.a	2726
-size	liblora.a	36221
-size	liblvgl__lvgl.a	541779
+size	liblora.a	36253
+size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13391
 size	libmbedtls.a	22
-size	libmesh.a	404495
+size	libmesh.a	404507
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2

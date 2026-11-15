@@ -61,6 +61,8 @@ reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v);
 reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out);
 // wifi.ps: none / min through the Wi-Fi service (not saved, as `fw wifi ps`)
 reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v);
+// disp.engine (#468): developer mode only, under the LVGL lock, not saved
+reg_status_t reg_p4_disp_engine_set(reg_entry_t const *e, reg_value_t const *v);
 // bl.idle / bl.override from the backlight driver (and the thermal watchdog's load shed)
 reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out);
 

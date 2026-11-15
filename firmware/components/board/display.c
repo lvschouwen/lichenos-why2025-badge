@@ -13,6 +13,7 @@
 #include "st7703_bono.h"
 
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
+#include "display_engine.h"
 #include "display_flip.h"
 #include "display_rot.h"
 #include "esp_attr.h"
@@ -23,10 +24,11 @@
 #include "freertos/semphr.h"
 #include <stdint.h>
 #include <string.h>
-#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
+#if CONFIG_LICHEN_DEV_COMMANDS // the PPA engines are bench switches (#468): not in a release image
 #include "driver/ppa.h"
 #endif
 #endif
+#include "display_info.h"
 
 static char const TAG[] = "display";
 
@@ -70,11 +72,6 @@ static esp_lcd_panel_handle_t lcd_panel;
 #define SWAP_GUARD_US   200 // the ISR's index read to callback stamp is well under this
 #define SWAP_TIMEOUT_MS 100 // about six frames at 62.45 Hz: a stalled scan-out costs this once per frame, no more
 #define FLIP_LOG_SWAPS  600 // developer builds: one stats line per ~10 s of continuous redraw
-#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
-#define DIRECT_FLUSH_ENGINE "PPA"
-#else
-#define DIRECT_FLUSH_ENGINE "CPU"
-#endif
 
 static uint16_t         *panel_fbs[2];
 EXT_RAM_BSS_ATTR static display_flip_t flip; // LVGL task only
@@ -84,9 +81,8 @@ static StaticSemaphore_t fb_done_buf;
 static uint32_t volatile fb_done_us; // low 32 bits of esp_timer
 static uint32_t volatile fb_done_count;
 static uint32_t          swap_misses;
-#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
-static ppa_client_handle_t ppa_srm; // kept for the display's lifetime
-#endif
+EXT_RAM_BSS_ATTR static display_engine_t engine; // LVGL task; the registry setter under the LVGL lock
+static lv_display_t *direct_disp;                // set once the direct flush runs (the PPA interrupt readies it)
 
 // The port's sw_rotate=0 path "rotates" by calling swap_xy/mirror on the panel, which on the ST7703 means
 // MADCTL writes over DBI while the panel is in video mode. Hand it a control panel that does nothing instead.
@@ -161,7 +157,7 @@ static bool flip_wait(void *ctx, display_frame_mark_t req) {
     return true;
 }
 
-// Written back at once: the PPA variant invalidates its destination rows before it writes, which would drop dirty
+// Written back at once: a PPA transfer invalidates its destination rows before it writes, which would drop dirty
 // lines of this copy, and the scan-out reads PSRAM, not the cache.
 static void flip_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
     (void)ctx;
@@ -172,79 +168,230 @@ static void flip_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
 
 static display_flip_ops_t const flip_ops = {flip_request, flip_frame_count, flip_wait, flip_copy, flip_now_us, NULL};
 
-// Bench figure (#467): the time spent waiting for the swap proof and copying back, developer builds only
+// Bench figures (#467, #468): the time spent waiting for the swap proof, copying back and turning the strips with the
+// engine in use, developer builds only. One run of scrolling per engine gives comparable lines.
 static void flip_log_stats(void) {
 #if CONFIG_LICHEN_DEV_COMMANDS
-    display_flip_stats_t *const st = &flip.stats;
-    uint32_t const              n  = st->swaps + st->timeouts;
+    display_flip_stats_t *const   st = &flip.stats;
+    display_engine_stats_t *const es = &engine.stats;
+    uint32_t const                n  = st->swaps + st->timeouts;
     if (n < FLIP_LOG_SWAPS) {
         return;
     }
-    ESP_LOGI(TAG, "flip: %u swaps, %u timeouts, %u refused; wait avg %u max %u us; copy avg %u max %u us",
+    uint32_t const strips = es->strips ? es->strips : 1;
+    ESP_LOGI(TAG,
+             "flip: %u swaps, %u timeouts, %u refused; wait avg %u max %u us; copy avg %u max %u us; "
+             "%s rotate avg %u max %u us, %u strips, %u fallbacks",
              (unsigned)st->swaps, (unsigned)st->timeouts, (unsigned)st->refusals, (unsigned)(st->wait_us / n),
-             (unsigned)st->wait_max_us, (unsigned)(st->copy_us / n), (unsigned)st->copy_max_us);
+             (unsigned)st->wait_max_us, (unsigned)(st->copy_us / n), (unsigned)st->copy_max_us,
+             display_engine_name(display_engine_active(&engine)), (unsigned)(es->rotate_us / strips),
+             (unsigned)es->rotate_max_us, (unsigned)es->strips, (unsigned)es->fallbacks);
     memset(st, 0, sizeof(*st));
+    memset(es, 0, sizeof(*es));
 #endif
 }
 
-#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
-// Cache: ppa_do_scale_rotate_mirror writes the strip back (C2M, unaligned allowed) before the PPA reads it, and
-// invalidates the destination rows (M2C) itself, so there is no msync here. The only CPU writes into a frame buffer
-// are flip_copy's, which are written back before the next strip.
-static void rotate_strip(uint16_t *fb, display_rect_t ui, display_rect_t blk, uint8_t const *px_map, uint32_t stride) {
+// The turned strip is LCD_V_RES rows of h pixels: write back the whole row span in one msync, as the DPI driver's
+// own CPU copy path does (only dirty lines cost a PSRAM write). Written back before it returns, so a PPA transfer
+// that invalidates these rows later (any engine switch included) drops no CPU data.
+static void cpu_turn(void *ctx, display_strip_t const *s, unsigned fb) {
+    (void)ctx;
+    uint16_t *const dst_row = panel_fbs[fb] + s->blk.y1 * LCD_H_RES;
+    lv_draw_sw_rotate(s->px, dst_row + s->blk.x1, s->ui.x2 - s->ui.x1 + 1, s->ui.y2 - s->ui.y1 + 1, s->stride,
+                      LCD_H_RES * 2, LV_DISPLAY_ROTATION_90, LV_COLOR_FORMAT_RGB565);
+    esp_cache_msync(dst_row, (size_t)(s->blk.y2 - s->blk.y1 + 1) * LCD_H_RES * 2,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+#if CONFIG_LICHEN_DEV_COMMANDS
+// The PPA engines (#468, experiments e1/e2 of #95). What the IDF 6.1 driver does (esp_driver_ppa, read, not changed):
+// - Cache, both modes, before the transfer and in the caller's task: the input window is written back (C2M,
+//   unaligned allowed, ppa_srm.c:276) and the output window invalidated (M2C, ppa_srm.c:285); nothing after it. The
+//   output window is whole rows (block_offset_y .. + block_h, full pic_w), and our turned strip spans all 720 rows,
+//   so every transfer invalidates the whole frame buffer: no CPU write into it may still be dirty. cpu_turn and
+//   flip_copy write back before they return, and the engine module never lets the CPU touch a frame buffer while a
+//   transfer runs (a timed-out one aside, see display_engine_set), so none is, whatever engine ran before a switch.
+// - Blocking mode waits for the done with portMAX_DELAY (ppa_core.c:540): a PPA that never finishes would hang the
+//   LVGL task. So both engines start non-blocking (ppa_core.c:500, no wait) and wait on our own done, bounded.
+// - The done callback runs from the DMA2D RX channel's EOF interrupt (ppa_transaction_done_cb, ppa_core.c:547, set
+//   as on_recv_eof in ppa_srm.c:126), after the driver recycled the transaction (ppa_core.c:572; done_cb at :592),
+//   so the next start cannot find the client busy. An error EOF ends there too and the event data is empty: a DMA
+//   error looks like a done (the strip may be wrong until it is redrawn). That interrupt is not IRAM
+//   (DMA2D_ISR_IRAM_SAFE off), so neither is ours: a flash write holds it back, and one longer than the bound
+//   below ends in a fallback to the CPU, logged once.
+// - max_pending_trans_num defaults to 1: one transfer at a time, which is all the engine module ever starts.
+#define PPA_DONE_TIMEOUT_MS 200 // a strip takes a few ms; a flash erase may hold the non-IRAM interrupt back longer
+
+static ppa_client_handle_t ppa_srm;  // set up at the first strip after a switch to a PPA engine, kept after
+static SemaphoreHandle_t   ppa_done; // given by on_ppa_done once per current transfer
+static uint32_t volatile ppa_done_us;
+static bool volatile ppa_ready_in_isr; // this transfer's done readies LVGL (a background strip)
+// Transfer tags (the engine module's gen): the one in flight, 0 after a timeout, and the last any done reported. The
+// tag travels as the transfer's user_data (ppa_srm.c copies it into the transaction, done_cb gets it, ppa_core.c:592),
+// so a late done of a transfer given up on is told apart from the current one.
+static uint32_t volatile ppa_gen_current;
+static uint32_t volatile ppa_gen_last_done;
+
+static bool on_ppa_done(ppa_client_handle_t client, ppa_event_data_t *edata, void *user_data) {
+    (void)client;
+    (void)edata;
+    uint32_t const got = (uint32_t)(uintptr_t)user_data;
+    ppa_gen_last_done  = got; // a timed-out transfer's own done: the PPA is idle again (display_engine_ppa_done_seen)
+    if (!display_engine_done_is_current(ppa_gen_current, got)) {
+        return false; // neither readies LVGL nor counts as the done of a later transfer
+    }
+    ppa_done_us = (uint32_t)esp_timer_get_time();
+    if (ppa_ready_in_isr) {
+        ppa_ready_in_isr = false;
+        lv_display_flush_ready(direct_disp); // two stores, safe from an interrupt
+    }
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(ppa_done, &woken);
+    return woken == pdTRUE;
+}
+
+static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool ready_in_isr, uint32_t gen) {
+    (void)ctx;
+    if (!ppa_srm) {
+        return false; // the client could not be set up (logged by ppa_up)
+    }
     ppa_srm_oper_config_t const op = {
-        .in.buffer          = px_map,
-        .in.pic_w           = stride / 2,
-        .in.pic_h           = ui.y2 - ui.y1 + 1,
-        .in.block_w         = ui.x2 - ui.x1 + 1,
-        .in.block_h         = ui.y2 - ui.y1 + 1,
+        .in.buffer          = s->px,
+        .in.pic_w           = s->stride / 2,
+        .in.pic_h           = s->ui.y2 - s->ui.y1 + 1,
+        .in.block_w         = s->ui.x2 - s->ui.x1 + 1,
+        .in.block_h         = s->ui.y2 - s->ui.y1 + 1,
         .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
-        .out.buffer         = fb,
+        .out.buffer         = panel_fbs[fb],
         .out.buffer_size    = FB_BYTES,
         .out.pic_w          = LCD_H_RES,
         .out.pic_h          = LCD_V_RES,
-        .out.block_offset_x = blk.x1,
-        .out.block_offset_y = blk.y1,
+        .out.block_offset_x = s->blk.x1,
+        .out.block_offset_y = s->blk.y1,
         .out.srm_cm         = PPA_SRM_COLOR_MODE_RGB565,
         .rotation_angle     = PPA_SRM_ROTATION_ANGLE_90, // counter-clockwise, as LV_DISPLAY_ROTATION_90 (the port maps them 1:1)
         .scale_x            = 1.0f,
         .scale_y            = 1.0f,
-        .mode               = PPA_TRANS_MODE_BLOCKING,
+        .mode               = PPA_TRANS_MODE_NON_BLOCKING,
+        .user_data          = (void *)(uintptr_t)gen,
     };
+    xSemaphoreTake(ppa_done, 0); // a give that raced a timeout
+    ppa_ready_in_isr    = ready_in_isr;
+    ppa_gen_current     = gen; // before the start: its done may come at once
     esp_err_t const err = ppa_do_scale_rotate_mirror(ppa_srm, &op);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "PPA flush %d,%d..%d,%d: %s", (int)ui.x1, (int)ui.y1, (int)ui.x2, (int)ui.y2, esp_err_to_name(err));
+        ppa_ready_in_isr = false;
+        ppa_gen_current  = 0;
+        ESP_LOGE(TAG, "PPA strip %d,%d..%d,%d: %s", (int)s->ui.x1, (int)s->ui.y1, (int)s->ui.x2, (int)s->ui.y2,
+                 esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+static bool ppa_wait(void *ctx, uint32_t *done_us) {
+    (void)ctx;
+    if (xSemaphoreTake(ppa_done, pdMS_TO_TICKS(PPA_DONE_TIMEOUT_MS)) != pdTRUE) {
+        ppa_gen_current  = 0; // its late done is ignored (on_ppa_done)
+        ppa_ready_in_isr = false;
+        return false;
+    }
+    *done_us = ppa_done_us;
+    return true;
+}
+
+// The SRM client, once: its driver state is heap (internal by MALLOC_CAP_DEFAULT, plus two DMA descriptors), so a
+// badge that never switches pays no heap (the drivers' code, DMA2D's IRAM interrupt included, is linked regardless).
+// Called from the LVGL task, not from the registry setter: ppa_register_client acquires the DMA2D pool (ppa_core.c:361
+// -> :205, dma2d_acquire_pool at dma2d.c:410), which allocates its interrupts on the calling core (dma2d.c:519). Here
+// that is the LVGL task's core 1, so the done interrupt does not depend on how busy core 0 (the console) is.
+static bool ppa_up(void) {
+    if (ppa_srm) {
+        return true;
+    }
+    ppa_done = ppa_done ? ppa_done : xSemaphoreCreateBinary();
+    if (!ppa_done) {
+        return false;
+    }
+    ppa_client_config_t const   cfg = {.oper_type = PPA_OPERATION_SRM};
+    ppa_event_callbacks_t const cbs = {.on_trans_done = on_ppa_done};
+    ppa_client_handle_t         c   = NULL;
+    esp_err_t                   err = ppa_register_client(&cfg, &c);
+    if (err == ESP_OK && (err = ppa_client_register_event_callbacks(c, &cbs)) != ESP_OK) {
+        ppa_unregister_client(c);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PPA client: %s", esp_err_to_name(err));
+        return false;
+    }
+    ppa_srm = c;
+    return true;
+}
+
+// First strip after a switch to a PPA engine: the client, on this task's core. A failure goes back to cpu (the
+// registry's read-back then says so).
+static void ppa_on_demand(void) {
+    display_engine_id_t const want = display_engine_active(&engine);
+    if (want != DISPLAY_ENGINE_CPU && !ppa_srm && !ppa_up()) {
+        ESP_LOGE(TAG, "rotate: %s -> cpu, no PPA client", display_engine_name(want));
+        display_engine_select(&engine, DISPLAY_ENGINE_CPU);
     }
 }
 #else
-// The turned strip is LCD_V_RES rows of h pixels: write back the whole row span in one msync, as the DPI driver's
-// own CPU copy path does (only dirty lines cost a PSRAM write).
-static void rotate_strip(uint16_t *fb, display_rect_t ui, display_rect_t blk, uint8_t const *px_map, uint32_t stride) {
-    uint16_t *const dst_row = fb + blk.y1 * LCD_H_RES;
-    lv_draw_sw_rotate(px_map, dst_row + blk.x1, ui.x2 - ui.x1 + 1, ui.y2 - ui.y1 + 1, stride, LCD_H_RES * 2,
-                      LV_DISPLAY_ROTATION_90, LV_COLOR_FORMAT_RGB565);
-    esp_cache_msync(dst_row, (size_t)(blk.y2 - blk.y1 + 1) * LCD_H_RES * 2,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool ready_in_isr, uint32_t gen) {
+    (void)ctx;
+    (void)s;
+    (void)fb;
+    (void)ready_in_isr;
+    (void)gen;
+    return false;
+}
+
+static bool ppa_wait(void *ctx, uint32_t *done_us) {
+    (void)ctx;
+    (void)done_us;
+    return false;
 }
 #endif
 
-static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
-    display_rect_t const ui     = {area->x1, area->y1, area->x2, area->y2};
-    display_rect_t const blk    = display_rot90_block(ui, LCD_V_RES); // UI width = panel height
-    uint32_t const       stride = lv_draw_buf_width_to_stride(ui.x2 - ui.x1 + 1, LV_COLOR_FORMAT_RGB565);
-    // Resolves the previous frame's switch (and its copy-back) before anything is written
-    uint16_t *const fb = panel_fbs[display_flip_write_target(&flip)];
-    rotate_strip(fb, ui, blk, px_map, stride);
-    display_flip_drawn(&flip, blk);
-    if (lv_display_flush_is_last(disp)) {
-        display_flip_frame_end(&flip); // requests the switch, does not wait
-        flip_log_stats();
-    }
-    lv_display_flush_ready(disp);
+// Once per failure: the engine stays on the CPU until it is selected again
+static void engine_fell_back(void *ctx, display_engine_id_t from, display_fallback_t why) {
+    (void)ctx;
+    ESP_LOGW(TAG, "rotate: %s -> cpu, %s", display_engine_name(from),
+             why == DISPLAY_FALLBACK_START ? "the PPA refused the transfer" : "no PPA done in time");
 }
 
-// Frame buffers and (for the PPA) the SRM client. False = fall back to the port's path (with a CPU copy
-// instead of DMA2D, which is not enabled in this configuration); it draws into fbs[0], the one scanned out.
+static display_engine_ops_t const engine_ops = {cpu_turn, ppa_start, ppa_wait, engine_fell_back, flip_now_us, NULL};
+
+static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
+    display_rect_t const  ui = {area->x1, area->y1, area->x2, area->y2};
+    display_strip_t const s  = {
+         .ui     = ui,
+         .blk    = display_rot90_block(ui, LCD_V_RES), // UI width = panel height
+         .px     = px_map,
+         .stride = lv_draw_buf_width_to_stride(ui.x2 - ui.x1 + 1, LV_COLOR_FORMAT_RGB565),
+    };
+    bool const last = lv_display_flush_is_last(disp); // read first: flush_ready (the interrupt's too) clears it
+#if CONFIG_LICHEN_DEV_COMMANDS
+    ppa_on_demand();
+#endif
+    bool const done = display_engine_flush(&engine, &flip, &s, last);
+    if (last) {
+        flip_log_stats();
+    }
+    if (done) {
+        lv_display_flush_ready(disp);
+    }
+}
+
+// LVGL waits here, not in its own spin on disp->flushing, before it hands over the next strip: bounded
+static void flush_wait(lv_display_t *disp) {
+    (void)disp;
+    display_engine_settle(&engine);
+}
+
+// Frame buffers. False = fall back to the port's path (with a CPU copy instead of DMA2D, which is not enabled in this
+// configuration); it draws into fbs[0], the one scanned out.
 static bool direct_flush_init(esp_lcd_panel_handle_t panel) {
     void *fb0 = NULL, *fb1 = NULL;
     if (esp_lcd_dpi_panel_get_frame_buffer(panel, 2, &fb0, &fb1) != ESP_OK || !fb0 || !fb1) {
@@ -256,14 +403,6 @@ static bool direct_flush_init(esp_lcd_panel_handle_t panel) {
         ESP_LOGE(TAG, "direct flush: frame buffers %p %p not cache-line aligned", fb0, fb1);
         return false;
     }
-#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
-    ppa_client_config_t const cfg = {.oper_type = PPA_OPERATION_SRM};
-    esp_err_t const           err = ppa_register_client(&cfg, &ppa_srm);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "direct flush: PPA client: %s", esp_err_to_name(err));
-        return false;
-    }
-#endif
     panel_fbs[0] = fb0;
     panel_fbs[1] = fb1;
     fb_done      = xSemaphoreCreateBinaryStatic(&fb_done_buf);
@@ -377,13 +516,57 @@ bool display_start(lv_display_t **out) {
     if (direct) {
         bool const swap_on = direct_flush_callbacks(panel);
         display_flip_init(&flip, &flip_ops, swap_on); // front = fbs[0], where dpi_panel_init starts the DMA
+        display_engine_init(&engine, &engine_ops);     // every boot on the CPU (#468: disp.engine is not saved)
+        direct_disp = *out;
         lv_display_set_flush_cb(*out, flush_direct);
-        ESP_LOGI(TAG, "direct flush (%s), %s", DIRECT_FLUSH_ENGINE, swap_on ? "2 buffers" : "1 buffer");
+        lv_display_set_flush_wait_cb(*out, flush_wait);
+        ESP_LOGI(TAG, "direct flush (%s), %s", display_engine_name(display_engine_active(&engine)),
+                 swap_on ? "2 buffers" : "1 buffer");
     }
 #endif
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);
     lvgl_port_unlock();
     return true;
+}
+
+// disp.engine (#468). The caller holds the LVGL lock, so no refresh runs and nothing is in flight (the last strip of
+// every refresh waits for its transfer): the switch applies at once, between two frames. Cache: no sync is needed at
+// a switch. Every CPU write into a frame buffer (cpu_turn, flip_copy) is written back before it returns, so at any
+// frame boundary no dirty line exists that a PPA invalidate could drop; a PPA transfer writes PSRAM after
+// invalidating its window and is done before the CPU touches either buffer again, so no stale line survives the
+// other way either.
+// What stays open after a timeout: the timed-out transfer may still run. It can write its strip late, over the CPU's
+// redo, from a draw buffer LVGL may have rendered anew since (one wrong strip until that area is redrawn). It cannot
+// pair with a new transfer: its done is ignored (tags), and no PPA engine is selected again until that done is seen.
+bool display_engine_get(uint32_t *id) {
+#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
+    if (direct_disp) {
+        *id = display_engine_active(&engine);
+        return true;
+    }
+#endif
+    (void)id;
+    return false;
+}
+
+bool display_engine_set(uint32_t id) {
+#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH && CONFIG_LICHEN_DEV_COMMANDS
+    if (!direct_disp || !display_engine_valid(id)) {
+        return false;
+    }
+    display_engine_ppa_done_seen(&engine, ppa_gen_last_done);
+    if (!display_engine_select(&engine, id)) {
+        if (display_engine_ppa_hung(&engine)) {
+            ESP_LOGW(TAG, "rotate: the PPA has not finished the transfer that timed out, staying on cpu");
+        }
+        return false;
+    }
+    ESP_LOGI(TAG, "rotate: %s", display_engine_name(display_engine_active(&engine)));
+    return true;
+#else
+    (void)id;
+    return false;
+#endif
 }
 
 void display_blank(void) {

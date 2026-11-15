@@ -445,6 +445,26 @@ static void test_mismatch(void) {
     CHECK(!reg_proxy_mismatch(&q, REG_ID_BL_DISPLAY, &dim, 10001));
 }
 
+// #468: disp.engine is the display domain's one settable key, by name, and only to the three engines
+extern unsigned disp_engine_sets;
+
+static void test_disp_engine(void) {
+    char               reply[160];
+    reg_entry_t const *e = reg_p4_find_name("disp.engine");
+    CHECK(e && e->id == REG_ID_DISP_ENGINE && e->type == REG_T_ENUM && !(e->flags & REG_F_RO) && e->set);
+    CHECK(e && e->saved_key == NULL); // never saved: a boot is always on the CPU
+    disp_engine_sets = 0;
+    CHECK(set("disp.engine ppa-async", reply, sizeof(reply)) == RC_OK);
+    CHECK(strcmp(reply, "disp.engine = ppa-async") == 0);
+    CHECK(set("disp.engine ppa", reply, sizeof(reply)) == RC_OK);
+    CHECK(strcmp(reply, "disp.engine = ppa") == 0);
+    CHECK(set("disp.engine gpu", reply, sizeof(reply)) == RC_BAD_VALUE);
+    CHECK(set("disp.engine 3", reply, sizeof(reply)) == RC_RANGE);
+    CHECK(set("disp.engine cpu", reply, sizeof(reply)) == RC_OK);
+    CHECK(disp_engine_sets == 3);
+    CHECK(set("disp.pclk 1", reply, sizeof(reply)) == RC_RO); // the rest of the domain stays read-only
+}
+
 static void test_rows(void) {
     char               line[160];
     reg_entry_t const *bl = reg_p4_find_name("bl.display");
@@ -521,6 +541,7 @@ int main(void) {
     test_link();
     test_matches();
     test_mismatch();
+    test_disp_engine();
     test_rows();
     test_cached_read_never_asks_live();
     if (failures) {
