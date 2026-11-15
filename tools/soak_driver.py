@@ -43,6 +43,7 @@ import soak_plan as sp  # noqa: E402
 DEFAULT_CONFIG = os.path.expanduser("~/.config/why2025-badge/soak-driver.conf")
 SCOPE_RX = re.compile(r"^[a-z0-9][a-z0-9-]{2,}$")
 SCOPE_LINE_RX = re.compile(r"^(?:fw: )?default [^ |]+ \| console ([^ |]+|not set)\s*$", re.M)
+SCOPE_NAMES_RX = re.compile(r"^(?:fw: )?default ([^ |]+) \| console ([^ |]+|not set)\s*$", re.M)
 STACK_RX = re.compile(r"^(?:fw: )?ui stack: (.*?) \|", re.M)
 FOCUS_RX = re.compile(r"^(?:fw: )?ui stack: (.*?) \| focus: (.*?)\s*$", re.M)
 GRID_STACK_RX = re.compile(r"^0 > \d+$")  # home, then the MeshCore app (its grid on top)
@@ -190,6 +191,8 @@ class Driver:
     def __init__(self, profile: sp.Profile, cfg: Config, badge, clock, run_dir: str,
                  notify: Callable[[str], Optional[bool]] = lambda text: True):
         self.profile, self.cfg, self.badge, self.clock, self.dir, self.notify = profile, cfg, badge, clock, run_dir, notify
+        # Scope names the badge reported in a `mesh scope` reply: in memory only, never written anywhere (#477)
+        self.seen_scopes: set = set()
         self.start_wall = self.start_mono = 0.0
         self.run_id = ""
         self.base: Dict[str, int] = {}
@@ -214,9 +217,17 @@ class Driver:
         if self.address:
             text = text.replace(self.address, "<addr>")
         text = MAC_RX.sub("<mac>", IP_RX.sub("<ip>", text))
-        for name in self.cfg.names():
+        for name in sorted(set(self.cfg.names()) | self.seen_scopes, key=len, reverse=True):
             text = re.sub(r"(?<![\w-])#?" + re.escape(name) + r"(?![\w-])", "<scope>", text, flags=re.I)
         return text
+
+    def learn_scopes(self, raw: str) -> None:
+        """Remember every scope name a `mesh scope` reply shows so scrub() hides it (the badge's own scope is not a
+        configured name). 'none' is the badge's word for no default, not a name."""
+        for found in SCOPE_NAMES_RX.findall(raw.replace("\r", "")):
+            for name in map(norm_scope, found):
+                if SCOPE_RX.match(name) and name != "none":
+                    self.seen_scopes.add(name)
 
     def write(self, text: str) -> None:
         with open(self.path("transcript.txt"), "a", encoding="utf-8") as f:
@@ -237,8 +248,10 @@ class Driver:
             raise Blocker("the plan produced a console line outside the driver's allowlist")
         rc, raw = self.badge.run(text)
         self.last_raw = raw  # unscrubbed, for the one reader that needs the scope name (scope_ready)
+        if text == "mesh scope":
+            self.learn_scopes(raw)
         out = self.scrub(raw)
-        self.write(">> " + text)
+        self.write(">> " + self.scrub(text))
         self.write(out)
         if rc != 0:
             raise StepError("'%s' failed (exit %d)" % (text.split()[0], rc))

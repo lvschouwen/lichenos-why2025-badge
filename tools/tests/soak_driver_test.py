@@ -47,7 +47,8 @@ class FakeBadge:
         self.clock, self.hook, self.line_s = clock, hook, line_s
         self.address = "badge.example.lan"
         self.boot, self.crash, self.slot, self.c6rs, self.mtx = 54, 0, 0, 0, 0
-        self.scope, self.lock, self.stack, self.focus = "none", False, "0", "Home"
+        self.scope, self.default = "none", "None"
+        self.lock, self.stack, self.focus = False, "0", "Home"
         self.right_stuck = False
         self.ignore_scope_set, self.stuck_stack = False, False
         self.log, self.sent_at = [], []
@@ -69,7 +70,7 @@ class FakeBadge:
         if line == "soak":
             return 0, self.soak() + "\n"
         if line == "mesh scope":
-            return 0, "default None | console %s\n" % self.scope
+            return 0, "default %s | console %s\n" % (self.default, self.scope)
         if line.startswith("mesh scope console "):
             if not self.ignore_scope_set:
                 self.scope = w[3]
@@ -928,6 +929,36 @@ class RestoreFailureTest(unittest.TestCase):
         e = Env(self, hook=lambda b, line: setattr(b, "boot", 99) if line.startswith("mesh send ") else None)
         self.assertEqual(e.driver.run(), 1)
         self.assertIn("may still be the regional one", e.read("BLOCKER"))
+
+
+class ScopeNamesTest(unittest.TestCase):
+    """#477: no scope name, configured or read from the badge, anywhere in the run directory."""
+    START, DEFAULT = "zz-start", "zz-default"
+
+    def all_text(self, e):
+        out = []
+        for name in os.listdir(e.dir):
+            with open(os.path.join(e.dir, name), encoding="utf-8") as f:
+                out.append(f.read())
+        return "\n".join(out).lower()
+
+    def test_no_scope_name_is_written_anywhere(self):
+        e = Env(self, profile=sp.REHEARSAL)
+        e.badge.scope, e.badge.default = "#" + self.START.upper(), self.DEFAULT
+        e.driver.run()
+        text = self.all_text(e)
+        self.assertTrue(any(x == "mesh scope" for x in e.badge.log))
+        self.assertIn(">> mesh scope console <scope> yes", text)
+        for name in (ZERO, REGION, self.START, self.DEFAULT):
+            self.assertNotIn(name, text)
+
+    def test_blocker_and_state_hold_no_name_either(self):
+        e = Env(self, profile=sp.REHEARSAL, hook=lambda b, line: setattr(b, "boot", 99) if line.startswith("mesh send ") else None)
+        e.badge.scope = self.START
+        self.assertEqual(e.driver.run(), 1)
+        for name in (ZERO, REGION, self.START):
+            self.assertNotIn(name, self.all_text(e))
+        self.assertTrue(os.path.exists(os.path.join(e.dir, "BLOCKER")))
 
 
 class AllowlistLinesTest(unittest.TestCase):
