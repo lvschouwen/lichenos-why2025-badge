@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <stdint.h>
+#include <string.h>
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 #include "driver/ppa.h"
 #endif
@@ -51,8 +52,10 @@ static esp_lcd_panel_handle_t lcd_panel;
 // buffer, no DMA2D copy, and flush_ready comes from this callback instead of the DMA2D done interrupt.
 //
 // Tear-free (#467): two frame buffers (num_fbs = 2). The strips of a frame go into the back buffer, the one the
-// DMA is not reading; after the last strip the buffers swap, and the areas that frame drew are copied into the
-// new back buffer so both hold the same picture again (PARTIAL rendering only redraws what changed).
+// DMA is not reading. After the last strip the switch is requested and the flush returns at once; the first strip
+// of the next frame resolves it (bounded wait, usually already proven) and copies the areas the earlier frame drew
+// into the new back buffer, so both hold the same picture again (PARTIAL rendering only redraws what changed). The
+// state machine is display_flip.c; here are its hardware hooks.
 // How the IDF 6.1 DPI driver swaps (esp_lcd/dsi/esp_lcd_panel_dpi.c, read, not changed):
 // - draw_bitmap with a pointer inside fbs[i] copies nothing: it writes back the cache of the rows it names, sets
 //   cur_fb_index = i and calls on_color_trans_done at once (dpi_panel_draw_bitmap_2d, lines 613-637).
@@ -60,12 +63,13 @@ static esp_lcd_panel_handle_t lcd_panel;
 //   83-103) reads cur_fb_index, restarts on that buffer's link list and then calls on_frame_buf_complete. So the
 //   switch takes effect at the next end of frame, and the first on_frame_buf_complete after the index was set
 //   says the old buffer is no longer read. That ISR is not IRAM (DW_GDMA_ISR_IRAM_SAFE off), so neither is ours.
-// - The interrupt reads the index a few instructions before the callback, so a callback stamped just after the
-//   request may have restarted on the old buffer: display_swap_proven() waits one more frame then.
+// - The interrupt reads the index a few instructions before the callback, so the first callback after the request
+//   may have restarted on the old buffer: display_swap_proven() then wants a later stamp or a second callback.
 // The driver starts on fbs[0] (dpi_panel_init) and callocs both, so both start equal (black).
 #define FB_BYTES        (LCD_H_RES * LCD_V_RES * 2)
 #define SWAP_GUARD_US   200 // the ISR's index read to callback stamp is well under this
-#define SWAP_TIMEOUT_MS 100 // about two frames at 47 Hz plus slack: a missed end of frame costs this, no more
+#define SWAP_TIMEOUT_MS 100 // about six frames at 62.45 Hz: a stalled scan-out costs this once per frame, no more
+#define FLIP_LOG_SWAPS  600 // developer builds: one stats line per ~10 s of continuous redraw
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 #define DIRECT_FLUSH_ENGINE "PPA"
 #else
@@ -73,13 +77,13 @@ static esp_lcd_panel_handle_t lcd_panel;
 #endif
 
 static uint16_t         *panel_fbs[2];
-static unsigned          fb_front;    // the buffer the DMA scans out (LVGL task only)
-EXT_RAM_BSS_ATTR static display_dirty_t frame_dirty; // panel areas this frame wrote into the back buffer (LVGL task only)
-static SemaphoreHandle_t fb_done;     // given by on_fb_done at every end of frame
+EXT_RAM_BSS_ATTR static display_flip_t flip; // LVGL task only
+static SemaphoreHandle_t fb_done;            // given by on_fb_done at every end of frame
 static StaticSemaphore_t fb_done_buf;
-static uint32_t volatile fb_done_us; // low 32 bits of esp_timer at the last end of frame (32 bits: one store)
+// Written by on_fb_done, stamp first; a reader that sees the count but an older stamp only waits longer
+static uint32_t volatile fb_done_us; // low 32 bits of esp_timer
+static uint32_t volatile fb_done_count;
 static uint32_t          swap_misses;
-static bool              swap_on; // the end-of-frame callback is ours; false = no swap, each frame copied to the shown buffer
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 static ppa_client_handle_t ppa_srm; // kept for the display's lifetime
 #endif
@@ -101,87 +105,94 @@ static esp_err_t no_mirror(esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y)
 
 static esp_lcd_panel_t no_hw_rotate = {.swap_xy = no_swap_xy, .mirror = no_mirror};
 
-// DMA done ISR, once per scanned frame: kept to a stamp and a give
+// DMA done ISR, once per scanned frame: kept to a stamp, a count and a give
 static bool on_fb_done(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *edata, void *ctx) {
     (void)panel;
     (void)edata;
     (void)ctx;
-    fb_done_us       = (uint32_t)esp_timer_get_time();
+    fb_done_us = (uint32_t)esp_timer_get_time();
+    fb_done_count++;
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(fb_done, &woken);
     return woken == pdTRUE;
 }
 
-// Wait until an end of frame proves the DMA restarted after `after_us`. Bounded: a missed end of frame (scan-out
-// stalled by a flash erase, panel off) costs SWAP_TIMEOUT_MS and a log line, never a hung UI.
-static bool wait_swap(uint32_t after_us) {
-    TickType_t const until = xTaskGetTickCount() + pdMS_TO_TICKS(SWAP_TIMEOUT_MS);
-    for (;;) {
-        TickType_t const left = until - xTaskGetTickCount();
-        if ((int32_t)left <= 0 || xSemaphoreTake(fb_done, left) != pdTRUE) {
-            return false;
-        }
-        if (display_swap_proven(after_us, fb_done_us, SWAP_GUARD_US)) {
-            return true;
-        }
-    }
+static display_frame_mark_t frame_mark(void) {
+    display_frame_mark_t const m = {.count = fb_done_count, .us = fb_done_us};
+    return m;
 }
 
-// Show the back buffer at the next end of frame. False when there is no swap (the picture then reaches the front
-// buffer by the copy-back alone, as torn as before #467).
-static bool show_back(void) {
-    if (!swap_on) {
-        return false;
-    }
-    unsigned const back = display_back_fb(fb_front);
-    xSemaphoreTake(fb_done, 0); // an end of frame from before the request proves nothing
-    // Row 0 is the cache write-back the driver does for a 1x1 area; every strip was written back already
-    esp_err_t const err = esp_lcd_panel_draw_bitmap(lcd_panel, 0, 0, 1, 1, panel_fbs[back]);
+static uint32_t flip_now_us(void *ctx) {
+    (void)ctx;
+    return (uint32_t)esp_timer_get_time();
+}
+
+// Row 0 is the cache write-back the driver does for a 1x1 area; every strip was written back already
+static bool flip_request(void *ctx, unsigned fb, display_frame_mark_t *mark) {
+    (void)ctx;
+    esp_err_t const err = esp_lcd_panel_draw_bitmap(lcd_panel, 0, 0, 1, 1, panel_fbs[fb]);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "frame buffer swap: %s", esp_err_to_name(err));
         return false;
     }
-    if (!wait_swap((uint32_t)esp_timer_get_time()) && (swap_misses++ % 100) == 0) {
-        ESP_LOGW(TAG, "swap: no end of frame in %d ms (%u)", SWAP_TIMEOUT_MS, (unsigned)swap_misses);
-    }
-    fb_front = back; // the index is set: the DMA switches whenever it next restarts
+    *mark = frame_mark();
     return true;
 }
 
-// End of an LVGL refresh: swap, then copy what this frame drew into the buffer that is now the back one. The copy is
-// written back to PSRAM at once: the PPA variant invalidates its destination rows before it writes, which would drop
-// dirty lines of this copy.
-static void finish_frame(void) {
-    unsigned const drawn = display_back_fb(fb_front);
-    show_back();
-    uint16_t *const       dst = panel_fbs[display_back_fb(drawn)];
-    uint16_t const *const src = panel_fbs[drawn];
-    for (uint32_t i = 0; i < frame_dirty.n; i++) {
-        display_rect_t const r = frame_dirty.r[i];
-        display_copy_rect(dst, src, LCD_H_RES, r);
-        esp_cache_msync(dst + r.y1 * LCD_H_RES, (size_t)(r.y2 - r.y1 + 1) * LCD_H_RES * 2,
-                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+// Bounded: a stalled scan-out (flash erase, panel off) costs SWAP_TIMEOUT_MS and a log line, never a hung UI. After an
+// idle spell the proof is already there and nothing waits.
+static bool flip_wait(void *ctx, display_frame_mark_t req) {
+    (void)ctx;
+    TickType_t const until = xTaskGetTickCount() + pdMS_TO_TICKS(SWAP_TIMEOUT_MS);
+    while (!display_swap_proven(req, frame_mark(), SWAP_GUARD_US)) {
+        TickType_t const left = until - xTaskGetTickCount();
+        if ((int32_t)left <= 0 || xSemaphoreTake(fb_done, left) != pdTRUE) {
+            if ((swap_misses++ % 100) == 0) {
+                ESP_LOGW(TAG, "swap: no end of frame in %d ms (%u)", SWAP_TIMEOUT_MS, (unsigned)swap_misses);
+            }
+            return false;
+        }
     }
-    display_dirty_clear(&frame_dirty);
+    return true;
 }
 
-static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
-    display_rect_t const ui  = {area->x1, area->y1, area->x2, area->y2};
-    display_rect_t const blk = display_rot90_block(ui, LCD_V_RES); // UI width = panel height
-    int32_t const        w   = ui.x2 - ui.x1 + 1;
-    int32_t const        h   = ui.y2 - ui.y1 + 1;
-    uint32_t const       stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB565);
-    uint16_t *const      fb     = panel_fbs[display_back_fb(fb_front)];
+// Written back at once: the PPA variant invalidates its destination rows before it writes, which would drop dirty
+// lines of this copy, and the scan-out reads PSRAM, not the cache.
+static void flip_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
+    (void)ctx;
+    display_copy_rect(panel_fbs[dst], panel_fbs[src], LCD_H_RES, r);
+    esp_cache_msync(panel_fbs[dst] + r.y1 * LCD_H_RES, (size_t)(r.y2 - r.y1 + 1) * LCD_H_RES * 2,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+static display_flip_ops_t const flip_ops = {flip_request, flip_wait, flip_copy, flip_now_us, NULL};
+
+// Bench figure (#467): the time spent waiting for the swap proof and copying back, developer builds only
+static void flip_log_stats(void) {
+#if CONFIG_LICHEN_DEV_COMMANDS
+    display_flip_stats_t *const st = &flip.stats;
+    uint32_t const              n  = st->swaps + st->timeouts;
+    if (n < FLIP_LOG_SWAPS) {
+        return;
+    }
+    ESP_LOGI(TAG, "flip: %u swaps, %u timeouts, %u refused; wait avg %u max %u us; copy avg %u max %u us",
+             (unsigned)st->swaps, (unsigned)st->timeouts, (unsigned)st->refusals, (unsigned)(st->wait_us / n),
+             (unsigned)st->wait_max_us, (unsigned)(st->copy_us / n), (unsigned)st->copy_max_us);
+    memset(st, 0, sizeof(*st));
+#endif
+}
+
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
-    // Cache: ppa_do_scale_rotate_mirror writes the strip back (C2M, unaligned allowed) before the PPA reads it,
-    // and invalidates the destination rows (M2C) itself, so there is no msync here. The only CPU writes into a
-    // frame buffer are finish_frame's copies, which are written back before the next strip.
+// Cache: ppa_do_scale_rotate_mirror writes the strip back (C2M, unaligned allowed) before the PPA reads it, and
+// invalidates the destination rows (M2C) itself, so there is no msync here. The only CPU writes into a frame buffer
+// are flip_copy's, which are written back before the next strip.
+static void rotate_strip(uint16_t *fb, display_rect_t ui, display_rect_t blk, uint8_t const *px_map, uint32_t stride) {
     ppa_srm_oper_config_t const op = {
         .in.buffer          = px_map,
         .in.pic_w           = stride / 2,
-        .in.pic_h           = h,
-        .in.block_w         = w,
-        .in.block_h         = h,
+        .in.pic_h           = ui.y2 - ui.y1 + 1,
+        .in.block_w         = ui.x2 - ui.x1 + 1,
+        .in.block_h         = ui.y2 - ui.y1 + 1,
         .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
         .out.buffer         = fb,
         .out.buffer_size    = FB_BYTES,
@@ -199,17 +210,30 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PPA flush %d,%d..%d,%d: %s", (int)ui.x1, (int)ui.y1, (int)ui.x2, (int)ui.y2, esp_err_to_name(err));
     }
+}
 #else
-    // The turned strip is LCD_V_RES rows of h pixels: write back the whole row span in one msync, as the DPI
-    // driver's own CPU copy path does (only dirty lines cost a PSRAM write).
+// The turned strip is LCD_V_RES rows of h pixels: write back the whole row span in one msync, as the DPI driver's
+// own CPU copy path does (only dirty lines cost a PSRAM write).
+static void rotate_strip(uint16_t *fb, display_rect_t ui, display_rect_t blk, uint8_t const *px_map, uint32_t stride) {
     uint16_t *const dst_row = fb + blk.y1 * LCD_H_RES;
-    lv_draw_sw_rotate(px_map, dst_row + blk.x1, w, h, stride, LCD_H_RES * 2, LV_DISPLAY_ROTATION_90, LV_COLOR_FORMAT_RGB565);
+    lv_draw_sw_rotate(px_map, dst_row + blk.x1, ui.x2 - ui.x1 + 1, ui.y2 - ui.y1 + 1, stride, LCD_H_RES * 2,
+                      LV_DISPLAY_ROTATION_90, LV_COLOR_FORMAT_RGB565);
     esp_cache_msync(dst_row, (size_t)(blk.y2 - blk.y1 + 1) * LCD_H_RES * 2,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
 #endif
-    display_dirty_add(&frame_dirty, blk);
+
+static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
+    display_rect_t const ui     = {area->x1, area->y1, area->x2, area->y2};
+    display_rect_t const blk    = display_rot90_block(ui, LCD_V_RES); // UI width = panel height
+    uint32_t const       stride = lv_draw_buf_width_to_stride(ui.x2 - ui.x1 + 1, LV_COLOR_FORMAT_RGB565);
+    // Resolves the previous frame's switch (and its copy-back) before anything is written
+    uint16_t *const fb = panel_fbs[display_flip_write_target(&flip)];
+    rotate_strip(fb, ui, blk, px_map, stride);
+    display_flip_drawn(&flip, blk);
     if (lv_display_flush_is_last(disp)) {
-        finish_frame();
+        display_flip_frame_end(&flip); // requests the switch, does not wait
+        flip_log_stats();
     }
     lv_display_flush_ready(disp);
 }
@@ -237,9 +261,7 @@ static bool direct_flush_init(esp_lcd_panel_handle_t panel) {
 #endif
     panel_fbs[0] = fb0;
     panel_fbs[1] = fb1;
-    fb_front     = 0; // dpi_panel_init starts the DMA on fbs[0]
-    display_dirty_clear(&frame_dirty);
-    fb_done = xSemaphoreCreateBinaryStatic(&fb_done_buf);
+    fb_done      = xSemaphoreCreateBinaryStatic(&fb_done_buf);
     return true;
 }
 
@@ -348,7 +370,8 @@ bool display_start(lv_display_t **out) {
     lvgl_port_lock(0);
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
     if (direct) {
-        swap_on = direct_flush_callbacks(panel);
+        bool const swap_on = direct_flush_callbacks(panel);
+        display_flip_init(&flip, &flip_ops, swap_on); // front = fbs[0], where dpi_panel_init starts the DMA
         lv_display_set_flush_cb(*out, flush_direct);
         ESP_LOGI(TAG, "direct flush (%s), %s", DIRECT_FLUSH_ENGINE, swap_on ? "2 buffers" : "1 buffer");
     }

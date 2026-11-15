@@ -87,6 +87,72 @@ void display_copy_rect(uint16_t *dst, uint16_t const *src, int32_t stride_px, di
     }
 }
 
-bool display_swap_proven(uint32_t after_us, uint32_t cb_us, uint32_t guard_us) {
-    return (int32_t)(cb_us - after_us) > (int32_t)guard_us;
+bool display_swap_proven(display_frame_mark_t req, display_frame_mark_t now, uint32_t guard_us) {
+    uint32_t const frames = now.count - req.count;
+    if (frames >= 2 && frames < UINT32_MAX / 2) {
+        return true;
+    }
+    return frames == 1 && (int32_t)(now.us - req.us) > (int32_t)guard_us;
+}
+
+void display_flip_init(display_flip_t *f, display_flip_ops_t const *ops, bool swap_on) {
+    memset(f, 0, sizeof(*f));
+    f->ops     = *ops;
+    f->swap_on = swap_on;
+}
+
+static void note_time(uint64_t *total, uint32_t *max, uint32_t us) {
+    *total += us;
+    if (us > *max) {
+        *max = us;
+    }
+}
+
+// Bring buffer dst level with src over every area drawn since they were last equal
+static void copy_dirty(display_flip_t *f, unsigned dst, unsigned src) {
+    uint32_t const t0 = f->ops.now_us(f->ops.ctx);
+    for (uint32_t i = 0; i < f->dirty.n; i++) {
+        f->ops.copy(f->ops.ctx, dst, src, f->dirty.r[i]);
+    }
+    display_dirty_clear(&f->dirty);
+    note_time(&f->stats.copy_us, &f->stats.copy_max_us, f->ops.now_us(f->ops.ctx) - t0);
+}
+
+unsigned display_flip_write_target(display_flip_t *f) {
+    if (!f->swap_on) {
+        return f->front;
+    }
+    if (f->pending) {
+        f->pending         = false;
+        uint32_t const t0  = f->ops.now_us(f->ops.ctx);
+        bool const     yes = f->ops.wait(f->ops.ctx, f->req);
+        note_time(&f->stats.wait_us, &f->stats.wait_max_us, f->ops.now_us(f->ops.ctx) - t0);
+        if (yes) {
+            f->stats.swaps++;
+            f->front = display_back_fb(f->front);
+            copy_dirty(f, display_back_fb(f->front), f->front);
+        } else {
+            f->stats.timeouts++;
+        }
+    }
+    return display_back_fb(f->front);
+}
+
+void display_flip_drawn(display_flip_t *f, display_rect_t r) {
+    if (f->swap_on) {
+        display_dirty_add(&f->dirty, r);
+    }
+}
+
+void display_flip_frame_end(display_flip_t *f) {
+    if (!f->swap_on) {
+        return;
+    }
+    unsigned const back = display_back_fb(f->front);
+    if (f->ops.request(f->ops.ctx, back, &f->req)) {
+        f->pending = true;
+        return;
+    }
+    f->stats.refusals++;
+    copy_dirty(f, f->front, back);
 }

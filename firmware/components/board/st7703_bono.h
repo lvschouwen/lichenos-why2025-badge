@@ -1,7 +1,7 @@
 #pragma once
 
 // The WHY2025 badge v2.1 panel ("BONO" ST7703, 720x720), copied from badgevms/drivers/st7703.h
-// (CONFIG_SCREEN_TYPE_BONO) for the lean firmware (#61): RGB565, one DPI framebuffer.
+// (CONFIG_SCREEN_TYPE_BONO) for the lean firmware (#61): RGB565, two DPI frame buffers (#467: tear-free flush).
 
 
 /**
