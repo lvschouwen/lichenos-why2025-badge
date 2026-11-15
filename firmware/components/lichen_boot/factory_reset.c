@@ -25,6 +25,7 @@
 #include "nvs_fail.h"
 #include "nvs_flash.h"
 #include "storage.h"
+#include "walk_pace.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -484,8 +485,11 @@ static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *faile
             strlcpy(names[n++], e->d_name, sizeof(names[0]));
         }
         closedir(d);
-        unsigned before = *failed;
+        unsigned     before = *failed;
+        walk_slice_t slice; // an unlink each: hundreds of MeshCore files must not hold the console's core (#471)
+        walk_pace_begin(&slice);
         for (size_t i = 0; i < n; i++) {
+            walk_pace(&slice);
             int w = snprintf(path + len, PATH_BUF - len, "/%s", names[i]);
             if (w <= 0 || (size_t)w >= PATH_BUF - len) {
                 (*failed)++;
@@ -500,6 +504,7 @@ static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *faile
             }
             path[len] = '\0';
         }
+        walk_pace_end(&slice);
         if (n == 0 || *failed != before) {
             break; // empty, or stuck on something that will not go
         }

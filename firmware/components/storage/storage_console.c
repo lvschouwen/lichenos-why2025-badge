@@ -4,6 +4,7 @@
 #include "storage.h"
 
 #include "fw_console.h"
+#include "walk_pace.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -12,12 +13,15 @@
 
 #define MAX_DEPTH 4 // each level is an opendir on the console task's small stack: keep it shallow
 
-static char s_path[256];
+static char         s_path[256];
+static walk_slice_t s_slice; // the whole listing is one walk: every stat paces it (#471)
 
 // Bytes under s_path (a file's size, or a folder's files summed); s_path is restored before it returns
 static uint64_t tree_bytes(int depth) {
     struct stat st;
-    if (stat(s_path, &st) != 0) {
+    int         r = stat(s_path, &st);
+    walk_pace(&s_slice); // a stat in a big LittleFS folder reads its metadata from flash: milliseconds each
+    if (r != 0) {
         return 0;
     }
     if (!S_ISDIR(st.st_mode)) {
@@ -82,7 +86,9 @@ static void cmd_storage(char const *args) {
     }
     size_t         len = strlen(s_path);
     struct dirent *e;
+    walk_pace_begin(&s_slice);
     while ((e = readdir(dir)) != NULL) {
+        walk_pace(&s_slice);
         if (snprintf(s_path + len, sizeof(s_path) - len, "/%s", e->d_name) >= (int)(sizeof(s_path) - len)) {
             s_path[len] = 0;
             continue;
@@ -92,6 +98,7 @@ static void cmd_storage(char const *args) {
         s_path[len] = 0;
     }
     closedir(dir);
+    walk_pace_end(&s_slice);
 }
 
 void storage_console_register(void) {

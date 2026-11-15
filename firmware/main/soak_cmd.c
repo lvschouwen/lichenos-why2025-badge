@@ -35,6 +35,7 @@
 #include "sdcard.h"
 #include "shell_parts.h"
 #include "storage.h"
+#include "walk_pace.h"
 #include "wifi_service.h"
 
 #define MESH_WAIT_MS 50 // MeshCore's loop holds its lock briefly; a sample taken while it is busy prints -1
@@ -199,6 +200,7 @@ static void read_slow_paths(soak_t *s) {
     s->toast_drops = notify_ui_toast_drops();
     s->notice_drops = lichen_notify_dropped();
     s->c6_send_busy = lora_c6_send_busy();
+    s->walk_max_ms  = walk_pace_worst_ms();
 }
 
 static void read_net_and_heat(soak_t *s) {

@@ -1,5 +1,7 @@
 #include "files_ops.h"
 
+#include "walk_pace.h"
+
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -114,7 +116,10 @@ int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, s
         return errno ? errno : EIO;
     }
     struct dirent *de;
+    walk_slice_t   slice; // a stat per entry: a folder of hundreds of files must not hold core 0 (#471)
+    walk_pace_begin(&slice);
     while ((de = readdir(d)) != NULL) {
+        walk_pace(&slice);
         char path[FILES_PATH_MAX];
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
             continue;
@@ -134,6 +139,7 @@ int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, s
         (*count)++;
     }
     closedir(d);
+    walk_pace_end(&slice);
     files_sort(out, *count);
     return 0;
 }

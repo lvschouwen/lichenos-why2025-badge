@@ -2,6 +2,7 @@
 #include "lichen_sys_data_fs.h"
 
 #include "fs_path.h"
+#include "walk_pace.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -42,6 +43,7 @@ typedef struct {
     bool          remove;
     bool          failed; // a directory could not be read (measure) or something is left (clear)
     app_data_fs_t r;
+    walk_slice_t  slice; // every entry paces the walk: MeshCore's folder holds hundreds of files (#471)
 } walk_t;
 
 static void walk_dir(walk_t *w, int depth);
@@ -67,6 +69,7 @@ static void leave_name(walk_t *w, size_t keep) {
 // is never followed or counted: removing unlinks the entry itself, so a link out of the tree cannot be walked through
 static void one_entry(walk_t *w, int depth) {
     struct stat st;
+    walk_pace(&w->slice);
     if (entry_stat(w->path, &st) != 0) {
         w->r.skipped++;
         return;
@@ -145,7 +148,9 @@ static bool run(char const *dir, bool remove, app_data_fs_t *out) {
     walk_t *w  = &wk;
     strcpy(w->path, dir);
     w->len = strlen(dir);
+    walk_pace_begin(&w->slice);
     walk_dir(w, 0);
+    walk_pace_end(&w->slice);
     *out = w->r;
     return !w->failed && (!remove || w->r.skipped == 0);
 }

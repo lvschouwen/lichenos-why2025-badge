@@ -85,7 +85,7 @@ static soak_key_t const KEYS[] = {
     NUM(4, "nslowms", notice_slow_max, U32), NUM(4, "uiref", ui_refused, U32),     NUM(4, "uiwait", ui_wait_max, U32),
     NUM(4, "wqfull", wifi_qfull, U32),      NUM(4, "c6qfull", c6_qfull, U32),      NUM(4, "toastdrop", toast_drops, U32),
     NUM(4, "notdrop", notice_drops, U32),   NUM(4, "jpend", journal_pend_hw, U32), NUM(4, "jdrop", journal_dropped, U32),
-    NUM(4, "c6busy", c6_send_busy, U32),
+    NUM(4, "c6busy", c6_send_busy, U32),    NUM(4, "wkmax", walk_max_ms, U32),
 };
 #define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 

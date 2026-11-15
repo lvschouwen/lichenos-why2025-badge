@@ -18,7 +18,7 @@ REPLY = """\
 soak1 v=1 boot=30 up=91751 rst=sw rstcrash=0 crash=0 slot=0 slotok=1 int=179147 intmin=172563 intbig=69620 intwin=172563 intwx=1 dma=152991 dmamin=146407 dmabig=69620 dmawin=146407 dmawx=1 ps=26034464
 soak2 v=1 boot=30 up=91751 lock=0 canary=0 c6=up c6rs=0 hb=2 hbmiss=0 hbdrop=0 pooltx=0 poolrx=0 lora=rx lpkt=12 lcrc=5 c6up=60 lage=27 lrx=17 ltx=0
 soak3 v=1 boot=30 up=91751 mrx=17 mtx=0 mfail=0 mtmo=0 mref=0 mdrop=0 airlog=17 airdrop=0 wdbm=-61 wup=1 therm=ok store=2961408 sd=mounted sdok=1 sdfree=31088705536 sderr=0 bat=absent batmv=-1 kbd=1
-soak4 v=1 boot=30 up=91751 mslow=0 mslowms=0 mslowfile=0 stlast=3058 stmax=3058 nslow=1 nslowms=3061 uiref=0 uiwait=0 wqfull=0 c6qfull=0 toastdrop=0 notdrop=0 jpend=0 jdrop=0 c6busy=0
+soak4 v=1 boot=30 up=91751 mslow=0 mslowms=0 mslowfile=0 stlast=3058 stmax=3058 nslow=1 nslowms=3061 uiref=0 uiwait=0 wqfull=0 c6qfull=0 toastdrop=0 notdrop=0 jpend=0 jdrop=0 c6busy=0 wkmax=0
 """
 
 BUDGETS = """\

@@ -37,6 +37,7 @@ mesh_loop_slow_ms key mslowms <200 - ms firmware/components/mesh/mesh_task.cpp t
 mesh_loop_slow_log log MeshCore\sloop\stook\s(\d+)\sms <200 - ms firmware/components/mesh/mesh_task.cpp warning line, same limit as mslowms
 notice_slow_ms key nslowms <=500 - ms firmware/components/lichen_os/sys_notice_rules.h SYSN_SLOW_MS=500
 storage_count_ms key stmax - - ms none measured 2.5-3.1 s on fw-869e608d, no written expectation
+walk_stretch_ms key wkmax <=100 - ms #471 longest stretch a directory walk (fw storage, Files, app data) held its core
 storage_count_log log storage\scount:\s(\d+)\sms - - ms none sys_notices warning line, every 10 min
 
 # Probes (no soak key; the probe name is what a later tool or a CSV column supplies)

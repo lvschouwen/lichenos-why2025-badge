@@ -102,6 +102,7 @@ typedef struct {
     int64_t toast_drops, notice_drops;   // toasts dropped from the full waiting list; notices that found no room
     int64_t journal_pend_hw, journal_dropped; // MeshCore history: highest pending bytes, records not journaled
     int64_t c6_send_busy;                // times the C6 link went down with a send still inside ESP-Hosted
+    int64_t walk_max_ms;                 // the longest stretch a directory walk held its core without a block (#471)
 } soak_t;
 
 // 1 when this boot follows a crash: crash.c judged so itself (crash_now), or it is the software restart of the PSRAM

@@ -39,7 +39,7 @@ static char const *const KEYS[SOAK_LINES][40] = {
     {"v", "boot", "up", "mrx", "mtx", "mfail", "mtmo", "mref", "mdrop", "airlog", "airdrop", "wdbm", "wup", "therm",
      "store", "sd", "sdok", "sdfree", "sderr", "bat", "batmv", "kbd", "kbdrst", "bl", "blapp", "kbl", "kblapp", NULL},
     {"v", "boot", "up", "mslow", "mslowms", "mslowfile", "stlast", "stmax", "nslow", "nslowms", "uiref", "uiwait",
-     "wqfull", "c6qfull", "toastdrop", "notdrop", "jpend", "jdrop", "c6busy", NULL},
+     "wqfull", "c6qfull", "toastdrop", "notdrop", "jpend", "jdrop", "c6busy", "wkmax", NULL},
 };
 
 // A badge as a soak sample might see it: every value distinct, so a key reading the wrong field shows
@@ -62,7 +62,7 @@ static soak_t sample(void) {
         .mesh_slow = 22, .mesh_slow_max = 923, .mesh_slow_file = 874, .store_last_ms = 1250, .store_max_ms = 4700,
         .notice_slow = 23, .notice_slow_max = 610, .ui_refused = 24, .ui_wait_max = 100, .wifi_qfull = 25,
         .c6_qfull = 26, .toast_drops = 27, .notice_drops = 28, .journal_pend_hw = 3900, .journal_dropped = 29,
-        .c6_send_busy = 30,
+        .c6_send_busy = 30, .walk_max_ms = 31,
     };
     return s;
 }
@@ -83,7 +83,7 @@ static void exact_lines(void) {
     CHECK_LINE(&s, 4,
                "soak4 v=1 boot=42 up=3600250 mslow=22 mslowms=923 mslowfile=874 stlast=1250 stmax=4700 nslow=23 "
                "nslowms=610 uiref=24 uiwait=100 wqfull=25 c6qfull=26 toastdrop=27 notdrop=28 jpend=3900 jdrop=29 "
-               "c6busy=30");
+               "c6busy=30 wkmax=31");
 }
 
 // MeshCore stopped: its keys are -1 (the glue leaves them), the rest of the line is still numbers
@@ -94,9 +94,9 @@ static void slow_path_stopped(void) {
     CHECK_LINE(&s, 4,
                "soak4 v=1 boot=42 up=3600250 mslow=-1 mslowms=-1 mslowfile=-1 stlast=-1 stmax=4700 nslow=23 "
                "nslowms=610 uiref=24 uiwait=100 wqfull=25 c6qfull=26 toastdrop=27 notdrop=28 jpend=-1 jdrop=-1 "
-               "c6busy=30");
+               "c6busy=30 wkmax=31");
     soak_init(&s);
-    CHECK(strstr(at(&s, 4), " mslow=-1 ") && strstr(at(&s, 4), " c6busy=-1"));
+    CHECK(strstr(at(&s, 4), " mslow=-1 ") && strstr(at(&s, 4), " c6busy=-1 ") && strstr(at(&s, 4), " wkmax=-1"));
 }
 
 // Splits a line into its keys and checks them against KEYS[n-1]: names, order, count, one space each, key=value
