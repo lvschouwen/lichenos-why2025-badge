@@ -31,7 +31,7 @@
      .dpi_clock_freq_mhz = ST7703_DPI_CLOCK_MHZ,                                                          \
      .virtual_channel    = 0,                                                                                          \
      .in_color_format    = LCD_COLOR_FMT_RGB565,                       \
-     .num_fbs            = 1,                                                                       \
+     .num_fbs            = 2, /* #467: the direct flush draws into the one not scanned out */      \
      .video_timing =                                                                                                   \
          {                                                                                                             \
              .h_size            = ST7703_H_SIZE,                                                                                 \

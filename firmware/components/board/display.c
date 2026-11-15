@@ -13,13 +13,17 @@
 #include "st7703_bono.h"
 
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
+#include "display_flip.h"
 #include "display_rot.h"
+#include "esp_attr.h"
+#include "esp_cache.h"
 #include "esp_lcd_panel_interface.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <stdint.h>
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 #include "driver/ppa.h"
-#else
-#include "esp_cache.h"
 #endif
 #endif
 
@@ -45,16 +49,37 @@ static esp_lcd_panel_handle_t lcd_panel;
 // and writes it turned into its own rotation buffer, then the DPI driver's DMA2D reads that and writes it
 // into the frame buffer. Here the strip is turned straight into the frame buffer: three passes, no rotation
 // buffer, no DMA2D copy, and flush_ready comes from this callback instead of the DMA2D done interrupt.
-// Tearing is no worse than before: there is one frame buffer, scanned out while it is written, and the
-// DMA2D copy wrote into it the same way.
-#define FB_BYTES (LCD_H_RES * LCD_V_RES * 2)
+//
+// Tear-free (#467): two frame buffers (num_fbs = 2). The strips of a frame go into the back buffer, the one the
+// DMA is not reading; after the last strip the buffers swap, and the areas that frame drew are copied into the
+// new back buffer so both hold the same picture again (PARTIAL rendering only redraws what changed).
+// How the IDF 6.1 DPI driver swaps (esp_lcd/dsi/esp_lcd_panel_dpi.c, read, not changed):
+// - draw_bitmap with a pointer inside fbs[i] copies nothing: it writes back the cache of the rows it names, sets
+//   cur_fb_index = i and calls on_color_trans_done at once (dpi_panel_draw_bitmap_2d, lines 613-637).
+// - The DMA reads one whole frame buffer per transfer; its done interrupt (mipi_dsi_dma_trans_done_cb, lines
+//   83-103) reads cur_fb_index, restarts on that buffer's link list and then calls on_frame_buf_complete. So the
+//   switch takes effect at the next end of frame, and the first on_frame_buf_complete after the index was set
+//   says the old buffer is no longer read. That ISR is not IRAM (DW_GDMA_ISR_IRAM_SAFE off), so neither is ours.
+// - The interrupt reads the index a few instructions before the callback, so a callback stamped just after the
+//   request may have restarted on the old buffer: display_swap_proven() waits one more frame then.
+// The driver starts on fbs[0] (dpi_panel_init) and callocs both, so both start equal (black).
+#define FB_BYTES        (LCD_H_RES * LCD_V_RES * 2)
+#define SWAP_GUARD_US   200 // the ISR's index read to callback stamp is well under this
+#define SWAP_TIMEOUT_MS 100 // about two frames at 47 Hz plus slack: a missed end of frame costs this, no more
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 #define DIRECT_FLUSH_ENGINE "PPA"
 #else
 #define DIRECT_FLUSH_ENGINE "CPU"
 #endif
 
-static uint16_t *panel_fb;
+static uint16_t         *panel_fbs[2];
+static unsigned          fb_front;    // the buffer the DMA scans out (LVGL task only)
+EXT_RAM_BSS_ATTR static display_dirty_t frame_dirty; // panel areas this frame wrote into the back buffer (LVGL task only)
+static SemaphoreHandle_t fb_done;     // given by on_fb_done at every end of frame
+static StaticSemaphore_t fb_done_buf;
+static uint32_t volatile fb_done_us; // low 32 bits of esp_timer at the last end of frame (32 bits: one store)
+static uint32_t          swap_misses;
+static bool              swap_on; // the end-of-frame callback is ours; false = no swap, each frame copied to the shown buffer
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
 static ppa_client_handle_t ppa_srm; // kept for the display's lifetime
 #endif
@@ -76,16 +101,81 @@ static esp_err_t no_mirror(esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y)
 
 static esp_lcd_panel_t no_hw_rotate = {.swap_xy = no_swap_xy, .mirror = no_mirror};
 
+// DMA done ISR, once per scanned frame: kept to a stamp and a give
+static bool on_fb_done(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *edata, void *ctx) {
+    (void)panel;
+    (void)edata;
+    (void)ctx;
+    fb_done_us       = (uint32_t)esp_timer_get_time();
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(fb_done, &woken);
+    return woken == pdTRUE;
+}
+
+// Wait until an end of frame proves the DMA restarted after `after_us`. Bounded: a missed end of frame (scan-out
+// stalled by a flash erase, panel off) costs SWAP_TIMEOUT_MS and a log line, never a hung UI.
+static bool wait_swap(uint32_t after_us) {
+    TickType_t const until = xTaskGetTickCount() + pdMS_TO_TICKS(SWAP_TIMEOUT_MS);
+    for (;;) {
+        TickType_t const left = until - xTaskGetTickCount();
+        if ((int32_t)left <= 0 || xSemaphoreTake(fb_done, left) != pdTRUE) {
+            return false;
+        }
+        if (display_swap_proven(after_us, fb_done_us, SWAP_GUARD_US)) {
+            return true;
+        }
+    }
+}
+
+// Show the back buffer at the next end of frame. False when there is no swap (the picture then reaches the front
+// buffer by the copy-back alone, as torn as before #467).
+static bool show_back(void) {
+    if (!swap_on) {
+        return false;
+    }
+    unsigned const back = display_back_fb(fb_front);
+    xSemaphoreTake(fb_done, 0); // an end of frame from before the request proves nothing
+    // Row 0 is the cache write-back the driver does for a 1x1 area; every strip was written back already
+    esp_err_t const err = esp_lcd_panel_draw_bitmap(lcd_panel, 0, 0, 1, 1, panel_fbs[back]);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "frame buffer swap: %s", esp_err_to_name(err));
+        return false;
+    }
+    if (!wait_swap((uint32_t)esp_timer_get_time()) && (swap_misses++ % 100) == 0) {
+        ESP_LOGW(TAG, "swap: no end of frame in %d ms (%u)", SWAP_TIMEOUT_MS, (unsigned)swap_misses);
+    }
+    fb_front = back; // the index is set: the DMA switches whenever it next restarts
+    return true;
+}
+
+// End of an LVGL refresh: swap, then copy what this frame drew into the buffer that is now the back one. The copy is
+// written back to PSRAM at once: the PPA variant invalidates its destination rows before it writes, which would drop
+// dirty lines of this copy.
+static void finish_frame(void) {
+    unsigned const drawn = display_back_fb(fb_front);
+    show_back();
+    uint16_t *const       dst = panel_fbs[display_back_fb(drawn)];
+    uint16_t const *const src = panel_fbs[drawn];
+    for (uint32_t i = 0; i < frame_dirty.n; i++) {
+        display_rect_t const r = frame_dirty.r[i];
+        display_copy_rect(dst, src, LCD_H_RES, r);
+        esp_cache_msync(dst + r.y1 * LCD_H_RES, (size_t)(r.y2 - r.y1 + 1) * LCD_H_RES * 2,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
+    display_dirty_clear(&frame_dirty);
+}
+
 static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
     display_rect_t const ui  = {area->x1, area->y1, area->x2, area->y2};
     display_rect_t const blk = display_rot90_block(ui, LCD_V_RES); // UI width = panel height
     int32_t const        w   = ui.x2 - ui.x1 + 1;
     int32_t const        h   = ui.y2 - ui.y1 + 1;
     uint32_t const       stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB565);
+    uint16_t *const      fb     = panel_fbs[display_back_fb(fb_front)];
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
     // Cache: ppa_do_scale_rotate_mirror writes the strip back (C2M, unaligned allowed) before the PPA reads it,
-    // and invalidates the destination rows (M2C) itself, so there is no msync here. The CPU never writes the
-    // frame buffer in this variant, so that invalidate drops nothing dirty.
+    // and invalidates the destination rows (M2C) itself, so there is no msync here. The only CPU writes into a
+    // frame buffer are finish_frame's copies, which are written back before the next strip.
     ppa_srm_oper_config_t const op = {
         .in.buffer          = px_map,
         .in.pic_w           = stride / 2,
@@ -93,7 +183,7 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
         .in.block_w         = w,
         .in.block_h         = h,
         .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
-        .out.buffer         = panel_fb,
+        .out.buffer         = fb,
         .out.buffer_size    = FB_BYTES,
         .out.pic_w          = LCD_H_RES,
         .out.pic_h          = LCD_V_RES,
@@ -112,25 +202,29 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
 #else
     // The turned strip is LCD_V_RES rows of h pixels: write back the whole row span in one msync, as the DPI
     // driver's own CPU copy path does (only dirty lines cost a PSRAM write).
-    uint16_t *const dst_row = panel_fb + blk.y1 * LCD_H_RES;
+    uint16_t *const dst_row = fb + blk.y1 * LCD_H_RES;
     lv_draw_sw_rotate(px_map, dst_row + blk.x1, w, h, stride, LCD_H_RES * 2, LV_DISPLAY_ROTATION_90, LV_COLOR_FORMAT_RGB565);
     esp_cache_msync(dst_row, (size_t)(blk.y2 - blk.y1 + 1) * LCD_H_RES * 2,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 #endif
+    display_dirty_add(&frame_dirty, blk);
+    if (lv_display_flush_is_last(disp)) {
+        finish_frame();
+    }
     lv_display_flush_ready(disp);
 }
 
-// Frame buffer and (for the PPA) the SRM client. False = fall back to the port's path (with a CPU copy
-// instead of DMA2D, which is not enabled in this configuration).
+// Frame buffers and (for the PPA) the SRM client. False = fall back to the port's path (with a CPU copy
+// instead of DMA2D, which is not enabled in this configuration); it draws into fbs[0], the one scanned out.
 static bool direct_flush_init(esp_lcd_panel_handle_t panel) {
-    void *fb = NULL;
-    if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb) != ESP_OK || !fb) {
-        ESP_LOGE(TAG, "direct flush: no frame buffer");
+    void *fb0 = NULL, *fb1 = NULL;
+    if (esp_lcd_dpi_panel_get_frame_buffer(panel, 2, &fb0, &fb1) != ESP_OK || !fb0 || !fb1) {
+        ESP_LOGE(TAG, "direct flush: not two frame buffers");
         return false;
     }
     // The PPA wants its output buffer address and size on cache lines (ppa_check_buffer_alignment)
-    if (((uintptr_t)fb | FB_BYTES) & (CONFIG_CACHE_L2_CACHE_LINE_SIZE - 1)) {
-        ESP_LOGE(TAG, "direct flush: frame buffer %p not cache-line aligned", fb);
+    if (((uintptr_t)fb0 | (uintptr_t)fb1 | FB_BYTES) & (CONFIG_CACHE_L2_CACHE_LINE_SIZE - 1)) {
+        ESP_LOGE(TAG, "direct flush: frame buffers %p %p not cache-line aligned", fb0, fb1);
         return false;
     }
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH_PPA
@@ -141,7 +235,23 @@ static bool direct_flush_init(esp_lcd_panel_handle_t panel) {
         return false;
     }
 #endif
-    panel_fb = fb;
+    panel_fbs[0] = fb0;
+    panel_fbs[1] = fb1;
+    fb_front     = 0; // dpi_panel_init starts the DMA on fbs[0]
+    display_dirty_clear(&frame_dirty);
+    fb_done = xSemaphoreCreateBinaryStatic(&fb_done_buf);
+    return true;
+}
+
+// Replaces the port's DPI callbacks: its on_color_trans_done would call flush_ready from inside our draw_bitmap,
+// and the swap needs the end-of-frame callback (on_vsync stays off, as before).
+static bool direct_flush_callbacks(esp_lcd_panel_handle_t panel) {
+    esp_lcd_dpi_panel_event_callbacks_t const cbs = {.on_frame_buf_complete = on_fb_done};
+    esp_err_t const                           err = esp_lcd_dpi_panel_register_event_callbacks(panel, &cbs, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "direct flush: frame callback: %s", esp_err_to_name(err));
+        return false;
+    }
     return true;
 }
 #endif
@@ -193,10 +303,10 @@ bool display_start(lv_display_t **out) {
         return false;
     }
     lcd_panel = panel;
-    void *fb = NULL;
-    if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb) == ESP_OK) {
+    void *fb0 = NULL, *fb1 = NULL;
+    if (esp_lcd_dpi_panel_get_frame_buffer(panel, 2, &fb0, &fb1) == ESP_OK) {
         // #86: who owns what in PSRAM
-        ESP_LOGI(TAG, "panel framebuffer %p, %u KB", fb, (unsigned)(LCD_H_RES * LCD_V_RES * 2 >> 10));
+        ESP_LOGI(TAG, "panel framebuffers %p %p, %u KB each", fb0, fb1, (unsigned)(LCD_H_RES * LCD_V_RES * 2 >> 10));
     }
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -238,8 +348,9 @@ bool display_start(lv_display_t **out) {
     lvgl_port_lock(0);
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
     if (direct) {
+        swap_on = direct_flush_callbacks(panel);
         lv_display_set_flush_cb(*out, flush_direct);
-        ESP_LOGI(TAG, "direct flush (%s) into the frame buffer", DIRECT_FLUSH_ENGINE);
+        ESP_LOGI(TAG, "direct flush (%s), %s", DIRECT_FLUSH_ENGINE, swap_on ? "2 buffers" : "1 buffer");
     }
 #endif
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);

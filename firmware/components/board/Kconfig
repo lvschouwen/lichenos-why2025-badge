@@ -6,7 +6,8 @@ menu "Lichen display"
             Lichen's own flush callback turns each rendered 720x80 strip by 90 degrees directly into the DSI
             panel's frame buffer, instead of esp_lvgl_port rotating it into a second PSRAM buffer and the DPI
             driver copying that into the frame buffer with DMA2D (#95). Saves two PSRAM passes per strip and
-            the port's 112 KB rotation buffer. Off = the port's path, untouched.
+            the port's 112 KB rotation buffer. Tear-free since #467: strips go into the second frame buffer,
+            which is swapped in at the end of the frame. Off = the port's path, untouched (one buffer shown).
 
     choice LICHEN_DISPLAY_DIRECT_FLUSH_ENGINE
         prompt "What rotates the strip"
