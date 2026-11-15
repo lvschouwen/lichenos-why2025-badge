@@ -235,20 +235,23 @@ class Driver:
     def path(self, name: str) -> str:
         return os.path.join(self.dir, name)
 
-    def scrub(self, text: str) -> str:
+    def scrub(self, text: str, learned: bool = False) -> str:
+        """learned: also the names the badge reported. Only what is written uses it: a scope named like a command
+        ('mem', 'soak') must not break the parsers, which read the configured-names-only text."""
         if self.address:
             text = text.replace(self.address, "<addr>")
         text = MAC_RX.sub("<mac>", IP_RX.sub("<ip>", text))
-        for name in sorted(set(self.cfg.names()) | self.seen_scopes, key=len, reverse=True):
+        for name in sorted(set(self.cfg.names()) | (self.seen_scopes if learned else set()), key=len, reverse=True):
             text = re.sub(r"(?<![\w-])#?" + re.escape(name) + r"(?![\w-])", "<scope>", text, flags=re.I)
         return text
 
     def learn_scopes(self, raw: str) -> None:
         """Remember every scope name a `mesh scope` reply shows so scrub() hides it (the badge's own scope is not a
-        configured name). 'none' is the badge's word for no default, not a name."""
+        configured name). Every token counts, whatever its characters or length (the leak is the same); 'none' is the
+        badge's word for no default and 'not set' for no scope, neither is a name."""
         for found in SCOPE_NAMES_RX.findall(raw.replace("\r", "")):
             for name in map(norm_scope, found):
-                if SCOPE_RX.match(name) and name != "none":
+                if name and name not in ("none", "not set"):
                     self.seen_scopes.add(name)
 
     def write(self, text: str) -> None:
@@ -272,9 +275,9 @@ class Driver:
         self.last_raw = raw  # unscrubbed, for the readers that need the scope name (scope_ready, the start scope)
         if text == "mesh scope":
             self.learn_scopes(raw)
-        out = self.scrub(raw)
-        self.write(">> " + self.scrub(text))
-        self.write(out)
+        out = self.scrub(raw)  # what the parsers read
+        self.write(">> " + self.scrub(text, True))
+        self.write(self.scrub(raw, True))
         if rc != 0:
             raise StepError("'%s' failed (exit %d)" % (text.split()[0], rc))
         if (sp.is_checked(text) if judged is None else judged) and FAILED_RX.search(out):
@@ -435,25 +438,34 @@ class Driver:
 
     def end_restore(self) -> None:
         """At the end of the run: the console scope back to the start value when the bench guard allows it, else the
-        0-hop scope stays, with a note (no name). Never raises; nothing is sent after a silent blocker (not called)."""
+        0-hop scope stays, with a note (no name). Never raises, not even on a second Ctrl-C or SIGTERM: the caller's
+        exit code and BLOCKER must survive it. Nothing is sent after a silent blocker (not called)."""
         try:
-            self.restore_scope()  # the tail normally did this; a run that ended between sessions is already there
-            want = self.start_scope
-            if want is not None and want == self.cfg.scopes[sp.ZERO_HOP]:
-                return
-            if want is None or want not in [norm_scope(x) for x in self.allowed_scopes()]:
-                self.start_note = "start scope not restored: not in the allow list"
-            else:
-                self.extra_names = (want,)
-                self.line("mesh scope console %s YES" % want, judged=False)
-                self.line("mesh scope", judged=False)
-                found = SCOPE_LINE_RX.findall(self.last_raw.replace("\r", ""))
-                if len(found) == 1 and norm_scope(found[0]) == want:
-                    return
-                self.start_note = "start scope not restored: the badge did not take it"
-        except Exception as e:  # noqa: BLE001 - best effort at the very end
+            self.restore_start_scope()
+        except BaseException as e:  # noqa: BLE001
             self.start_note = "start scope not restored: error (%s)" % type(e).__name__
-        self.note(self.start_note)
+        if self.start_note:
+            try:
+                self.note(self.start_note)
+            except BaseException:  # noqa: BLE001
+                pass
+
+    def restore_start_scope(self) -> None:
+        self.restore_scope()  # the tail normally did this; a run that ended between sessions is already there
+        want = self.start_scope
+        if want is not None and want == self.cfg.scopes[sp.ZERO_HOP]:
+            return
+        # The regional scope floods: never the rest state, whatever the allow file says (owner default)
+        if want is None or want == self.cfg.scopes[sp.REGIONAL] or \
+                want not in [norm_scope(x) for x in self.allowed_scopes()]:
+            self.start_note = "start scope not restored: not in the allow list"
+            return
+        self.extra_names = (want,)
+        self.line("mesh scope console %s YES" % want, judged=False)
+        self.line("mesh scope", judged=False)
+        found = SCOPE_LINE_RX.findall(self.last_raw.replace("\r", ""))
+        if not (len(found) == 1 and norm_scope(found[0]) == want):
+            self.start_note = "start scope not restored: the badge did not take it"
 
     def send(self, kind: str) -> None:
         if kind == sp.REGIONAL:

@@ -963,6 +963,24 @@ class ScopeNamesTest(ScopeHelpers, unittest.TestCase):
         for name in (ZERO, REGION, self.START):
             self.assertNotIn(name, self.all_text(e))
         self.assertTrue(os.path.exists(os.path.join(e.dir, "BLOCKER")))
+        self.assertTrue(e.notes)  # the comment text
+        for name in (ZERO, REGION, self.START):
+            self.assertNotIn(name, "\n".join(e.notes).lower())
+
+    def test_odd_and_short_badge_names_are_scrubbed_too(self):
+        e = Env(self, profile=sp.REHEARSAL)
+        e.badge.scope, e.badge.default = "Zz_Under.x", "zq"
+        e.driver.run()
+        text = self.all_text(e)
+        self.assertIn("<scope>", text)
+        self.assertNotIn("zz_under.x", text)
+        self.assertIsNone(re.search(r"(?<![\w-])zq(?![\w-])", text))
+
+    def test_a_scope_named_like_a_key_does_not_break_the_state_reads(self):
+        e = Env(self, profile=sp.REHEARSAL)
+        e.badge.scope = "boot"
+        self.assertEqual(e.driver.run(), 0)
+        self.assertFalse(os.path.exists(os.path.join(e.dir, "BLOCKER")))
 
 
 class StartScopeTest(ScopeHelpers, unittest.TestCase):
@@ -1021,6 +1039,37 @@ class StartScopeTest(ScopeHelpers, unittest.TestCase):
                 e.badge.stuck_stack = True  # a session that does not end on home: a loud blocker
             self.assertEqual(e.driver.run(), rc_want, how)
             self.assertEqual(e.badge.scope, self.START, how)
+
+    def test_the_regional_scope_is_never_the_rest_state(self):
+        e = self.env(REGION, [REGION])
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertIn(self.NOTE, e.read("state.txt"))
+
+    def test_a_restore_that_does_not_take_is_noted(self):
+        line = "mesh scope console %s YES" % self.START
+        e = self.env(self.START, [self.START],
+                     hook=lambda b, ln: setattr(b, "ignore_scope_set", True) if ln == line and b.scope == ZERO else None)
+        self.assertEqual(e.driver.run(), 0)
+        self.assertEqual(e.badge.scope, ZERO)
+        self.assertIn("the badge did not take it", e.read("state.txt"))
+        self.assertNotIn(self.START, self.all_text(e))
+
+    def test_a_second_interrupt_in_the_restore_keeps_the_result(self):
+        line = "mesh scope console %s YES" % self.START
+
+        def hook(b, ln):
+            if ln == line and b.scope == ZERO:
+                raise KeyboardInterrupt()
+
+        e = self.env(self.START, [self.START], hook=hook)
+        self.assertEqual(e.driver.run(), 0)
+        self.assertIn("error (KeyboardInterrupt)", e.read("state.txt"))
+        e = self.env(self.START, [self.START], hook=hook)
+        e.badge.stuck_stack = True  # a loud blocker first
+        self.assertEqual(e.driver.run(), 1)
+        self.assertTrue(os.path.exists(os.path.join(e.dir, "BLOCKER")))
+        self.assertTrue(e.notes)
 
     def test_a_silent_blocker_sends_nothing_after_it(self):
         e = self.env(self.START, [self.START], hook=lambda b, line: setattr(b, "boot", 99) if line.startswith("mesh send ") else None)
