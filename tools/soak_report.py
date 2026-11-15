@@ -6,7 +6,9 @@ per window and reports late kinds, rising rates and rising numbers (tools/soak_c
 drift, with the allow file tools/soak_rising.txt (tools/soak_trend.py). Both are report only: exit 0, or 2 when the
 input cannot be read.
 
-`soak_report.py expected <samples.csv> [--log <serial.log>] [--budgets FILE]`.
+`soak_report.py expected <samples.csv> [--log <serial.log>] [--budgets FILE] [--segment S --transcript FILE]`.
+`--segment awake|night|<block>` (trend and expected, #476) keeps only the samples of that segment, read from the markers
+of the use-soak driver's transcript (tools/soak_segment.py); without it both behave as before.
 Prints the expected-against-measured table of tools/soak_budgets.txt (format documented there): figure, expected,
 tolerance, measured median, measured worst, flag. Samples marked incomplete (a lost or mismatched soak line) are
 counted and left out of the figures.
@@ -28,6 +30,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import soak_census  # noqa: E402
 import soak_parse  # noqa: E402
+import soak_segment  # noqa: E402
 import soak_trend  # noqa: E402
 import soak_vocab  # noqa: E402
 
@@ -190,7 +193,25 @@ def render(rows: list, samples: List[soak_parse.Sample], log_given: bool = True)
 
 
 USAGE_CENSUS = "usage: soak_report.py census <serial-log> [--warmup-h H] [--window-h H] [--gap-min M] [--top N] [--vocab FILE]"
-USAGE_TREND = "usage: soak_report.py trend <samples.csv> [--warmup-h H] [--interval-s S] [--allow FILE]"
+USAGE_TREND = "usage: soak_report.py trend <samples.csv> [--warmup-h H] [--interval-s S] [--allow FILE] [--segment S --transcript FILE]"
+
+
+def take_segment(args: List[str]):
+    """-> (args without the options, markers transcript path or None, segment or None). `--segment awake|night|<block>`
+    needs `--transcript <driver transcript>` for its markers (tools/soak_segment.py); neither option: no split."""
+    args, seg = take_option(list(args), "--segment")
+    args, tr = take_option(args, "--transcript")
+    if (seg is None) != (tr is None) or seg == "" or tr == "":
+        raise ValueError("--segment and --transcript go together, each with a value")
+    return args, tr, seg
+
+
+def split_samples(samples: List[soak_parse.Sample], transcript: Optional[str], segment: Optional[str]):
+    if segment is None:
+        return samples
+    with open(transcript, encoding="utf-8", errors="replace") as f:
+        markers = soak_segment.parse_markers(f)
+    return soak_segment.select(samples, markers, segment)
 
 
 def float_options(rest: List[str], spec: Dict[str, float]) -> Optional[str]:
@@ -236,7 +257,8 @@ def take_option(args: List[str], name: str):
 
 
 def run_trend(args: List[str]) -> int:
-    args, allow_path = take_option(list(args), "--allow")
+    args, transcript, segment = take_segment(args)
+    args, allow_path = take_option(args, "--allow")
     rest = args[1:]
     if allow_path is None:
         allow_path = soak_trend.DEFAULT_ALLOW
@@ -250,7 +272,7 @@ def run_trend(args: List[str]) -> int:
         return 2
     try:
         allow = soak_trend.load_allow(allow_path)
-        samples = soak_parse.read_csv(args[0])
+        samples = split_samples(soak_parse.read_csv(args[0]), transcript, segment)
     except (OSError, ValueError) as e:
         print("soak_report: %s" % e, file=sys.stderr)
         return 2
@@ -274,8 +296,12 @@ def main(argv: Sequence[str]) -> int:
     if len(args) < 2 or args[0] != "expected":
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2
+    try:
+        rest, transcript, segment = take_segment(args[2:])
+    except ValueError as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
     csv_path, log_path, budgets_path = args[1], None, DEFAULT_BUDGETS
-    rest = args[2:]
     while rest:
         opt = rest.pop(0)
         if opt == "--log" and rest:
@@ -287,7 +313,7 @@ def main(argv: Sequence[str]) -> int:
             return 2
     try:
         budgets = load_budgets(budgets_path)
-        samples = soak_parse.read_csv(csv_path)
+        samples = split_samples(soak_parse.read_csv(csv_path), transcript, segment)
         log = None
         if log_path:
             with open(log_path, encoding="utf-8", errors="replace") as f:

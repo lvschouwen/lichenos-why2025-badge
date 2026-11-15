@@ -2727,3 +2727,7 @@ add_test(NAME console_sub_dev_test COMMAND console_sub_dev_test)
 
 # #464: the console rule guard's fixtures: open transmitting rows, unreadable tables, and the registration tie
 add_test(NAME check_console_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_console_rules_test.py)
+
+# #476: the use-soak plan and driver against a fake badge and clock, and the soak report split by segment
+add_test(NAME soak_driver_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_driver_test.py)
+add_test(NAME soak_segment_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_segment_test.py)
