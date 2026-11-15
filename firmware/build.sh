@@ -152,9 +152,11 @@ if [ "$building" = 1 ]; then
             mv -f "$dir/sdkconfig" "$dir/sdkconfig.old"
         fi
     done
+    # mtimes alone miss a sdkconfig that never got the option, so also look for the symbol itself
     if [ "$fp" = 1 ] && [ -f "$sdkconfig" ] &&
-       { [ "$here/sdkconfig.defaults" -nt "$sdkconfig" ] || [ "$here/sdkconfig.frame-pointers.defaults" -nt "$sdkconfig" ]; }; then
-        echo "the frame-pointer defaults are newer than $sdkconfig, regenerating it (old one: sdkconfig.old)"
+       { [ "$here/sdkconfig.defaults" -nt "$sdkconfig" ] || [ "$here/sdkconfig.frame-pointers.defaults" -nt "$sdkconfig" ] ||
+         ! grep -q '^CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y' "$sdkconfig"; }; then
+        echo "$sdkconfig is older than the frame-pointer defaults or lacks the option, regenerating it (old one: sdkconfig.old)"
         mv -f "$sdkconfig" "$bdir/sdkconfig.old"
     fi
     if [ "$release" = 1 ] && [ -f "$sdkconfig" ] &&
@@ -197,6 +199,10 @@ if [ "$building" = 1 ] && [ "$release" = 1 ]; then
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
 elif [ "$building" = 1 ] && [ "$fp" = 1 ]; then
     idf.py -C "$here" "${idf_args[@]}" "$@"
+    if ! grep -q '^CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y' "$sdkconfig"; then
+        echo "BADGE_FRAME_POINTERS=1: CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y is missing from $sdkconfig, the image has no frame pointers" >&2
+        exit 1
+    fi
     for arg in "$@"; do
         case $arg in build|all|app) "$repo/tools/check_release_image.sh" dev "$bdir/badge_fw.bin"; break ;; esac
     done
