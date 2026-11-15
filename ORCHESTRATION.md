@@ -65,12 +65,14 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-15 evening; NEWEST, read this one first)
+### RESUME HERE (written 2026-11-15 about 22:40 UTC; NEWEST, read this one first)
 
-Main is now Opus 5.5 with Fable 5.2 as advisor (see "Agents and models"). State at this point, everything else as in the section below:
-- **#476** (soak driver) is merged on main with both review rounds (ed77bbdf, 695195e8, 9433e1df); pushed with this record. Its 1 h rehearsal waits on the owner: `~/.config/why2025-badge/soak-driver.conf` (`scope_zero_hop=`, `scope_regional=`) does not exist yet.
-- **#474**: the off-by-default switch `BADGE_FRAME_POINTERS=1` (own build dir `firmware/build-fp`, exits 3, no gates or baseline writes) was half done and uncommitted in wt-2 when its agent was lost; a new `lichen-implementer` finishes it on `feat/474-dev-frame-pointers`. Then a reviewer, `merge-one.sh`, and a bench: a provoked watchdog report from the switch image shows a backtrace.
-- **#475** merged and benched (below); open for the owner's eyes only.
+Main: Opus 5.5, advisor Fable 5.2. **The badge runs fw-4e90a0b2** (normal developer image, P4 over Wi-Fi; C6 unchanged; list off; developer mode on; crash log clean). Main = origin = 4e90a0b2, 282 host tests. All slots free except wt-3 (#322).
+- **Closed:** #474 (switch `BADGE_FRAME_POINTERS=1`, 6-frame backtrace proven), #479 (`crash test twdt [core]`, the on-demand task-watchdog warning). Evidence on the issues.
+- **#476 rehearsal 1 DONE** (results on #476): 0-hop sends 5/5 heard direct; the regional session was refused by the guard (the scope was not yet an allow-file line; the owner has since added it). A regional post by hand reached 43 observers, up to 11 hops. One extra badge tx = its periodic advert (expected background). Found #477 (scope names in the transcript) and #478 (restore the start scope): both merged in 4e90a0b2, open until rehearsal 2 proves them.
+- **Next:** rehearsal 2 (`python3 tools/soak_driver.py --rehearsal --badge-ip-file <scratch>/badge-ip --run-dir <new dir> --issue 476`; tell the meshcore session first, it observes reach read-only). Then grep the run dir for scope names and check the end scope; close #477/#478; then the 24 h use-soak.
+- **Waiting on the owner:** confirm that the regional scope in soak-driver.conf (province-wide reach) is what the 24 h run should use. A leftover `stash@{0}` (WIP on the #477 branch, nothing needed) is his to drop; the hook refuses `git stash drop`.
+- Facts: `fw storage` over Wi-Fi no longer trips the task watchdog (#428 comment). `crash test wdt` trips the interrupt watchdog (a panic), not the task one: use `crash test twdt`. The soak driver config lives at `~/.config/why2025-badge/soak-driver.conf`; check it with `soak_driver.load_config`, never print it.
 
 ### RESUME HERE (written 2026-11-15 about 16:00 UTC; superseded by the section above)
 
