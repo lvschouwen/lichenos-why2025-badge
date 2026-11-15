@@ -87,12 +87,14 @@ void display_engine_settle(display_engine_t *e) {
     }
     e->in_flight     = false;
     uint32_t done_us = 0;
-    if (e->ops.ppa_wait(e->ops.ctx, &done_us)) {
+    if (e->ops.ppa_wait(e->ops.ctx, &done_us, false)) {
         note_rotate(e, done_us - e->start_us);
         return;
     }
-    e->hung     = true; // until its own done turns up (display_engine_ppa_done_seen)
-    e->hung_gen = e->gen;
+    if (!e->ops.ppa_wait(e->ops.ctx, &done_us, true)) {
+        e->hung     = true; // until its own done turns up (display_engine_ppa_done_seen)
+        e->hung_gen = e->gen;
+    }
     fall_back(e, DISPLAY_FALLBACK_TIMEOUT);
     cpu_turn(e, &e->flight, e->flight_fb); // the PPA may have written nothing: the frame stays right
 }
@@ -100,7 +102,7 @@ void display_engine_settle(display_engine_t *e) {
 // True = the strip is in the buffer (or the last strip's transfer is done); false = in flight, the interrupt readies
 static bool turn(display_engine_t *e, display_strip_t const *s, unsigned fb, bool last) {
     if (e->active != DISPLAY_ENGINE_CPU) {
-        bool const     background = e->active == DISPLAY_ENGINE_PPA_ASYNC && !last;
+        bool const     background = !last;
         uint32_t const t0         = e->ops.now_us(e->ops.ctx);
         e->gen                    = display_engine_gen_next(e->gen);
         if (e->ops.ppa_start(e->ops.ctx, s, fb, background, e->gen)) {

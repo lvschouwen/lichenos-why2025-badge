@@ -16,6 +16,6 @@ bool display_phy_ldo_mv(uint32_t *mv);
 // flush (the port's own path then turns them on the CPU). Lock-free: one word the LVGL task writes.
 bool display_engine_get(uint32_t *id);
 // Switch the engine. The caller holds the LVGL lock (the UI service's, through the registry setter), so no refresh is
-// running and the switch lands between frames. False: unknown id, no direct flush, a release image (the PPA engines
-// are developer-build code), or the PPA client could not be set up.
+// running and the switch lands between frames. False: unknown id, no direct flush, a release image (the key is a bench
+// switch), or the PPA has not finished a transfer that timed out.
 bool display_engine_set(uint32_t id);

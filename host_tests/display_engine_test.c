@@ -28,6 +28,8 @@ typedef struct {
     int      overlaps;     // CPU write, copy-back or request while hw_busy
     bool     refuse_start; // the driver says no
     bool     never_done;   // the transfer hangs
+    bool     late_done;    // the transfer finishes only inside the late wait (after the first bound)
+    bool     strict;       // fell_back does not stop the fake PPA: only its done does
     bool     ready_in_isr; // what the last start asked for
     uint32_t now;
     uint32_t rotate_us;    // how long a fake transfer takes
@@ -75,9 +77,15 @@ static bool fake_start(void *ctx, display_strip_t const *s, unsigned fb, bool re
     return true;
 }
 
-static bool fake_wait(void *ctx, uint32_t *done_us) {
+static bool fake_wait(void *ctx, uint32_t *done_us, bool late) {
     fake_t *fk = ctx;
-    if (fk->never_done) {
+    if (fk->late_done && late) {
+        note(fk, 'L');
+        fk->hw_busy = false;
+        *done_us    = fk->now;
+        return true;
+    }
+    if (fk->never_done || fk->late_done) {
         note(fk, 'T');
         return false; // hw_busy stays until the engine gives up on it (fake_fell_back)
     }
@@ -92,7 +100,9 @@ static void fake_fell_back(void *ctx, display_engine_id_t from, display_fallback
     fake_t *fk = ctx;
     (void)from;
     fk->fell_back[why]++;
-    fk->hw_busy = false; // a hung transfer: the fake stops counting its window as busy
+    if (!fk->strict) {
+        fk->hw_busy = false; // a hung transfer: the fake stops counting its window as busy
+    }
 }
 
 static uint32_t fake_now(void *ctx) {
@@ -171,10 +181,9 @@ static int refresh(display_engine_t *e, display_flip_t *f, int n) {
 
 static void test_names(void) {
     CHECK(strcmp(display_engine_name(DISPLAY_ENGINE_CPU), "cpu") == 0);
-    CHECK(strcmp(display_engine_name(DISPLAY_ENGINE_PPA), "ppa") == 0);
     CHECK(strcmp(display_engine_name(DISPLAY_ENGINE_PPA_ASYNC), "ppa-async") == 0);
-    CHECK(strcmp(display_engine_name(3), "?") == 0);
-    CHECK(display_engine_valid(2) && !display_engine_valid(3) && !display_engine_valid(UINT32_MAX));
+    CHECK(strcmp(display_engine_name(2), "?") == 0);
+    CHECK(display_engine_valid(1) && !display_engine_valid(2) && !display_engine_valid(UINT32_MAX));
 }
 
 static void test_cpu_default(void) {
@@ -193,36 +202,22 @@ static void test_select(void) {
     display_engine_t e;
     display_flip_t   f;
     setup(&fk, &e, &f);
-    CHECK(!display_engine_select(&e, 3));
+    CHECK(!display_engine_select(&e, 2));
     CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU);
     refresh(&e, &f, 2);
     CHECK(e.stats.strips == 2);
-    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA)); // at a boundary: at once, stats cleared
-    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA && e.stats.strips == 0);
+    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC)); // at a boundary: at once, stats cleared
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA_ASYNC && e.stats.strips == 0);
     // mid-frame (not possible under the LVGL lock, but never mid-refresh): waits for the next refresh
     display_engine_flush(&e, &f, &S0, false);
     CHECK(display_engine_select(&e, DISPLAY_ENGINE_CPU));
-    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA);
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA_ASYNC);
     display_engine_flush(&e, &f, &S1, true);
-    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA); // the rest of the refresh keeps its engine
+    CHECK(display_engine_active(&e) == DISPLAY_ENGINE_PPA_ASYNC); // the rest of the refresh keeps its engine
     fk.n = 0;
     refresh(&e, &f, 1);
     CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU);
     CHECK(fk.log[fk.n - 2] == 'C');
-}
-
-// The blocking PPA: every strip waits for its own transfer inside the callback
-static void test_ppa_blocking(void) {
-    fake_t           fk;
-    display_engine_t e;
-    display_flip_t   f;
-    setup(&fk, &e, &f);
-    display_engine_select(&e, DISPLAY_ENGINE_PPA);
-    CHECK(refresh(&e, &f, 3) == 3);
-    CHECK(strcmp(fk.log, "SWSWSWR") == 0);
-    CHECK(!fk.ready_in_isr);
-    CHECK(fk.overlaps == 0);
-    CHECK(e.stats.strips == 3 && e.stats.rotate_us == 4500 && e.stats.rotate_max_us == 1500);
 }
 
 // The background PPA: strips 0..n-2 are readied by the interrupt, the last one waits before the swap request, and the
@@ -284,7 +279,7 @@ static void test_hung_transfer(void) {
     display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
     fk.never_done = true;
     CHECK(refresh(&e, &f, 3) == 2); // strip 0 in the background, its wait times out, 1 and 2 on the CPU
-    CHECK(strcmp(fk.log, "STCCCR") == 0);
+    CHECK(strcmp(fk.log, "STTCCCR") == 0);
     CHECK(fk.cpu_last.blk.x1 == 160);
     CHECK(fk.fell_back[DISPLAY_FALLBACK_TIMEOUT] == 1);
     CHECK(fk.overlaps == 0);
@@ -297,10 +292,10 @@ static void test_hung_redo_target(void) {
     display_engine_t e;
     display_flip_t   f;
     setup(&fk, &e, &f);
-    display_engine_select(&e, DISPLAY_ENGINE_PPA);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
     fk.never_done = true;
     CHECK(display_engine_flush(&e, &f, &S4, true));
-    CHECK(strcmp(fk.log, "STCR") == 0); // the swap request only after the redo
+    CHECK(strcmp(fk.log, "STTCR") == 0); // the swap request only after the redo
     CHECK(fk.cpu_fb_last == 1 && fk.cpu_last.blk.x1 == 320);
 }
 
@@ -335,21 +330,21 @@ static void test_hung_blocks_rearm(void) {
     display_engine_t e;
     display_flip_t   f;
     setup(&fk, &e, &f);
-    display_engine_select(&e, DISPLAY_ENGINE_PPA);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
     fk.never_done = true;
     display_engine_flush(&e, &f, &S0, true);
     uint32_t const hung = fk.gen_last;
     CHECK(display_engine_ppa_hung(&e));
     fk.never_done = false;
-    CHECK(!display_engine_select(&e, DISPLAY_ENGINE_PPA));
+    CHECK(!display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC));
     CHECK(!display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC));
     CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU); // the read-back stays cpu
     CHECK(display_engine_select(&e, DISPLAY_ENGINE_CPU));
     display_engine_ppa_done_seen(&e, hung + 1); // some other tag: still hung
-    CHECK(display_engine_ppa_hung(&e) && !display_engine_select(&e, DISPLAY_ENGINE_PPA));
+    CHECK(display_engine_ppa_hung(&e) && !display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC));
     display_engine_ppa_done_seen(&e, hung); // its own done: the PPA is idle
     CHECK(!display_engine_ppa_hung(&e));
-    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA));
+    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC));
     fk.n = 0;
     refresh(&e, &f, 1);
     CHECK(strcmp(fk.log, "KSWR") == 0 && fk.gen_last != hung); // K: the copy-back of the frame before
@@ -361,14 +356,32 @@ static void test_refused_not_hung(void) {
     display_engine_t e;
     display_flip_t   f;
     setup(&fk, &e, &f);
-    display_engine_select(&e, DISPLAY_ENGINE_PPA);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
     fk.refuse_start = true;
     refresh(&e, &f, 1);
     CHECK(!display_engine_ppa_hung(&e));
-    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA));
+    CHECK(display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC));
+}
+
+// #475: a transfer later than the first bound but inside the late one: the CPU redo waits for its done, so the late
+// transfer never writes over newer pixels. Not hung, one fallback.
+static void test_late_done_waits(void) {
+    fake_t           fk;
+    display_engine_t e;
+    display_flip_t   f;
+    setup(&fk, &e, &f);
+    display_engine_select(&e, DISPLAY_ENGINE_PPA_ASYNC);
+    fk.late_done = true;
+    fk.strict    = true;
+    CHECK(refresh(&e, &f, 2) == 1); // strip 0 in the background (readied by the redo path, not counted), strip 1 on the CPU
+    CHECK(strcmp(fk.log, "STLCCR") == 0); // the redo (C) only after the late done (L)
+    CHECK(fk.overlaps == 0);
+    CHECK(!display_engine_ppa_hung(&e));
+    CHECK(fk.fell_back[DISPLAY_FALLBACK_TIMEOUT] == 1 && display_engine_active(&e) == DISPLAY_ENGINE_CPU);
 }
 
 int main(void) {
+    test_late_done_waits();
     test_gen();
     test_gen_per_transfer();
     test_hung_blocks_rearm();
@@ -376,7 +389,6 @@ int main(void) {
     test_names();
     test_cpu_default();
     test_select();
-    test_ppa_blocking();
     test_ppa_async_order();
     test_ppa_async_isr_first();
     test_refused_start();

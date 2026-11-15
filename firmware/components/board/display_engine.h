@@ -5,20 +5,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// What turns each LVGL strip into the frame buffer (#468), chosen at runtime so one developer image compares them on
-// the bench: the CPU (lv_draw_sw_rotate, the default), the PPA with the flush waiting for it, or the PPA in the
-// background (LVGL renders strip N+1 while the PPA turns strip N, flush_ready from the PPA's done interrupt). The
+// What turns each LVGL strip into the frame buffer (#468, #475): the PPA in the background (LVGL renders strip N+1
+// while the PPA turns strip N, flush_ready from the PPA's done interrupt), the default after boot, or the CPU
+// (lv_draw_sw_rotate), the fallback and, in a developer build, a bench switch to compare. The
 // order of a strip, a PPA transfer, the copy-back and the swap request lives here, pure (host_tests/
 // display_engine_test.c); display.c holds the hardware hooks.
 typedef enum {
     DISPLAY_ENGINE_CPU,
-    DISPLAY_ENGINE_PPA,
     DISPLAY_ENGINE_PPA_ASYNC,
     DISPLAY_ENGINE_COUNT,
 } display_engine_id_t;
 
 // The registry's names for the values above (disp.engine), in order
-#define DISPLAY_ENGINE_NAMES {"cpu", "ppa", "ppa-async"}
+#define DISPLAY_ENGINE_NAMES {"cpu", "ppa-async"}
 
 bool        display_engine_valid(uint32_t id);
 char const *display_engine_name(uint32_t id); // "?" for an unknown id
@@ -42,9 +41,10 @@ typedef struct {
     // lv_display_flush_ready (a background strip). gen tags the transfer: its done counts only while gen is current
     // (display_engine_done_is_current). False = refused, nothing started.
     bool (*ppa_start)(void *ctx, display_strip_t const *s, unsigned fb, bool ready_in_isr, uint32_t gen);
-    // Bounded wait for the started transfer's done; *done_us = the interrupt's stamp. False = none in time (the
-    // interrupt may no longer call flush_ready after this).
-    bool (*ppa_wait)(void *ctx, uint32_t *done_us);
+    // Bounded wait for the started transfer's done; *done_us = the interrupt's stamp. late = the second, longer wait
+    // after the first one timed out: the hook keeps the transfer current until then, and a false from a late wait
+    // means the PPA is given up on (the interrupt no longer calls flush_ready, its done is ignored).
+    bool (*ppa_wait)(void *ctx, uint32_t *done_us, bool late);
     // The engine fell back to the CPU (log it); a new select re-arms the PPA
     void (*fell_back)(void *ctx, display_engine_id_t from, display_fallback_t why);
     uint32_t (*now_us)(void *ctx);
@@ -90,8 +90,9 @@ void     display_engine_ppa_done_seen(display_engine_t *e, uint32_t got);
 // The engine the strips use now (the registry's applied value)
 display_engine_id_t display_engine_active(display_engine_t const *e);
 
-// Take the done of a transfer in flight (bounded); on a timeout fall back to the CPU and redo that strip, whose pixels
-// LVGL keeps until the next flush returns. LVGL's flush_wait_cb, and the start of every strip.
+// Take the done of a transfer in flight (bounded, twice); on a timeout fall back to the CPU and redo that strip, whose
+// pixels LVGL keeps until the next flush returns. The redo waits for a late done first (#475), so a slow transfer
+// does not write its old strip over what the CPU path draws next; a PPA that gives none even then is `hung`. LVGL's flush_wait_cb, and the start of every strip.
 void display_engine_settle(display_engine_t *e);
 
 // One strip, the flush callback's body. Order: settle the previous transfer, then the swap state machine's write

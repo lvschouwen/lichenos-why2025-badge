@@ -24,9 +24,7 @@
 #include "freertos/semphr.h"
 #include <stdint.h>
 #include <string.h>
-#if CONFIG_LICHEN_DEV_COMMANDS // the PPA engines are bench switches (#468): not in a release image
 #include "driver/ppa.h"
-#endif
 #endif
 #include "display_info.h"
 
@@ -203,8 +201,9 @@ static void cpu_turn(void *ctx, display_strip_t const *s, unsigned fb) {
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
-#if CONFIG_LICHEN_DEV_COMMANDS
-// The PPA engines (#468, experiments e1/e2 of #95). What the IDF 6.1 driver does (esp_driver_ppa, read, not changed):
+// PSRAM ECC (CONFIG_SPIRAM_ECC_ENABLE, the open IDF bug with PPA reads from ECC PSRAM) is off in sdkconfig.defaults:
+// accepted, nothing to guard (#475).
+// The PPA engine (#468, #475, experiments e1/e2 of #95). What the IDF 6.1 driver does (esp_driver_ppa, read, not changed):
 // - Cache, both modes, before the transfer and in the caller's task: the input window is written back (C2M,
 //   unaligned allowed, ppa_srm.c:276) and the output window invalidated (M2C, ppa_srm.c:285); nothing after it. The
 //   output window is whole rows (block_offset_y .. + block_h, full pic_w), and our turned strip spans all 720 rows,
@@ -215,12 +214,19 @@ static void cpu_turn(void *ctx, display_strip_t const *s, unsigned fb) {
 //   LVGL task. So both engines start non-blocking (ppa_core.c:500, no wait) and wait on our own done, bounded.
 // - The done callback runs from the DMA2D RX channel's EOF interrupt (ppa_transaction_done_cb, ppa_core.c:547, set
 //   as on_recv_eof in ppa_srm.c:126), after the driver recycled the transaction (ppa_core.c:572; done_cb at :592),
-//   so the next start cannot find the client busy. An error EOF ends there too and the event data is empty: a DMA
-//   error looks like a done (the strip may be wrong until it is redrawn). That interrupt is not IRAM
+//   so the next start cannot find the client busy. Only a successful EOF gets there: dma2d_rx_isr delivers on_recv_eof
+//   only for RX_SUC_EOF (dma2d.c:363, the only EOF event unmasked, :775); an error EOF frees the channels (:345-:358)
+//   and calls nobody. A 2D-DMA error therefore never reads as a done, it ends as a timeout below (#475: the
+//   old "an error looks like a done" risk does not exist in 6.1, the driver's own TODO at ppa_core.c:116 says the
+//   same, a stuck transfer). That interrupt is not IRAM
 //   (DMA2D_ISR_IRAM_SAFE off), so neither is ours: a flash write holds it back, and one longer than the bound
 //   below ends in a fallback to the CPU, logged once.
 // - max_pending_trans_num defaults to 1: one transfer at a time, which is all the engine module ever starts.
 #define PPA_DONE_TIMEOUT_MS 200 // a strip takes a few ms; a flash erase may hold the non-IRAM interrupt back longer
+// A done later than that is still taken before the CPU redoes the strip (display_engine_settle): the late transfer
+// must not write its old strip over pixels the CPU path drew since. Only a PPA silent for this long as well is given
+// up on (hung: no PPA engine until its own done shows up).
+#define PPA_DONE_LATE_MS 2000
 
 static ppa_client_handle_t ppa_srm;  // set up at the first strip after a switch to a PPA engine, kept after
 static SemaphoreHandle_t   ppa_done; // given by on_ppa_done once per current transfer
@@ -289,11 +295,13 @@ static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool rea
     return true;
 }
 
-static bool ppa_wait(void *ctx, uint32_t *done_us) {
+static bool ppa_wait(void *ctx, uint32_t *done_us, bool late) {
     (void)ctx;
-    if (xSemaphoreTake(ppa_done, pdMS_TO_TICKS(PPA_DONE_TIMEOUT_MS)) != pdTRUE) {
-        ppa_gen_current  = 0; // its late done is ignored (on_ppa_done)
-        ppa_ready_in_isr = false;
+    if (xSemaphoreTake(ppa_done, pdMS_TO_TICKS(late ? PPA_DONE_LATE_MS : PPA_DONE_TIMEOUT_MS)) != pdTRUE) {
+        if (late) {
+            ppa_gen_current  = 0; // its later done is ignored (on_ppa_done)
+            ppa_ready_in_isr = false;
+        }
         return false;
     }
     *done_us = ppa_done_us;
@@ -337,22 +345,6 @@ static void ppa_on_demand(void) {
         display_engine_select(&engine, DISPLAY_ENGINE_CPU);
     }
 }
-#else
-static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool ready_in_isr, uint32_t gen) {
-    (void)ctx;
-    (void)s;
-    (void)fb;
-    (void)ready_in_isr;
-    (void)gen;
-    return false;
-}
-
-static bool ppa_wait(void *ctx, uint32_t *done_us) {
-    (void)ctx;
-    (void)done_us;
-    return false;
-}
-#endif
 
 // Once per failure: the engine stays on the CPU until it is selected again
 static void engine_fell_back(void *ctx, display_engine_id_t from, display_fallback_t why) {
@@ -372,9 +364,7 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
          .stride = lv_draw_buf_width_to_stride(ui.x2 - ui.x1 + 1, LV_COLOR_FORMAT_RGB565),
     };
     bool const last = lv_display_flush_is_last(disp); // read first: flush_ready (the interrupt's too) clears it
-#if CONFIG_LICHEN_DEV_COMMANDS
     ppa_on_demand();
-#endif
     bool const done = display_engine_flush(&engine, &flip, &s, last);
     if (last) {
         flip_log_stats();
@@ -516,7 +506,9 @@ bool display_start(lv_display_t **out) {
     if (direct) {
         bool const swap_on = direct_flush_callbacks(panel);
         display_flip_init(&flip, &flip_ops, swap_on); // front = fbs[0], where dpi_panel_init starts the DMA
-        display_engine_init(&engine, &engine_ops);     // every boot on the CPU (#468: disp.engine is not saved)
+        display_engine_init(&engine, &engine_ops);
+        display_engine_select(&engine, DISPLAY_ENGINE_PPA_ASYNC); // every boot (#475: disp.engine is not saved); the
+                                                                  // first strip sets the client up, a failure falls back
         direct_disp = *out;
         lv_display_set_flush_cb(*out, flush_direct);
         lv_display_set_flush_wait_cb(*out, flush_wait);

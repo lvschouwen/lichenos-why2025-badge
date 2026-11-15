@@ -8,6 +8,6 @@ menu "Lichen display"
             driver copying that into the frame buffer with DMA2D (#95). Saves two PSRAM passes per strip and
             the port's 112 KB rotation buffer. Tear-free since #467: strips go into the second frame buffer,
             which is swapped in at the end of the frame. Off = the port's path, untouched (one buffer shown).
-            What turns the strip is chosen at runtime (#468): the CPU at every boot; in a developer build the
-            registry key disp.engine (developer mode) switches to the PPA, blocking or in the background.
+            What turns the strip is chosen at runtime (#468, #475): the PPA in the background at every boot, in both
+            builds, with a fallback to the CPU; in a developer build the registry key disp.engine switches to cpu.
 endmenu

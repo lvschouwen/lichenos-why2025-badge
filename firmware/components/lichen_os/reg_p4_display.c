@@ -11,7 +11,7 @@
 // they show what the clock tree gave the panel, not the MHz asked for. cfg_lanes, cfg_lane_rate and cfg_phy_mv are the values
 // display_start() configured: the IDF has no read-back for them. disp.engine (#468) is the one settable key: what turns
 // the LVGL strips, for the bench to compare engines without reflashing. Developer mode only, never saved (every boot
-// starts on cpu): reg_p4_disp_engine_set (lichen_reg.c) refuses otherwise and takes the LVGL lock for the switch.
+// starts on ppa-async, #475): reg_p4_disp_engine_set (lichen_reg.c) refuses otherwise and takes the LVGL lock for the switch.
 
 static reg_status_t disp_get(reg_entry_t const *e, reg_value_t *out) {
     bool (*const fn)(uint32_t *) = e->id == REG_ID_DISP_PCLK      ? display_dpi_hz

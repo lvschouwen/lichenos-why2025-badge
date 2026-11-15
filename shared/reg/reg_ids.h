@@ -87,8 +87,8 @@ typedef enum {
     REG_ID_DISP_LANES     = 0x1202, // disp.cfg_lanes     U8, DSI data lanes: configured, no IDF read-back
     REG_ID_DISP_LANE_RATE = 0x1203, // disp.cfg_lane_rate U32 Mbps per lane: configured, no IDF read-back
     REG_ID_DISP_PHY_MV    = 0x1204, // disp.cfg_phy_mv    U32 mV, DSI PHY LDO: configured, no IDF read-back
-    REG_ID_DISP_ENGINE    = 0x1205, // disp.engine     ENUM cpu/ppa/ppa-async: what turns the strips (#468); set only in
-                                      // developer mode, not saved (boots on cpu)
+    REG_ID_DISP_ENGINE    = 0x1205, // disp.engine     ENUM cpu/ppa-async: what turns the strips (#468); set only in
+                                      // developer mode, not saved (boots on ppa-async)
 
     // 0x14 haptics, status LED, time zone, C6 pad holds (#319): all read from the hardware or libc, RO
     REG_ID_HAPTICS_DUTY = 0x1400, // haptics.duty  U8 %, RO: the LEDC duty the motor pin is driven with

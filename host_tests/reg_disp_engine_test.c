@@ -59,7 +59,7 @@ static void reset(void) {
 static void test_release_refuses(void) {
     reset();
     dev_on = true;
-    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA, false) == REG_DISP_ENGINE_RELEASE);
+    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA_ASYNC, false) == REG_DISP_ENGINE_RELEASE);
     CHECK(locks == 0 && sets == 0 && applied == DISPLAY_ENGINE_CPU);
 }
 
@@ -91,11 +91,11 @@ static void test_lock_and_display_refusals(void) {
     reset();
     dev_on    = true;
     lock_free = false;
-    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA, true) == REG_DISP_ENGINE_NO_LOCK);
+    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA_ASYNC, true) == REG_DISP_ENGINE_NO_LOCK);
     CHECK(sets == 0 && unlocks == 0);
     lock_free        = true;
     display_says_yes = false; // the PPA still busy after a timeout
-    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA, true) == REG_DISP_ENGINE_REFUSED);
+    CHECK(reg_disp_engine_set(DISPLAY_ENGINE_PPA_ASYNC, true) == REG_DISP_ENGINE_REFUSED);
     CHECK(locks == 1 && unlocks == 1 && applied == DISPLAY_ENGINE_CPU);
 }
 
