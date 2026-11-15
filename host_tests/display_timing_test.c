@@ -17,7 +17,11 @@ int main(void) {
     // the panel's own totals (one source: st7703_bono.h)
     EXPECT(ST7703_HTOTAL == 1006);
     EXPECT(ST7703_VTOTAL == 764);
-    EXPECT(disp_refresh_dhz(ST7703_DPI_CLOCK_MHZ * 1000000u, ST7703_HTOTAL, ST7703_VTOTAL) == 468); // 46.8 Hz
+    // #322: 48 MHz asked for, and the divider can hit it exactly (240 MHz / 5, field 4), so asked == applied
+    EXPECT(ST7703_DPI_CLOCK_MHZ == 48);
+    EXPECT(disp_pclk_hz(240000000, 4) == (uint32_t)ST7703_DPI_CLOCK_MHZ * 1000000u);
+    EXPECT(disp_pclk_hz(240000000, 4) == 48000000);
+    EXPECT(disp_refresh_dhz(ST7703_DPI_CLOCK_MHZ * 1000000u, ST7703_HTOTAL, ST7703_VTOTAL) == 625); // 62.45 Hz, rounded
     EXPECT(disp_refresh_dhz(38000000, 1006, 755) == 500);                                              // #322: 50.0 Hz
     EXPECT(disp_refresh_dhz(47000000, 1006, 764) == 612);
     EXPECT(disp_refresh_dhz(36000000, 0, 764) == 0);

@@ -7,7 +7,7 @@
 // link this file. Keep ESP calls out of it.
 //
 // What each key reads: pclk and refresh come from the DPI clock source select and divider the driver programmed, so
-// they show what the clock tree gave the panel, not the 36 MHz asked for. cfg_lanes, cfg_lane_rate and cfg_phy_mv are the values
+// they show what the clock tree gave the panel, not the MHz asked for. cfg_lanes, cfg_lane_rate and cfg_phy_mv are the values
 // display_start() configured: the IDF has no read-back for them.
 
 static reg_status_t disp_get(reg_entry_t const *e, reg_value_t *out) {
@@ -29,7 +29,7 @@ static reg_status_t disp_get(reg_entry_t const *e, reg_value_t *out) {
 
 static reg_entry_t const rows[] = {
     DISP_RO(REG_ID_DISP_PCLK, REG_T_U32, "disp.pclk", "Hz"),
-    DISP_RO(REG_ID_DISP_REFRESH, REG_T_U32, "disp.refresh", "dHz"), // tenths of a Hz: 468 = 46.8 Hz
+    DISP_RO(REG_ID_DISP_REFRESH, REG_T_U32, "disp.refresh", "dHz"), // tenths of a Hz: 625 = 62.5 Hz (rounded)
     DISP_RO(REG_ID_DISP_LANES, REG_T_U8, "disp.cfg_lanes", NULL),
     DISP_RO(REG_ID_DISP_LANE_RATE, REG_T_U32, "disp.cfg_lane_rate", "Mbps"),
     DISP_RO(REG_ID_DISP_PHY_MV, REG_T_U32, "disp.cfg_phy_mv", "mV"),
