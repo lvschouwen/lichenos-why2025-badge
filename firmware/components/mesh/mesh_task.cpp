@@ -285,9 +285,9 @@ void BadgeBoard::reboot() {
         contacts_hold_off_locked(); // the restart comes before the loop would write a held save
         if (!fs_shim_wiped()) { // a factory reset formats, then reboots: its erase stays erased (#426)
             node->saveAll();
-            node->pruneAdverts();
-            mesh_advtab_run_save_locked();
         }
+        node->pruneAdverts();
+        mesh_advtab_run_save_locked(); // after a factory reset: removes the snapshots, the card's too (#469)
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
     }
@@ -498,9 +498,9 @@ static void mesh_task(void *arg) {
                 store.saveContacts(node, keep_contact);
                 contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
                 store.saveChannels(node);
-                node->pruneAdverts();
-                mesh_advtab_run_save_locked();
             }
+            node->pruneAdverts();
+            mesh_advtab_run_save_locked(); // erased files: only removes the snapshots (#469)
             long long save_ms = (esp_timer_get_time() - save_started) / 1000;
             mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);

@@ -62,8 +62,24 @@ bool   mesh_advtab_valid(uint8_t const *buf, size_t len, uint32_t *generation);
 // Replaces the table's content with a valid snapshot's; the blobs loaded (those beyond cap are left out)
 size_t mesh_advtab_unpack(mesh_advtab_t *t, uint8_t const *buf, size_t len);
 
-// Whether a snapshot is due: the table changed since the last one and its interval has passed (on_card picks it)
-bool mesh_advtab_due(bool changed, bool on_card, uint32_t now_s, uint32_t last_save_s);
+#define MESH_ADVTAB_RETRY_S 60 // a forced snapshot (the takeover's first) that failed is tried again this often
+
+// What the snapshot's clock knows. All times are uptime seconds.
+typedef struct {
+    bool     changed;          // the table differs from the last snapshot written
+    bool     on_card;          // an SD card is mounted
+    bool     forced;           // the takeover's first snapshot: does not wait for its interval
+    bool     internal_written; // /storage took a snapshot since boot (last_internal_s is valid)
+    uint32_t now_s;
+    uint32_t last_try_s;       // boot, or the last attempt, whether it worked or not
+    uint32_t last_internal_s;
+} mesh_advtab_clock_t;
+// Whether a snapshot is tried now: the table changed and the interval of its place has passed since the last attempt
+// (a failure waits an interval too); a forced one waits only MESH_ADVTAB_RETRY_S, never less.
+bool mesh_advtab_due(mesh_advtab_clock_t const *c);
+// Whether /storage may take the snapshot now (flash wear): at a stop always, forced always, else at most every
+// MESH_ADVTAB_INTERNAL_S since the last one it took
+bool mesh_advtab_internal_ok(mesh_advtab_clock_t const *c, bool at_stop);
 // The key in an old per-node file's name (16 hex digits, either case); false for any other name
 bool mesh_advtab_key_from_name(char const *name, uint8_t key[MESH_ADVTAB_KEY]);
 

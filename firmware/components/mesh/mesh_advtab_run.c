@@ -26,6 +26,7 @@ static char const TAG[] = "mesh_adverts";
 #define BOOT_WAIT_MS  5000
 #define WRITE_WAIT_MS 100  // the card's batch lock: when another batch has it, the next loop tries again
 #define STOP_WAIT_MS  3000
+#define RETRY_S       5 // after a busy card lock, as the journal waits
 #define OLD_PER_CALL  16 // old per-node files removed per loop of the mesh task: never a long walk (#471)
 #define SNAPSHOT_MAX  (MESH_ADVTAB_HEAD + MESH_ADVTAB_CAP * (MESH_ADVTAB_REC + MESH_ADVTAB_DATA))
 
@@ -39,6 +40,7 @@ static uint32_t      last_save_s, last_internal_s;
 static bool          internal_written; // since boot: the 6 h rule counts from the last one
 static bool          old_files;        // <dir>/bl still holds per-node files
 static bool          wipe_files;
+static uint32_t      retry_at_s;       // a busy card: no new try before this
 static bool          force;            // the takeover's first snapshot does not wait for its interval
 // Console figures: written by the mesh task, read by the console (words, a stale value is fine)
 static volatile uint32_t writes, write_errors, last_write_ms, last_bytes, alloc_failures;
@@ -58,51 +60,59 @@ static void path_in(char *out, char const *base, char const *name) {
 
 // ---- boot: the newest valid snapshot, then the old per-node files --------------------------------------------------
 
-// The file when it is a valid snapshot newer than *best: its bytes replace buf's (best_len, best set)
-static void consider(char const *base, char const *name, uint8_t *buf, uint8_t *scratch, size_t *best_len,
-                     uint32_t *best, bool *found) {
-    char path[PATH_MAX_LEN];
+// The file's bytes (PSRAM, the caller frees) when it is a valid snapshot; its generation in *gen
+static uint8_t *read_snapshot(char const *base, char const *name, size_t *len, uint32_t *gen) {
+    char        path[PATH_MAX_LEN];
+    struct stat st;
     path_in(path, base, name);
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        return;
+    if (stat(path, &st) != 0 || st.st_size < MESH_ADVTAB_HEAD || st.st_size > SNAPSHOT_MAX) {
+        return NULL;
     }
-    size_t   n = fread(scratch, 1, SNAPSHOT_MAX + 1, f);
-    uint32_t gen;
-    fclose(f);
-    if (!mesh_advtab_valid(scratch, n, &gen)) {
+    uint8_t *buf = psram((size_t)st.st_size);
+    FILE    *f   = buf ? fopen(path, "rb") : NULL;
+    size_t   n   = f ? fread(buf, 1, (size_t)st.st_size, f) : 0;
+    if (f) {
+        fclose(f);
+    }
+    if (!buf || n != (size_t)st.st_size || !mesh_advtab_valid(buf, n, gen)) {
         ESP_LOGW(TAG, "%s is not a whole snapshot (%u bytes): not used", path, (unsigned)n);
-        return;
+        unalloc(buf);
+        return NULL;
     }
-    if (!*found || gen > *best) {
-        memcpy(buf, scratch, n);
-        *best_len = n;
-        *best     = gen;
-        *found    = true;
+    *len = n;
+    return buf;
+}
+
+// Keeps the newer of the best so far and the file
+static void consider(char const *base, char const *name, uint8_t **best, size_t *best_len, uint32_t *best_gen) {
+    size_t   len = 0;
+    uint32_t gen = 0;
+    uint8_t *buf = read_snapshot(base, name, &len, &gen);
+    if (buf && (!*best || gen > *best_gen)) {
+        unalloc(*best);
+        *best     = buf;
+        *best_len = len;
+        *best_gen = gen;
+    } else {
+        unalloc(buf);
     }
 }
 
 static void load_snapshot(void) {
-    uint8_t *buf = psram(SNAPSHOT_MAX + 1), *scratch = psram(SNAPSHOT_MAX + 1);
-    size_t   len   = 0;
-    bool     found = false;
-    if (buf && scratch) {
-        consider(dir, FILE_NAME, buf, scratch, &len, &generation, &found);
-        if (lichen_fs_sd_mounted() && lichen_fs_sd_begin(meshcore_ctx(), BOOT_WAIT_MS)) {
-            consider(SD_DIR, FILE_NAME, buf, scratch, &len, &generation, &found);
-            consider(SD_DIR, SIDE_NAME, buf, scratch, &len, &generation, &found); // a cut between remove and rename
-            lichen_fs_sd_end(meshcore_ctx(), 0);
-        }
-        if (found) {
-            size_t n = mesh_advtab_unpack(&table, buf, len);
-            ESP_LOGI(TAG, "%u adverts loaded (snapshot %lu, %u bytes)", (unsigned)n, (unsigned long)generation,
-                     (unsigned)len);
-        }
-    } else {
-        ESP_LOGE(TAG, "no memory to load the advert snapshot: the table starts empty");
+    uint8_t *best = NULL;
+    size_t   len  = 0;
+    consider(dir, FILE_NAME, &best, &len, &generation);
+    if (lichen_fs_sd_mounted() && lichen_fs_sd_begin(meshcore_ctx(), BOOT_WAIT_MS)) {
+        consider(SD_DIR, FILE_NAME, &best, &len, &generation);
+        consider(SD_DIR, SIDE_NAME, &best, &len, &generation); // a cut between remove and rename
+        lichen_fs_sd_end(meshcore_ctx(), 0);
     }
-    unalloc(buf);
-    unalloc(scratch);
+    if (best) {
+        size_t n = mesh_advtab_unpack(&table, best, len);
+        ESP_LOGI(TAG, "%u adverts loaded (snapshot %lu, %u bytes)", (unsigned)n, (unsigned long)generation,
+                 (unsigned)len);
+    }
+    unalloc(best);
     saved_changes = table.changes;
 }
 
@@ -154,13 +164,24 @@ static bool changed(void) {
     return table.changes != saved_changes;
 }
 
+static mesh_advtab_clock_t clock_now(void) {
+    return (mesh_advtab_clock_t){
+        .changed          = changed(),
+        .on_card          = lichen_fs_sd_mounted(),
+        .forced           = force,
+        .internal_written = internal_written,
+        .now_s            = mesh_uptime_s(),
+        .last_try_s       = last_save_s,
+        .last_internal_s  = last_internal_s,
+    };
+}
+
 bool mesh_advtab_run_due(void) {
     if (taken || !table.keys) {
         return false; // one is still waiting for the card
     }
-    bool     on_card = lichen_fs_sd_mounted();
-    uint32_t since   = on_card || !internal_written ? last_save_s : last_internal_s;
-    return (force && changed()) || mesh_advtab_due(changed(), on_card, mesh_uptime_s(), since);
+    mesh_advtab_clock_t c = clock_now();
+    return mesh_advtab_due(&c);
 }
 
 void mesh_advtab_run_take_locked(void) {
@@ -175,23 +196,35 @@ void mesh_advtab_run_take_locked(void) {
     taken_changes = table.changes;
 }
 
-// The snapshot as <base>/adverts.bin through a side file. LittleFS renames over the old file in one step; FAT does
-// not, so there the old one is removed first and a cut in between leaves adverts.new, which boot reads as well.
-static bool write_file(char const *base, bool fat) {
+// The snapshot as <base>/adverts.bin through a side file, which goes again when anything fails (a partial one would
+// eat the drive's last blocks). LittleFS renames over the old file in one step. FAT does not: there the old one is
+// removed first, and a cut in between leaves adverts.new, which boot reads as well; the next write first gives it its
+// name, so it is never truncated while it is the only copy. *err: the errno of the step that failed.
+static bool write_file(char const *base, bool fat, int *err) {
     char side[PATH_MAX_LEN], path[PATH_MAX_LEN];
     path_in(side, base, SIDE_NAME);
     path_in(path, base, FILE_NAME);
+    if (fat && access(path, F_OK) != 0) {
+        rename(side, path); // nothing to rename is the usual case
+    }
     FILE *f  = fopen(side, "wb");
     bool  ok = f && fwrite(taken, 1, taken_len, f) == taken_len;
-    if (f && fclose(f) != 0) {
-        ok = false;
+    *err     = ok ? 0 : errno;
+    if (f && fclose(f) != 0 && ok) {
+        ok   = false;
+        *err = errno;
     }
     if (ok && fat && unlink(path) != 0 && errno != ENOENT) {
-        ok = false;
+        ok   = false;
+        *err = errno;
     }
-    ok = ok && rename(side, path) == 0;
+    if (ok && rename(side, path) != 0) {
+        ok   = false;
+        *err = errno;
+    }
     if (!ok) {
-        ESP_LOGE(TAG, "snapshot to %s failed (errno %d)", path, errno);
+        unlink(side);
+        ESP_LOGE(TAG, "snapshot to %s failed (errno %d)", path, *err);
     }
     return ok;
 }
@@ -206,15 +239,17 @@ static bool write_card(uint32_t wait_ms, bool *busy) {
         *busy = true;
         return false;
     }
-    bool ok = (mkdir(SD_ROOT, 0755) == 0 || errno == EEXIST) && (mkdir(SD_DIR, 0755) == 0 || errno == EEXIST) &&
-              write_file(SD_DIR, true);
-    lichen_fs_sd_end(meshcore_ctx(), ok ? 0 : errno);
+    int  err = 0;
+    bool ok  = (mkdir(SD_ROOT, 0755) == 0 || errno == EEXIST) && (mkdir(SD_DIR, 0755) == 0 || errno == EEXIST);
+    if (!ok) {
+        err = errno;
+    }
+    ok = ok && write_file(SD_DIR, true, &err);
+    lichen_fs_sd_end(meshcore_ctx(), err);
     if (ok) {
         char path[PATH_MAX_LEN];
         path_in(path, dir, FILE_NAME);
         unlink(path); // with a card, /storage holds none
-    } else {
-        write_errors++;
     }
     return ok;
 }
@@ -223,55 +258,68 @@ static void written(bool on_card, int64_t started) {
     saved_changes = taken_changes;
     generation++;
     force         = false;
-    last_save_s   = mesh_uptime_s();
     last_on_card  = on_card;
     last_bytes    = (uint32_t)taken_len;
     last_write_ms = (uint32_t)((esp_timer_get_time() - started) / 1000);
     writes++;
     if (!on_card) {
-        last_internal_s  = last_save_s;
+        last_internal_s  = mesh_uptime_s();
         internal_written = true;
     }
 }
 
-// Whether /storage may take a snapshot now: at a stop or the takeover always, else at most every 6 hours
-static bool internal_allowed(bool always) {
-    return always || !internal_written || mesh_uptime_s() - last_internal_s >= MESH_ADVTAB_INTERNAL_S;
-}
-
-static void write_taken(uint32_t wait_ms, bool always) {
-    int64_t started = esp_timer_get_time();
-    bool    busy;
+// The copy goes to the card, else to /storage when that may take one; then it is freed, written or not: a failure
+// waits its interval like a success (mesh_advtab_due). Only a busy card keeps it, for a try RETRY_S later.
+static void write_taken(uint32_t wait_ms, bool at_stop) {
+    int64_t             started = esp_timer_get_time();
+    mesh_advtab_clock_t c       = clock_now();
+    bool                busy, ok;
+    int                 err = 0;
     mesh_advtab_seal(taken, taken_len);
-    if (write_card(wait_ms, &busy)) {
-        written(true, started);
-    } else if (busy && !always) {
-        return; // kept: the next loop tries the card again
-    } else if (internal_allowed(always || force)) {
-        if (write_file(dir, false)) {
-            written(false, started);
-        } else {
-            write_errors++;
-        }
+    ok = write_card(wait_ms, &busy);
+    if (!ok && busy && !at_stop) {
+        retry_at_s = c.now_s + RETRY_S;
+        return;
     }
-    last_save_s = mesh_uptime_s(); // a failure waits an interval too
+    bool on_card = ok, tried = ok || c.on_card;
+    if (!ok && mesh_advtab_internal_ok(&c, at_stop)) {
+        ok    = write_file(dir, false, &err);
+        tried = true;
+    }
+    if (ok) {
+        written(on_card, started);
+    } else if (tried) {
+        write_errors++;
+    }
+    last_save_s = mesh_uptime_s();
     unalloc(taken);
     taken = NULL;
 }
 
-static void remove_snapshots(void) {
+// After a factory reset. A busy card keeps the request for RETRY_S later; at a stop there is no later (the restart
+// follows), so after STOP_WAIT_MS the card's snapshot stays: an accepted gap, logged.
+static void remove_snapshots(bool at_stop) {
     char path[PATH_MAX_LEN];
     path_in(path, dir, FILE_NAME);
     unlink(path);
-    if (lichen_fs_sd_mounted() && lichen_fs_sd_begin(meshcore_ctx(), STOP_WAIT_MS)) {
-        unlink(SD_DIR "/" FILE_NAME);
-        unlink(SD_DIR "/" SIDE_NAME);
-        lichen_fs_sd_end(meshcore_ctx(), 0);
+    if (!lichen_fs_sd_mounted()) {
+        wipe_files = false;
+        return;
     }
+    if (!lichen_fs_sd_begin(meshcore_ctx(), at_stop ? STOP_WAIT_MS : WRITE_WAIT_MS)) {
+        retry_at_s = mesh_uptime_s() + RETRY_S;
+        if (at_stop) {
+            ESP_LOGE(TAG, "the card was busy: its advert snapshot was not removed");
+        }
+        return;
+    }
+    unlink(SD_DIR "/" FILE_NAME);
+    unlink(SD_DIR "/" SIDE_NAME);
+    lichen_fs_sd_end(meshcore_ctx(), 0);
     wipe_files = false;
 }
 
-// A few of the old per-node files per call; the folder itself when it is empty
+// A few of the old per-node files per call; the folder itself once a call finds nothing left to remove
 static void remove_old_files(void) {
     char path[PATH_MAX_LEN], file[PATH_MAX_LEN + 260];
     path_in(path, dir, "bl");
@@ -280,26 +328,35 @@ static void remove_old_files(void) {
         old_files = false;
         return;
     }
-    int            removed = 0;
+    char           names[OLD_PER_CALL][2 * MESH_ADVTAB_KEY + 1];
+    int            n = 0, others = 0;
     struct dirent *e;
-    while (removed < OLD_PER_CALL && (e = readdir(d)) != NULL) {
-        if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
-            snprintf(file, sizeof(file), "%s/%s", path, e->d_name);
-            unlink(file);
-            removed++;
+    while (n < OLD_PER_CALL && (e = readdir(d)) != NULL) { // names first: no unlink while the walk is open
+        if (strlen(e->d_name) == 2 * MESH_ADVTAB_KEY) {
+            memcpy(names[n++], e->d_name, 2 * MESH_ADVTAB_KEY + 1);
+        } else if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
+            others++;
         }
     }
     closedir(d);
-    if (removed < OLD_PER_CALL) {
-        rmdir(path);
-        old_files = false;
-        ESP_LOGI(TAG, "the per-node advert files are gone");
+    for (int i = 0; i < n; i++) {
+        snprintf(file, sizeof(file), "%s/%.16s", path, names[i]);
+        unlink(file);
+    }
+    if (n == 0) {
+        bool gone = others == 0 && rmdir(path) == 0;
+        old_files = false; // a folder that holds something else stays; nothing more is tried
+        ESP_LOGI(TAG, "the per-node advert files are gone%s", gone ? "" : " (the folder holds other files and stays)");
     }
 }
 
 void mesh_advtab_run_write(void) {
+    if (retry_at_s && mesh_uptime_s() < retry_at_s) {
+        return; // a busy card: not in every loop
+    }
+    retry_at_s = 0;
     if (wipe_files) {
-        remove_snapshots();
+        remove_snapshots(false);
     }
     if (taken) {
         write_taken(WRITE_WAIT_MS, false);
@@ -312,6 +369,9 @@ void mesh_advtab_run_write(void) {
 void mesh_advtab_run_save_locked(void) {
     if (!table.keys) {
         return;
+    }
+    if (wipe_files) { // a factory reset restarts right after its erase: the snapshots go now, also the card's
+        remove_snapshots(true);
     }
     if (taken) { // one was waiting for the card: the table is newer
         unalloc(taken);
@@ -328,6 +388,8 @@ void mesh_advtab_run_save_locked(void) {
 void mesh_advtab_run_wiped(void) {
     if (table.keys) {
         mesh_advtab_clear(&table);
+        unalloc(taken); // a copy taken before the erase is not written after it
+        taken         = NULL;
         saved_changes = table.changes;
         wipe_files    = true;
         force         = false;

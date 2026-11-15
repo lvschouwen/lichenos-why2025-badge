@@ -178,11 +178,37 @@ static void damaged_snapshots_are_refused(void) {
 }
 
 static void due_and_names(void) {
-    CHECK(!mesh_advtab_due(false, true, 100000, 0));
-    CHECK(!mesh_advtab_due(true, true, 1000 + MESH_ADVTAB_CARD_S - 1, 1000));
-    CHECK(mesh_advtab_due(true, true, 1000 + MESH_ADVTAB_CARD_S, 1000));
-    CHECK(!mesh_advtab_due(true, false, 1000 + MESH_ADVTAB_CARD_S, 1000));
-    CHECK(mesh_advtab_due(true, false, 1000 + MESH_ADVTAB_INTERNAL_S, 1000));
+    mesh_advtab_clock_t c = {.changed = false, .on_card = true, .now_s = 100000, .last_try_s = 0};
+    CHECK(!mesh_advtab_due(&c)); // nothing changed: never
+    c.changed    = true;
+    c.last_try_s = 1000;
+    c.now_s      = 1000 + MESH_ADVTAB_CARD_S - 1;
+    CHECK(!mesh_advtab_due(&c));
+    c.now_s = 1000 + MESH_ADVTAB_CARD_S;
+    CHECK(mesh_advtab_due(&c));
+    c.on_card = false; // no card: the long interval
+    CHECK(!mesh_advtab_due(&c));
+    c.now_s = 1000 + MESH_ADVTAB_INTERNAL_S;
+    CHECK(mesh_advtab_due(&c));
+    // A card that fails every 15 minutes: /storage steps in, but only every 6 hours
+    c.internal_written = true;
+    c.last_internal_s  = c.now_s - 100;
+    CHECK(!mesh_advtab_internal_ok(&c, false) && mesh_advtab_internal_ok(&c, true));
+    CHECK(!mesh_advtab_due(&c)); // and without a card it is not even tried
+    c.last_internal_s = c.now_s - MESH_ADVTAB_INTERNAL_S;
+    CHECK(mesh_advtab_internal_ok(&c, false) && mesh_advtab_due(&c));
+    // The takeover's first snapshot: at once after boot's minute, and a failed one waits a minute, not a loop (review H1)
+    mesh_advtab_clock_t f = {.changed = true, .forced = true, .now_s = 59, .last_try_s = 0};
+    CHECK(!mesh_advtab_due(&f));
+    f.now_s = 60;
+    CHECK(mesh_advtab_due(&f) && mesh_advtab_internal_ok(&f, false));
+    f.last_try_s = 60; // it failed at 60
+    f.now_s      = 61;
+    CHECK(!mesh_advtab_due(&f));
+    f.now_s = 120;
+    CHECK(mesh_advtab_due(&f));
+    f.changed = false;
+    CHECK(!mesh_advtab_due(&f));
     uint8_t key[MESH_ADVTAB_KEY];
     CHECK(mesh_advtab_key_from_name("0123456789abCDEF", key) && key[0] == 0x01 && key[7] == 0xef);
     CHECK(!mesh_advtab_key_from_name("0123456789abCDE", key));

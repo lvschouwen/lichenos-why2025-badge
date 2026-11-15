@@ -22,7 +22,8 @@ bool mesh_advtab_run_due(void);
 void mesh_advtab_run_take_locked(void);
 // On the mesh task, without the lock: writes what was taken; a few old per-node files go per call while any are left
 void mesh_advtab_run_write(void);
-// With the mesh lock, at a stop: a changed table is written now, whatever the interval
+// With the mesh lock, at a stop or MeshCore's own reboot: a changed table is written now, whatever the interval; after
+// mesh_advtab_run_wiped the snapshots are removed first (a factory reset restarts before the next write)
 void mesh_advtab_run_save_locked(void);
 // MeshCore's files were erased (factory reset): the table is empty and the snapshots go at the next write
 void mesh_advtab_run_wiped(void);

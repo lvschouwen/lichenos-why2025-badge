@@ -211,9 +211,21 @@ size_t mesh_advtab_unpack(mesh_advtab_t *t, uint8_t const *buf, size_t len) {
     return t->count;
 }
 
-bool mesh_advtab_due(bool changed, bool on_card, uint32_t now_s, uint32_t last_save_s) {
-    uint32_t every = on_card ? MESH_ADVTAB_CARD_S : MESH_ADVTAB_INTERNAL_S;
-    return changed && now_s - last_save_s >= every;
+bool mesh_advtab_due(mesh_advtab_clock_t const *c) {
+    if (!c->changed) {
+        return false;
+    }
+    if (c->forced) {
+        return c->now_s - c->last_try_s >= MESH_ADVTAB_RETRY_S;
+    }
+    if (c->on_card) {
+        return c->now_s - c->last_try_s >= MESH_ADVTAB_CARD_S;
+    }
+    return c->now_s - c->last_try_s >= MESH_ADVTAB_INTERNAL_S && mesh_advtab_internal_ok(c, false);
+}
+
+bool mesh_advtab_internal_ok(mesh_advtab_clock_t const *c, bool at_stop) {
+    return at_stop || c->forced || !c->internal_written || c->now_s - c->last_internal_s >= MESH_ADVTAB_INTERNAL_S;
 }
 
 static int hex_digit(char c) {
