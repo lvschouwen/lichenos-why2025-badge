@@ -195,7 +195,7 @@ onair_gate() {
     verdict=$(onair_verdict "$1")
     case $verdict in
         deny\ *) echo "refusing: ${verdict#deny }" >&2; exit 1 ;;
-        ask\ *) echo "refusing: ${verdict#ask } (MeshCore Settings on the badge)" >&2; exit 1 ;;
+        ask\ *) echo "refusing: ${verdict#ask } (he does it at the badge)" >&2; exit 1 ;;
     esac
 }
 

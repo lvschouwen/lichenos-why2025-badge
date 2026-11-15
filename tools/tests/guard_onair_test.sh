@@ -109,6 +109,36 @@ expect deny "echo 'mesh send #badgetest\r#general' > /dev/ttyACM0"
 expect deny "printf 'mesh remote settings\nx' > /dev/ttyACM0"
 expect deny "$b mesh dm abcdef123456\nfoo"
 expect deny "echo 'mesh remote mesh status' > /dev/ttyACM0"
+# #450: lines that change what or where the badge transmits, or erase, are refused; the forms that read pass
+for line in "mesh radio 869.618 62.5 8 8 22" "mesh radio eu-narrow" "mesh name Other" "mesh loc 1.0 2.0" \
+  "mesh path abcdef123456 reset" "mesh pathhash 2" "mesh autoadd off" "channel add '#badgetest' AAAAAAAAAAAAAAAAAAAAAA==" \
+  "channel rm '#badgetest'" "channel rename 1 other" "contacts import abc" "factory-reset all YES" \
+  "factory-reset settings YES" "nvs-down YES" "nvs-enc burn YES" "c6 reflash" "meshcore channel add '#x'" \
+  "fw meshcore mesh radio eu-narrow"; do
+  expect deny "$b $line"
+done
+for line in "mesh radio" "mesh loc" "mesh pathhash" "mesh autoadd" "channel show 1" "channels" "contacts" \
+  "contacts export" "factory-reset plan all" "factory-reset" "nvs-enc" "c6" "c6 status"; do
+  expect pass "$b $line"
+done
+expect deny "ssh pi 'tools/badge.sh console /dev/ttyACM0 \"fw nvs-enc burn YES\"'"
+expect deny "echo 'channel rm #badgetest' > /dev/badge-console"
+expect deny "printf 'mesh out\nchannel add #badgetest AAAA' > /dev/ttyACM0"
+expect pass "grep -n 'channel add' firmware/components/mesh/mesh_cmd_table.c"
+expect pass "git commit -m 'the guard asks for mesh radio and channel rm'"
+# #450: routes the hook did not see
+expect deny "wget -q --post-data='mesh send Public hi' http://192.0.2.1:8080/console"
+expect deny "python3 -c \"from urllib.request import urlopen; urlopen('http://192.0.2.1:8080/x', b'mesh send Public hi')\""
+expect deny "python3 -c \"import serial; serial.Serial('/dev/serial/by-id/x').write(b'mesh send Public hi')\""
+expect deny "printf 'mesh send Public hi' > /dev/badge-console"
+expect deny "echo 'mesh send Public hi' | socat - UNIX-CONNECT:/home/u/badge-logs/badge-console.sock"
+expect pass "wget -q --post-data='mesh send #badgetest hi' http://192.0.2.1:8080/console"
+# #450: a body from a file toward the badge's port cannot be judged
+expect deny "curl -s --data-binary @/tmp/line http://192.0.2.1:8080/console"
+expect deny "curl -s http://192.0.2.1:8080/console -d @/tmp/line"
+expect deny "curl -s -T /tmp/line http://192.0.2.1:8080/console"
+expect pass "curl -s --data-binary @/tmp/line http://192.0.2.1:9000/x"
+expect pass "curl -s http://192.0.2.1:8080/info"
 # The console scope (#290): read freely, set only to the allow list's scope line
 expect pass "$b mesh scope"
 expect pass "$b mesh scope console zz-bench YES"
@@ -166,6 +196,9 @@ mkdir -p "$tmp/bin" "$tmp/repo/tools" "$tmp/repo/.claude"
 # The fake answers the scope query with FAKE_SCOPE (#290), prints SENT for anything else, and logs every line
 cat > "$tmp/bin/curl" <<'SH'
 #!/bin/sh
+# The real curl reads its config (the token) from stdin first. A fake that never reads it races the writer: under
+# load the writer gets a broken pipe and badge.sh reports a failed send that was sent (#470)
+cat > /dev/null
 body=
 for a in "$@"; do case $a in @*) body=$(cat "${a#@}") ;; esac; done
 printf '%s\n' "$body" >> "$FAKE_LOG"
@@ -205,6 +238,13 @@ sent refused fw 192.0.2.1 "mesh send #other hi"
 sent refused fw 192.0.2.1 mesh dm 0123456789ab hi
 sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
 sent refused fw 192.0.2.1 mesh advert interval 6h
+sent refused fw 192.0.2.1 mesh radio eu-narrow
+sent refused fw 192.0.2.1 channel rm '#badgetest'
+sent refused fw 192.0.2.1 meshcore channel add '#badgetest' AAAA
+sent refused console /dev/null "fw nvs-enc burn YES"
+sent refused console /dev/null "fw factory-reset all YES"
+sent sent fw 192.0.2.1 mesh radio
+sent sent fw 192.0.2.1 channel show 1
 sent refused console /dev/null "fw mesh send Public hi"
 sent sent fw 192.0.2.1 mesh advert
 sent sent fw 192.0.2.1 onair on
@@ -280,6 +320,8 @@ expect ask "$f --wipe-storage"
 expect ask "$f --storage-image /tmp/storage.bin"
 expect ask "BADGE_EXTRA_PORTS=/dev/ttyUSB1 $f --storage-image ./restore.bin /tmp/build"
 expect pass "$f"
+expect ask "tools/badge.sh restore /dev/ttyACM0 /tmp/b.bin --yes"
+expect pass "tools/badge.sh backup /dev/ttyACM0 /tmp/b.bin"
 # A caller's environment cannot swap the list
 for var in ONAIR_ALLOW_FILE onair_allow_override; do
   out=$(env "$var=$tmp/evil" PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef BADGE_HOST=none \
