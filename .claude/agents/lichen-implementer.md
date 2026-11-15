@@ -1,6 +1,6 @@
 ---
 name: lichen-implementer
-description: Build-only implementer for exactly one Lichen OS issue (code, host tests, full build). Stops at a green firmware/build.sh build and a local commit; never flashes, ssh-es, pushes or touches the badge. Name it explicitly when dispatching and pass model (Opus for risky work).
+description: Build-only implementer for exactly one Lichen OS issue (code, host tests, full build). Stops at a green firmware/build.sh build and a local commit; never flashes, ssh-es, pushes or touches the badge. Name it explicitly when dispatching.
 tools: Read, Edit, Write, Bash, Grep, Glob, LSP, mcp__context7__resolve-library-id, mcp__context7__query-docs
 model: sonnet
 effort: medium

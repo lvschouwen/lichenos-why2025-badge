@@ -26,5 +26,5 @@ ESP32-P4 runs Lichen (ESP-IDF 6.1, LVGL 9.6); ESP32-C6 is a radio coprocessor (W
 
 ## Agents (standard: `~/.claude/rules/common/agent-runs.md`)
 - Check `agent-check` (`reconfigure` relabels); warm pool `agent-wt`; guards `lichen-implementer.md`, `lichen-reviewer.md`, `.claude/hooks/guard-badge.sh`.
-- Opus triggers: the LVGL lock / UI service, task and memory books, raw-hook tables, the P4 <-> C6 contract (#234), DMA/internal RAM, anything that changes what the badge transmits.
+- Risk areas (always a reviewer pass, or keep the work in main): the LVGL lock / UI service, task and memory books, raw-hook tables, the P4 <-> C6 contract (#234), DMA/internal RAM, anything that changes what the badge transmits.
 - Conflict files: `host_tests/CMakeLists.txt`, component `CMakeLists.txt`, `tools/layers.conf`, `tools/layers-baseline.txt`, `tools/standard-baseline.txt`, `tools/cppcheck-baseline.txt`, `tools/gate_manifest.txt`, `sdkconfig.defaults`, `boot_order[]`.
