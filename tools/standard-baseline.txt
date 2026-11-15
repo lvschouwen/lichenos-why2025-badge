@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	294805
+size	<merged-strings>	294813
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -91,17 +91,17 @@ size	libesp_wifi_remote_glue.a	617
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	39129
+size	libespressif__mdns.a	39133
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	16110
+size	libfw_console.a	16422
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34390
-size	liblichen_api.a	42210
+size	liblichen_api.a	42234
 size	liblichen_apps.a	51552
-size	liblichen_boot.a	13084
+size	liblichen_boot.a	13120
 size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2793
 size	liblichen_led.a	1428
@@ -111,13 +111,13 @@ size	liblichen_notify.a	13358
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	73655
 size	liblichen_random.a	63
-size	liblichen_shell.a	192155
+size	liblichen_shell.a	192193
 size	liblog.a	2726
-size	liblora.a	36257
+size	liblora.a	36261
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
-size	libmain.a	13391
+size	libmain.a	13423
 size	libmbedtls.a	22
 size	libmesh.a	408839
 size	libmsg_codec.a	13256
@@ -133,7 +133,7 @@ size	libsensors.a	29341
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
-size	libstorage.a	2244
+size	libstorage.a	2322
 size	libtfpsacrypto.a	80464
 size	libvfs.a	5051
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872
