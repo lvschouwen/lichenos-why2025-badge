@@ -4,6 +4,7 @@
 #include <time.h>
 
 static uint32_t s_worst_us;
+unsigned        walk_pace_host_calls; // the tests read it: a walk of N entries paces at least N times
 
 static int64_t now_us(void) {
     struct timespec t;
@@ -16,6 +17,7 @@ void walk_pace_begin(walk_slice_t *s) {
 }
 
 void walk_pace(walk_slice_t *s) {
+    walk_pace_host_calls++;
     if (walk_slice_step(s, now_us())) {
         walk_slice_resume(s, now_us());
     }

@@ -15,7 +15,8 @@
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
 
-static char root[128];
+static char      root[128];
+extern unsigned  walk_pace_host_calls; // walk_pace_host.c (#471)
 
 static void path_of(char *out, size_t cap, char const *rel) {
     snprintf(out, cap, "%s/%s", root, rel);
@@ -90,9 +91,13 @@ static void measure_and_clear(void) {
     char dir[256];
     path_of(dir, sizeof(dir), "notes");
 
+    unsigned paced = walk_pace_host_calls;
     CHECK(lichen_sys_data_dir_measure(dir, &r));
     CHECK(r.bytes == 2105 && r.files == 3 && r.dirs == 2 && r.skipped == 0);
+    CHECK(walk_pace_host_calls - paced >= 5); // every entry, at every depth, paces the walk (#471)
+    paced = walk_pace_host_calls;
     CHECK(lichen_sys_data_dir_clear(dir, &r));
+    CHECK(walk_pace_host_calls - paced >= 5);
     CHECK(r.files == 3 && r.dirs == 2 && r.bytes == 2105 && r.skipped == 0);
     CHECK(exists("notes") && !exists("notes/a.txt") && !exists("notes/sub")); // the directory itself stays
     CHECK(exists("other_a.txt") && exists("weather/w.csv"));                    // nothing else was touched

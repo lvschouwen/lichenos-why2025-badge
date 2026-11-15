@@ -8,7 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-char files_test_root[256];
+char            files_test_root[256];
+extern unsigned walk_pace_host_calls; // walk_pace_host.c (#471)
 
 static int failures;
 
@@ -66,7 +67,9 @@ static void test_list(void) {
     write_file("/storage/b.txt", 5, 'x');
     write_file("/storage/A.txt", 7, 'x');
     mkdirp("/storage/zdir");
+    unsigned paced = walk_pace_host_calls;
     CHECK(files_list("/storage", e, 8, &n, &skipped) == 0 && n == 3 && skipped == 0);
+    CHECK(walk_pace_host_calls - paced >= 3); // every entry paces the listing (#471)
     CHECK(e[0].dir && !strcmp(e[0].name, "zdir") && !strcmp(e[1].name, "A.txt") && e[1].size == 7);
     CHECK(files_list("/storage", e, 2, &n, &skipped) == 0 && n == 2 && skipped == 1);
     CHECK(files_list("/storage/nope", e, 8, &n, &skipped) == ENOENT);

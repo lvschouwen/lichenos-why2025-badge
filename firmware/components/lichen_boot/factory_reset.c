@@ -465,7 +465,8 @@ static bool is_dir(char const *path) {
 }
 
 // Removes everything inside path (top: except what the plan keeps), then path itself unless top. Counts failures.
-static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *failed) {
+// One slice for the whole tree (#471): every readdir and every unlink paces it, at every depth.
+static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *failed, walk_slice_t *slice) {
     char(*names)[256] = malloc(32 * sizeof(*names));
     if (!names) {
         (*failed)++;
@@ -479,23 +480,22 @@ static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *faile
         size_t         n = 0;
         struct dirent *e;
         while (n < 32 && (e = readdir(d)) != NULL) {
+            walk_pace(slice);
             if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0 || (top && factory_storage_keeps(e->d_name))) {
                 continue;
             }
             strlcpy(names[n++], e->d_name, sizeof(names[0]));
         }
         closedir(d);
-        unsigned     before = *failed;
-        walk_slice_t slice; // an unlink each: hundreds of MeshCore files must not hold the console's core (#471)
-        walk_pace_begin(&slice);
+        unsigned before = *failed;
         for (size_t i = 0; i < n; i++) {
-            walk_pace(&slice);
+            walk_pace(slice);
             int w = snprintf(path + len, PATH_BUF - len, "/%s", names[i]);
             if (w <= 0 || (size_t)w >= PATH_BUF - len) {
                 (*failed)++;
             } else if (is_dir(path)) {
                 if (depth < 8) {
-                    rm_tree(path, len + (size_t)w, depth + 1, false, failed);
+                    rm_tree(path, len + (size_t)w, depth + 1, false, failed, slice);
                 } else {
                     (*failed)++;
                 }
@@ -504,7 +504,6 @@ static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *faile
             }
             path[len] = '\0';
         }
-        walk_pace_end(&slice);
         if (n == 0 || *failed != before) {
             break; // empty, or stuck on something that will not go
         }
@@ -523,7 +522,10 @@ static void fallback_wipe(staged_t const *staged, size_t n) {
         char     path[PATH_BUF];
         unsigned failed = 0;
         strlcpy(path, STORAGE_BASE, sizeof(path));
-        rm_tree(path, strlen(path), 0, true, &failed);
+        walk_slice_t slice; // an unlink each: hundreds of MeshCore files must not hold the console's core (#471)
+        walk_pace_begin(&slice);
+        rm_tree(path, strlen(path), 0, true, &failed, &slice);
+        walk_pace_end(&slice);
         storage_detach();
         ESP_LOGE(TAG, "fallback: files deleted (%u would not go), NOT erased from flash", failed);
         if (n) {

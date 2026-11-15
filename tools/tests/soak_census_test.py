@@ -140,6 +140,13 @@ class CensusTest(unittest.TestCase):
         lines = log_lines(1, 60) + log_lines(1, 60, start=10 * H + 3 * H)
         self.assertIn("log gaps over 30 min: 1", report(lines))
 
+    def test_task_watchdog_triggers_are_counted(self):
+        self.assertIn("task watchdog triggers in the serial log: 0 (pass: 0)", report(log_lines(1, 60)))
+        wdt = ["E (@MS@) task_wdt: Task watchdog got triggered. The following tasks/users did not reset the watchdog in time:",
+               "E (@MS@) task_wdt:  - IDLE0 (CPU 0)", "E (@MS@) task_wdt: Tasks currently running:"]
+        lines = log_lines(1, 60, lambda t: wdt if t in (600, 1200) else [])
+        self.assertIn("task watchdog triggers in the serial log: 2 (pass: 0)", report(lines))
+
     def test_short_log_makes_no_trend_claim(self):
         self.assertIn("shorter than the warm-up", report(log_lines(1, 60)))
 

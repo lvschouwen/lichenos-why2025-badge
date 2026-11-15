@@ -79,6 +79,7 @@ static void cmd_storage(char const *args) {
     } else {
         console_reply("storage: free space unknown (the count failed, or nothing is free) | listing %s", s_path);
     }
+    walk_pace_begin(&s_slice);
     DIR *dir = opendir(s_path);
     if (!dir) {
         console_reply("storage: %s is not a folder", s_path);
@@ -86,7 +87,6 @@ static void cmd_storage(char const *args) {
     }
     size_t         len = strlen(s_path);
     struct dirent *e;
-    walk_pace_begin(&s_slice);
     while ((e = readdir(dir)) != NULL) {
         walk_pace(&s_slice);
         if (snprintf(s_path + len, sizeof(s_path) - len, "/%s", e->d_name) >= (int)(sizeof(s_path) - len)) {

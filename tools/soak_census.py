@@ -255,6 +255,10 @@ class Kind:
         self.nums: Dict[Tuple[int, int], Acc] = {}
 
 
+# The first line of each task watchdog report (the IDF prints the task lines after it): one per trigger
+WDT_TRIGGER = "task_wdt: Task watchdog got triggered"
+
+
 class Census:
     def __init__(self, warmup_s: float, window_s: float, gap_s: float, vocab=None) -> None:
         self.warmup, self.window, self.gap = warmup_s, window_s, gap_s
@@ -262,6 +266,7 @@ class Census:
         self.in_banner = False
         self.kinds: Dict[str, Kind] = {}
         self.lines, self.last_t, self.gaps = 0, 0.0, []
+        self.wdt = 0  # task watchdog triggers (#471): only the serial log shows them, no soak counter does
         self.rng = random.Random(430)
 
     def window_of(self, t: float) -> int:
@@ -277,6 +282,8 @@ class Census:
 
     def add(self, line: str) -> None:
         self.lines += 1
+        if WDT_TRIGGER in line:
+            self.wdt += 1
         wall, level, ms, tag, text = split_line(line)
         if level != "-":
             self.in_banner = False         # a stamped line ends the banner block, so the next banner is a new boot
@@ -381,6 +388,7 @@ def census_report(c: Census, top: int = 40) -> List[str]:
         len(c.clock.segments), "".join("; line %d at %s" % (n, hours(t)) for n, t in c.clock.segments[:10]))]
     out += ["  log gaps over %.0f min: %d%s" % (c.gap / 60.0, len(c.gaps), "".join(
         "; %s at line %d" % (hours(g), n) for n, _, g in c.gaps[:10]))]
+    out += ["  task watchdog triggers in the serial log: %d (pass: 0)" % c.wdt]
     if last < 1:
         return out + ["  the log is shorter than the warm-up plus two windows: no rate or number trend checks"]
     out += limited("kinds first seen after the warm-up", [

@@ -110,14 +110,14 @@ int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, s
     if (!files_path_ok(dir)) {
         return EINVAL;
     }
-    char rb[FILES_PATH_MAX + 64];
+    char         rb[FILES_PATH_MAX + 64];
+    walk_slice_t slice; // a stat per entry: a folder of hundreds of files must not hold core 0 (#471)
+    walk_pace_begin(&slice);
     DIR *d = opendir(real_path(dir, rb, sizeof(rb)));
     if (!d) {
         return errno ? errno : EIO;
     }
     struct dirent *de;
-    walk_slice_t   slice; // a stat per entry: a folder of hundreds of files must not hold core 0 (#471)
-    walk_pace_begin(&slice);
     while ((de = readdir(d)) != NULL) {
         walk_pace(&slice);
         char path[FILES_PATH_MAX];
