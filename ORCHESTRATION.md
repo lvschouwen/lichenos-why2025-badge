@@ -64,7 +64,18 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-15 about 12:10 UTC, before a /clear; newest)
+### RESUME HERE (written 2026-11-15 about 13:00 UTC, before a /clear; NEWEST, read this one first)
+
+**Of the three storage issues that go in before the flash, two are merged and one is designed:**
+- **#471 MERGED** (e4a258fd, 23762b55; Opus review plus re-review clean): paced directory walks, `wkmax` in `fw soak`, a watchdog count in the census. NOT done there: the periodic storage count, filed as **#473** (measure `notice_slow_ms` after the flash first; options on the issue are an owner decision).
+- **#469 MERGED** (d2a7e58f, d031ae26; Opus review, fixes in the second commit): adverts in a PSRAM table (`mesh_advtab`, always 4000 slots = 1.06 MB, stated on the issue), snapshot `/sd/lichen/meshcore/adverts.bin` every 15 min or `/storage` every 6 h and at every stop, takeover of `bl/` then removal 16 files a loop, no fork change, an `adverts:` line in `fw mesh`. Bench steps are a comment on #469.
+- **#472 DESIGNED, NOT BUILT.** The design is a comment on #472 and the owner chose A (remember deletions made without the card, up to 64 keys), B (a foreign or unreadable card file is left alone; "Use this card for contacts" in MeshCore's settings, by hand at the badge), C (accept about 753 KB of PSRAM permanently). He answered the three choices but did not say "build" in words: start the build in the main session (order of work is in the design comment: fork hook `getMaxContacts()` first, fork pushed before the submodule moves), one Opus review of the whole diff. The card save should share #469's clock (`mesh_advtab_run_due` / `mesh_advtab_clock_t`) and its write pattern (`write_file` in `mesh_advtab_run.c`: side file, unlink on failure, FAT rename rule).
+- Main is pushed at the commit that holds this text; wt-1 is released. Host tests: 277. The last relabel build is older than HEAD: `reconfigure build` before the flash.
+- A commit `83151c74 docs: replace void Opus triggers with risk areas` appeared on main from outside this session (between the two #469 commits); it is docs only.
+
+After #472 is merged: step 1 of the older section below (bench script, add the #469, #471, #472 and #473 steps).
+
+### RESUME HERE (written 2026-11-15 about 12:10 UTC, before a /clear)
 
 **State:** the baseline soak is OVER (ended by the owner at 20 h, 121 samples, clean; final report on #407). The badge still runs **fw-6b8febf7**, untouched, on the flash host (USB serial logger running) and on Wi-Fi. Main is at the commit that holds this text; the last relabel build was fw-b183b227: run `reconfigure build` before the flash. Nothing is running: no agents, no scheduled jobs, all slots free except wt-3 (the superseded `feat/322-refresh-50hz`; deleting it is the owner's call).
 
