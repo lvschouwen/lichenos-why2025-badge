@@ -30,7 +30,8 @@ if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
 fi
 # 1b. `badge.sh flash-fw ... --storage-image <bin>` (#300) replaces the whole flash drive with <bin> the same way.
-if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*[[:space:]]restore[[:space:]]'; then
+# Quotes and backslashes go first, as the shell drops them: 'restore' or re\store is the same verb
+if printf '%s' "$cmd" | tr -d "'\"\\\\" | grep -qE 'badge\.sh[^|;&]*[[:space:]]restore([[:space:]]|$)'; then
   ask "badge.sh restore writes a backup image over the badge's flash drive (MeshCore identity, contacts, channels), also with --yes. Needs Lucas (#450)."
 fi
 if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--storage-image'; then
@@ -47,12 +48,14 @@ onair_allow_override=${ONAIR_ALLOW_FILE:-}
 reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|/dev/serial/|/dev/badge-console|badge-console\.sock|curl[^|;&]*/console|(^|[^[:alnum:]_-])wget[[:space:]]|urlopen|serial\.Serial'
 # #450: a body read from a file toward the badge's port never shows its console line to this hook (badge.sh's own
 # sends are judged inside badge.sh): refused, whichever side of the URL the file stands on
+# Fails closed: any '@', an upload or a config file in a curl toward the port, any file body in a wget toward it
+# (curl's "--config -" with the token on stdin stays: badge.sh's own form)
 while IFS= read -r seg; do
   case "$seg" in *:8080*) ;; *) continue ;; esac
-  if printf '%s' "$seg" | grep -qE -- "(-d|--data|--data-binary|--data-raw|--data-urlencode|--json)[[:space:]=]*[\"']?@|(-T|--upload-file)[[:space:]=]"; then
-    deny "curl with a body from a file toward the badge's port: the console line in it cannot be judged. Use tools/badge.sh fw (#450)"
+  if printf '%s' "$seg" | grep -qE -- "^curl.*(@|[[:space:]]-[[:alnum:]]*T|--upload-file|[[:space:]]-[[:alnum:]]*K[[:space:]=]*[^-[:space:]]|--config[[:space:]=]+[^-[:space:]])|^wget.*--(post|body)-file"; then
+    deny "a body or config from a file toward the badge's port: the console line in it cannot be judged. Use tools/badge.sh fw (#450)"
   fi
-done < <(printf '%s\n' "$cmd" | grep -oE 'curl[^|;&]*' || true)
+done < <(printf '%s\n' "$cmd" | grep -oE '(curl|wget)[^|;&]*' || true)
 # Backslash-newline continuations join first, so a target on the next line is still seen
 cmd_joined=$(printf '%s\n' "$cmd" | sed -e ':a' -e '/\\$/N' -e 's/\\\n/ /' -e 'ta')
 # Never looser than main, and one console line must never hide the next. grep -o does not rescan text it consumed, so
