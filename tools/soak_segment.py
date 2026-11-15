@@ -4,8 +4,11 @@ each session, and the baseline's `## sample <n> <iso> epoch=<epoch>` before each
 
 A sample row (a CSV row of soak_to_csv) belongs to
 - `awake` / `night`: the segment in force at its time (from its marker to the next one);
-- a block name (chat, contacts, tour, files, web, idle): the span from the start of a session of that block to the
-  start of the next session (so the sample taken just after the block, while its effects show, counts for it).
+- a block name (chat, contacts, tour, files, web, idle): the span after the start of a session of that block up to and
+  including the start of the next session. The driver takes a sample just BEFORE a session at the same second, so that
+  sample shows the previous block's effects and belongs to it; the one taken a minute into the gap and the one just
+  before the next session belong to this block.
+The trend test assumes evenly spaced samples, so on a split (a night, one block) its gap lines are expected.
 A row's time is its `epoch` column when it has one, else the transcript's first sample epoch plus its `t` column
 (seconds since the first sample, as soak_to_csv writes it). Standard library only."""
 import re
@@ -69,7 +72,7 @@ def _in_segment(m: Markers, name: str, epoch: float) -> bool:
 def _in_block(m: Markers, name: str, epoch: float) -> bool:
     for i, (_, block, start) in enumerate(m.sessions):
         end = m.sessions[i + 1][2] if i + 1 < len(m.sessions) else float("inf")
-        if block == name and start <= epoch < end:
+        if block == name and start < epoch <= end:
             return True
     return False
 

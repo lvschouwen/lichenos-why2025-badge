@@ -6,10 +6,11 @@ console run with the keyboard locked: `idle test 0`, `ui lock on`, the block's l
 `ui lock off` (the driver runs those two also after an error). Blocks rotate chat, contacts, tour, files, web, idle.
 
 What it cannot emulate (said here so nobody reads a result as more than it is):
-- No Enter key anywhere (a remote Enter is refused on send screens and careful dialogs, by design). Messages are sent
-  from the console, not typed into the compose box; the compose screen, dialogs and real key presses stay hands checks.
-- Contacts is scrolled, never opened: MeshCore's Contacts tile opens only with Enter, so the contacts block scrolls
-  what is reachable without one (the Messages list, shape key triangle, over MeshCore's grid).
+- One Enter in the whole plan: the contacts block opens MeshCore's Contacts list with `keys send needlock
+  focus:Contacts| enter`, which the firmware stops when the focused tile is not Contacts (ui_keys.c guards; the tile's
+  name is its first label, mesh_grid.c NAMES). Inside the list it only scrolls, never opens a contact. Messages are sent
+  from the console, not typed into the compose box (a remote Enter is refused on send screens and careful dialogs, by
+  design); the compose screen, dialogs and real key presses stay hands checks.
 - The Files block only browses the storage root (a copy needs a key the plan does not allow unattended).
 - The keyboard is locked about a minute in twenty; a key pressed during a session is ignored.
 - Inbound traffic and direct messages come from the meshcore peer session, which the owner starts.
@@ -17,6 +18,7 @@ What it cannot emulate (said here so nobody reads a result as more than it is):
 Sends: console lines `mesh send #badgetest ...` only; the first send of the session at each regional interval goes
 under the regional scope, every other under the 0-hop scope. Scope NAMES are never here: a send carries the kind
 (ZERO_HOP / REGIONAL) and the driver maps it through its private config."""
+import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -30,8 +32,9 @@ HOUR_S = 3600
 # Lines whose reply says whether they worked (a refused open, a stopped key sequence, a failed guard); the driver
 # judges these. `mem`, `ui perf` and the like are read only and not judged (mem prints "refused 0" in its rows).
 CHECKED_PREFIXES = ("keys send", "ui open", "ui lock on", "mesh chat")
-# Gated developer forms: each its own badge.sh call, as every line is
-GATED_PREFIXES = ("idle test", "keys", "ui", "mesh chat", "soak")
+CONTACTS_ENTER = "keys send needlock focus:Contacts| enter"  # the only Enter of the plan
+APP_IDS = ("home", "meshcore", "clock", "timer", "calc", "weather", "notes", "qrcode", "lora_spectrum", "settings", "files")
+KEY_WORDS = ("up", "down", "left", "right", "wait", "triangle")
 
 
 @dataclass(frozen=True)
@@ -125,12 +128,13 @@ def block_lines(block: str) -> Tuple[List[str], List[str]]:
         return (["mesh chat open " + TEST_CHANNEL],
                 [keys("up", "up", "up", "down", "down", "down"), "mesh chat close"])
     if block == "contacts":
-        # ui open meshcore (MESHCORE_APP_ID), then the Messages shape key (shortcuts.c SHORTCUT_MESSAGES)
-        return (["ui open meshcore", keys("triangle", "wait")] + scroll(60) + ["ui perf"], [])
+        # ui open meshcore (MESHCORE_APP_ID), right to the second tile (mesh_grid.c IDS: chat, contacts), then the one
+        # guarded Enter; the list is only scrolled
+        return (["ui open meshcore", keys("right"), CONTACTS_ENTER, keys("wait")] + scroll(60) + ["ui perf"], [])
     if block == "tour":
         apps = ("clock", "timer", "calc", "weather", "notes", "qrcode", "lora_spectrum", "settings")
         lines = [x for a in apps for x in ("ui open " + a, keys("wait"))]
-        return (lines + [keys("down", "down", "up", "up"), "mem"], [])
+        return (lines + ["mem"], [])
     if block == "files":
         return (["ui open files", keys("wait")] + scroll(12) + ["ui perf"], [])
     if block == "web":
@@ -162,6 +166,26 @@ def target_is_test_channel(line: str) -> bool:
     """The driver's own check, independent of the bench guard: exactly `mesh send #badgetest <text>`, nothing else."""
     words = line.split()
     return len(words) >= 4 and words[0] == "mesh" and words[1] == "send" and words[2] == TEST_CHANNEL
+
+
+def line_allowed(line: str, scope_names: Tuple[str, ...]) -> bool:
+    """The driver's allowlist, a second guard behind the plan: only the console lines the plan can produce. No Enter
+    except CONTACTS_ENTER, no dm, advert, remote, trace, discover, telemetry, history; `mesh scope console` only with
+    one of the two configured names."""
+    if line in ("idle test 0", "ui lock off", "ui", "ui perf", "soak", "mem", "tasks", "c6", "mesh scope",
+                "mesh chat close", "mesh chat open " + TEST_CHANNEL, CONTACTS_ENTER):
+        return True
+    w = line.split()
+    if len(w) == 4 and w[:3] == ["ui", "lock", "on"] and w[3].isdigit():
+        return True
+    if len(w) == 3 and w[:2] == ["ui", "open"] and w[2] in APP_IDS:
+        return True
+    if len(w) >= 4 and w[:3] == ["keys", "send", "needlock"]:
+        return all(x in KEY_WORDS for x in w[3:])
+    if len(w) == 5 and w[:3] == ["mesh", "scope", "console"] and w[4] == "YES":
+        return w[3] in scope_names
+    return len(w) == 6 and target_is_test_channel(line) and w[3] == "soak" and w[5].isdigit() and \
+        re.fullmatch(r"[0-9a-f]+", w[4]) is not None
 
 
 def is_checked(line: str) -> bool:

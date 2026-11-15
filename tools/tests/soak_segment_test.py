@@ -64,11 +64,12 @@ class SegmentTest(unittest.TestCase):
 
     def test_block_rows_run_to_the_next_session(self):
         m = self.markers()
-        # chat sessions start at 0 and 3600 s: samples 0..5 and 6..11 minus the contacts/tour spans
-        self.assertEqual([r["t"] for r in seg.select(ROWS, m, "chat")], [0, 600, 3600, 4200])
-        self.assertEqual([r["t"] for r in seg.select(ROWS, m, "contacts")], [1200, 1800, 4800, 5400])
+        # a sample at a session's own second belongs to the block before it, so chat (sessions at 0 and 3600 s) holds 600, 1200, 4200, 4800
+        self.assertEqual([r["t"] for r in seg.select(ROWS, m, "chat")], [600, 1200, 4200, 4800])
+        self.assertEqual([r["t"] for r in seg.select(ROWS, m, "contacts")], [1800, 2400, 5400, 6000])
         # the last session (tour, started at 6000 s) holds every later sample, the night too
         self.assertEqual([r["t"] for r in seg.select(ROWS, m, "tour")][-1], 600 * 18)
+        self.assertNotIn(0, [r["t"] for r in seg.select(ROWS, m, "chat")])  # t=0 is taken before the first session
 
     def test_epoch_column_wins_over_t(self):
         m = self.markers()
@@ -106,6 +107,11 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report(["expected", cs, "--budgets", bd, "--segment", "night"])[0], 2)
         self.assertEqual(report(["expected", cs, "--budgets", bd, "--transcript", tr])[0], 2)
         self.assertEqual(report(["expected", cs, "--budgets", bd, "--segment", "files", "--transcript", tr])[0], 2)
+
+    def test_lone_segment_option_on_trend_is_a_tool_error(self):
+        tr, cs, bd = files(self)
+        self.assertEqual(report(["trend", cs, "--segment", "night"])[0], 2)
+        self.assertEqual(report(["trend", cs, "--transcript", tr])[0], 2)
 
     def test_trend_split(self):
         tr, cs, bd = files(self)
