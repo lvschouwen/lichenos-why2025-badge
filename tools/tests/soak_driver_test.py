@@ -52,6 +52,7 @@ class FakeBadge:
         self.right_stuck = False
         self.ignore_scope_set, self.stuck_stack = False, False
         self.log, self.sent_at = [], []
+        self.tx_result = "ok"  # what `mesh airlog` shows for the badge's own tx entries; None: none at all
 
     def soak(self):
         up = int(self.clock.t) - T0 + 1000
@@ -60,6 +61,15 @@ class FakeBadge:
                           "soak2 %s c6rs=%d hb=5" % (common, self.c6rs),
                           "soak3 %s mtx=%d mrx=0" % (common, self.mtx),
                           "soak4 %s jpend=0" % common])
+
+    def airlog(self):
+        """The real format (airlog_console_line / airlog_console_header): newest first, rx rows around the tx row."""
+        up = int(self.clock.t) - T0 + 1000
+        rows = ["#9 t=%d rx advert flood hops=1 len=44 rssi=-87.4 snr=6.5" % (up - 40),
+                "#8 t=%d rx grp_txt flood hops=0 len=61 rssi=-90.0 snr=-0.5" % (up - 70)]
+        if self.tx_result:
+            rows.insert(1, "#10 t=%d tx grp_txt flood hops=0 len=61 retry=0 result=%s" % (up - 2, self.tx_result))
+        return "\n".join(["air log: %d entries, newest first, 10 logged since boot, 0 dropped" % len(rows)] + rows) + "\n"
 
     def run(self, line):
         self.log.append(line)
@@ -79,6 +89,8 @@ class FakeBadge:
             self.mtx += 1
             self.sent_at.append(self.clock.now())
             return 0, "queued #%d on %s\n" % (self.mtx, w[2])
+        if line == "mesh airlog":
+            return 0, self.airlog()
         if line.startswith("ui lock on"):
             self.lock = True
             return 0, "ui lock: on, 120 s after the last command\n"
@@ -626,6 +638,71 @@ class SendAccountingTest(unittest.TestCase):
                 if len(b.log) == 8 else None)
         e.driver.run()
         self.assertIn("skipped late", e.read("transcript.txt"))
+
+
+class TxAirTest(unittest.TestCase):
+    """#480: the badge's own tx entry of each send, read from `mesh airlog` right after the mtx read-back."""
+
+    def send_with(self, tx_result):
+        e = Env(self)
+        e.start()
+        e.badge.tx_result = tx_result
+        e.driver.send(sp.ZERO_HOP)
+        return e
+
+    def test_ok_failed_timeout_and_missing(self):
+        for tx, want in (("ok", "ok"), ("failed", "failed"), ("timeout", "timeout"), ("refused", "failed"),
+                         (None, "missing")):
+            with self.subTest(tx=tx):
+                e = self.send_with(tx)
+                self.assertEqual(e.ledger()[0]["tx_air"], want)
+                self.assertEqual(e.ledger()[0]["result"], "sent")
+
+    def test_transcript_names_the_entry_without_a_scope(self):
+        e = self.send_with("ok")
+        text = e.read("transcript.txt")
+        self.assertIn("## tx_air ok t=", text)
+        self.assertIn(">> mesh airlog", text)
+        self.assertNotIn(ZERO, text)
+
+    def test_an_old_tx_entry_is_not_this_send(self):
+        e = Env(self)
+        e.start()
+        orig = e.badge.run
+        e.badge.run = lambda line: (0, "air log: 1 entry, newest first, 3 logged since boot, 0 dropped\n"
+                                    "#3 t=900 tx grp_txt flood hops=0 len=61 retry=0 result=ok\n") \
+            if line == "mesh airlog" else orig(line)
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(e.ledger()[0]["tx_air"], "missing")
+
+    def test_the_read_is_not_a_send_and_costs_no_cap(self):
+        e = self.send_with("ok")
+        self.assertEqual(len(e.driver.attempts), 1)
+        self.assertEqual(e.badge.log.count("mesh airlog"), 1)
+
+    def test_a_failing_airlog_read_is_missing_not_a_stop(self):
+        e = Env(self)
+        e.start()
+        orig = e.badge.run
+        e.badge.run = lambda line: (1, "") if line == "mesh airlog" else orig(line)
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(e.ledger()[0]["tx_air"], "missing")
+        self.assertEqual(e.driver.bad, 0)
+
+    def test_a_failed_send_reads_no_airlog(self):
+        e = Env(self)
+        e.start()
+        orig = e.badge.run
+        e.badge.run = lambda line: (0, "not queued: x\n") if line.startswith("mesh send ") else orig(line)
+        e.driver.send(sp.ZERO_HOP)
+        self.assertNotIn("mesh airlog", e.badge.log)
+        self.assertEqual(e.ledger()[0]["tx_air"], "")
+
+    def test_an_old_ledger_without_the_column_still_loads(self):
+        e = Env(self)
+        e.seed_ledger([(1, 100, "zero_hop", "sent")])  # the 7-column head of a run before #480
+        e.driver.load_ledger()
+        self.assertEqual(len(e.driver.attempts), 1)
 
 
 class RedactionTest(unittest.TestCase):

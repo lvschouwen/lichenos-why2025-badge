@@ -56,7 +56,11 @@ FAILED_RX = re.compile(r"not now|did not open|no app|guard \d+ failed|key lock i
 MAC_RX = re.compile(r"([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
 IP_RX = re.compile(r"(\d{1,3}\.){3}\d{1,3}")
 STATE_KEYS = ("boot", "crash", "slot", "c6rs")
-LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result"]
+LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result", "tx_air"]
+# One tx row of `mesh airlog` (airlog_console_line, mesh_airlog.c): "#12 t=3405 tx grp_txt flood hops=0 len=61 retry=0
+# result=ok". t is the badge uptime in seconds, the same clock as `up=` of `fw soak`. No address is printed.
+AIRLOG_TX_RX = re.compile(r"^#(\d+) t=(\d+) tx (\S+) \S+ hops=\d+ len=(\d+) retry=\d+ result=(\w+)\s*$", re.M)
+AIRLOG_SLACK_S = 1     # t= and up= are whole seconds, read at different moments
 ATTEMPT_RESULTS = ("sent", "failed", "pending")  # a pending row: the line may have gone out, so it counts
 RETRIES, RETRY_WAIT_S = 3, 20
 SAMPLE_MISSES_MAX, SAMPLE_RETRY_S = 5, 60
@@ -291,7 +295,7 @@ class Driver:
         if s is None:
             return None
         out = {}
-        for key in STATE_KEYS + ("mtx",):
+        for key in STATE_KEYS + ("mtx", "up"):
             v = soak_parse.value(s, key)
             if v is not None:
                 out[key] = int(v)
@@ -326,7 +330,34 @@ class Driver:
         for key in STATE_KEYS:
             if state[key] != self.base[key]:
                 raise Blocker(names[key], silent=True)
-        self.write("## state %s epoch=%d" % (" ".join("%s=%d" % (k, state[k]) for k in sorted(state)), self.clock.now()))
+        self.write("## state %s epoch=%d" % (" ".join("%s=%d" % (k, state[k]) for k in sorted(state) if k != "up"), self.clock.now()))
+
+    @staticmethod
+    def parse_tx_air(reply: str, up_from: Optional[int], up_to: Optional[int]) -> Tuple[str, str]:
+        """(ledger value, transcript note) for this send: the badge's own channel-message tx entry closest at or after
+        the send time (up_from), not after the read before it (up_to). `missing` when the airlog has none, or no time
+        is known to match by."""
+        if up_from is None or up_to is None:
+            return "missing", "## tx_air missing (no uptime to match by)"
+        hits = [(int(t), int(n), length, res) for n, t, kind, length, res in AIRLOG_TX_RX.findall(reply)
+                if kind == "grp_txt" and up_from - AIRLOG_SLACK_S <= int(t) <= up_to + AIRLOG_SLACK_S]
+        if not hits:
+            return "missing", "## tx_air missing"
+        t, _, length, res = min(hits)
+        value = res if res in ("ok", "timeout") else "failed"
+        return value, "## tx_air %s t=%d len=%s" % (value, t, length)
+
+    def read_tx_air(self, up_from: Optional[int], up_to: Optional[int]) -> str:
+        """One `mesh airlog` line through the guarded route; not a send, so no cap counts it. A badge that does not
+        answer it gives `missing`, never a stop: the send itself already went."""
+        try:
+            reply = self.line("mesh airlog", judged=False)  # its header says "0 dropped": not a refusal
+        except StepError:
+            self.write("## tx_air missing (airlog read failed)")
+            return "missing"
+        value, note = self.parse_tx_air(reply, up_from, up_to)
+        self.write(note)
+        return value
 
     def check_home(self) -> None:
         rc, out = self.badge.run("ui")
@@ -510,7 +541,7 @@ class Driver:
         before = self.read_state()
         now = self.clock.now()
         self.attempts.append((self.clock.mono(), kind, self.slot))
-        row = [self.seq, int(now), kind, ident, before.get("mtx", ""), "", "pending"]
+        row = [self.seq, int(now), kind, ident, before.get("mtx", ""), "", "pending", ""]
         self.ledger(row)  # before the line goes out: a restart or Ctrl-C after it still leaves the attempt on record
         try:
             result = "sent" if "queued #" in self.line(text, judged=False) else "failed"
@@ -518,7 +549,8 @@ class Driver:
             result = "failed"
         self.clock.sleep(SETTLE_S)
         after = self.read_state()
-        self.ledger_update(row[:5] + [after.get("mtx", ""), result])
+        tx_air = self.read_tx_air(before.get("up"), after.get("up")) if result == "sent" else ""
+        self.ledger_update(row[:5] + [after.get("mtx", ""), result, tx_air])
         if result == "sent":
             self.bad = 0
         else:

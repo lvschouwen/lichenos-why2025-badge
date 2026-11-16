@@ -175,7 +175,7 @@ def line_allowed(line: str, scope_names: Tuple[str, ...]) -> bool:
     if not line or line != " ".join(line.split()) or any(ord(c) < 32 or ord(c) == 127 for c in line):
         return False  # one line, single spaces, no control character
     if line in ("idle test 0", "ui lock off", "ui", "ui perf", "soak", "mem", "tasks", "c6", "mesh scope",
-                "mesh chat close", "mesh chat open " + TEST_CHANNEL, CONTACTS_ENTER):
+                "mesh chat close", "mesh airlog", "mesh chat open " + TEST_CHANNEL, CONTACTS_ENTER):
         return True
     w = line.split()
     if len(w) == 4 and w[:3] == ["ui", "lock", "on"] and w[3].isdigit() and 1 <= int(w[3]) <= 600:
