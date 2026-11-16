@@ -708,7 +708,7 @@ class TxAirTest(unittest.TestCase):
         e = Env(self)
         e.start()
         e.badge.tx_result = None
-        e.clock.sleep = lambda s: (_ for _ in ()).throw(KeyboardInterrupt) if s == sd.AIR_RETRY_S else None
+        e.clock.sleep = lambda s: (_ for _ in ()).throw(KeyboardInterrupt) if s == sd.AIR_STEP_S else None
         with self.assertRaises(KeyboardInterrupt):
             e.driver.send(sp.ZERO_HOP)
         self.assertEqual(e.ledger()[0]["tx_air"], "none_yet")
@@ -737,6 +737,31 @@ class TxAirTest(unittest.TestCase):
         e.clock.sleep(10)
         e.driver.send(sp.ZERO_HOP)  # same airlog: #10 is claimed, #11 is a repeat, so nothing is left
         self.assertEqual([r["tx_air"] for r in e.ledger()], ["ok", "missing"])
+
+    def test_regional_scope_is_back_before_the_airlog_read_and_wait(self):
+        e = Env(self)
+        e.start()
+        e.badge.tx_result = None  # forces the 30 s re-read
+        e.driver.send(sp.REGIONAL)
+        log = e.badge.log
+        restore = max(i for i, x in enumerate(log) if x.startswith("mesh scope console %s" % ZERO))
+        self.assertLess(restore, log.index("mesh airlog"))
+        self.assertEqual(log.count("mesh airlog"), 2)
+
+    def test_stop_during_the_wait_skips_the_reread(self):
+        e = Env(self)
+        e.start()
+        e.badge.tx_result = None
+        orig = e.clock.sleep
+
+        def sleep(s):
+            orig(s)
+            if s == sd.AIR_STEP_S:
+                open(e.driver.path("STOP"), "w").close()
+        e.clock.sleep = sleep
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(e.badge.log.count("mesh airlog"), 1)
+        self.assertEqual(e.ledger()[0]["tx_air"], "none_yet")
 
     def test_resume_of_a_seven_column_ledger_then_a_send(self):
         e = Env(self)

@@ -60,6 +60,7 @@ LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result", 
 # One tx row of `mesh airlog` (airlog_console_line, mesh_airlog.c): "#12 t=3405 tx grp_txt flood hops=0 len=61 retry=0
 # result=ok". t is the badge uptime in seconds, the same clock as `up=` of `fw soak`. No address is printed.
 AIRLOG_TX_RX = re.compile(r"^#(\d+) t=(\d+) tx (\S+) \S+ hops=\d+ len=(\d+) retry=(\d) result=(\w+)\s*$", re.M)
+AIR_STEP_S = 5         # the re-read wait is slept in steps, a STOP file ends it
 AIR_RETRY_S = 30       # a late transmit: one re-read this long after the first
 AIRLOG_SLACK_S = 1     # t= and up= are whole seconds, read at different moments
 ATTEMPT_RESULTS = ("sent", "failed", "pending")  # a pending row: the line may have gone out, so it counts
@@ -226,6 +227,7 @@ class Driver:
         self.seq = 0
         # every send that reached `mesh send`: (monotonic time, scope kind, plan slot or None when reloaded)
         self.attempts: List[Tuple[float, str, Optional[int]]] = []
+        self.air_job: Optional[tuple] = None
         self.air_seq = 0  # the last airlog `#n` claimed by a send (n restarts at a boot, and a boot is a Blocker)
         self.bad = 0                # failed or skipped sends in a row
         self.contacts_bad = 0       # Contacts blocks in a row that could not open the list
@@ -368,7 +370,10 @@ class Driver:
             if up_to is None:
                 found = None
             else:
-                self.clock.sleep(AIR_RETRY_S)
+                for _ in range(0, AIR_RETRY_S, AIR_STEP_S):
+                    if self.stop_requested():
+                        return  # the row keeps none_yet
+                    self.clock.sleep(AIR_STEP_S)
                 found = self.find_tx_air(up_from, up_to + AIR_RETRY_S)
         if found is None:
             self.write("## tx_air missing")
@@ -530,6 +535,9 @@ class Driver:
             self.safe_restore()
             raise
         self.restore_scope()
+        job, self.air_job = self.air_job, None
+        if job:
+            self.settle_tx_air(*job)  # after the restore: the re-read wait must not keep the regional scope set
 
     def safe_restore(self) -> None:
         """restore_scope on the way out of an exception: whatever it raises must not replace that exception."""
@@ -571,7 +579,7 @@ class Driver:
         row = row[:5] + [after.get("mtx", ""), result, ""]
         self.ledger_update(row)
         if result == "sent":
-            self.settle_tx_air(row, before.get("up"), after.get("up"))
+            self.air_job = (row, before.get("up"), after.get("up"))  # run by send(), after the scope is back
         if result == "sent":
             self.bad = 0
         else:

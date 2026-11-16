@@ -316,6 +316,15 @@ class AirSplitTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("zero_hop      1       0           0 (0 0 0)             0        1", out)
 
+    def test_several_ledgers_are_each_printed(self):
+        d = self.ledger(self.HEAD + "1,1,zero_hop,x,0,1,sent,ok\n")
+        with open(os.path.join(d, "ledger-rehearsal.csv"), "w") as f:
+            f.write(self.HEAD + "1,1,regional,x,0,1,sent,failed\n")
+        out = self.report(d)[1]
+        self.assertIn("ledger ledger-full.csv", out)
+        self.assertIn("ledger ledger-rehearsal.csv", out)
+        self.assertIn("regional", out)
+
     def test_unreadable_is_exit_2(self):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(self.report("/nonexistent/ledger.csv")[0], 2)

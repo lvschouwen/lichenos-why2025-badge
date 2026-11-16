@@ -273,27 +273,33 @@ def air_counts(path: str) -> Dict[str, Dict[str, int]]:
     return out
 
 
-def run_air(args: List[str]) -> int:
-    if len(args) != 1:
-        print("soak_report.py air <ledger-<profile>.csv | run-dir>", file=sys.stderr)
-        return 2
-    path = args[0]
-    try:
-        if os.path.isdir(path):
-            found = sorted(glob.glob(os.path.join(path, "ledger-*.csv")))
-            if not found:
-                raise OSError("no ledger-*.csv in " + path)
-            path = found[0]
-        counts = air_counts(path)
-    except (OSError, UnicodeError, csv.Error) as e:
-        print("soak_report: %s" % e, file=sys.stderr)
-        return 2
-    print("scope      sent  on air  not on air (failed timeout missing)  not yet seen  unknown")
+def print_air(counts: Dict[str, Dict[str, int]]) -> None:
     for scope in sorted(counts):
         c = counts[scope]
         print("%-10s %4d  %6d  %10d (%d %d %d)  %12d  %7d" % (
             scope, c["sent"], c["ok"], c["failed"] + c["timeout"] + c["missing"], c["failed"], c["timeout"],
             c["missing"], c["none_yet"], c["unknown"]))
+
+
+def run_air(args: List[str]) -> int:
+    if len(args) != 1:
+        print("soak_report.py air <ledger-<profile>.csv | run-dir>", file=sys.stderr)
+        return 2
+    try:
+        paths = [args[0]]
+        if os.path.isdir(args[0]):
+            paths = sorted(glob.glob(os.path.join(args[0], "ledger-*.csv")))
+            if not paths:
+                raise OSError("no ledger-*.csv in " + args[0])
+        all_counts = [(p, air_counts(p)) for p in paths]
+    except (OSError, UnicodeError, csv.Error) as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
+    print("scope      sent  on air  not on air (failed timeout missing)  not yet seen  unknown")
+    for p, counts in all_counts:
+        if len(all_counts) > 1:
+            print("ledger %s" % os.path.basename(p))
+        print_air(counts)
     print("heard: see the peer's reach table")
     return 0
 
