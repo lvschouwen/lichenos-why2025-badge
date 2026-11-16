@@ -22,6 +22,7 @@
 # lichen_sys_display.c: lichen_sys_display.h and lichen_sys_power.h (#226) over board's backlight driver.
 # lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228), and the C6 link's Wi-Fi
 # frame pool figures for the stress run (#278, through c6link); lichen_task.c also gives it every task's stack.
+# update_mode.c (pure, update_mode_test.c, #433): the update-mode state machine; its header lives in lichen_api because the shell (L5) and main use the types and calls.
 # lichen_sys_storage.c / lichen_sys_update.c: lichen_sys_storage.h (SD card and storage drive), lichen_sys_update.h,
 # lichen_sys_crash.h and lichen_sys_factory.h's request (#227); lichen_sys_pure.c their ESP-free parts (host-tested).
 # lichen_sys_pure_view.c / lichen_sys_view.c (#244): the shell's clock, Wi-Fi, mDNS, boot progress, keyboard-hook and LED
@@ -43,7 +44,7 @@
 # app_manage.c (#233): Settings > Apps' data size, Clear data, background switch and crash count for one app, over
 # lichen_api's lichen_sys_data_fs.c (pure, app_data_fs_test.c).
 # stop(reason) (#231, app_stop.c): every app's stop hook with its lifecycle record (lichen_sys_life.h), cooperative.
-idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
+idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c" "update_mode.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
