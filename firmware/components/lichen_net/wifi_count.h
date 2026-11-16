@@ -23,7 +23,7 @@ void wifi_count_init(wifi_count_t *c);
 // The link got an IP. Counts a reconnect when a counted loss is waiting for one.
 void wifi_count_got_ip(wifi_count_t *c);
 // A disconnect event with its IDF reason. Only a link that was up counts as a loss; every failed attempt of a retry
-// loop still updates last_reason (it says why the link stays down).
+// loop still updates last_reason (it says why the link stays down); with nothing up and no loss pending it does not.
 void wifi_count_disconnected(wifi_count_t *c, int reason);
 // The link went away with no disconnect event (the C6 went down for a re-attach): an up link counts as a loss, the
 // reason stays. The got-IP after the re-attach is then its reconnect.

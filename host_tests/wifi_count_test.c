@@ -67,26 +67,25 @@ static void asked_for_is_not_counted(void) {
     CHECK(c.disconnects == 1 && c.last_reason == 201);
     wifi_count_got_ip(&c);
     CHECK(c.reconnects == 1); // the new network's IP is not a reconnect either
-    // A loss waiting for its reconnect, then the owner joins another network: that IP is not its reconnect
+    // A loss waiting for its reconnect, then the owner joins another network: the link is back, so it counts as the
+    // reconnect (a late local disconnect cannot be told from a C6 re-attach's)
     wifi_count_disconnected(&c, 3);
     wifi_count_disconnected(&c, WIFI_COUNT_REASON_LOCAL);
     wifi_count_got_ip(&c);
-    CHECK(c.disconnects == 2 && c.reconnects == 1);
+    CHECK(c.disconnects == 2 && c.reconnects == 2);
     // After the owner's disconnect, a failed attempt of the new network is no loss of an up link
     wifi_count_disconnected(&c, WIFI_COUNT_REASON_LOCAL);
     wifi_count_disconnected(&c, 15);
-    CHECK(c.disconnects == 2 && c.last_reason == 15);
+    CHECK(c.disconnects == 2 && c.last_reason == 3);
 }
 
-// A disconnect before any IP (a wrong password, no AP) is no lost link
+// A disconnect before any IP (a wrong password, no AP) is no lost link, and its reason is not kept
 static void never_up(void) {
     wifi_count_t c;
     wifi_count_init(&c);
     wifi_count_disconnected(&c, 15);
     wifi_count_disconnected(&c, 205);
-    CHECK(c.disconnects == 0 && c.last_reason == 205);
-    wifi_count_disconnected(&c, -3);
-    CHECK(c.last_reason == 0);
+    CHECK(c.disconnects == 0 && c.last_reason == 0);
 }
 
 // The C6 went down for a re-attach: no event comes, the up link is a loss and its return a reconnect
@@ -106,6 +105,17 @@ static void c6_reattach(void) {
     CHECK(c.reconnects == 2);
 }
 
+// A live C6 re-attach: the late local disconnect after link_gone must not drop the pending loss
+static void late_local_after_link_gone(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_got_ip(&c);
+    wifi_count_link_gone(&c);
+    wifi_count_disconnected(&c, WIFI_COUNT_REASON_LOCAL);
+    wifi_count_got_ip(&c);
+    CHECK(c.disconnects == 1 && c.reconnects == 1);
+}
+
 // Wi-Fi switched off by the owner: no loss even when the driver's stop event carries another reason
 static void switched_off(void) {
     wifi_count_t c;
@@ -113,7 +123,7 @@ static void switched_off(void) {
     wifi_count_got_ip(&c);
     wifi_count_owner_down(&c);
     wifi_count_disconnected(&c, 3);
-    CHECK(c.disconnects == 0 && c.last_reason == 3);
+    CHECK(c.disconnects == 0 && c.last_reason == 0); // the stop event is not a loss we did not ask for
     wifi_count_got_ip(&c);
     CHECK(c.reconnects == 0);
 }
@@ -121,6 +131,7 @@ static void switched_off(void) {
 int main(void) {
     c6_reattach();
     switched_off();
+    late_local_after_link_gone();
     fresh();
     loss_and_return();
     outage_counts_once();

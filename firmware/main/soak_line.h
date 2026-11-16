@@ -19,7 +19,7 @@
 //   every slow notice step, not the rate-limited warnings. The last three keys of soak4 are the Wi-Fi link losses
 //   since boot (#415): wdisc counts an up link (it had an IP) lost without being asked to (a join, a forget or a
 //   rollback by the owner or the OS is not one), wrec the got-IPs after such a loss, wrsn the IDF reason number of the
-//   newest disconnect event that was not asked for (0: none yet; it also updates during a retry loop, saying why the
+//   newest disconnect event that was not asked for (0: none yet; it also updates during a retry loop after a loss, saying why the
 //   link stays down). wdisc minus wrec is 1 during an outage and 0 when the link is back; many of both is a flapping
 //   link. wdisc and wrec print at most 9999, wrsn at most 999. No network name.
 //   An AP kick that carries reason 8 is not counted, and a disconnect message dropped for a full queue (wqfull) can

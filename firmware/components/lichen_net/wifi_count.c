@@ -30,9 +30,13 @@ void wifi_count_got_ip(wifi_count_t *c) {
 void wifi_count_disconnected(wifi_count_t *c, int reason) {
     if (reason == WIFI_COUNT_REASON_LOCAL) {
         // Asked for: whatever was up is gone on purpose, and a loss still waiting for its reconnect is moot
+        // A loss still waiting for its reconnect stays: a live C6 re-attach sends this late after wifi_count_link_gone
+        c->lost = c->lost && !c->up;
         c->up   = false;
-        c->lost = false;
         return;
+    }
+    if (!c->up && !c->lost) {
+        return; // nothing of ours was up: a stop event or a failed first join is not a loss we did not ask for
     }
     c->last_reason = clamp_reason(reason);
     if (c->up) {
