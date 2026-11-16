@@ -201,6 +201,11 @@ static void read_slow_paths(soak_t *s) {
     s->notice_drops = lichen_notify_dropped();
     s->c6_send_busy = lora_c6_send_busy();
     s->walk_max_ms  = walk_pace_worst_ms();
+    uint32_t disc, recon, why;
+    wifi_link_counts(&disc, &recon, &why);
+    s->wifi_disc   = disc;
+    s->wifi_recon  = recon;
+    s->wifi_reason = why;
 }
 
 static void read_net_and_heat(soak_t *s) {

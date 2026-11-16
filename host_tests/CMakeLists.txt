@@ -1730,6 +1730,14 @@ target_include_directories(wifi_join_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
 target_compile_options(wifi_join_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_join_test COMMAND wifi_join_test)
 
+add_executable(wifi_count_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi_count_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_count.c
+)
+target_include_directories(wifi_count_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net)
+target_compile_options(wifi_count_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME wifi_count_test COMMAND wifi_count_test)
+
 add_executable(wifi_text_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_text_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_text.c

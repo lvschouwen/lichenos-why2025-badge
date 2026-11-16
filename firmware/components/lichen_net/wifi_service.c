@@ -21,6 +21,7 @@
 #include "lichen_clock.h"
 #include "lichen_mdns.h"
 #include "wifi_cmd.h"
+#include "wifi_count.h"
 #include "wifi_regdom.h"
 #include "wifi_text.h"
 #include "wifi_saved.h"
@@ -56,6 +57,7 @@ static SemaphoreHandle_t saved_lock; // the saved-network list (#160): the task 
 static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the console may ask together)
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
+static wifi_count_t counts; // #415: written by the c6wifi task, read by wifi_link_counts, both under state_lock
 
 bool wifi_has_ip(char *ip, size_t cap) {
     portENTER_CRITICAL(&ip_lock);
@@ -134,6 +136,15 @@ static atomic_uint    queue_full; // messages dropped for a full queue, since bo
 
 uint32_t wifi_queue_drops(void) {
     return atomic_load(&queue_full);
+}
+
+void wifi_link_counts(uint32_t *disconnects, uint32_t *reconnects, uint32_t *last_reason) {
+    portENTER_CRITICAL(&state_lock);
+    wifi_count_t c = counts;
+    portEXIT_CRITICAL(&state_lock);
+    *disconnects = c.disconnects;
+    *reconnects  = c.reconnects;
+    *last_reason = c.last_reason;
 }
 
 static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is connected to (#15)
@@ -894,6 +905,7 @@ static void handle_got_ip(void) {
     // which already holds the trial pair
     portENTER_CRITICAL(&state_lock);
     first_connect_settled = true;
+    wifi_count_got_ip(&counts);
     wifi_join_event_t  ev;
     wifi_join_action_t act   = wifi_join_got_ip(&join, &link_ap, trial_ssid, now_ms(), &ev);
     bool               trial = join.state == WIFI_JOIN_TRYING;
@@ -935,6 +947,7 @@ static void handle_disconnected(int reason, uint32_t now) {
     wifi_link_down(&link_ap);
     portENTER_CRITICAL(&state_lock);
     first_connect_settled = true;
+    wifi_count_disconnected(&counts, reason);
     wifi_join_action_t act    = wifi_join_event(&join, JOIN_EV_DISCONNECTED, reason, now);
     bool               have   = have_credentials;
     bool               trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;

@@ -9,14 +9,19 @@
 // - Keys are separated by single spaces and never change order. A new key is appended to the last line; when that
 //   line would not fit, a new line starts. Removing or reordering a key bumps SOAK_FORMAT; adding a key or a line does
 //   not (soak4, #419, kept v=1: a sampler that reads the keys it knows by name loses nothing). soak3 has 11
-//   characters left at its ceilings: room for the Wi-Fi disconnect count (its own issue) and no more. soak4 holds
+//   characters left at its ceilings, too few for the Wi-Fi link-loss keys (#415), so those went to soak4. soak4 holds
 //   the slow-path counters, all since boot and only rising within one boot: the mesh ones (mslow, mslowms, mslowfile,
 //   jpend, jdrop) survive a MeshCore stop and start and read -1 only while it is stopped. mslow* are the loop's time
 //   under the mesh lock: MeshCore's contacts file, written after the unlock since #425, is in none of them (its time is
 //   the "contacts saved after the unlock" log line). uiwait is the longest
 //   timeout a refused ui call asked for, not a measured wait. jpend is a high-water sampled once per mesh loop tick.
 //   notdrop counts notices with no room and sources too long, not "no source" or "service not started". nslow counts
-//   every slow notice step, not the rate-limited warnings.
+//   every slow notice step, not the rate-limited warnings. The last three keys of soak4 are the Wi-Fi link losses
+//   since boot (#415): wdisc counts an up link (it had an IP) lost without being asked to (a join, a forget or a
+//   rollback by the owner or the OS is not one), wrec the got-IPs after such a loss, wrsn the IDF reason number of the
+//   newest disconnect event that was not asked for (0: none yet; it also updates during a retry loop, saying why the
+//   link stays down). wdisc minus wrec is 1 during an outage and 0 when the link is back; many of both is a flapping
+//   link. wdisc and wrec print at most 9999, wrsn at most 999. No network name.
 // - A number that cannot be read now is SOAK_NA (-1), an enum that cannot be read is "na"; wdbm (Wi-Fi signal) is 0
 //   when there is no reading (a real one is below 0). A number above its key's ceiling prints the ceiling.
 // - Every line, at every key's ceiling, fits SOAK_LINE_MAX: the console's reply limit (console.c REPLY_MAX).
@@ -103,6 +108,7 @@ typedef struct {
     int64_t journal_pend_hw, journal_dropped; // MeshCore history: highest pending bytes, records not journaled
     int64_t c6_send_busy;                // times the C6 link went down with a send still inside ESP-Hosted
     int64_t walk_max_ms;                 // the longest stretch a directory walk held its core without a block (#471)
+    int64_t wifi_disc, wifi_recon, wifi_reason; // Wi-Fi links lost, got-IPs after a loss, IDF reason of the last disconnect (#415)
 } soak_t;
 
 // 1 when this boot follows a crash: crash.c judged so itself (crash_now), or it is the software restart of the PSRAM

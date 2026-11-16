@@ -38,6 +38,10 @@ bool wifi_enabled(void);
 bool wifi_has_ip(char *ip, size_t cap);
 // Messages to the c6wifi task dropped for a full queue, since boot (fw soak, #419). Any task, no lock.
 uint32_t wifi_queue_drops(void);
+// Link losses since boot (#415, fw soak): an up link that dropped without being asked to (a join, forget or rollback
+// is not one), the got-IPs that followed a loss, and the IDF reason of the newest unasked disconnect (0: none yet).
+// Any task; a copy under a spinlock, never blocks.
+void wifi_link_counts(uint32_t *disconnects, uint32_t *reconnects, uint32_t *last_reason);
 // The cached signal strength of the connected AP (read every 5 s by the c6wifi task); false while not connected or
 // before the first reading
 bool wifi_rssi(int8_t *out);

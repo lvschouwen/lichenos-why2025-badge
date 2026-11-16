@@ -26,7 +26,7 @@ static char const *const BAT_W[]   = {"unprobed", "absent", "lineslow", "nobus",
 #define DBM_MIN     (-128)
 
 // What a key's value is: its range, or its words. Kept apart so a key costs 8 bytes of the image.
-enum { U32, BYTES, FLAG, LEVEL, DBM, RESET, C6, LORA, TH, SD, BAT };
+enum { U32, BYTES, FLAG, LEVEL, DBM, COUNT4, REASON, RESET, C6, LORA, TH, SD, BAT };
 typedef struct {
     int64_t        min, max;
     words_t const *words; // NULL: a number
@@ -35,7 +35,7 @@ static words_t const     RESET_T = WORDS(RESET_W), C6_T = WORDS(C6_W), LORA_T = 
                      SD_T = WORDS(SD_W), BAT_T = WORDS(BAT_W);
 static soak_kind_t const KINDS[] = {
     [U32] = {SOAK_NA, U32_MAX_V, NULL}, [BYTES] = {SOAK_NA, BYTES_MAX_V, NULL}, [FLAG] = {SOAK_NA, 1, NULL},
-    [LEVEL] = {SOAK_NA, 255, NULL},     [DBM] = {DBM_MIN, 0, NULL},             [RESET] = {0, 0, &RESET_T},
+    [LEVEL] = {SOAK_NA, 255, NULL},     [COUNT4] = {SOAK_NA, 9999, NULL},     [REASON] = {SOAK_NA, 999, NULL},     [DBM] = {DBM_MIN, 0, NULL},             [RESET] = {0, 0, &RESET_T},
     [C6] = {0, 0, &C6_T},               [LORA] = {0, 0, &LORA_T},               [TH] = {0, 0, &TH_T},
     [SD] = {0, 0, &SD_T},               [BAT] = {0, 0, &BAT_T},
 };
@@ -86,6 +86,7 @@ static soak_key_t const KEYS[] = {
     NUM(4, "wqfull", wifi_qfull, U32),      NUM(4, "c6qfull", c6_qfull, U32),      NUM(4, "toastdrop", toast_drops, U32),
     NUM(4, "notdrop", notice_drops, U32),   NUM(4, "jpend", journal_pend_hw, U32), NUM(4, "jdrop", journal_dropped, U32),
     NUM(4, "c6busy", c6_send_busy, U32),    NUM(4, "wkmax", walk_max_ms, U32),
+    NUM(4, "wdisc", wifi_disc, COUNT4),     NUM(4, "wrec", wifi_recon, COUNT4),    NUM(4, "wrsn", wifi_reason, REASON),
 };
 #define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 
