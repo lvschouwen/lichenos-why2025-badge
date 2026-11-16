@@ -22,6 +22,8 @@
 //   newest disconnect event that was not asked for (0: none yet; it also updates during a retry loop, saying why the
 //   link stays down). wdisc minus wrec is 1 during an outage and 0 when the link is back; many of both is a flapping
 //   link. wdisc and wrec print at most 9999, wrsn at most 999. No network name.
+//   An AP kick that carries reason 8 is not counted, and a disconnect message dropped for a full queue (wqfull) can
+//   skew wdisc minus wrec by one. A C6 re-attach counts as a loss of an up link; the got-IP after it as its reconnect.
 // - A number that cannot be read now is SOAK_NA (-1), an enum that cannot be read is "na"; wdbm (Wi-Fi signal) is 0
 //   when there is no reading (a real one is below 0). A number above its key's ceiling prints the ceiling.
 // - Every line, at every key's ceiling, fits SOAK_LINE_MAX: the console's reply limit (console.c REPLY_MAX).

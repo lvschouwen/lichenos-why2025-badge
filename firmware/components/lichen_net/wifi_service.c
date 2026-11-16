@@ -1021,6 +1021,9 @@ static void handle_c6_down(void) {
     retry_pending = false;
     set_ip("");
     wifi_link_down(&link_ap);
+    portENTER_CRITICAL(&state_lock);
+    wifi_count_link_gone(&counts); // no disconnect event comes from a dead C6 (#415)
+    portEXIT_CRITICAL(&state_lock);
     abort_trial();
     esp_err_t stop = esp_wifi_stop();
     // A dead C6 never answers the stop, so WIFI_EVENT_STA_DISCONNECTED/STA_STOP never come and the default handlers
@@ -1090,6 +1093,9 @@ static void handle_wifi_sync(void) {
     retry_pending = false;
     set_ip("");
     wifi_link_down(&link_ap);
+    portENTER_CRITICAL(&state_lock);
+    wifi_count_owner_down(&counts); // the stop's disconnect event may carry another reason than a local one (#415)
+    portEXIT_CRITICAL(&state_lock);
     abort_trial();
     esp_err_t stop = esp_wifi_stop();
     atomic_store(&wifi_started, false);

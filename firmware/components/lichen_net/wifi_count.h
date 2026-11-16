@@ -25,3 +25,8 @@ void wifi_count_got_ip(wifi_count_t *c);
 // A disconnect event with its IDF reason. Only a link that was up counts as a loss; every failed attempt of a retry
 // loop still updates last_reason (it says why the link stays down).
 void wifi_count_disconnected(wifi_count_t *c, int reason);
+// The link went away with no disconnect event (the C6 went down for a re-attach): an up link counts as a loss, the
+// reason stays. The got-IP after the re-attach is then its reconnect.
+void wifi_count_link_gone(wifi_count_t *c);
+// The owner switched Wi-Fi off: not a loss, whatever reason the driver's stop event carries.
+void wifi_count_owner_down(wifi_count_t *c);

@@ -89,7 +89,38 @@ static void never_up(void) {
     CHECK(c.last_reason == 0);
 }
 
+// The C6 went down for a re-attach: no event comes, the up link is a loss and its return a reconnect
+static void c6_reattach(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_link_gone(&c); // not up: nothing to lose
+    CHECK(c.disconnects == 0 && c.reconnects == 0);
+    wifi_count_got_ip(&c);
+    wifi_count_disconnected(&c, 201);
+    wifi_count_got_ip(&c);
+    wifi_count_link_gone(&c);
+    CHECK(c.disconnects == 2 && c.last_reason == 201); // the reason stays
+    wifi_count_link_gone(&c); // a second call without an IP in between counts nothing
+    CHECK(c.disconnects == 2);
+    wifi_count_got_ip(&c);
+    CHECK(c.reconnects == 2);
+}
+
+// Wi-Fi switched off by the owner: no loss even when the driver's stop event carries another reason
+static void switched_off(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_got_ip(&c);
+    wifi_count_owner_down(&c);
+    wifi_count_disconnected(&c, 3);
+    CHECK(c.disconnects == 0 && c.last_reason == 3);
+    wifi_count_got_ip(&c);
+    CHECK(c.reconnects == 0);
+}
+
 int main(void) {
+    c6_reattach();
+    switched_off();
     fresh();
     loss_and_return();
     outage_counts_once();

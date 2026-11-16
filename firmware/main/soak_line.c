@@ -35,7 +35,8 @@ static words_t const     RESET_T = WORDS(RESET_W), C6_T = WORDS(C6_W), LORA_T = 
                      SD_T = WORDS(SD_W), BAT_T = WORDS(BAT_W);
 static soak_kind_t const KINDS[] = {
     [U32] = {SOAK_NA, U32_MAX_V, NULL}, [BYTES] = {SOAK_NA, BYTES_MAX_V, NULL}, [FLAG] = {SOAK_NA, 1, NULL},
-    [LEVEL] = {SOAK_NA, 255, NULL},     [COUNT4] = {SOAK_NA, 9999, NULL},     [REASON] = {SOAK_NA, 999, NULL},     [DBM] = {DBM_MIN, 0, NULL},             [RESET] = {0, 0, &RESET_T},
+    [LEVEL] = {SOAK_NA, 255, NULL},     [COUNT4] = {SOAK_NA, 9999, NULL},   [REASON] = {SOAK_NA, 999, NULL},
+    [DBM] = {DBM_MIN, 0, NULL},         [RESET] = {0, 0, &RESET_T},
     [C6] = {0, 0, &C6_T},               [LORA] = {0, 0, &LORA_T},               [TH] = {0, 0, &TH_T},
     [SD] = {0, 0, &SD_T},               [BAT] = {0, 0, &BAT_T},
 };
