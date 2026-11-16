@@ -275,7 +275,8 @@ static int            contacts_taken_n;
 static bool           contacts_complete; // #413: the table read at boot holds every record of contacts3, no more, no fewer
 
 // Right after begin() loaded the table: DataStore::loadContacts stops silently at an open failure, a short read or a
-// full table, which would make every contact look removed to the password sweep (meshcore_run.c)
+// full table, which would make every contact look removed to the password sweep (meshcore_run.c). Set once, at this
+// boot load, and never cleared: later the table changes, so the sweep must stay boot-only (the first successful start)
 static void contacts_note_load(BadgeMesh *n, char const *files_dir) {
     char        path[96];
     struct stat st;

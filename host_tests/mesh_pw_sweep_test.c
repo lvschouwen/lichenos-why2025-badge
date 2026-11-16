@@ -146,6 +146,25 @@ static void a_busy_answer_stops_the_sweep(void) {
     CHECK(pw_sweep(&busy, true, &left) == 3 && asked == 4 && nkeys == 17 && left == 13); // 0..2 erased, 3 busy: stop, the rest of the batch kept
 }
 
+// A listing that claims more keys than the batch holds is not believed: nothing is erased or read past the buffer
+static size_t overrun_list(void *env, char (*out)[APP_SECRET_KEY_BUF], size_t cap, size_t skip, bool *more) {
+    (void)env;
+    (void)skip;
+    for (size_t i = 0; i < cap; i++) {
+        snprintf(out[i], APP_SECRET_KEY_BUF, "pw%02x0000000000", (unsigned)i);
+    }
+    *more = true;
+    return cap + 1;
+}
+static void an_overrunning_listing_is_refused(void) {
+    reset();
+    for (int i = 0; i < 256; i++) {
+        state_for[i] = PW_CONTACT_GONE;
+    }
+    pw_sweep_io_t const bad = {NULL, overrun_list, contact, erase};
+    CHECK(pw_sweep(&bad, true, NULL) == 0 && erases == 0);
+}
+
 static void a_complete_load_is_known_by_the_file(void) {
     CHECK(pw_load_complete(152 * 5, 5, 1000));
     CHECK(!pw_load_complete(0, 0, 1000));            // no contacts at all: nothing to judge by
@@ -163,6 +182,7 @@ int main(void) {
     an_orphan_behind_a_full_batch_is_dropped();
     untrusted_or_unknown_erases_nothing();
     a_busy_answer_stops_the_sweep();
+    an_overrunning_listing_is_refused();
     a_complete_load_is_known_by_the_file();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;

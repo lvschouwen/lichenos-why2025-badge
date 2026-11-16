@@ -103,7 +103,7 @@ static bool sweep_erase(void *env, char const *key) {
 }
 
 static void sweep_leftover_passwords(void) {
-    static bool           done;
+    static bool           done; // boot-only: the complete-load flag is the boot load's, never cleared (mesh_task.cpp)
     static pw_sweep_io_t const io = {NULL, sweep_list, sweep_contact, sweep_erase};
     if (done) {
         return;
