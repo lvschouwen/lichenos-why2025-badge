@@ -4,6 +4,13 @@
 
 // The status bar's right group against the centred clock (#399), pure: widths in, what to show out.
 
+#define NOTIFY_DOT   10
+#define NOTIFY_GAP   4 // between the dot and the count
+#define NOTIFY_PAD_R 8 // the chip's right padding
+#define NOTIFY_WIFI  6 // the Wi-Fi row's gap after the chip
+// What the chip adds to the right group with the dot alone
+#define NOTIFY_DOT_W (NOTIFY_DOT + NOTIFY_PAD_R + NOTIFY_WIFI)
+
 typedef enum {
     SB_NOTIFY_COUNT, // dot and count
     SB_NOTIFY_DOT,   // the dot alone: the count is the lowest-priority part and gives way first

@@ -133,6 +133,13 @@ int main(void) {
     CHECK(have == 200);
     CHECK(px(0, 100, 399, 0, 299, OVF_WRAP) == 0);
 
+    // the unread chip against the clock (#399)
+    ovf_rect_t clk = {330, 8, 391, 40};
+    CHECK(ovf_overlap_px((ovf_rect_t){380, 8, 430, 40}, clk) == 12);
+    CHECK(ovf_overlap_px((ovf_rect_t){392, 8, 430, 40}, clk) == 0);   // touching edges apart
+    CHECK(ovf_overlap_px((ovf_rect_t){380, 50, 430, 60}, clk) == 0);  // other rows
+    CHECK(ovf_overlap_px((ovf_rect_t){340, 10, 350, 20}, clk) == 11); // inside
+
     test_vertical();
     test_crashlog_icon();
 

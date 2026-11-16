@@ -41,12 +41,6 @@ static lv_obj_t *remote_banner; // "fw ui lock" (#190): over the bar's right par
 static int32_t   notify_room;   // px between the clock and the right group for the chip (sb_notify_room)
 static int32_t   clock_w_shown; // the clock's fixed width: the banner starts at its left edge
 
-#define NOTIFY_DOT   10
-#define NOTIFY_GAP   4  // between the dot and the count
-#define NOTIFY_PAD_R 8  // the chip's right padding
-#define NOTIFY_WIFI  6  // the Wi-Fi row's gap after the chip
-// What the chip adds to the right group with the dot alone
-#define NOTIFY_DOT_W (NOTIFY_DOT + NOTIFY_PAD_R + NOTIFY_WIFI)
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -411,11 +405,23 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
     lv_timer_create(poll_lora_activity, 100, NULL);
 
-    // The right group's width with the chip hidden, measured once: what is left to the clock is the chip's room (#399)
+    // The right group's width with the chip hidden, measured once: what is left to the clock is the chip's room (#399).
+    // Every element of the right group must exist before this point, or the room is too big.
     lv_obj_update_layout(bar);
-    notify_room = sb_notify_room(lv_display_get_horizontal_resolution(lv_obj_get_display(bar)), BAR_PAD, clock_w,
+    notify_room = sb_notify_room(lv_obj_get_width(bar), BAR_PAD, clock_w,
                                  CLOCK_GAP, lv_obj_get_width(right));
     refresh(NULL);
     lv_timer_create(refresh, 1000, NULL);
     return bar;
+}
+
+// The chip and the clock as laid out, for `fw ui overflow` (#399); false while the chip is hidden
+bool status_bar_chip_clock(lv_area_t *chip, lv_area_t *clock) {
+    if (!bar_obj || lv_obj_is_hidden(notify_box)) {
+        return false;
+    }
+    lv_obj_update_layout(bar_obj);
+    lv_obj_get_coords(notify_box, chip);
+    lv_obj_get_coords(clock_label, clock);
+    return true;
 }

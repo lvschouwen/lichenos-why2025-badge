@@ -48,6 +48,9 @@ int32_t ovf_hidden_rows(ovf_span_t obj, ovf_span_t inner, ovf_span_t outer, int3
 // in x as well; the fewest over the scroll positions, so content that scrolls clear of the cover is not a hit.
 int32_t ovf_cover_rows(ovf_rect_t obj, ovf_span_t inner, ovf_span_t outer, ovf_rect_t cover, int32_t up, int32_t down);
 
+// Px two boxes share across x when they also share rows; 0 when apart (#399: the unread chip against the clock)
+int32_t ovf_overlap_px(ovf_rect_t a, ovf_rect_t b);
+
 // Rows of wrapped text that do not fit a label of fixed height (text_h at the label's width, box_h its content height).
 int32_t ovf_wrap_lost_px(int32_t text_h, int32_t box_h);
 

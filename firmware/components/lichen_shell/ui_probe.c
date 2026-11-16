@@ -485,9 +485,9 @@ typedef struct {
     int        scrollers; // how many ancestors scroll at all
 } vgeom_t;
 
-typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED, HIT_COUNT } hit_kind_t;
+typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED, HIT_OVERLAP, HIT_COUNT } hit_kind_t;
 
-static char const *const HIT_NAME[] = {"width", "height", "under-hint", "clipped"};
+static char const *const HIT_NAME[] = {"width", "height", "under-hint", "clipped", "overlap"};
 static_assert(sizeof(HIT_NAME) / sizeof(HIT_NAME[0]) == HIT_COUNT, "HIT_NAME must name every hit kind");
 
 typedef struct {
@@ -744,7 +744,7 @@ static bool area_rect(lv_obj_t *obj, ovf_rect_t *out) {
 // The active screen (checked against the pinned hint and the status bar), then the top layer (status bar, toast,
 // dialogs) and the sys layer. Those draw over the screen on purpose, so they are not checked against the hint.
 //   ui overflow: <n>
-//     <kind> x,y a/b px ["hint"|"bar" ]"<text>"      kind: width | height | clipped | under-hint (see hit_t)
+//     <kind> x,y a/b px ["hint"|"bar" ]"<text>"      kind: width | height | clipped | under-hint | overlap (see hit_t)
 static void print_geom(vgeom_t const *g) {
     console_reply("    inner %d..%d outer %d..%d up %d down %d scrollers %d", (int)g->inner.x1, (int)g->inner.x2,
                   (int)g->outer.x1, (int)g->outer.x2, (int)g->up, (int)g->down, g->scrollers);
@@ -753,6 +753,23 @@ static void print_geom(vgeom_t const *g) {
                       (int)g->scroller.y2);
     } else {
         console_reply("    page none");
+    }
+}
+
+// The unread chip must stay clear of the clock (#399): overlap px / chip width, target "clock"
+static void check_chip_clock(ovf_ctx_t *ctx) {
+    lv_area_t chip, clock;
+    if (!status_bar_chip_clock(&chip, &clock)) {
+        return;
+    }
+    int32_t px = ovf_overlap_px((ovf_rect_t){chip.x1, chip.y1, chip.x2, chip.y2},
+                                (ovf_rect_t){clock.x1, clock.y1, clock.x2, clock.y2});
+    if (px > 0) {
+        size_t before = ctx->n;
+        add_hit(ctx, HIT_OVERLAP, shell_status_bar(), px, chip.x2 - chip.x1 + 1, "clock");
+        if (ctx->n > before) {
+            snprintf(ctx->hits[before].text, sizeof(ctx->hits[before].text), "unread chip"); // not the bar's first label
+        }
     }
 }
 
@@ -772,6 +789,7 @@ static void cmd_ui_overflow(bool verbose) {
     ctx.in_screen    = true;
     overflow_walk(&ctx, screen, true);
     ctx.in_screen = false;
+    check_chip_clock(&ctx);
     overflow_walk(&ctx, lv_layer_top(), true);
     overflow_walk(&ctx, lv_layer_sys(), true);
     lichen_sys_ui_unlock();

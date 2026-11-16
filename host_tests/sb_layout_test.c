@@ -12,9 +12,9 @@ static int failures;
 #define CLEAR  8
 #define RIGHT  240 // Wi-Fi fan, "Wi-Fi", LoRa and chevrons with their gaps, no chip
 
-// dot 10 + pad 8 + gap 6; the count adds its text and the 4 px column gap
-#define DOT_W      24
-#define COUNT_W(t) (DOT_W + 4 + (t))
+// CLOCK and RIGHT are assumed (the badge bench checks the real figures); the chip constants are status_bar.c's own
+#define DOT_W      NOTIFY_DOT_W
+#define COUNT_W(t) (DOT_W + NOTIFY_GAP + (t))
 
 int main(void) {
     int32_t room = sb_notify_room(SCREEN, PAD, CLOCK, CLEAR, RIGHT);

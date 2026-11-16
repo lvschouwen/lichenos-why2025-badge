@@ -125,3 +125,12 @@ int ovf_pick_scroller(int32_t const range[], int n) {
     }
     return best;
 }
+
+int32_t ovf_overlap_px(ovf_rect_t a, ovf_rect_t b) {
+    if (a.y2 < b.y1 || b.y2 < a.y1) {
+        return 0;
+    }
+    int32_t x1 = a.x1 > b.x1 ? a.x1 : b.x1;
+    int32_t x2 = a.x2 < b.x2 ? a.x2 : b.x2;
+    return x2 >= x1 ? x2 - x1 + 1 : 0;
+}
