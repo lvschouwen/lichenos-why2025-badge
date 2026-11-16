@@ -7,7 +7,7 @@
 // badge restarts afterwards anyway and the transfer needs the internal RAM. Pure: says what to do per event and owns
 // the restart decision; the update screen does the doing. A zeroed update_state_t is "normal".
 // OS-only (#433): the shell's update screen and main drive it, apps never do (tools/layers.conf forbids update_mode_* for L6).
-// Pure and lock-free: callable from any task, the caller serialises (update_screen.c holds a spinlock around every call).
+// The state functions are pure and lock-free: callable from any task, the caller serialises (update_screen.c holds a spinlock around each call). The stop hook pair below is different.
 
 typedef enum { UM_NORMAL, UM_UPDATING } update_mode_t;
 
@@ -48,7 +48,7 @@ bool update_mode_file_allowed(update_state_t const *s);
 bool update_mode_restart_due(update_state_t const *s, bool message_done);
 
 // What the OS itself stops after the apps' stop_for_update (the LoRa radio when every app stopped, the C6 link's update
-// state), set once from main.c. NULL = nothing. Any task.
+// state), set once from main.c. NULL = nothing. Boot only, before the update server starts.
 void update_mode_set_stop_hook(void (*hook)(bool apps_stopped));
-// Any task, the caller serialises.
+// Not serialised: update_screen.c (stop_everything) and app_power.c (power_task) call it unlocked, so the hook must tolerate that (see #432).
 void update_mode_run_stop_hook(bool apps_stopped);

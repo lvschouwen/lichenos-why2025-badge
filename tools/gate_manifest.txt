@@ -655,6 +655,6 @@ update_mode_on_end	-	any	update_mode.h
 update_mode_on_prepare	-	any	update_mode.h
 update_mode_on_restart_stall	-	any	update_mode.h
 update_mode_restart_due	-	any	update_mode.h
-update_mode_run_stop_hook	-	any	update_mode.h
-update_mode_set_stop_hook	-	any	update_mode.h
+update_mode_run_stop_hook	-	unspecified	update_mode.h
+update_mode_set_stop_hook	-	unspecified	update_mode.h
 update_mode_tick	-	any	update_mode.h
