@@ -65,6 +65,9 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
+### Wave L during the soak (written 2026-11-16 about 10:30 UTC; read with the section below)
+Owner chose a host-only wave while #476 runs (no flash until the soak verdict). Agents: impl-480 wt-1 `feat/480-soak-airlog-tx`, impl-415 wt-2 `feat/415-wifi-disconnect-count`, impl-399 wt-4 `fix/399-unread-chip-clock`, impl-402 wt-5 `docs/402-dma-gate`. Then one lichen-reviewer per code branch, merge one at a time with `merge-one.sh`. **Hold the #480 merge until the soak driver has exited** (the running driver is the main checkout's copy). Flash + bench all of wave L after the #476 verdict.
+
 ### RESUME HERE (written 2026-11-16 about 08:05 UTC; NEWEST, read this one first)
 
 Main: Opus 5.5. **The badge runs fw-4e90a0b2**, list off, developer mode on. Main = origin. All slots free except wt-3 (#322).
