@@ -67,6 +67,7 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 
 ### Wave L during the soak (written 2026-11-16 about 10:30 UTC; read with the section below)
 Owner chose a host-only wave while #476 runs (no flash until the soak verdict). Agents: impl-480 wt-1 `feat/480-soak-airlog-tx`, impl-415 wt-2 `feat/415-wifi-disconnect-count`, impl-399 wt-4 `fix/399-unread-chip-clock`, impl-402 wt-5 `docs/402-dma-gate`. Then one lichen-reviewer per code branch, merge one at a time with `merge-one.sh`. **Hold the #480 merge until the soak driver has exited** (the running driver is the main checkout's copy). Flash + bench all of wave L after the #476 verdict.
+**State at about 10:50 UTC:** #402 merged + closed (c782162d). #399 merged (..55d0022f), #415 merged (..871e7caf), both pushed, not flashed; bench steps on each issue. #480 DONE in wt-1 (`feat/480-soak-airlog-tx` at 5c43236a, three review rounds, no open finding; slot still claimed): after the soak driver exits run `merge-one.sh wt-1 feat/480-soak-airlog-tx 480`, agent-check, push, `agent-wt done wt-1`. Its bench: one driver send, ledger last column `ok`, `## tx_air ok` in the transcript, `soak_report.py air <run dir>`. Post-soak flash then benches #399, #415 (and the earlier queue: #462, #456, #461, #443 A8 etc.).
 
 ### RESUME HERE (written 2026-11-16 about 08:05 UTC; NEWEST, read this one first)
 
