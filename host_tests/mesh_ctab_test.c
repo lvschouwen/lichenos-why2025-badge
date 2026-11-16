@@ -415,6 +415,65 @@ static void test_defer(void) {
     CHECK(mesh_ctab_flush_due(5, last)); // the uptime clock cannot go back: if it did, write
 }
 
+typedef struct {
+    uint8_t const *file;
+    size_t         len;
+    int            reads, fail_at;
+} fake_t;
+
+static size_t fake_read(void *ctx, size_t at, uint8_t *out, size_t want) {
+    fake_t *f = ctx;
+    if (f->reads++ == f->fail_at || at + want > f->len) {
+        return 0;
+    }
+    memcpy(out, f->file + at, want);
+    return want;
+}
+
+static int diff_calls;
+static mesh_ctab_diff_t fake_diff(void *ctx) {
+    diff_calls++;
+    return *(mesh_ctab_diff_t *)ctx;
+}
+
+static void test_file_diff(void) {
+    enum { NR = 60 }; // 9120 B: two full 26-record steps and a short last one of 8
+    static uint8_t file[NR * MESH_CTAB_REC], save[NR * MESH_CTAB_REC], scratch[4096];
+    memset(file, 0x22, sizeof(file));
+    memcpy(save, file, sizeof(file));
+    fake_t f = {file, sizeof(file), 0, -1};
+    size_t L = sizeof(file);
+    CHECK(mesh_ctab_file_diff(save, L, true, L, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_SAME && f.reads == 3);
+    save[(NR - 1) * MESH_CTAB_REC + MESH_CTAB_AT_LASTMOD] ^= 1; // in the short last chunk
+    f.reads = 0;
+    CHECK(mesh_ctab_file_diff(save, L, true, L, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_TIMES_ONLY);
+    save[5 * MESH_CTAB_REC + MESH_CTAB_AT_NAME] ^= 1; // in the first
+    f.reads = 0;
+    CHECK(mesh_ctab_file_diff(save, L, true, L, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_CHANGED && f.reads == 1);
+    save[5 * MESH_CTAB_REC + MESH_CTAB_AT_NAME] ^= 1;
+    CHECK(mesh_ctab_file_diff(save, L, false, 0, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_CHANGED); // missing
+    CHECK(mesh_ctab_file_diff(save, L, true, L - MESH_CTAB_REC, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_CHANGED);
+    CHECK(mesh_ctab_file_diff(save, L - 1, true, L - 1, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_CHANGED);
+    f.reads = 0, f.fail_at = 1; // a read that fails in the second step
+    CHECK(mesh_ctab_file_diff(save, L, true, L, fake_read, &f, scratch, sizeof(scratch)) == MESH_CTAB_CHANGED);
+    f.fail_at = -1;
+    CHECK(mesh_ctab_file_diff(save, L, true, L, fake_read, &f, scratch, 100) == MESH_CTAB_CHANGED); // no room for a record
+
+    // park: a forced write or a due one never asks for the difference; deferral, release, write, then parked again
+    mesh_ctab_diff_t times = MESH_CTAB_TIMES_ONLY;
+    uint32_t last = 100;
+    diff_calls    = 0;
+    CHECK(!mesh_ctab_park(true, last + 1, last, fake_diff, &times) && diff_calls == 0);
+    CHECK(mesh_ctab_park(false, last + 10, last, fake_diff, &times) && diff_calls == 1);
+    CHECK(mesh_ctab_park(false, last + MESH_CTAB_SAVE_INTERVAL_S - 1, last, fake_diff, &times));
+    diff_calls = 0;
+    CHECK(!mesh_ctab_park(false, last + MESH_CTAB_SAVE_INTERVAL_S, last, fake_diff, &times) && diff_calls == 0);
+    last += MESH_CTAB_SAVE_INTERVAL_S; // the write took place: the interval starts again
+    CHECK(mesh_ctab_park(false, last + 10, last, fake_diff, &times));
+    mesh_ctab_diff_t changed = MESH_CTAB_CHANGED;
+    CHECK(!mesh_ctab_park(false, last + 10, last, fake_diff, &changed));
+}
+
 int main(void) {
     test_select();
     test_digest();
@@ -423,6 +482,7 @@ int main(void) {
     test_file();
     test_card_plan();
     test_defer();
+    test_file_diff();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

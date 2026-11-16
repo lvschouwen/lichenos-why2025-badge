@@ -59,6 +59,31 @@ mesh_ctab_diff_t mesh_ctab_diff(uint8_t const *a, uint8_t const *b, size_t n) {
     return worst;
 }
 
+mesh_ctab_diff_t mesh_ctab_file_diff(uint8_t const *save, size_t len, bool have_file, size_t file_len,
+                                     mesh_ctab_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len) {
+    size_t step = scratch_len / MESH_CTAB_REC * MESH_CTAB_REC;
+    if (!have_file || !scratch || !read || step == 0 || file_len != len || len % MESH_CTAB_REC) {
+        return MESH_CTAB_CHANGED;
+    }
+    mesh_ctab_diff_t worst = MESH_CTAB_SAME;
+    for (size_t at = 0; at < len && worst != MESH_CTAB_CHANGED; at += step) {
+        size_t           want = len - at < step ? len - at : step;
+        mesh_ctab_diff_t d    = read(ctx, at, scratch, want) == want
+                                    ? mesh_ctab_diff(scratch, save + at, want / MESH_CTAB_REC)
+                                    : MESH_CTAB_CHANGED;
+        worst = d > worst ? d : worst;
+    }
+    return worst;
+}
+
+bool mesh_ctab_park(bool forced, uint32_t now_s, uint32_t last_write_s, mesh_ctab_diff_t (*diff)(void *ctx),
+                    void *ctx) {
+    if (forced || mesh_ctab_flush_due(now_s, last_write_s)) {
+        return false;
+    }
+    return mesh_ctab_defer(diff(ctx), false, now_s, last_write_s);
+}
+
 bool mesh_ctab_flush_due(uint32_t now_s, uint32_t last_write_s) {
     return now_s - last_write_s >= MESH_CTAB_SAVE_INTERVAL_S; // unsigned: a clock that went back writes, never waits
 }

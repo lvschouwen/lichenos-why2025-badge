@@ -342,6 +342,12 @@ static void held_deferred(uint8_t *expect, uint8_t *older, uint8_t *disk) {
     CHECK(!taken.set && live_blocks == 1);
     fs_shim_take_held(&taken);
     CHECK(taken.set && memcmp(taken.buf, expect, n) == 0);
+    fs_shim_defer_held(&taken); // deferred again, then a new save opens: the deferred buffer is freed first
+    CHECK(live_blocks == 1);
+    File w = SPIFFS.open("/contacts3", "w", true);
+    CHECK(w && live_blocks == 0); // peak: one buffer
+    w.close();
+    fs_shim_take_held(&taken);
     fs_shim_free_held(&taken);
     fs_shim_defer_held(&taken); // nothing: no effect
     fs_shim_hold(NULL);

@@ -67,6 +67,14 @@ mesh_ctab_diff_t mesh_ctab_diff(uint8_t const *a, uint8_t const *b, size_t n);
 // Whether a save with this difference stays parked: only timestamps moved, nothing forces a write (a stop, the owner,
 // the interval), and the last write is less than the interval ago
 bool mesh_ctab_defer(mesh_ctab_diff_t d, bool forced, uint32_t now_s, uint32_t last_write_s);
+// The file's bytes [at, at + want) into out; how many were read (fewer: the file is shorter or unreadable)
+typedef size_t (*mesh_ctab_read_fn)(void *ctx, size_t at, uint8_t *out, size_t want);
+// A save of len bytes (whole records) against a file of file_len bytes read through read, in steps of whole records
+// through scratch (scratch_len at least one record). have_file false, another size, a short read: CHANGED.
+mesh_ctab_diff_t mesh_ctab_file_diff(uint8_t const *save, size_t len, bool have_file, size_t file_len,
+                                     mesh_ctab_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len);
+// mesh_ctab_defer, asking for the file's difference only when it can matter (not for a forced write or a due one)
+bool mesh_ctab_park(bool forced, uint32_t now_s, uint32_t last_write_s, mesh_ctab_diff_t (*diff)(void *ctx), void *ctx);
 // Whether a parked save is due to be written
 bool mesh_ctab_flush_due(uint32_t now_s, uint32_t last_write_s);
 

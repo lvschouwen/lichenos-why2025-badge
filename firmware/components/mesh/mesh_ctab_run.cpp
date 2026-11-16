@@ -82,7 +82,7 @@ static uint8_t     *chunk;
 
 // Console figures (words; a stale value is fine)
 static volatile uint32_t card_writes, card_errors, card_last_ms, card_last_bytes, card_bad_blocks;
-static volatile uint32_t internal_writes, internal_skips, internal_kept, merged_added, merged_newer, merged_full;
+static volatile uint32_t internal_writes, internal_skips, internal_parked, internal_kept, merged_added, merged_newer, merged_full;
 
 static void *psram(size_t bytes) {
     return lichen_alloc(meshcore_ctx(), bytes, LICHEN_MEM_BULK);
@@ -447,7 +447,7 @@ void mesh_ctab_run_tick_locked(void) {
         c.last_try_s          = last_card_try_s;
         due                   = mesh_advtab_due(&c);
     }
-    if (deferred && mesh_ctab_flush_due(now, last_internal_s) && fs_shim_release_deferred()) {
+    if (deferred && mesh_ctab_flush_due(now, last_internal_s) && !fs_shim_wiped() && fs_shim_release_deferred()) {
         deferred = false; // the interval is up: this loop's take picks the parked save up and the write follows (#429)
     }
     if ((due || want_save) && !fs_shim_wiped()) {
@@ -594,44 +594,53 @@ static void write_card(uint8_t const *recs, size_t n, uint32_t wait_ms) {
              (unsigned long)card_last_ms);
 }
 
-// #429: how the save differs from contacts3 on /storage, read in chunks of whole records into the scratch buffer (no new
-// memory; the file is as big as the save, so one pass of a few ms). Anything unreadable counts as changed.
-static mesh_ctab_diff_t file_diff(fs_shim_held_t const *h) {
-    char        path[PATH_MAX_LEN];
-    struct stat st;
-    if (!chunk || !h->path || snprintf(path, sizeof(path), "%s%s", dir, h->path) >= (int)sizeof(path) ||
-        stat(path, &st) != 0 || (size_t)st.st_size != h->len || h->len % MESH_CTAB_REC) {
+// #429: the save against contacts3 on /storage (mesh_ctab_file_diff reads it in chunks of whole records into the
+// scratch buffer: no new memory, one pass of a few ms). Anything unreadable counts as changed.
+typedef struct {
+    fs_shim_held_t const *h;
+    FILE                 *f;
+} diff_ctx_t;
+
+static size_t diff_read(void *ctx, size_t at, uint8_t *out, size_t want) {
+    FILE *f = ((diff_ctx_t *)ctx)->f;
+    return fseek(f, (long)at, SEEK_SET) == 0 ? fread(out, 1, want, f) : 0;
+}
+
+static mesh_ctab_diff_t file_diff(void *ctx) {
+    fs_shim_held_t const *h = ((diff_ctx_t *)ctx)->h;
+    char                  path[PATH_MAX_LEN];
+    struct stat           st;
+    if (!h->path || snprintf(path, sizeof(path), "%s%s", dir, h->path) >= (int)sizeof(path) || stat(path, &st) != 0) {
         return MESH_CTAB_CHANGED;
     }
     FILE *f = fopen(path, "rb");
     if (!f) {
         return MESH_CTAB_CHANGED;
     }
-    size_t const     step  = CHUNK / MESH_CTAB_REC * MESH_CTAB_REC;
-    mesh_ctab_diff_t worst = MESH_CTAB_SAME;
-    for (size_t at = 0; at < h->len && worst != MESH_CTAB_CHANGED; at += step) {
-        size_t want = h->len - at < step ? h->len - at : step;
-        mesh_ctab_diff_t d = fread(chunk, 1, want, f) == want
-                                 ? mesh_ctab_diff(chunk, h->buf + at, want / MESH_CTAB_REC)
-                                 : MESH_CTAB_CHANGED;
-        worst = d > worst ? d : worst;
-    }
+    ((diff_ctx_t *)ctx)->f = f;
+    mesh_ctab_diff_t d     = mesh_ctab_file_diff(h->buf, h->len, true, (size_t)st.st_size, diff_read, ctx, chunk, CHUNK);
     fclose(f);
-    return worst;
+    return d;
 }
 
-// #429: a save that only moved timestamps goes back into the shim's slot (the screens and MeshCore still read it) and
-// is written when the interval is up. The slot is the mesh lock's: taken for this one call, no file work under it.
+// #429: a save that only moved timestamps goes back into the shim's slot (MeshCore and the screens read it again) and
+// is written when the interval is up. While the file is compared the slot is empty and readers see the file on disk
+// (as after any take). The slot is the mesh lock's: taken for this one call, no file work under it.
 static bool park_again(fs_shim_held_t *h, bool forced, uint32_t now) {
-    if (forced || mesh_ctab_flush_due(now, last_internal_s) ||
-        !mesh_ctab_defer(file_diff(h), false, now, last_internal_s)) {
+    diff_ctx_t c = {h, NULL};
+    if (!chunk || !mesh_ctab_park(forced, now, last_internal_s, file_diff, &c)) {
         return false;
     }
     mesh_lock();
-    fs_shim_defer_held(h);
+    bool wiped = fs_shim_wiped(); // a factory reset since the take: the pre-reset list is not parked behind it
+    if (wiped) {
+        fs_shim_free_held(h);
+    } else {
+        fs_shim_defer_held(h);
+    }
     mesh_unlock();
-    deferred       = true;
-    internal_skips = internal_skips + 1;
+    deferred = !wiped;
+    internal_parked = internal_parked + 1;
     return true;
 }
 
@@ -855,11 +864,12 @@ void mesh_ctab_run_work(void) {
 void mesh_ctab_run_console(void) {
     static char const *const PLACE[] = {"on /storage", "on the card", "on /storage (the card's file is left alone)"};
     console_reply("contacts: list %s, room for %d | card file %lu, last %lu bytes in %lu ms, %lu written, %lu failed, "
-                  "%lu bad blocks read | /storage %lu kept, %lu written, %lu held back | merged %lu new, %lu newer, "
+                  "%lu bad blocks read | /storage %lu kept, %lu written, %lu held back, %lu parked | merged %lu new, %lu newer, "
                   "%lu without room",
                   PLACE[mesh_ctab_run_place()], mesh_ctab_run_cap(), (unsigned long)generation,
                   (unsigned long)card_last_bytes, (unsigned long)card_last_ms, (unsigned long)card_writes,
                   (unsigned long)card_errors, (unsigned long)card_bad_blocks, (unsigned long)internal_kept,
-                  (unsigned long)internal_writes, (unsigned long)internal_skips, (unsigned long)merged_added,
+                  (unsigned long)internal_writes, (unsigned long)internal_skips, (unsigned long)internal_parked,
+                  (unsigned long)merged_added,
                   (unsigned long)merged_newer, (unsigned long)merged_full);
 }
