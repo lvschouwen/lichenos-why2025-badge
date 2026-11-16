@@ -118,7 +118,7 @@ static size_t nvs_collect(factory_level_t level, nvs_name_t *out, size_t cap, bo
         nvs_entry_info(it, &info);
         bool erase = factory_nvs_erases(info.namespace_name, info.key, level);
         if (print && factory_nvs_name_hidden(info.namespace_name, info.key)) {
-            hidden++;
+            hidden += factory_nvs_secret(info.namespace_name, info.key); // the OS's own record is not a password
         } else if (print) {
             console_reply("  nvs %-5s %s/%s", erase ? "ERASE" : "keep", info.namespace_name, info.key);
         } else if (erase) {

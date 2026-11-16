@@ -60,6 +60,19 @@ static void backup_and_keep(void) {
     CHECK(!app_secret_keys_plain(NULL, mark, 1));
 }
 
+// #413: a stored name back to its key, for listing
+static void from_stored(void) {
+    char out[APP_SECRET_KEY_BUF];
+    CHECK(app_secret_key_from_stored("pw", "~pw0123456789ab", out, sizeof(out)) && !strcmp(out, "pw0123456789ab"));
+    CHECK(!app_secret_key_from_stored("pw", "~:moved", out, sizeof(out)) && out[0] == '\0'); // the OS's record
+    CHECK(!app_secret_key_from_stored("pw", "pw0123456789ab", out, sizeof(out)));              // no mark: a plain copy
+    CHECK(!app_secret_key_from_stored("pw", "~autostart", out, sizeof(out)));
+    CHECK(!app_secret_key_from_stored("pw", "~pw0123456789abc", out, sizeof(out)));            // over the key maximum
+    CHECK(!app_secret_key_from_stored(NULL, "~pw1", out, sizeof(out)) && !app_secret_key_from_stored("", "~pw1", out, sizeof(out)));
+    CHECK(!app_secret_key_from_stored("pw", NULL, out, sizeof(out)) && !app_secret_key_from_stored("pw", "~pw1", out, 14));
+    CHECK(app_secret_key_from_stored("pw", "~pw", out, sizeof(out)) && !strcmp(out, "pw"));
+}
+
 static char const *kept[4];
 static size_t      kept_n;
 static bool        add(char const *ns, char const *key) {
@@ -81,6 +94,7 @@ int main(void) {
     stored_names();
     backup_and_keep();
     keep_list();
+    from_stored();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
 }

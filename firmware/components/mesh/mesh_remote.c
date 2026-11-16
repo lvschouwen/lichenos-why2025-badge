@@ -295,6 +295,26 @@ void rr_pw_key(uint8_t const prefix[MF_PREFIX], char *out, size_t cap) {
     out[2 + 2 * MF_PREFIX] = 0;
 }
 
+static int hex_val(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+bool rr_pw_key_prefix(char const *key, uint8_t out[MF_PREFIX]) {
+    if (!key || key[0] != 'p' || key[1] != 'w' || strnlen(key, RR_PW_KEY_MAX) != 2 + 2 * MF_PREFIX) {
+        return false;
+    }
+    uint8_t got[MF_PREFIX];
+    for (int i = 0; i < MF_PREFIX; i++) {
+        int hi = hex_val(key[2 + 2 * i]), lo = hex_val(key[2 + 2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        got[i] = (uint8_t)(hi << 4 | lo);
+    }
+    memcpy(out, got, MF_PREFIX);
+    return true;
+}
+
 // The reply of a command we tagged: its text without our tag; NULL for a reply that carries another one (it answers an
 // earlier command that timed out, or the settings page's). Untagged text stays: some of the repeater's replies are made
 // before it reads the tag.

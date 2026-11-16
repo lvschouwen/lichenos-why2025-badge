@@ -2752,3 +2752,14 @@ target_include_directories(crash_twdt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_definitions(crash_twdt_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
 target_compile_options(crash_twdt_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME crash_twdt_test COMMAND crash_twdt_test)
+
+# The sweep of remembered passwords whose contact is gone (#413)
+add_executable(mesh_pw_sweep_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_pw_sweep_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_pw_sweep.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_remote.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_str.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_rset.c)
+target_include_directories(mesh_pw_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(mesh_pw_sweep_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(mesh_pw_sweep_test PRIVATE m)
+add_test(NAME mesh_pw_sweep_test COMMAND mesh_pw_sweep_test)

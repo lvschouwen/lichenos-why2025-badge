@@ -8,6 +8,7 @@
 // without a usable id is refused: reads give the default, writes false (a refused ctx is logged at most once per 10 s
 // and counted in "fw app ctx", never an abort).
 
+#include "app_secret.h"
 #include "lichen_app.h"
 
 #include <stdbool.h>
@@ -44,6 +45,11 @@ bool app_secret_get(lichen_ctx_t ctx, char const *key, char *out, size_t cap);
 bool app_secret_set(lichen_ctx_t ctx, char const *key, char const *value);
 // Removes a secret; true when it is gone (also when it was never there)
 bool app_secret_erase(lichen_ctx_t ctx, char const *key);
+// The keys of the app's OWN stored secrets (never another app's, never a value), at most cap of them into keys, each
+// as app_secret_get takes it; returns how many were written. Order is storage order. 0 with no secrets, no
+// CAP_SECRETS or an unreadable namespace; if there are more than cap, the rest are not listed (erase what the app no
+// longer needs, then ask again). The app uses it to drop secrets whose owner (a contact) is gone.
+size_t app_secret_list(lichen_ctx_t ctx, char (*keys)[APP_SECRET_KEY_BUF], size_t cap);
 
 #ifdef __cplusplus
 }

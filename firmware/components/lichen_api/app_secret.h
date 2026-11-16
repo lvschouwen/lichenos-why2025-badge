@@ -24,6 +24,7 @@ extern "C" {
 #define APP_SECRET_MARK       '~'
 #define APP_SECRET_PREFIX_MAX 8  // characters of a declared prefix, a-z 0-9 _
 #define APP_SECRET_KEY_MAX    14 // characters of an app's secret key: the mark makes it NVS's 15
+#define APP_SECRET_KEY_BUF    (APP_SECRET_KEY_MAX + 1) // a buffer for a key, NUL included
 #define APP_SECRET_STORED_MAX 16 // a buffer for the stored name, NUL included
 #define APP_SECRET_VALUE_MAX  64 // characters of a value (a Wi-Fi password's length); longer is refused
 
@@ -34,6 +35,10 @@ bool app_secret_key_secret(char const *prefix, char const *key);
 // The stored name of an app secret: false (out emptied when cap > 0) when prefix is not a valid declaration, key does
 // not start with it, is longer than APP_SECRET_KEY_MAX, or cap is under APP_SECRET_STORED_MAX
 bool app_secret_stored_name(char const *prefix, char const *key, char *out, size_t cap);
+// The inverse, for listing (app_secret_list): the key a stored name belongs to, out terminated; false (out emptied when
+// cap > 0) for a name that is not a stored secret of this prefix: no mark, the OS's own "~:" record, another prefix, a
+// key over APP_SECRET_KEY_MAX, or a cap under APP_SECRET_KEY_MAX + 1
+bool app_secret_key_from_stored(char const *prefix, char const *stored, char *out, size_t cap);
 // True when none of an app's n backup keys is in its secrets class (a group with one is refused whole)
 bool app_secret_keys_plain(char const *prefix, sb_key_t const *keys, size_t n);
 

@@ -296,6 +296,20 @@ static void pw_key(void) {
     CHECK(tiny[0] == 0);
 }
 
+// #413: the key back to its prefix, strictly
+static void pw_key_prefix(void) {
+    uint8_t p[6] = {0xAB, 0x01, 0xFF, 0x00, 0x7E, 0x10}, got[6], keep[6] = {1, 2, 3, 4, 5, 6};
+    char    key[RR_PW_KEY_MAX];
+    rr_pw_key(p, key, sizeof(key));
+    CHECK(rr_pw_key_prefix(key, got) && memcmp(got, p, 6) == 0);
+    memcpy(got, keep, 6);
+    CHECK(!rr_pw_key_prefix("pwab01ff007e1", got) && !rr_pw_key_prefix("pwab01ff007e100", got));    // short, long
+    CHECK(!rr_pw_key_prefix("pwAB01ff007e10", got) && !rr_pw_key_prefix("pwab01ff007e1g", got));    // capital, not hex
+    CHECK(!rr_pw_key_prefix("xxab01ff007e10", got) && !rr_pw_key_prefix("autostart", got));
+    CHECK(!rr_pw_key_prefix("", got) && !rr_pw_key_prefix(NULL, got) && !rr_pw_key_prefix("~pwab01ff007e10", got));
+    CHECK(memcmp(got, keep, 6) == 0); // never written on a refusal
+}
+
 // #123: a free CLI command goes out with a tag of its own; a reply that carries another tag (a late answer to an earlier
 // command that timed out) is not the answer to this one
 static void cli_tags(void) {
@@ -620,6 +634,7 @@ int main(void) {
     cli();
     cli_filter();
     pw_key();
+    pw_key_prefix();
     cli_tags();
     cli_no_tags();
     cli_tag_secret();

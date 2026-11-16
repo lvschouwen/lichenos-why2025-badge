@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
+#include "nvs_flash.h"
 #include "settings_fail.h"
 
 #include <string.h>
@@ -290,4 +291,28 @@ bool app_secret_erase(lichen_ctx_t ctx, char const *key) {
     }
     esp_err_t err = nvs_erase_key(nvs, stored);
     return commit_close(key, nvs, err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err);
+}
+
+// Only the caller's own namespace is walked (lichen_sys_ctx_settings_ns gives no other), and only names are copied
+size_t app_secret_list(lichen_ctx_t ctx, char (*keys)[APP_SECRET_KEY_BUF], size_t cap) {
+    char                ns[16];
+    char const         *name = NULL;
+    lichen_app_t const *app  = NULL;
+    if (!keys || cap == 0 || !lichen_sys_caps_ok(ctx, CAP_SECRETS, "app_secret") ||
+        lichen_sys_ctx_settings_ns(ctx, "app_secret", ns, sizeof(ns), &name) != GATE_APP_ID ||
+        !lichen_sys_ctx_resolve(ctx, &app, "app_secret") || !app || !app->secret_prefix) {
+        return 0;
+    }
+    nvs_iterator_t it  = NULL;
+    size_t         n   = 0;
+    esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, ns, NVS_TYPE_STR, &it);
+    for (; err == ESP_OK && n < cap; err = nvs_entry_next(&it)) {
+        nvs_entry_info_t info;
+        if (nvs_entry_info(it, &info) != ESP_OK) {
+            break;
+        }
+        n += app_secret_key_from_stored(app->secret_prefix, info.key, keys[n], APP_SECRET_KEY_BUF);
+    }
+    nvs_release_iterator(it);
+    return n;
 }

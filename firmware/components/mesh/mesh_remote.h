@@ -162,6 +162,9 @@ bool rr_head_busy(rr_head_t const *h);
 // key prefix (14 characters, NVS allows 15). Empty out when cap is under RR_PW_KEY_MAX.
 #define RR_PW_KEY_MAX 15
 void rr_pw_key(uint8_t const prefix[MF_PREFIX], char *out, size_t cap);
+// The inverse (#413): the prefix a key made by rr_pw_key names. False, out untouched, for anything else (wrong length,
+// capital or non-hex digit, another lead-in): such a key is not ours to judge.
+bool rr_pw_key_prefix(char const *key, uint8_t out[MF_PREFIX]);
 
 // ---- text for the screens and the console ------------------------------------------------------------------------
 #define RR_LINE_MAX  64

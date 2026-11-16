@@ -118,6 +118,10 @@ bool factory_nvs_name_hidden(char const *ns, char const *key) {
     return ns && key && strncmp(ns, "a.", 2) == 0 && ns[2] && key[0] == '~';
 }
 
+bool factory_nvs_secret(char const *ns, char const *key) {
+    return factory_nvs_name_hidden(ns, key) && key[1] != ':'; // ':' is never in a secret prefix (app_secret_move.h)
+}
+
 bool factory_storage_keeps(char const *name) {
     return name && listed(keep_files, sizeof(keep_files) / sizeof(keep_files[0]), name);
 }

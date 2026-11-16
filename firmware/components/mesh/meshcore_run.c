@@ -13,6 +13,7 @@
 #include "lora_app.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_pw_sweep.h"
 #include "mesh_remote.h"
 
 #include <stdint.h>
@@ -79,6 +80,39 @@ bool meshcore_autostart_set(bool on) {
     return ok;
 }
 
+// #413: once per boot, after the contacts are loaded, the remembered passwords of contacts that are gone are erased
+// (a rollback to a pre-#288 image deletes a contact without its stored secret). Names only, no value is read.
+static size_t sweep_list(void *env, char (*keys)[APP_SECRET_KEY_BUF], size_t cap) {
+    (void)env;
+    return app_secret_list(app_ctx, keys, cap);
+}
+
+static pw_contact_t sweep_contact(void *env, uint8_t const prefix[MF_PREFIX]) {
+    (void)env;
+    mesh_contact_detail_t d;
+    size_t                r = mesh_contact_detail(prefix, &d, 200);
+    return r == 1 ? PW_CONTACT_THERE : r == 0 ? PW_CONTACT_GONE : PW_CONTACT_UNKNOWN;
+}
+
+static bool sweep_erase(void *env, char const *key) {
+    (void)env;
+    return app_secret_erase(app_ctx, key);
+}
+
+static void sweep_leftover_passwords(void) {
+    static bool           done;
+    static pw_sweep_io_t const io = {NULL, sweep_list, sweep_contact, sweep_erase};
+    if (done) {
+        return;
+    }
+    done          = true;
+    size_t left   = 0;
+    size_t erased = pw_sweep(&io, &left);
+    if (erased) {
+        ESP_LOGI(TAG, "dropped %u remembered password(s) of removed contacts", (unsigned)erased);
+    }
+}
+
 // The same path for boot and on demand
 static bool start_now(void) {
     if (!lora_up()) {
@@ -90,7 +124,11 @@ static bool start_now(void) {
         mesh_identity_no_files(); // #110: no drive is "unreadable", never "no identity yet"
         return false;
     }
-    return mesh_start(dir);
+    bool ok = mesh_start(dir);
+    if (ok) {
+        sweep_leftover_passwords();
+    }
+    return ok;
 }
 
 bool meshcore_run_boot(void) {

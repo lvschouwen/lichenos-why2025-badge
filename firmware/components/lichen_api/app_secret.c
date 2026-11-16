@@ -46,6 +46,23 @@ bool app_secret_stored_name(char const *prefix, char const *key, char *out, size
     return true;
 }
 
+bool app_secret_key_from_stored(char const *prefix, char const *stored, char *out, size_t cap) {
+    if (cap > 0) {
+        out[0] = '\0';
+    }
+    if (!prefix || !stored || cap < APP_SECRET_KEY_BUF || !app_secret_prefix_ok(prefix) || stored[0] != APP_SECRET_MARK) {
+        return false;
+    }
+    char const *key = stored + 1;
+    size_t      n   = strnlen(key, APP_SECRET_KEY_MAX + 1);
+    if (n > APP_SECRET_KEY_MAX || strncmp(key, prefix, strlen(prefix)) != 0) {
+        return false;
+    }
+    memcpy(out, key, n);
+    out[n] = '\0';
+    return true;
+}
+
 bool app_secret_keys_plain(char const *prefix, sb_key_t const *keys, size_t n) {
     for (size_t i = 0; keys && i < n; i++) {
         if (app_secret_key_secret(prefix, keys[i].key)) {

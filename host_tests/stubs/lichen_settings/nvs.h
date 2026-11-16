@@ -28,3 +28,16 @@ esp_err_t nvs_erase_all(nvs_handle_t h);
 esp_err_t nvs_get_used_entry_count(nvs_handle_t h, size_t *used);
 esp_err_t nvs_commit(nvs_handle_t h);
 void      nvs_close(nvs_handle_t h);
+
+// The entry walk (nvs_flash.h's stand-in includes this): the test's store answers it, in storage order
+#define NVS_DEFAULT_PART_NAME "nvs"
+typedef enum { NVS_TYPE_STR, NVS_TYPE_ANY } nvs_type_t;
+typedef struct nvs_opaque_iterator *nvs_iterator_t;
+typedef struct {
+    char namespace_name[16];
+    char key[16];
+} nvs_entry_info_t;
+esp_err_t nvs_entry_find(char const *part, char const *ns, nvs_type_t type, nvs_iterator_t *out);
+esp_err_t nvs_entry_next(nvs_iterator_t *it);
+esp_err_t nvs_entry_info(nvs_iterator_t it, nvs_entry_info_t *info);
+void      nvs_release_iterator(nvs_iterator_t it);

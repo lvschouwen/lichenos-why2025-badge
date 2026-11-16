@@ -52,6 +52,11 @@ static void app_declared_keys_are_kept(void) {
     CHECK(factory_nvs_erases("a.meshcore", "~:moved", A));
     // the preview counts them instead of printing a name that carries a contact's id
     CHECK(factory_nvs_name_hidden("a.meshcore", "~pw0123456789ab"));
+    // #413: only a stored password is counted; the OS's "moved" record is hidden but is not one
+    CHECK(factory_nvs_secret("a.meshcore", "~pw0123456789ab") && !factory_nvs_secret("a.meshcore", "~:moved"));
+    CHECK(factory_nvs_name_hidden("a.meshcore", "~:moved") && !factory_nvs_secret("a.", "~pw1") &&
+          !factory_nvs_secret("badge_fw", "~x") && !factory_nvs_secret("a.meshcore", NULL) &&
+          !factory_nvs_secret(NULL, "~x") && !factory_nvs_secret("a.meshcore", "mc_advlast"));
     CHECK(!factory_nvs_name_hidden("a.meshcore", "mc_advlast") && !factory_nvs_name_hidden("badge_fw", "~x"));
     CHECK(!factory_nvs_name_hidden("a.", "~x") && !factory_nvs_name_hidden(NULL, "~x") &&
           !factory_nvs_name_hidden("a.x", NULL));

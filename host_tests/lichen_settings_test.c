@@ -7,6 +7,7 @@
 #include "nvs.h"
 #include "settings_fail.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,6 +180,37 @@ void nvs_close(nvs_handle_t h) {
     (void)h;
 }
 
+// The walk: an iterator is the index of the next matching entry + 1 (0 = none left)
+static struct nvs_opaque_iterator *it_from(int i, char const *ns) {
+    for (; i < ENTRIES; i++) {
+        if (nvs[i].used && !strcmp(nvs[i].ns, ns)) {
+            return (struct nvs_opaque_iterator *)(intptr_t)(i + 1);
+        }
+    }
+    return NULL;
+}
+static char walk_ns[16];
+esp_err_t nvs_entry_find(char const *part, char const *ns, nvs_type_t type, nvs_iterator_t *out) {
+    (void)part;
+    (void)type;
+    snprintf(walk_ns, sizeof(walk_ns), "%s", ns);
+    *out = it_from(0, walk_ns);
+    return *out ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t nvs_entry_next(nvs_iterator_t *it) {
+    *it = it_from((int)(intptr_t)*it, walk_ns);
+    return *it ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t nvs_entry_info(nvs_iterator_t it, nvs_entry_info_t *info) {
+    int i = (int)(intptr_t)it - 1;
+    snprintf(info->namespace_name, sizeof(info->namespace_name), "%s", nvs[i].ns);
+    snprintf(info->key, sizeof(info->key), "%s", nvs[i].key);
+    return ESP_OK;
+}
+void nvs_release_iterator(nvs_iterator_t it) {
+    (void)it;
+}
+
 void settings_fail_note(char const *key, int err) {
     (void)key;
     (void)err;
@@ -290,6 +322,37 @@ static void secrets_need_the_capability(void) {
     CHECK(app_secret_erase(MESH, "pwcap"));
 }
 
+// #413: an app lists its own stored secrets, by key, never the plain keys, the OS's record or another app's
+static void secrets_are_listed_for_their_owner(void) {
+    char keys[4][APP_SECRET_KEY_BUF];
+    CHECK(app_secret_set(MESH, "pwaa", "made-up-6") && app_secret_set(MESH, "pwbb", "made-up-7"));
+    nvs_handle_t h;
+    nvs_open("a.meshcore", NVS_READWRITE, &h);
+    nvs_set_u8(h, "~:moved", 1);                         // the OS's record: not a secret
+    nvs_set_str(h, "~other", "made-up-8");              // marked but outside the prefix
+    nvs_set_str(h, "pwplain", "made-up-9");             // a plain copy: not listed, not a stored secret
+    nvs_open("a.other", NVS_READWRITE, &h);
+    nvs_set_str(h, "~pwzz", "made-up-10");              // another app's namespace
+    memset(keys, 'x', sizeof(keys));
+    size_t n = app_secret_list(MESH, keys, 4);
+    CHECK(n == 2 && ((!strcmp(keys[0], "pwaa") && !strcmp(keys[1], "pwbb")) ||
+                     (!strcmp(keys[0], "pwbb") && !strcmp(keys[1], "pwaa")))); // storage order, whichever it is
+    CHECK(app_secret_list(MESH, keys, 1) == 1 && (!strcmp(keys[0], "pwaa") || !strcmp(keys[0], "pwbb"))); // capped
+    CHECK(app_secret_list(MESH, keys, 0) == 0 && app_secret_list(MESH, NULL, 4) == 0);
+    CHECK(app_secret_list(OTHER, keys, 4) == 0); // no prefix declared: no secrets, whatever its namespace holds
+    CHECK(app_secret_list(OS, keys, 4) == 0 && app_secret_list((lichen_ctx_t)99, keys, 4) == 0);
+    caps_refused = 0;
+    CHECK(app_secret_list(NOCAP, keys, 4) == 0 && caps_refused == 1);
+    CHECK(app_secret_erase(MESH, "pwaa") && app_secret_list(MESH, keys, 4) == 1 && !strcmp(keys[0], "pwbb"));
+    CHECK(app_secret_erase(MESH, "pwbb"));
+    nvs_open("a.meshcore", NVS_READWRITE, &h);
+    nvs_erase_key(h, "~:moved");
+    nvs_erase_key(h, "~other");
+    nvs_erase_key(h, "pwplain");
+    nvs_open("a.other", NVS_READWRITE, &h);
+    nvs_erase_key(h, "~pwzz");
+}
+
 static void clear_data_takes_the_secrets(void) {
     CHECK(count_ns("a.meshcore") > 0);
     CHECK(app_settings_erase_all(MESH));
@@ -320,6 +383,7 @@ int main(void) {
     secrets_scoped_to_the_declaring_app();
     secrets_need_the_capability();
     clear_data_takes_the_secrets();
+    secrets_are_listed_for_their_owner(); // after Clear data: the namespace is empty
     entries_are_counted();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
