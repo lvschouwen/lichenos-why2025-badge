@@ -3,7 +3,8 @@
 // a contact and erases only the old plain key, so the stored secret outlives it. Pure, host-tested in
 // host_tests/mesh_pw_sweep_test.c; meshcore_run.c supplies the storage and the contact table. Fails closed: a secret is
 // erased only when the table was loaded completely, the contact table says "not there" for a key that rr_pw_key made;
-// a busy table (the first UNKNOWN ends the sweep, so a contended lock costs one wait), a key of another shape or a failed listing leaves everything as it is (an erase cannot be undone).
+// a busy table (the first UNKNOWN ends the sweep, so a contended lock costs one wait), a key of another shape or a
+// failed listing leaves everything as it is (an erase cannot be undone).
 // The namespace is walked in batches of PW_SWEEP_BATCH (the stack bound), skipping what was kept. Keys are secrets'
 // names: never logged, buffers wiped.
 
@@ -36,9 +37,11 @@ typedef struct {
 bool pw_load_complete(long file_bytes, long records_in_table, long table_cap);
 
 // trusted: the contact table is known complete (pw_load_complete and the list lives on /storage); false does nothing.
-// Returns how many secrets were erased; *left is set to the number kept or left unchecked up to where the sweep ended (kept contacts, unknown state,
-// unparsable keys, failed erases). Either out pointer may be NULL.
-size_t pw_sweep(pw_sweep_io_t const *io, bool trusted, size_t *left);
+// Returns how many secrets were erased; *left is set to the number kept or left unchecked up to where the sweep ended
+// (kept contacts, unknown state, unparsable keys, failed erases).
+// *stopped_early is set when a busy or not-running contact table ended the sweep.
+// The out pointers may be NULL.
+size_t pw_sweep(pw_sweep_io_t const *io, bool trusted, size_t *left, bool *stopped_early);
 
 #ifdef __cplusplus
 }

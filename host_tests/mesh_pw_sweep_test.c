@@ -68,9 +68,9 @@ static void only_gone_contacts_lose_their_secret(void) {
     state_for[0x0b] = PW_CONTACT_GONE;
     state_for[0x0c] = PW_CONTACT_UNKNOWN; // a busy table never counts as gone
     size_t left = 99;
-    CHECK(pw_sweep(&io, true, &left) == 1 && left == 2 && nkeys == 2);
+    CHECK(pw_sweep(&io, true, &left, NULL) == 1 && left == 2 && nkeys == 2);
     CHECK(!strcmp(keys[0], "pw0a0000000000") && !strcmp(keys[1], "pw0c0000000000"));
-    CHECK(pw_sweep(&io, true, NULL) == 0); // nothing more to drop
+    CHECK(pw_sweep(&io, true, NULL, NULL) == 0); // nothing more to drop
 }
 
 static void odd_keys_and_failures_are_left_alone(void) {
@@ -81,8 +81,8 @@ static void odd_keys_and_failures_are_left_alone(void) {
     state_for[0x0a] = state_for[0x0d] = PW_CONTACT_GONE;
     erase_fail_at = 0; // the first erase fails (only the parsable key reaches it)
     size_t left = 0;
-    CHECK(pw_sweep(&io, true, &left) == 0 && left == 3 && nkeys == 3 && erases == 1);
-    CHECK(pw_sweep(&io, true, &left) == 1 && left == 2 && nkeys == 2); // the retry works, the odd ones stay
+    CHECK(pw_sweep(&io, true, &left, NULL) == 0 && left == 3 && nkeys == 3 && erases == 1);
+    CHECK(pw_sweep(&io, true, &left, NULL) == 1 && left == 2 && nkeys == 2); // the retry works, the odd ones stay
 }
 
 static void a_long_namespace_is_walked_in_batches(void) {
@@ -93,7 +93,7 @@ static void a_long_namespace_is_walked_in_batches(void) {
         add(k);
         state_for[i] = PW_CONTACT_GONE;
     }
-    CHECK(pw_sweep(&io, true, NULL) == 20 && nkeys == 0); // more than one batch
+    CHECK(pw_sweep(&io, true, NULL, NULL) == 20 && nkeys == 0); // more than one batch
 }
 
 // #413 review: 16 live passwords fill the first batch, the orphan behind them is still reached
@@ -106,7 +106,7 @@ static void an_orphan_behind_a_full_batch_is_dropped(void) {
     }
     state_for[PW_SWEEP_BATCH] = PW_CONTACT_GONE;
     size_t left = 0;
-    CHECK(pw_sweep(&io, true, &left) == 1 && left == PW_SWEEP_BATCH && nkeys == PW_SWEEP_BATCH);
+    CHECK(pw_sweep(&io, true, &left, NULL) == 1 && left == PW_SWEEP_BATCH && nkeys == PW_SWEEP_BATCH);
 }
 
 // A table that may be incomplete, or a busy one: nothing is erased, however the contacts read
@@ -118,12 +118,17 @@ static void untrusted_or_unknown_erases_nothing(void) {
         add(k);
         state_for[i] = PW_CONTACT_GONE;
     }
-    CHECK(pw_sweep(&io, false, NULL) == 0 && nkeys == 20 && erases == 0);
+    CHECK(pw_sweep(&io, false, NULL, NULL) == 0 && nkeys == 20 && erases == 0);
     for (int i = 0; i < 256; i++) {
         state_for[i] = PW_CONTACT_UNKNOWN;
     }
     size_t left = 0;
-    CHECK(pw_sweep(&io, true, &left) == 0 && nkeys == 20 && erases == 0 && left == PW_SWEEP_BATCH); // the first busy answer ends it
+    bool stopped = false;
+    CHECK(pw_sweep(&io, true, &left, &stopped) == 0 && stopped && nkeys == 20 && erases == 0 && left == PW_SWEEP_BATCH);
+    stopped = true;
+    reset();
+    add("pw0a0000000000");
+    CHECK(pw_sweep(&io, true, NULL, &stopped) == 0 && !stopped); // a sweep that ran through is not "early"
 }
 
 // The first busy answer ends the sweep: later keys are not asked, whatever they would have said
@@ -143,7 +148,8 @@ static void a_busy_answer_stops_the_sweep(void) {
     pw_sweep_io_t const busy = {NULL, list, counting_contact, erase};
     asked                    = 0;
     size_t left              = 0;
-    CHECK(pw_sweep(&busy, true, &left) == 3 && asked == 4 && nkeys == 17 && left == 13); // 0..2 erased, 3 busy: stop, the rest of the batch kept
+    bool stopped             = false;
+    CHECK(pw_sweep(&busy, true, &left, &stopped) == 3 && stopped && asked == 4 && nkeys == 17 && left == 13); // 0..2 erased, 3 busy: stop, the rest of the batch kept
 }
 
 // A listing that claims more keys than the batch holds is not believed: nothing is erased or read past the buffer
@@ -162,7 +168,7 @@ static void an_overrunning_listing_is_refused(void) {
         state_for[i] = PW_CONTACT_GONE;
     }
     pw_sweep_io_t const bad = {NULL, overrun_list, contact, erase};
-    CHECK(pw_sweep(&bad, true, NULL) == 0 && erases == 0);
+    CHECK(pw_sweep(&bad, true, NULL, NULL) == 0 && erases == 0);
 }
 
 static void a_complete_load_is_known_by_the_file(void) {

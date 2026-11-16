@@ -113,7 +113,11 @@ static void sweep_leftover_passwords(void) {
     // card in use /storage holds the core set, merged with the card by the mesh task a while later)
     bool trusted = mesh_contacts_load_complete() && mesh_ctab_run_place() == MESH_CTAB_ON_STORAGE;
     size_t left   = 0;
-    size_t erased = pw_sweep(&io, trusted, &left);
+    bool   stopped = false;
+    size_t erased  = pw_sweep(&io, trusted, &left, &stopped);
+    if (stopped) {
+        ESP_LOGI(TAG, "password sweep ended early (mesh busy); kept the rest"); // no key, no name
+    }
     if (!trusted) {
         ESP_LOGI(TAG, "contact list not known complete: remembered passwords not checked");
     } else if (erased) {
