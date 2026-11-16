@@ -68,7 +68,8 @@ class FakeBadge:
         rows = ["#9 t=%d rx advert flood hops=1 len=44 rssi=-87.4 snr=6.5" % (up - 40),
                 "#8 t=%d rx grp_txt flood hops=0 len=61 rssi=-90.0 snr=-0.5" % (up - 70)]
         if self.tx_result:
-            rows.insert(1, "#10 t=%d tx grp_txt flood hops=0 len=61 retry=0 result=%s" % (up - 2, self.tx_result))
+            rows.insert(1, "#%d t=%d tx grp_txt flood hops=0 len=61 retry=0 result=%s" % (9 + self.mtx, up - 2,
+                                                                                         self.tx_result))
         return "\n".join(["air log: %d entries, newest first, 10 logged since boot, 0 dropped" % len(rows)] + rows) + "\n"
 
     def run(self, line):
@@ -679,6 +680,75 @@ class TxAirTest(unittest.TestCase):
         e = self.send_with("ok")
         self.assertEqual(len(e.driver.attempts), 1)
         self.assertEqual(e.badge.log.count("mesh airlog"), 1)
+
+    def test_a_late_entry_is_found_on_the_one_reread(self):
+        e = Env(self)
+        e.start()
+        orig, calls = e.badge.run, []
+
+        def run(line):
+            if line == "mesh airlog":
+                calls.append(e.read("ledger-%s.csv" % e.driver.profile.name))
+                if len(calls) == 1:  # the transmit has not ended yet
+                    return 0, "air log: empty, 0 dropped\n"
+            return orig(line)
+        e.badge.run = run
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("none_yet", calls[1])  # durable between the two reads
+        self.assertEqual(e.ledger()[0]["tx_air"], "ok")
+        self.assertEqual(len(e.driver.attempts), 1)
+
+    def test_no_entry_after_the_reread_is_missing(self):
+        e = self.send_with(None)
+        self.assertEqual(e.badge.log.count("mesh airlog"), 2)
+        self.assertEqual(e.ledger()[0]["tx_air"], "missing")
+
+    def test_an_interrupted_reread_leaves_none_yet(self):
+        e = Env(self)
+        e.start()
+        e.badge.tx_result = None
+        e.clock.sleep = lambda s: (_ for _ in ()).throw(KeyboardInterrupt) if s == sd.AIR_RETRY_S else None
+        with self.assertRaises(KeyboardInterrupt):
+            e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(e.ledger()[0]["tx_air"], "none_yet")
+
+    def test_two_sends_close_together_claim_their_own_entries(self):
+        e = Env(self)
+        e.start()
+        e.badge.tx_result = "ok"
+        e.driver.send(sp.ZERO_HOP)
+        e.badge.tx_result = "timeout"
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual([r["tx_air"] for r in e.ledger()], ["ok", "timeout"])
+
+    def test_a_repeat_row_is_not_a_second_post(self):
+        e = Env(self)
+        e.start()
+        orig = e.badge.run
+        # the badge's airlog, newest first: the repeat (#11) of the post #10; no first transmission of a second post
+        e.badge.run = lambda line: (0, "air log: 2 entries, newest first, 11 logged since boot, 0 dropped\n"
+                                    "#11 t=%d tx grp_txt flood hops=0 len=61 retry=1 result=ok\n"
+                                    "#10 t=%d tx grp_txt flood hops=0 len=61 retry=0 result=ok\n"
+                                    % (int(e.clock.t) - T0 + 1000 - 1, int(e.clock.t) - T0 + 1000 - 2)) \
+            if line == "mesh airlog" else orig(line)
+        e.driver.send(sp.ZERO_HOP)
+        self.assertEqual(e.driver.air_seq, 10)
+        e.clock.sleep(10)
+        e.driver.send(sp.ZERO_HOP)  # same airlog: #10 is claimed, #11 is a repeat, so nothing is left
+        self.assertEqual([r["tx_air"] for r in e.ledger()], ["ok", "missing"])
+
+    def test_resume_of_a_seven_column_ledger_then_a_send(self):
+        e = Env(self)
+        e.seed_ledger([(1, 100, "zero_hop", "sent")])
+        e.driver.load_ledger()
+        e.driver.run_id = "abcd"
+        e.driver.read_state()
+        e.driver.send(sp.ZERO_HOP)
+        rows = e.ledger()  # DictReader: the old head stays, the new row is longer than it
+        self.assertEqual([r["result"] for r in rows], ["sent", "sent"])
+        self.assertEqual(rows[1][None], ["ok"])
+        self.assertEqual(len(e.driver.attempts), 2)
 
     def test_a_failing_airlog_read_is_missing_not_a_stop(self):
         e = Env(self)

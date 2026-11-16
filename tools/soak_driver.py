@@ -59,7 +59,8 @@ STATE_KEYS = ("boot", "crash", "slot", "c6rs")
 LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result", "tx_air"]
 # One tx row of `mesh airlog` (airlog_console_line, mesh_airlog.c): "#12 t=3405 tx grp_txt flood hops=0 len=61 retry=0
 # result=ok". t is the badge uptime in seconds, the same clock as `up=` of `fw soak`. No address is printed.
-AIRLOG_TX_RX = re.compile(r"^#(\d+) t=(\d+) tx (\S+) \S+ hops=\d+ len=(\d+) retry=\d+ result=(\w+)\s*$", re.M)
+AIRLOG_TX_RX = re.compile(r"^#(\d+) t=(\d+) tx (\S+) \S+ hops=\d+ len=(\d+) retry=(\d) result=(\w+)\s*$", re.M)
+AIR_RETRY_S = 30       # a late transmit: one re-read this long after the first
 AIRLOG_SLACK_S = 1     # t= and up= are whole seconds, read at different moments
 ATTEMPT_RESULTS = ("sent", "failed", "pending")  # a pending row: the line may have gone out, so it counts
 RETRIES, RETRY_WAIT_S = 3, 20
@@ -225,6 +226,7 @@ class Driver:
         self.seq = 0
         # every send that reached `mesh send`: (monotonic time, scope kind, plan slot or None when reloaded)
         self.attempts: List[Tuple[float, str, Optional[int]]] = []
+        self.air_seq = 0  # the last airlog `#n` claimed by a send (n restarts at a boot, and a boot is a Blocker)
         self.bad = 0                # failed or skipped sends in a row
         self.contacts_bad = 0       # Contacts blocks in a row that could not open the list
         self.contacts_opened = False
@@ -332,32 +334,47 @@ class Driver:
                 raise Blocker(names[key], silent=True)
         self.write("## state %s epoch=%d" % (" ".join("%s=%d" % (k, state[k]) for k in sorted(state) if k != "up"), self.clock.now()))
 
-    @staticmethod
-    def parse_tx_air(reply: str, up_from: Optional[int], up_to: Optional[int]) -> Tuple[str, str]:
-        """(ledger value, transcript note) for this send: the badge's own channel-message tx entry closest at or after
-        the send time (up_from), not after the read before it (up_to). `missing` when the airlog has none, or no time
-        is known to match by."""
+    def find_tx_air(self, up_from: Optional[int], up_to: Optional[int]) -> Optional[Tuple[str, str]]:
+        """One `mesh airlog` line through the guarded route (not a send: no cap counts it). The badge's own
+        channel-message tx entry of this send: the earliest first transmission (retry=0; a repeat belongs to a post
+        already counted) between the read before the send and `up_to`, with a `#n` higher than the last one claimed,
+        so a neighbouring send never takes it. -> (ledger value, transcript note), None when there is no entry (yet),
+        the read failed, or no time is known to match by."""
         if up_from is None or up_to is None:
-            return "missing", "## tx_air missing (no uptime to match by)"
-        hits = [(int(t), int(n), length, res) for n, t, kind, length, res in AIRLOG_TX_RX.findall(reply)
-                if kind == "grp_txt" and up_from - AIRLOG_SLACK_S <= int(t) <= up_to + AIRLOG_SLACK_S]
-        if not hits:
-            return "missing", "## tx_air missing"
-        t, _, length, res = min(hits)
-        value = res if res in ("ok", "timeout") else "failed"
-        return value, "## tx_air %s t=%d len=%s" % (value, t, length)
-
-    def read_tx_air(self, up_from: Optional[int], up_to: Optional[int]) -> str:
-        """One `mesh airlog` line through the guarded route; not a send, so no cap counts it. A badge that does not
-        answer it gives `missing`, never a stop: the send itself already went."""
+            return None
         try:
             reply = self.line("mesh airlog", judged=False)  # its header says "0 dropped": not a refusal
         except StepError:
-            self.write("## tx_air missing (airlog read failed)")
-            return "missing"
-        value, note = self.parse_tx_air(reply, up_from, up_to)
-        self.write(note)
-        return value
+            return None
+        hits = [(int(t), int(n), length, res) for n, t, kind, length, retry, res in AIRLOG_TX_RX.findall(reply)
+                if kind == "grp_txt" and retry == "0" and int(n) > self.air_seq and
+                up_from - AIRLOG_SLACK_S <= int(t) <= up_to + AIRLOG_SLACK_S]
+        if not hits:
+            return None
+        t, n, length, res = min(hits)
+        self.air_seq = n
+        value = res if res in ("ok", "timeout") else "failed"
+        return value, "## tx_air %s t=%d len=%s" % (value, t, length)
+
+    def settle_tx_air(self, row: List[object], up_from: Optional[int], up_to: Optional[int]) -> None:
+        """Ledger the tx entry. The air log gets an entry when the transmit ENDS, so a post still waiting on backoff or
+        the airtime budget has none yet: that is `none_yet` (written at once, so an interrupted run leaves it), and
+        ONE re-read AIR_RETRY_S later decides `missing`. The air log holds about 75 s, so the re-read cannot wait for
+        the next send."""
+        found = self.find_tx_air(up_from, up_to)
+        if found is None:
+            self.write("## tx_air none_yet")
+            self.ledger_update(row[:7] + ["none_yet"])
+            if up_to is None:
+                found = None
+            else:
+                self.clock.sleep(AIR_RETRY_S)
+                found = self.find_tx_air(up_from, up_to + AIR_RETRY_S)
+        if found is None:
+            self.write("## tx_air missing")
+        else:
+            self.write(found[1])
+        self.ledger_update(row[:7] + [found[0] if found else "missing"])
 
     def check_home(self) -> None:
         rc, out = self.badge.run("ui")
@@ -371,6 +388,8 @@ class Driver:
         return self.path("ledger-%s.csv" % (profile or self.profile.name))
 
     def ledger(self, row: List[object]) -> None:
+        # A resumed run whose file has the 7-column head of before #480 keeps it and gets 8-column rows below it:
+        # csv.DictReader (load_ledger, soak_report) reads both, a positional reader must not be used on it.
         path = self.ledger_path()
         new = not os.path.exists(path)
         with open(path, "a", newline="", encoding="utf-8") as f:
@@ -549,8 +568,10 @@ class Driver:
             result = "failed"
         self.clock.sleep(SETTLE_S)
         after = self.read_state()
-        tx_air = self.read_tx_air(before.get("up"), after.get("up")) if result == "sent" else ""
-        self.ledger_update(row[:5] + [after.get("mtx", ""), result, tx_air])
+        row = row[:5] + [after.get("mtx", ""), result, ""]
+        self.ledger_update(row)
+        if result == "sent":
+            self.settle_tx_air(row, before.get("up"), after.get("up"))
         if result == "sent":
             self.bad = 0
         else:

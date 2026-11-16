@@ -284,5 +284,42 @@ class ShippedBudgetsTest(unittest.TestCase):
             self.assertIn("notice_slow_ms", out.getvalue())
 
 
+class AirSplitTest(unittest.TestCase):
+    HEAD = "seq,time,scope,id,tx_before,tx_after,result,tx_air\n"
+
+    def ledger(self, text):
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        with open(os.path.join(d, "ledger-full.csv"), "w") as f:
+            f.write(text)
+        return d
+
+    def report(self, arg):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = sr.main(["soak_report.py", "air", arg])
+        return rc, out.getvalue()
+
+    def test_split_per_scope_from_a_run_dir(self):
+        d = self.ledger(self.HEAD + "1,1,zero_hop,x,0,1,sent,ok\n2,2,zero_hop,x,1,2,sent,missing\n"
+                        "3,3,zero_hop,x,2,3,sent,failed\n4,4,regional,x,3,4,sent,none_yet\n"
+                        "5,5,regional,x,4,4,failed,\n6,6,regional,x,4,5,sent,timeout\n")
+        rc, out = self.report(d)
+        self.assertEqual(rc, 0)
+        self.assertIn("zero_hop      3       1           2 (1 0 1)             0        0", out)
+        self.assertIn("regional      2       0           1 (0 1 0)             1        0", out)  # the failed send is not counted
+        self.assertIn("heard: see the peer's reach table", out)
+
+    def test_a_ledger_without_the_column_is_unknown(self):
+        d = self.ledger("seq,time,scope,id,tx_before,tx_after,result\n1,1,zero_hop,x,0,1,sent\n")
+        rc, out = self.report(os.path.join(d, "ledger-full.csv"))
+        self.assertEqual(rc, 0)
+        self.assertIn("zero_hop      1       0           0 (0 0 0)             0        1", out)
+
+    def test_unreadable_is_exit_2(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.report("/nonexistent/ledger.csv")[0], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

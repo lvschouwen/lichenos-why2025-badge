@@ -20,7 +20,15 @@ lacks is a broken sampler), 2 a tool error (unreadable file, bad budget file: th
 `unplanned`, and `no data` on a probe or log figure (including every log figure when --log is not given), are shown
 and counted in the summary but do not fail the run.
 Worst = the value furthest past the expectation (min for >= and >, max for <= and <, farthest from expected for a
-tolerance, max for unplanned). Standard library only."""
+tolerance, max for unplanned). Standard library only.
+
+`soak_report.py air <ledger-<profile>.csv | run-dir>` (#480) reads the use-soak driver's ledger and prints, per scope
+(profile key: zero_hop, regional), the sends the badge counted (`sent`) split by the badge's own air log entry: on air
+(ok) against not on air (failed, timeout, missing) and not yet seen (none_yet); a ledger from before #480 has no
+column and counts as unknown. Whether a post was heard is outside the badge: see the peer's reach table. Exit 0, or 2
+when the ledger cannot be read."""
+import csv
+import glob
 import os
 import re
 import statistics
@@ -247,6 +255,49 @@ def run_census(args: List[str]) -> int:
     return 0
 
 
+AIR_VALUES = ("ok", "failed", "timeout", "missing", "none_yet")
+
+
+def air_counts(path: str) -> Dict[str, Dict[str, int]]:
+    """{scope: {"sent": n, "ok": n, ..., "unknown": n}} of the ledger's sent rows. unknown: no tx_air column or an
+    empty one (a ledger of an earlier driver). The scope is the profile key the ledger stores, never a name."""
+    out: Dict[str, Dict[str, int]] = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row.get("result") != "sent":
+                continue
+            c = out.setdefault(row.get("scope") or "?", dict.fromkeys(("sent",) + AIR_VALUES + ("unknown",), 0))
+            v = row.get("tx_air") or ""
+            c["sent"] += 1
+            c[v if v in AIR_VALUES else "unknown"] += 1
+    return out
+
+
+def run_air(args: List[str]) -> int:
+    if len(args) != 1:
+        print("soak_report.py air <ledger-<profile>.csv | run-dir>", file=sys.stderr)
+        return 2
+    path = args[0]
+    try:
+        if os.path.isdir(path):
+            found = sorted(glob.glob(os.path.join(path, "ledger-*.csv")))
+            if not found:
+                raise OSError("no ledger-*.csv in " + path)
+            path = found[0]
+        counts = air_counts(path)
+    except (OSError, UnicodeError, csv.Error) as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
+    print("scope      sent  on air  not on air (failed timeout missing)  not yet seen  unknown")
+    for scope in sorted(counts):
+        c = counts[scope]
+        print("%-10s %4d  %6d  %10d (%d %d %d)  %12d  %7d" % (
+            scope, c["sent"], c["ok"], c["failed"] + c["timeout"] + c["missing"], c["failed"], c["timeout"],
+            c["missing"], c["none_yet"], c["unknown"]))
+    print("heard: see the peer's reach table")
+    return 0
+
+
 def take_option(args: List[str], name: str):
     """-> (args without `name VALUE`, VALUE); VALUE is None when absent and "" when the value is missing."""
     if name not in args:
@@ -288,6 +339,8 @@ def main(argv: Sequence[str]) -> int:
     try:
         if args and args[0] == "census":
             return run_census(args[1:])
+        if args and args[0] == "air":
+            return run_air(args[1:])
         if args and args[0] == "trend":
             return run_trend(args[1:])
     except ValueError as e:
