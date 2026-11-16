@@ -3,6 +3,8 @@
 // mesh_lock (no app port: nothing to expose on a network). MyMesh's loop() holds the lock, so its callbacks (the Listener below) already run under it.
 #include "mesh_int.h"
 #include "mesh_cmd.h"
+#include "mesh_pw_sweep.h"
+#include <sys/stat.h>
 
 using namespace mesh_int;
 
@@ -270,6 +272,21 @@ bool (*const mesh_int::keep_contact)(ContactInfo const &c) = BadgeMesh::keepCont
 static char const     CONTACTS_FILE[] = "/contacts3";
 static fs_shim_held_t contacts_taken; // the mesh task: taken under the lock, written right after it
 static int            contacts_taken_n;
+static bool           contacts_complete; // #413: the table read at boot holds every record of contacts3, no more, no fewer
+
+// Right after begin() loaded the table: DataStore::loadContacts stops silently at an open failure, a short read or a
+// full table, which would make every contact look removed to the password sweep (meshcore_run.c)
+static void contacts_note_load(BadgeMesh *n, char const *files_dir) {
+    char        path[96];
+    struct stat st;
+    snprintf(path, sizeof(path), "%s%s", files_dir, CONTACTS_FILE);
+    long bytes        = stat(path, &st) == 0 ? (long)st.st_size : -1;
+    contacts_complete = pw_load_complete(bytes, n->getNumContacts(), mesh_ctab_run_cap());
+}
+
+extern "C" bool mesh_contacts_load_complete(void) {
+    return __atomic_load_n(&contacts_complete, __ATOMIC_ACQUIRE);
+}
 
 static void contacts_hold_off_locked(void) {
     fs_shim_hold(NULL); // drops what is parked: the save that follows has the newest state
@@ -845,6 +862,7 @@ static bool start_locked(char const *files_dir) {
     bool first_boot = !SPIFFS.exists("/prefs.json") && !SPIFFS.exists("/node_prefs");
     radio_driver.begin();
     n->begin();
+    contacts_note_load(n, files_dir);
     ident_verify(n); // before anything can transmit: the task does not exist yet
     apply_boot_radio(n, first_boot);
     n->loadConsoleScope(); // #290: before the task runs, so the first console flood already has it

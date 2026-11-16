@@ -86,9 +86,10 @@ to `layers.conf`):
   Secrets (#288): an app declares one key prefix in `lichen_app_t.secret_prefix` (MeshCore: `pw`); its keys under it
   go through `app_secret_get/set/erase` only (the plain calls refuse them), never reach a backup or a keep list, are
   never printed by the OS, and go with Clear data and a factory reset. Stored as `~<key>` in the same namespace.
-  `app_secret_list(ctx, keys, cap)` (#413) gives the keys (never values) of the app's OWN stored secrets, at most `cap`
-  of `APP_SECRET_KEY_BUF` bytes each, so an app can drop secrets whose owner is gone (MeshCore: a removed contact's
-  password, swept once per boot after the contacts load). Needs `SECRETS`; another app's namespace is unreachable.
+  `app_secret_list(ctx, keys, cap, skip, &more)` (#413) gives the keys (never values) of the app's OWN stored secrets:
+  it passes `skip`, writes at most `cap` of `APP_SECRET_KEY_BUF` bytes each and sets `more` when others follow, so an
+  app walks the whole namespace in batches and can drop secrets whose owner is gone (MeshCore: a removed contact's
+  password, swept once per boot, only when its contact list is known complete). Needs `SECRETS`; another app's namespace is unreachable.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
   name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(ctx, wait_ms)` (false:
   no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(ctx, errno_or_0)` (only

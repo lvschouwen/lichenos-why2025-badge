@@ -48,6 +48,9 @@ void meshcore_app_register(void);
 bool mesh_start(char const *files_dir);
 // The task runs (started, not stopped)
 bool mesh_running(void);
+// #413: the contact table read at the first start holds every record of contacts3 (no short read, not full). False
+// when it may be missing contacts, and before the first start.
+bool mesh_contacts_load_complete(void);
 typedef enum {
     MESH_STOP_USER,   // on request (#103): mesh_start brings it back
     MESH_STOP_UPDATE, // a firmware update is coming (#76): final, no start before the restart

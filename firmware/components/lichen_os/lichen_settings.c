@@ -294,10 +294,13 @@ bool app_secret_erase(lichen_ctx_t ctx, char const *key) {
 }
 
 // Only the caller's own namespace is walked (lichen_sys_ctx_settings_ns gives no other), and only names are copied
-size_t app_secret_list(lichen_ctx_t ctx, char (*keys)[APP_SECRET_KEY_BUF], size_t cap) {
+size_t app_secret_list(lichen_ctx_t ctx, char (*keys)[APP_SECRET_KEY_BUF], size_t cap, size_t skip, bool *more) {
     char                ns[16];
     char const         *name = NULL;
     lichen_app_t const *app  = NULL;
+    if (more) {
+        *more = false;
+    }
     if (!keys || cap == 0 || !lichen_sys_caps_ok(ctx, CAP_SECRETS, "app_secret") ||
         lichen_sys_ctx_settings_ns(ctx, "app_secret", ns, sizeof(ns), &name) != GATE_APP_ID ||
         !lichen_sys_ctx_resolve(ctx, &app, "app_secret") || !app || !app->secret_prefix) {
@@ -306,13 +309,27 @@ size_t app_secret_list(lichen_ctx_t ctx, char (*keys)[APP_SECRET_KEY_BUF], size_
     nvs_iterator_t it  = NULL;
     size_t         n   = 0;
     esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, ns, NVS_TYPE_STR, &it);
-    for (; err == ESP_OK && n < cap; err = nvs_entry_next(&it)) {
+    char           key[APP_SECRET_KEY_BUF];
+    for (; err == ESP_OK; err = nvs_entry_next(&it)) {
         nvs_entry_info_t info;
         if (nvs_entry_info(it, &info) != ESP_OK) {
             break;
         }
-        n += app_secret_key_from_stored(app->secret_prefix, info.key, keys[n], APP_SECRET_KEY_BUF);
+        if (!app_secret_key_from_stored(app->secret_prefix, info.key, key, sizeof(key))) {
+            continue;
+        }
+        if (skip) {
+            skip--;
+        } else if (n < cap) {
+            memcpy(keys[n++], key, sizeof(key));
+        } else {
+            if (more) {
+                *more = true;
+            }
+            break;
+        }
     }
+    wipe(key, sizeof(key));
     nvs_release_iterator(it);
     return n;
 }

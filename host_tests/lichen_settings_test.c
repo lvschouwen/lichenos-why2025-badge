@@ -334,16 +334,23 @@ static void secrets_are_listed_for_their_owner(void) {
     nvs_open("a.other", NVS_READWRITE, &h);
     nvs_set_str(h, "~pwzz", "made-up-10");              // another app's namespace
     memset(keys, 'x', sizeof(keys));
-    size_t n = app_secret_list(MESH, keys, 4);
-    CHECK(n == 2 && ((!strcmp(keys[0], "pwaa") && !strcmp(keys[1], "pwbb")) ||
-                     (!strcmp(keys[0], "pwbb") && !strcmp(keys[1], "pwaa")))); // storage order, whichever it is
-    CHECK(app_secret_list(MESH, keys, 1) == 1 && (!strcmp(keys[0], "pwaa") || !strcmp(keys[0], "pwbb"))); // capped
-    CHECK(app_secret_list(MESH, keys, 0) == 0 && app_secret_list(MESH, NULL, 4) == 0);
-    CHECK(app_secret_list(OTHER, keys, 4) == 0); // no prefix declared: no secrets, whatever its namespace holds
-    CHECK(app_secret_list(OS, keys, 4) == 0 && app_secret_list((lichen_ctx_t)99, keys, 4) == 0);
+    bool   more = true;
+    size_t n    = app_secret_list(MESH, keys, 4, 0, &more);
+    CHECK(n == 2 && !more && ((!strcmp(keys[0], "pwaa") && !strcmp(keys[1], "pwbb")) ||
+                              (!strcmp(keys[0], "pwbb") && !strcmp(keys[1], "pwaa")))); // storage order, whichever
+    char first[APP_SECRET_KEY_BUF], second[APP_SECRET_KEY_BUF];
+    snprintf(first, sizeof(first), "%s", keys[0]);
+    snprintf(second, sizeof(second), "%s", keys[1]);
+    // paged: one at a time by skipping what was passed
+    CHECK(app_secret_list(MESH, keys, 1, 0, &more) == 1 && more && !strcmp(keys[0], first));
+    CHECK(app_secret_list(MESH, keys, 1, 1, &more) == 1 && !more && !strcmp(keys[0], second));
+    CHECK(app_secret_list(MESH, keys, 1, 2, &more) == 0 && !more);
+    CHECK(app_secret_list(MESH, keys, 0, 0, &more) == 0 && app_secret_list(MESH, NULL, 4, 0, NULL) == 0);
+    CHECK(app_secret_list(OTHER, keys, 4, 0, &more) == 0 && !more); // no prefix: no secrets, whatever the namespace holds
+    CHECK(app_secret_list(OS, keys, 4, 0, NULL) == 0 && app_secret_list((lichen_ctx_t)99, keys, 4, 0, NULL) == 0);
     caps_refused = 0;
-    CHECK(app_secret_list(NOCAP, keys, 4) == 0 && caps_refused == 1);
-    CHECK(app_secret_erase(MESH, "pwaa") && app_secret_list(MESH, keys, 4) == 1 && !strcmp(keys[0], "pwbb"));
+    CHECK(app_secret_list(NOCAP, keys, 4, 0, NULL) == 0 && caps_refused == 1);
+    CHECK(app_secret_erase(MESH, "pwaa") && app_secret_list(MESH, keys, 4, 0, NULL) == 1 && !strcmp(keys[0], "pwbb"));
     CHECK(app_secret_erase(MESH, "pwbb"));
     nvs_open("a.meshcore", NVS_READWRITE, &h);
     nvs_erase_key(h, "~:moved");

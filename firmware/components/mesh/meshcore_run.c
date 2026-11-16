@@ -13,6 +13,7 @@
 #include "lora_app.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_ctab_run.h"
 #include "mesh_pw_sweep.h"
 #include "mesh_remote.h"
 
@@ -82,9 +83,9 @@ bool meshcore_autostart_set(bool on) {
 
 // #413: once per boot, after the contacts are loaded, the remembered passwords of contacts that are gone are erased
 // (a rollback to a pre-#288 image deletes a contact without its stored secret). Names only, no value is read.
-static size_t sweep_list(void *env, char (*keys)[APP_SECRET_KEY_BUF], size_t cap) {
+static size_t sweep_list(void *env, char (*keys)[APP_SECRET_KEY_BUF], size_t cap, size_t skip, bool *more) {
     (void)env;
-    return app_secret_list(app_ctx, keys, cap);
+    return app_secret_list(app_ctx, keys, cap, skip, more);
 }
 
 static pw_contact_t sweep_contact(void *env, uint8_t const prefix[MF_PREFIX]) {
@@ -106,10 +107,15 @@ static void sweep_leftover_passwords(void) {
         return;
     }
     done          = true;
+    // An erase cannot be undone: only when contacts3 was read completely and the whole list lives on /storage (with a
+    // card in use /storage holds the core set, merged with the card by the mesh task a while later)
+    bool trusted = mesh_contacts_load_complete() && mesh_ctab_run_place() == MESH_CTAB_ON_STORAGE;
     size_t left   = 0;
-    size_t erased = pw_sweep(&io, &left);
-    if (erased) {
-        ESP_LOGI(TAG, "dropped %u remembered password(s) of removed contacts", (unsigned)erased);
+    size_t erased = pw_sweep(&io, trusted, &left);
+    if (!trusted) {
+        ESP_LOGI(TAG, "contact list not known complete: remembered passwords not checked");
+    } else if (erased) {
+        ESP_LOGI(TAG, "dropped %u remembered password(s) of removed contacts, %u kept", (unsigned)erased, (unsigned)left);
     }
 }
 

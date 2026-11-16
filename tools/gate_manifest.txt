@@ -49,7 +49,7 @@ app_secret_get	SECRETS	unspecified	lichen_settings.h
 app_secret_key_from_stored	-	unspecified	app_secret.h
 app_secret_key_secret	-	unspecified	app_secret.h
 app_secret_keys_plain	-	unspecified	app_secret.h
-app_secret_list	-	unspecified	lichen_settings.h
+app_secret_list	SECRETS	unspecified	lichen_settings.h
 app_secret_prefix_ok	-	unspecified	app_secret.h
 app_secret_set	SECRETS	unspecified	lichen_settings.h
 app_secret_stored_name	-	unspecified	app_secret.h

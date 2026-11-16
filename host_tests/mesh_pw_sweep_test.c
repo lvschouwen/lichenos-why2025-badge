@@ -13,17 +13,19 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-static char keys[20][APP_SECRET_KEY_BUF];
+static char keys[40][APP_SECRET_KEY_BUF];
 static int  nkeys;
 static pw_contact_t state_for[256]; // by the first prefix byte
 static int  erase_fail_at = -1, erases;
 
-static size_t list(void *env, char (*out)[APP_SECRET_KEY_BUF], size_t cap) {
+static size_t list(void *env, char (*out)[APP_SECRET_KEY_BUF], size_t cap, size_t skip, bool *more) {
     (void)env;
-    size_t n = (size_t)nkeys < cap ? (size_t)nkeys : cap;
+    size_t have = (size_t)nkeys > skip ? (size_t)nkeys - skip : 0;
+    size_t n    = have < cap ? have : cap;
     for (size_t i = 0; i < n; i++) {
-        memcpy(out[i], keys[i], APP_SECRET_KEY_BUF);
+        memcpy(out[i], keys[skip + i], APP_SECRET_KEY_BUF);
     }
+    *more = have > n;
     return n;
 }
 static pw_contact_t contact(void *env, uint8_t const p[MF_PREFIX]) {
@@ -66,9 +68,9 @@ static void only_gone_contacts_lose_their_secret(void) {
     state_for[0x0b] = PW_CONTACT_GONE;
     state_for[0x0c] = PW_CONTACT_UNKNOWN; // a busy table never counts as gone
     size_t left = 99;
-    CHECK(pw_sweep(&io, &left) == 1 && left == 2 && nkeys == 2);
+    CHECK(pw_sweep(&io, true, &left) == 1 && left == 2 && nkeys == 2);
     CHECK(!strcmp(keys[0], "pw0a0000000000") && !strcmp(keys[1], "pw0c0000000000"));
-    CHECK(pw_sweep(&io, NULL) == 0); // nothing more to drop
+    CHECK(pw_sweep(&io, true, NULL) == 0); // nothing more to drop
 }
 
 static void odd_keys_and_failures_are_left_alone(void) {
@@ -79,11 +81,11 @@ static void odd_keys_and_failures_are_left_alone(void) {
     state_for[0x0a] = state_for[0x0d] = PW_CONTACT_GONE;
     erase_fail_at = 0; // the first erase fails (only the parsable key reaches it)
     size_t left = 0;
-    CHECK(pw_sweep(&io, &left) == 0 && left == 3 && nkeys == 3 && erases == 1);
-    CHECK(pw_sweep(&io, &left) == 1 && left == 2 && nkeys == 2); // the retry works, the odd ones stay
+    CHECK(pw_sweep(&io, true, &left) == 0 && left == 3 && nkeys == 3 && erases == 1);
+    CHECK(pw_sweep(&io, true, &left) == 1 && left == 2 && nkeys == 2); // the retry works, the odd ones stay
 }
 
-static void a_batch_is_bounded(void) {
+static void a_long_namespace_is_walked_in_batches(void) {
     reset();
     for (int i = 0; i < 20; i++) {
         char k[APP_SECRET_KEY_BUF];
@@ -91,14 +93,56 @@ static void a_batch_is_bounded(void) {
         add(k);
         state_for[i] = PW_CONTACT_GONE;
     }
-    CHECK(pw_sweep(&io, NULL) == PW_SWEEP_BATCH && nkeys == 4);
-    CHECK(pw_sweep(&io, NULL) == 4 && nkeys == 0);
+    CHECK(pw_sweep(&io, true, NULL) == 20 && nkeys == 0); // more than one batch
+}
+
+// #413 review: 16 live passwords fill the first batch, the orphan behind them is still reached
+static void an_orphan_behind_a_full_batch_is_dropped(void) {
+    reset();
+    for (int i = 0; i < PW_SWEEP_BATCH + 1; i++) {
+        char k[APP_SECRET_KEY_BUF];
+        snprintf(k, sizeof(k), "pw%02x0000000000", i);
+        add(k);
+    }
+    state_for[PW_SWEEP_BATCH] = PW_CONTACT_GONE;
+    size_t left = 0;
+    CHECK(pw_sweep(&io, true, &left) == 1 && left == PW_SWEEP_BATCH && nkeys == PW_SWEEP_BATCH);
+}
+
+// A table that may be incomplete, or a busy one: nothing is erased, however the contacts read
+static void untrusted_or_unknown_erases_nothing(void) {
+    reset();
+    for (int i = 0; i < 20; i++) {
+        char k[APP_SECRET_KEY_BUF];
+        snprintf(k, sizeof(k), "pw%02x0000000000", i);
+        add(k);
+        state_for[i] = PW_CONTACT_GONE;
+    }
+    CHECK(pw_sweep(&io, false, NULL) == 0 && nkeys == 20 && erases == 0);
+    for (int i = 0; i < 256; i++) {
+        state_for[i] = PW_CONTACT_UNKNOWN;
+    }
+    size_t left = 0;
+    CHECK(pw_sweep(&io, true, &left) == 0 && nkeys == 20 && erases == 0 && left == 20); // across both batches
+}
+
+static void a_complete_load_is_known_by_the_file(void) {
+    CHECK(pw_load_complete(152 * 5, 5, 1000));
+    CHECK(!pw_load_complete(0, 0, 1000));            // no contacts at all: nothing to judge by
+    CHECK(!pw_load_complete(152 * 5 + 1, 5, 1000));  // a short last record
+    CHECK(!pw_load_complete(152 * 5, 4, 1000));      // the table lost one (duplicate, bad read)
+    CHECK(!pw_load_complete(152 * 5, 6, 1000));
+    CHECK(!pw_load_complete(152 * 1000, 1000, 1000)); // full: the read stopped, maybe short of the file
+    CHECK(!pw_load_complete(-1, 0, 1000));            // no file
 }
 
 int main(void) {
     only_gone_contacts_lose_their_secret();
     odd_keys_and_failures_are_left_alone();
-    a_batch_is_bounded();
+    a_long_namespace_is_walked_in_batches();
+    an_orphan_behind_a_full_batch_is_dropped();
+    untrusted_or_unknown_erases_nothing();
+    a_complete_load_is_known_by_the_file();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
 }
