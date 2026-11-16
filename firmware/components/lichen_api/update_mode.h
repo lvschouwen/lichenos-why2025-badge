@@ -6,6 +6,8 @@
 // Update mode (#76): while a firmware image is being received everything not needed for it is stopped, because the
 // badge restarts afterwards anyway and the transfer needs the internal RAM. Pure: says what to do per event and owns
 // the restart decision; the update screen does the doing. A zeroed update_state_t is "normal".
+// OS-only (#433): the shell's update screen and main drive it, apps never do (tools/layers.conf forbids update_mode_* for L6).
+// Pure and lock-free: callable from any task, the caller serialises (update_screen.c holds a spinlock around every call).
 
 typedef enum { UM_NORMAL, UM_UPDATING } update_mode_t;
 
@@ -28,23 +30,25 @@ typedef struct {
 } update_state_t;
 
 // The sender asks the badge to get ready (POST /prepare): enters update mode like a firmware begin would. Asked again
-// (a retry), nothing more to stop; it also takes back a pending restart.
+// (a retry), nothing more to stop; it also takes back a pending restart. Any task.
 unsigned update_mode_on_prepare(update_state_t *s, int64_t now_ms);
 // A transfer starts. Only a firmware image enters update mode (a file push leaves everything running). Once updating, a
-// file push is refused (UM_ACT_REFUSE, state untouched) and a firmware begin takes back a pending restart.
+// file push is refused (UM_ACT_REFUSE, state untouched) and a firmware begin takes back a pending restart. Any task.
 unsigned update_mode_on_begin(update_state_t *s, bool firmware);
 // The transfer ended. A failed firmware update in update mode reboots the badge (everything is stopped); a good one is
-// rebooted by the sender as usual and does not cancel a restart already decided. A file end while updating is refused.
+// rebooted by the sender as usual and does not cancel a restart already decided. A file end while updating is refused. Any task.
 unsigned update_mode_on_end(update_state_t *s, bool firmware, bool ok);
-// Called regularly: a prepare that no firmware followed in UPDATE_PREPARE_TIMEOUT_MS is a failed update (REBOOT, once)
+// Called regularly: a prepare that no firmware followed in UPDATE_PREPARE_TIMEOUT_MS is a failed update (REBOOT, once). Any task.
 unsigned update_mode_tick(update_state_t *s, int64_t now_ms);
-// An installed image that nobody rebooted: restart anyway (the badge has no home to go back to)
+// An installed image that nobody rebooted: restart anyway (the badge has no home to go back to). Any task.
 void update_mode_on_restart_stall(update_state_t *s);
+// Any task, the caller serialises.
 bool update_mode_file_allowed(update_state_t const *s);
-// A restart has been decided and the failure message (if any) has been shown
+// A restart has been decided and the failure message (if any) has been shown. Any task.
 bool update_mode_restart_due(update_state_t const *s, bool message_done);
 
 // What the OS itself stops after the apps' stop_for_update (the LoRa radio when every app stopped, the C6 link's update
-// state), set once from main.c. NULL = nothing.
+// state), set once from main.c. NULL = nothing. Any task.
 void update_mode_set_stop_hook(void (*hook)(bool apps_stopped));
+// Any task, the caller serialises.
 void update_mode_run_stop_hook(bool apps_stopped);
