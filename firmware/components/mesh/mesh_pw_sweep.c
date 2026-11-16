@@ -18,9 +18,14 @@ static size_t sweep_batch(pw_sweep_io_t const *io, size_t skip, size_t *kept, bo
         *more = false;
     }
     for (size_t i = 0; i < n; i++) {
-        uint8_t prefix[MF_PREFIX];
-        if (rr_pw_key_prefix(keys[i], prefix) && io->contact(io->env, prefix) == PW_CONTACT_GONE &&
-            io->erase(io->env, keys[i])) {
+        uint8_t      prefix[MF_PREFIX];
+        pw_contact_t st = rr_pw_key_prefix(keys[i], prefix) ? io->contact(io->env, prefix) : PW_CONTACT_THERE;
+        if (st == PW_CONTACT_UNKNOWN) {
+            *more = false; // busy table or not running: the first one ends this boot's sweep, the rest stay as they are
+            *kept += n - i;
+            break;
+        }
+        if (st == PW_CONTACT_GONE && io->erase(io->env, keys[i])) {
             erased++;
         } else {
             (*kept)++;

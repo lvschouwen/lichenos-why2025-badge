@@ -83,6 +83,8 @@ bool meshcore_autostart_set(bool on) {
 
 // #413: once per boot, after the contacts are loaded, the remembered passwords of contacts that are gone are erased
 // (a rollback to a pre-#288 image deletes a contact without its stored secret). Names only, no value is read.
+#define SWEEP_LOCK_WAIT_MS 20 // a lookup that cannot get the mesh lock in this long ends the sweep for this boot
+
 static size_t sweep_list(void *env, char (*keys)[APP_SECRET_KEY_BUF], size_t cap, size_t skip, bool *more) {
     (void)env;
     return app_secret_list(app_ctx, keys, cap, skip, more);
@@ -91,7 +93,7 @@ static size_t sweep_list(void *env, char (*keys)[APP_SECRET_KEY_BUF], size_t cap
 static pw_contact_t sweep_contact(void *env, uint8_t const prefix[MF_PREFIX]) {
     (void)env;
     mesh_contact_detail_t d;
-    size_t                r = mesh_contact_detail(prefix, &d, 200);
+    size_t                r = mesh_contact_detail(prefix, &d, SWEEP_LOCK_WAIT_MS);
     return r == 1 ? PW_CONTACT_THERE : r == 0 ? PW_CONTACT_GONE : PW_CONTACT_UNKNOWN;
 }
 

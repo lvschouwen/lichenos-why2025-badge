@@ -123,7 +123,27 @@ static void untrusted_or_unknown_erases_nothing(void) {
         state_for[i] = PW_CONTACT_UNKNOWN;
     }
     size_t left = 0;
-    CHECK(pw_sweep(&io, true, &left) == 0 && nkeys == 20 && erases == 0 && left == 20); // across both batches
+    CHECK(pw_sweep(&io, true, &left) == 0 && nkeys == 20 && erases == 0 && left == PW_SWEEP_BATCH); // the first busy answer ends it
+}
+
+// The first busy answer ends the sweep: later keys are not asked, whatever they would have said
+static int asked;
+static pw_contact_t counting_contact(void *env, uint8_t const p[MF_PREFIX]) {
+    (void)env;
+    asked++;
+    return p[0] == 3 ? PW_CONTACT_UNKNOWN : PW_CONTACT_GONE;
+}
+static void a_busy_answer_stops_the_sweep(void) {
+    reset();
+    for (int i = 0; i < 20; i++) {
+        char k[APP_SECRET_KEY_BUF];
+        snprintf(k, sizeof(k), "pw%02x0000000000", i);
+        add(k);
+    }
+    pw_sweep_io_t const busy = {NULL, list, counting_contact, erase};
+    asked                    = 0;
+    size_t left              = 0;
+    CHECK(pw_sweep(&busy, true, &left) == 3 && asked == 4 && nkeys == 17 && left == 13); // 0..2 erased, 3 busy: stop, the rest of the batch kept
 }
 
 static void a_complete_load_is_known_by_the_file(void) {
@@ -142,6 +162,7 @@ int main(void) {
     a_long_namespace_is_walked_in_batches();
     an_orphan_behind_a_full_batch_is_dropped();
     untrusted_or_unknown_erases_nothing();
+    a_busy_answer_stops_the_sweep();
     a_complete_load_is_known_by_the_file();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
