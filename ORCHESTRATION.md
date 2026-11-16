@@ -65,7 +65,15 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-15 about 22:40 UTC; NEWEST, read this one first)
+### RESUME HERE (written 2026-11-16 about 08:05 UTC; NEWEST, read this one first)
+
+Main: Opus 5.5. **The badge runs fw-4e90a0b2**, list off, developer mode on. Main = origin. All slots free except wt-3 (#322).
+- **#476 24 h use-soak RUNNING** since 2026-11-16 08:02 UTC (run 6afab8a7; 16 h awake to about 00:00 UTC, night to about 08:00 UTC 2026-11-17). Driver is a background Bash of the session that started it; run dir `<scratch>/soak-24h` (that session's scratchpad: `transcript.txt`, `ledger-24h.csv`, `state.txt`; `touch STOP` there ends it cleanly; a `BLOCKER` file means the stop rule fired and #476 got a comment). Owner decisions: regional scope from soak-driver.conf stays; meshcore-1b runs the inbound side and logs reach of every post.
+- **Rehearsal 2 done** (results on #476): no scope name leak (#477 closed), start scope restored for real (#478 closed); post 6 C6-confirmed but not heard by the peer; air log too short to tell why: #480 filed. Regional reach 2 observers / 3 hops at 05:53 UTC vs 43 / 11 the night before.
+- **When it ends:** collect the ledger, the peer's tables, `tools/soak_report.py` trend + expected (per segment), post the verdict on #476 and #407; watch the largest internal block (69620 -> 51188 in rehearsal 2).
+- Owner's: drop `stash@{0}` (hook refuses).
+
+### RESUME HERE (written 2026-11-15 about 22:40 UTC; superseded by the section above)
 
 Main: Opus 5.5, advisor Fable 5.2. **The badge runs fw-4e90a0b2** (normal developer image, P4 over Wi-Fi; C6 unchanged; list off; developer mode on; crash log clean). Main = origin = 4e90a0b2, 282 host tests. All slots free except wt-3 (#322).
 - **Closed:** #474 (switch `BADGE_FRAME_POINTERS=1`, 6-frame backtrace proven), #479 (`crash test twdt [core]`, the on-demand task-watchdog warning). Evidence on the issues.
