@@ -2076,6 +2076,11 @@ target_include_directories(notify_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(notify_view_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notify_view_test COMMAND notify_view_test)
 
+add_executable(sb_layout_test ${CMAKE_CURRENT_SOURCE_DIR}/sb_layout_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/sb_layout.c)
+target_include_directories(sb_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(sb_layout_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sb_layout_test COMMAND sb_layout_test)
+
 add_executable(sys_notice_rules_test ${CMAKE_CURRENT_SOURCE_DIR}/sys_notice_rules_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/sys_notice_rules.c)
 target_include_directories(sys_notice_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(sys_notice_rules_test PRIVATE -Wall -Wextra -Werror)
@@ -2292,6 +2297,7 @@ add_custom_target(run_tests
     led_pattern_test
     haptics_pattern_test
     notify_view_test
+    sb_layout_test
     sys_notice_rules_test
     mesh_ident_test
     ota_autooff_test

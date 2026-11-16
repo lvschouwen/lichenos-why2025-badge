@@ -13,6 +13,7 @@
 #include "lora_activity.h"
 #include "notify_os.h"
 #include "notify_view.h"
+#include "sb_layout.h"
 #include "shell_parts.h"
 #include "theme.h"
 #include "lichen_ui.h"
@@ -37,9 +38,15 @@ static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
 static lv_obj_t *bar_obj;
 static lv_obj_t *remote_banner; // "fw ui lock" (#190): over the bar's right part while the physical keys are off
+static int32_t   notify_room;   // px between the clock and the right group for the chip (sb_notify_room)
 static int32_t   clock_w_shown; // the clock's fixed width: the banner starts at its left edge
 
-#define NOTIFY_DOT 10
+#define NOTIFY_DOT   10
+#define NOTIFY_GAP   4  // between the dot and the count
+#define NOTIFY_PAD_R 8  // the chip's right padding
+#define NOTIFY_WIFI  6  // the Wi-Fi row's gap after the chip
+// What the chip adds to the right group with the dot alone
+#define NOTIFY_DOT_W (NOTIFY_DOT + NOTIFY_PAD_R + NOTIFY_WIFI)
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -233,10 +240,14 @@ static void show_notify(void) {
     char   text[8];
     size_t unread = lichen_notify_unread(NULL);
     nview_count(text, sizeof(text), unread);
-    lv_obj_set_hidden(notify_box, unread == 0);
-    if (!unread) {
+    // The count gives way before the chip crosses the clock (#399, R3): the dot alone, or nothing
+    sb_notify_t fit = unread ? sb_notify_fit(notify_room, NOTIFY_DOT_W, NOTIFY_DOT_W + NOTIFY_GAP + text_width(text))
+                             : SB_NOTIFY_NONE;
+    lv_obj_set_hidden(notify_box, fit == SB_NOTIFY_NONE);
+    if (fit == SB_NOTIFY_NONE) {
         return;
     }
+    lv_obj_set_hidden(notify_count, fit == SB_NOTIFY_DOT);
     ln_level_t top   = lichen_notify_unread_top();
     lv_color_t color = lv_color_hex(top == LN_INFO ? THEME_TEAL : notify_level_color(top));
     lv_obj_set_style_bg_color(notify_dot, color, 0);
@@ -377,11 +388,11 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
 
     // Right-aligned by the bar's SPACE_BETWEEN; about 50 px stay free to the clock for a notification dot (#62)
     lv_obj_t *right = add_row(bar, 28);
-    lv_obj_t *wifi  = add_row(right, 6);
+    lv_obj_t *wifi  = add_row(right, NOTIFY_WIFI);
     // The unread dot and count (#62) just left of "Wi-Fi", in the room the right group leaves to the clock; hidden
     // (out of the layout) at 0
-    notify_box = add_row(wifi, 4);
-    lv_obj_set_style_pad_right(notify_box, 8, 0);
+    notify_box = add_row(wifi, NOTIFY_GAP);
+    lv_obj_set_style_pad_right(notify_box, NOTIFY_PAD_R, 0);
     notify_dot = lv_obj_create(notify_box);
     lv_obj_remove_style_all(notify_dot);
     lv_obj_set_size(notify_dot, NOTIFY_DOT, NOTIFY_DOT);
@@ -400,6 +411,10 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
     lv_timer_create(poll_lora_activity, 100, NULL);
 
+    // The right group's width with the chip hidden, measured once: what is left to the clock is the chip's room (#399)
+    lv_obj_update_layout(bar);
+    notify_room = sb_notify_room(lv_display_get_horizontal_resolution(lv_obj_get_display(bar)), BAR_PAD, clock_w,
+                                 CLOCK_GAP, lv_obj_get_width(right));
     refresh(NULL);
     lv_timer_create(refresh, 1000, NULL);
     return bar;

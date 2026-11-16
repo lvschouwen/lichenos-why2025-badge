@@ -7,7 +7,7 @@
 # draw), lock_combo.c (lock_combo_test.c, #75) and
 # saver_layout.c (saver_layout_test.c, #75; screen_saver.c is the screensaver and pocket lock), station_clock.c
 # (station_clock_test.c, #119, #122; station_view.c draws the station clock, for the saver in saver_station.c and the Clock app in app_clock.c), lora_activity.c (lora_activity_test.c, #29; the
-# status bar's TX/RX chevrons), notify_view.c (notify_view_test.c, #62),
+# status bar's TX/RX chevrons), notify_view.c (notify_view_test.c, #62), sb_layout.c (sb_layout_test.c, #399; the status bar's chip against the clock),
 # ui_overflow.c (ui_overflow_test.c, #133; ui_probe.c's "fw ui overflow"),
 # remote_ctl.c (remote_ctl_test.c, #190; ui_remote.c is "fw ui lock" and "fw ui open"),
 # shortcut.c (shortcut_test.c, #79; shortcuts.c runs the shape-key shortcuts it decides).
@@ -61,7 +61,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_stress.c" "stress_workers.c" "stress_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
                             "sd_screen.c" "sd_settings_model.c" "about_dev.c"
                             "idle_policy.c" "restart_frame.c" "draw_stack.c" "draw_call.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c" "station_clock.c" "saver_station.c"
-                            "notify_view.c" "notify_ui.c" "notify_centre.c"
+                            "sb_layout.c" "notify_view.c" "notify_ui.c" "notify_centre.c"
                             "shortcut.c" "shortcuts.c" "app_battery.c"
                             "factory_screen.c" "factory_combo.c"
                             "card_overlay.c" "app_files.c" "files_job.c" "files_ops.c" "files_model.c" "backup_screen.c"
