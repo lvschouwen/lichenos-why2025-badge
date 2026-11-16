@@ -84,7 +84,7 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **`WIFI_PS_NONE`:** `lichen_net/wifi_service.c:152` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
   seconds; `fw wifi ps` changes it.
 - **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; a failed DMA gate round at 120 MHz puts the
-  PSRAM back at 80 (`docs/psram-speed-switch.md`, #353). Internal DMA RAM stays scarce: bench gate `fw mem`.
+  PSRAM back at 80 (`docs/psram-speed-switch.md`, #353). Internal DMA RAM stays scarce: bench gate `fw mem` (gate and target: "Memory" under "Using the hardware better").
 
 - **Pairing:** the P4 builds the fork through `override_path` (`firmware/main/idf_component.yml`: v3.0.10 plus the SDIO RX
   lost-wakeup fix, #60); the C6 uses registry 3.0.10 (`c6/main/idf_component.yml`). So only the P4 has the fix. The
@@ -304,7 +304,15 @@ The rule: **core 1 draws, core 0 talks to the world.**
   esp_lvgl_port's second buffer was slower). `display_engine.c` holds the order of strip, transfer and buffer swap.
 - **Hardware SHA, AES and ECC exist, but MeshCore's crypto is Ed25519/X25519,** which they don't cover. Not worth it
   now.
-- **Memory:** large state in PSRAM, internal DMA-capable RAM at 150 KB or more free.
+- **Memory:** large state in PSRAM. Internal DMA-capable RAM has a gate and a target, and they differ:
+  - **Gate** (what the bench, the soak report and `tools/soak_budgets.txt` fail on): `fw mem` DMA free >= 89981 and
+    DMA min (since boot) >= 80650. These are the pre-MVP baseline (free 99979, min 89611) minus 10 % (#234).
+  - **Target** (what we aim for when budgeting a new service such as #67 or #73): keep DMA free at about 150 KB or
+    more. This is a goal, not a check; nothing fails on it.
+  - **Measured now:** the wave bench runs A to H (`orchestration/bench/`) read about 156 KB free and 146 to 149 KB
+    min; the last soak ended at free 151091, min 142475. That leaves about 60 KB
+    of headroom over the gate. A new service spends that headroom: budget it against the target, and never let it push
+    the min below the gate.
 
 ## Apps
 

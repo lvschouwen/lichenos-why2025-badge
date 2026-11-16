@@ -94,8 +94,8 @@ Contract: `docs/architecture.md` "Two-chip contract". Any failure stops the pass
   so it proves nothing here), LoRa `rx N` counts again, `ota-info` answers, `fw c6` reads `up` with `restarts` one higher.
 - [ ] `fw bl 40 40` -> **Expected:** `backlight 40 40` and the panel follows (this path runs through the C6). Restore
   the noted levels.
-- [ ] `fw mem` -> **Expected:** `mem dma free N ... min M` with **N >= 89981 and M >= 80650** (the pre-MVP 99979 / 89611
-  minus 10 %). Also `mem internal ... free_pct .. min_pct ..` is noted (the #205 totals).
+- [ ] `fw mem` -> **Expected:** `mem dma free N ... min M` with **N >= 89981 and M >= 80650** (the gate; the pre-MVP 99979 / 89611
+  minus 10 %; the 150 KB free figure is a budgeting target, see docs/architecture.md "Memory"). Also `mem internal ... free_pct .. min_pct ..` is noted (the #205 totals).
 - [ ] `fw airplane` -> **Expected:** `airplane off | wifi on | lora on | bluetooth off, controller idle (N s ago)`.
 - [ ] `fw tasks` -> no task without an owner except the IDF, esp_hosted and LVGL tasks.
 

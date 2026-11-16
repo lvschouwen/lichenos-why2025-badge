@@ -85,7 +85,7 @@ that is on the mesh, and everything set up then must be changeable later on the 
 
 - ESP-IDF 6.1 on the P4, LVGL 9 via esp_lvgl_port, 720×720 panel shown rotated 90°, keyboard as an LVGL input device
   (TCA8418).
-- Internal DMA-capable RAM stays at 150 KB or more free (`fw mem`); large UI state goes in PSRAM. LVGL runs pinned on core 1 together
+- Internal DMA-capable RAM: the gate is free >= 89981 and min >= 80650, the target about 150 KB free (`fw mem`; docs/architecture.md "Memory"); large UI state goes in PSRAM. LVGL runs pinned on core 1 together
   with an app's main loop (MeshCore's mesh task); connectivity and services run on core 0 (docs/architecture.md "Cores").
 - The boot screen must be up before the slow steps (C6 check and reflash, about 40 s), so the display starts first
   (`START_BOOT_SCREEN` before `START_C6LINK` in `firmware/main/boot_order.c`, #210).

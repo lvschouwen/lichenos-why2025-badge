@@ -39,7 +39,7 @@ Main runs this after every v2 wave merge, on the freshly flashed image (`ota-c6`
 3. MeshCore RX: `fw mesh` shows `rx N` counting up between two reads; one TX to `#badgetest` only (see Bench console).
 4. `fw c6` and note `restarts`; `fw keys on`; `fw c6 reset` (USB console only since #466: Wi-Fi answers "refused"). After the 75 s wait: one physical key press logs a key (`fw keys send` bypasses the TCA8418, so it proves nothing), LoRa `rx N` counts again, Wi-Fi is back (`ota-info`), and `fw c6` reads `up` with `restarts` one higher than before.
 5. Brightness changes (this path runs through the C6): `fw bl <display> <keyboard>` (e.g. `fw bl 40 40`), the panel follows; restore the previous level.
-6. `fw mem`: DMA free and DMA min not below the pre-MVP baseline (free 99979, min 89611) minus 10 %. Why: that baseline is what today's image measures, so a fixed 150 KB floor would fail the current firmware; the gate catches a regression, not the existing level.
+6. `fw mem`: DMA free and DMA min not below the pre-MVP baseline (free 99979, min 89611) minus 10 %. This is the gate. The 150 KB free figure in docs/architecture.md is the budgeting target, not a check (current images read about 156 KB free, 146 to 149 KB min); the gate catches a regression, not the existing level.
 7. BT off after boot (#197): `fw airplane` prints `airplane off | wifi on | lora on | bluetooth off, controller idle (N s ago)`: the saved switch, then the C6 controller's `bt.state` from the registry cache (#311; `fw get bt.state` asks live).
 8. `fw tasks`: no owner-less Lichen task (IDF, esp_hosted and LVGL tasks are exempt). Informational until #228 books the Lichen tasks: note the result, do not block on it.
 
