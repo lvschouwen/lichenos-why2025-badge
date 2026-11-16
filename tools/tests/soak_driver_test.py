@@ -55,8 +55,9 @@ class FakeBadge:
         self.tx_result = "ok"  # what `mesh airlog` shows for the badge's own tx entries; None: none at all
 
     def soak(self):
-        up = int(self.clock.t) - T0 + 1000
-        common = "v=1 boot=%d up=%d" % (self.boot, up)
+        # like firmware/main/soak_cmd.c: up= is milliseconds (#481), not the air log's seconds
+        up_ms = int((self.clock.t - T0 + 1000) * 1000) + 437
+        common = "v=1 boot=%d up=%d" % (self.boot, up_ms)
         return "\n".join(["soak1 %s crash=%d slot=%d dma=151091" % (common, self.crash, self.slot),
                           "soak2 %s c6rs=%d hb=5" % (common, self.c6rs),
                           "soak3 %s mtx=%d mrx=0" % (common, self.mtx),

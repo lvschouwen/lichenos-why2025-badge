@@ -62,7 +62,15 @@ LEDGER_HEAD = ["seq", "time", "scope", "id", "tx_before", "tx_after", "result", 
 AIRLOG_TX_RX = re.compile(r"^#(\d+) t=(\d+) tx (\S+) \S+ hops=\d+ len=(\d+) retry=(\d) result=(\w+)\s*$", re.M)
 AIR_STEP_S = 5         # the re-read wait is slept in steps, a STOP file ends it
 AIR_RETRY_S = 30       # a late transmit: one re-read this long after the first
-AIRLOG_SLACK_S = 1     # t= and up= are whole seconds, read at different moments
+AIRLOG_SLACK_S = 1     # t= (whole seconds) and up= (ms, see up_seconds) are read at different moments
+
+
+def up_seconds(up_ms: Optional[int], ceil: bool) -> Optional[int]:
+    """`fw soak` up= (milliseconds since boot, firmware/main/soak_cmd.c) -> whole seconds like the air log's t=
+    (#481): floored for the start of a window, rounded up for its end, so the window never shrinks."""
+    if up_ms is None:
+        return None
+    return -(-up_ms // 1000) if ceil else up_ms // 1000
 ATTEMPT_RESULTS = ("sent", "failed", "pending")  # a pending row: the line may have gone out, so it counts
 RETRIES, RETRY_WAIT_S = 3, 20
 SAMPLE_MISSES_MAX, SAMPLE_RETRY_S = 5, 60
@@ -580,7 +588,8 @@ class Driver:
         row = row[:5] + [after.get("mtx", ""), result, ""]
         self.ledger_update(row)
         if result == "sent":
-            self.air_job = (row, before.get("up"), after.get("up"))  # run by send(), after the scope is back
+            # run by send(), after the scope is back; `fw soak` up= is ms, the air log's t= whole seconds (#481)
+            self.air_job = (row, up_seconds(before.get("up"), ceil=False), up_seconds(after.get("up"), ceil=True))
         if result == "sent":
             self.bad = 0
         else:
