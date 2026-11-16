@@ -523,6 +523,7 @@ class Driver:
             self.start_note = "start scope not restored: the badge did not take it"
 
     def send(self, kind: str) -> None:
+        self.air_job = None  # a job parked by a send whose scope restore raised is stale: never run it for this one
         if kind == sp.REGIONAL:
             self.scope_dirty = True  # whatever happens next, the 0-hop scope goes back before this returns
         try:

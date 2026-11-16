@@ -748,6 +748,18 @@ class TxAirTest(unittest.TestCase):
         self.assertLess(restore, log.index("mesh airlog"))
         self.assertEqual(log.count("mesh airlog"), 2)
 
+    def test_a_stale_air_job_is_not_run_by_a_later_skipped_send(self):
+        e = Env(self)
+        e.start()
+        orig = e.driver.restore_scope
+        e.driver.restore_scope = lambda: (_ for _ in ()).throw(RuntimeError("restore"))
+        with self.assertRaises(RuntimeError):
+            e.driver.send(sp.ZERO_HOP)
+        e.driver.restore_scope = orig
+        e.driver.attempts = [(e.clock.mono(), sp.ZERO_HOP, None)] * 6  # the hour cap: the next send is skipped
+        e.driver.send(sp.ZERO_HOP)
+        self.assertNotIn("mesh airlog", e.badge.log)
+
     def test_stop_during_the_wait_skips_the_reread(self):
         e = Env(self)
         e.start()
