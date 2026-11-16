@@ -773,8 +773,9 @@ File FS::open(char const *path, char const *mode, bool create) {
         // "w": a buffer only, File::writeHeld opens the file after the owner's unlock; "r": the parked save is the
         // file's newest state
         if (mode[0] == 'w') {
-            // A deferred save (#429) is older than the one about to be made: its buffer goes first, so the reserve
-            // is the only 84 KB block and a failed allocation never leaves the stale save to be written later
+            // A deferred save (#429) is older than the one about to be made: its buffer goes first, so a reserve
+            // after a deferral is the only 84 KB block (while the owner holds a taken save for its compare, a
+            // save that opens makes a second one for those few tens of ms) and a failed allocation never leaves the stale save to be written later
             if (held_slot.deferred) {
                 fs_shim_drop_held();
             }

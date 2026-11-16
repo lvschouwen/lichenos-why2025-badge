@@ -625,7 +625,7 @@ static mesh_ctab_diff_t file_diff(void *ctx) {
 
 // #429: a save that only moved timestamps goes back into the shim's slot (MeshCore and the screens read it again) and
 // is written when the interval is up. While the file is compared the slot is empty and readers see the file on disk
-// (as after any take). The slot is the mesh lock's: taken for this one call, no file work under it.
+// (as after any take); a save that opens meanwhile makes a second buffer for those few tens of ms. The slot is the mesh lock's: taken for this one call, no file work under it.
 static bool park_again(fs_shim_held_t *h, bool forced, uint32_t now) {
     diff_ctx_t c = {h, NULL};
     if (!chunk || !mesh_ctab_park(forced, now, last_internal_s, file_diff, &c)) {
@@ -640,7 +640,9 @@ static bool park_again(fs_shim_held_t *h, bool forced, uint32_t now) {
     }
     mesh_unlock();
     deferred = !wiped;
-    internal_parked = internal_parked + 1;
+    if (!wiped) {
+        internal_parked = internal_parked + 1;
+    }
     return true;
 }
 
