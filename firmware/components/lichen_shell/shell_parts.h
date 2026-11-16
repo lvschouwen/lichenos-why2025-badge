@@ -17,7 +17,7 @@ lv_obj_t *shell_status_bar(void);              // the bar once created (NULL bef
 // "Keys locked: hold Esc 3 s" over the clock and the right group (on the top layer, so also over covers that hide the
 // bar) while "fw ui lock" holds (#190); HOT and the C6 state stay visible. LVGL context, nothing before the bar exists
 void status_bar_remote_lock(bool on);
-bool status_bar_chip_clock(lv_area_t *chip, lv_area_t *clock); // `fw ui overflow`: false while no chip shows
+lv_obj_t *status_bar_chip_clock(lv_area_t *chip, lv_area_t *clock); // `fw ui overflow`: the chip, NULL while none shows
 
 // home.c
 lv_obj_t *home_create(void);   // a fresh home screen for the registered apps and the saved layout; focus object = itself

@@ -13,8 +13,8 @@ static int failures;
 #define RIGHT  240 // Wi-Fi fan, "Wi-Fi", LoRa and chevrons with their gaps, no chip
 
 // CLOCK and RIGHT are assumed (the badge bench checks the real figures); the chip constants are status_bar.c's own
-#define DOT_W      NOTIFY_DOT_W
-#define COUNT_W(t) (DOT_W + NOTIFY_GAP + (t))
+#define DOT_W      SB_NOTIFY_DOT_W
+#define COUNT_W(t) (DOT_W + SB_NOTIFY_GAP + (t))
 
 int main(void) {
     int32_t room = sb_notify_room(SCREEN, PAD, CLOCK, CLEAR, RIGHT);

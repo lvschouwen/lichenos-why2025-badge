@@ -759,14 +759,15 @@ static void print_geom(vgeom_t const *g) {
 // The unread chip must stay clear of the clock (#399): overlap px / chip width, target "clock"
 static void check_chip_clock(ovf_ctx_t *ctx) {
     lv_area_t chip, clock;
-    if (!status_bar_chip_clock(&chip, &clock)) {
+    lv_obj_t *chip_obj = status_bar_chip_clock(&chip, &clock);
+    if (!chip_obj) {
         return;
     }
     int32_t px = ovf_overlap_px((ovf_rect_t){chip.x1, chip.y1, chip.x2, chip.y2},
                                 (ovf_rect_t){clock.x1, clock.y1, clock.x2, clock.y2});
     if (px > 0) {
         size_t before = ctx->n;
-        add_hit(ctx, HIT_OVERLAP, shell_status_bar(), px, chip.x2 - chip.x1 + 1, "clock");
+        add_hit(ctx, HIT_OVERLAP, chip_obj, px, chip.x2 - chip.x1 + 1, "clock");
         if (ctx->n > before) {
             snprintf(ctx->hits[before].text, sizeof(ctx->hits[before].text), "unread chip"); // not the bar's first label
         }

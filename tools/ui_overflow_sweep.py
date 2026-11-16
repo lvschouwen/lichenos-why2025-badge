@@ -9,7 +9,7 @@ Usage: tools/ui_overflow_sweep.py <badge-ip> [--all] [--only NAME] [--list] [--t
 
 What "fw ui overflow" reports (one line per hit, kinds): width (text cut off sideways), height (wrapped text taller than
 its fixed label), clipped (an object that no scroll position shows: off the screen or beyond a parent), under-hint (an
-object that runs under the pinned key hint or the status bar). This script only counts the lines; a hit is a bug in the
+object that runs under the pinned key hint or the status bar), overlap (the status bar's unread chip over the clock). This script only counts the lines; a hit is a bug in the
 screen, not in the script.
 
 Developer mode first: "fw ui" and "fw keys" are developer-mode commands (#373, #377). Run "fw dev on" once from the
@@ -268,8 +268,8 @@ UNREACHABLE.pop("SCREEN_KEYTEST")
 BADGE_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "badge.sh")
 SCREEN_IDS_H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "firmware", "components", "lichen_api",
                             "screen_ids.h")
-HIT = re.compile(r"^\s*(width|height|clipped|under-hint) (-?\d+),(-?\d+) ")
-KINDS = ("width", "height", "clipped", "under-hint")
+HIT = re.compile(r"^\s*(width|height|clipped|under-hint|overlap) (-?\d+),(-?\d+) ")
+KINDS = ("width", "height", "clipped", "under-hint", "overlap")
 
 
 Step = Union[str, Tuple[Any, ...]]
@@ -920,6 +920,9 @@ def selftest() -> int:
     expect("stack changed between routes", InUse, FakeFw([ui("0", "Settings"), ui("0 > 3", "Wi-Fi")]),
            lambda b: b.walk("weather", tile("Weather")), 0)
     selftest_remote(expect, failures)
+    hit = HIT.match('  overlap 640,12 12/64 px clock "unread chip"')
+    if not hit or hit.group(1) not in KINDS:
+        failures.append("an overlap line is not read as a hit of a known kind")
     for bad in ([("focus", "")], ["bksp"], [("focus", "Remove")], ["enter"], [("row", "Wi-Fi", ["Wi-Fi"]), "tab"],
                 [("open", "Nope")], ["down", ("open", "Settings")], [("focus", "a|b"), "enter"]):
         try:
