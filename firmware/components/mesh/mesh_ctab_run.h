@@ -18,6 +18,8 @@ extern "C" {
 // Every save of contacts3 that MeshCore makes is parked by the file shim (#425) and comes here after the mesh lock:
 // this is the one writer of both files. The card is written every MESH_ADVTAB_CARD_S while the table changes and at
 // every stop; /storage at once when the owner changed something, else every MESH_ADVTAB_INTERNAL_S and at every stop.
+// A save that only moved last_advert_timestamp / lastmod stays parked (still what the read view serves) and is written
+// every MESH_CTAB_SAVE_INTERVAL_S and at every stop (#429); a record added or removed or any other field writes at once.
 // A crash loses what changed since the last save of the place it was in; a node heard again comes back by itself.
 //
 // Threading: the _locked functions run with the mesh lock held; mesh_ctab_run_saved and mesh_ctab_run_work on the mesh

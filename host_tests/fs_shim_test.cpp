@@ -310,6 +310,44 @@ static void held_reads(uint8_t *expect, uint8_t *older, uint8_t *disk) {
     CHECK(disk_read("/contacts3", disk, n + 1) == n && memcmp(disk, direct, n) == 0);
 }
 
+// #429: a save taken and deferred stays readable, is skipped by the next take until released, is replaced by a newer
+// save, and ending the hold drops it
+static void held_deferred(uint8_t *expect, uint8_t *older, uint8_t *disk) {
+    size_t const n = 40 * REC_SIZE;
+    static uint8_t got[40 * REC_SIZE];
+    save_contacts(older, 40, 999, 0);
+    fs_shim_hold("/contacts3");
+    save_contacts(expect, 40, 7, 99);
+    fs_shim_held_t taken;
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && !taken.deferred && live_blocks == 1);
+    fs_shim_defer_held(&taken);
+    CHECK(!taken.set);
+    File in = SPIFFS.open("/contacts3", "r");
+    CHECK(in && in.size() == n && in.read(got, n) == n && memcmp(got, expect, n) == 0); // reads see it
+    in.close();
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && live_blocks == 1); // the take leaves it
+    CHECK(disk_read("/contacts3", disk, n + 1) == n && memcmp(disk, older, n) == 0); // nothing written
+    CHECK(fs_shim_release_deferred() && !fs_shim_release_deferred());
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && !taken.deferred && memcmp(taken.buf, expect, n) == 0);
+    fs_shim_defer_held(&taken);
+    save_contacts(older, 40, 8, 5); // a newer save replaces the deferred one, and is taken
+    CHECK(live_blocks == 1);
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && memcmp(taken.buf, older, n) == 0);
+    save_contacts(expect, 40, 9, 6); // a save landed before the deferral of the taken one: it wins
+    fs_shim_defer_held(&taken);
+    CHECK(!taken.set && live_blocks == 1);
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && memcmp(taken.buf, expect, n) == 0);
+    fs_shim_free_held(&taken);
+    fs_shim_defer_held(&taken); // nothing: no effect
+    fs_shim_hold(NULL);
+    CHECK(live_blocks == 0);
+}
+
 // #425: a held file's saves reach the file system only when the owner writes them, after its unlock: the save under
 // the lock makes no file system call, and what is written is the newest save, whole
 static void held_saves(void) {
@@ -390,6 +428,7 @@ static void held_saves(void) {
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 60 * REC_SIZE && memcmp(disk, expect, 60 * REC_SIZE) == 0);
 
     held_reads(expect, older, disk);
+    held_deferred(expect, older, disk);
     fs_shim_set_buffer_hooks(NULL, NULL);
     // No slow calls off the badge (nothing is timed there)
     fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];

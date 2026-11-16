@@ -37,6 +37,36 @@ uint32_t mesh_ctab_lastmod(uint8_t const *rec) {
     return get32(rec + MESH_CTAB_AT_LASTMOD);
 }
 
+// ---- timestamp-only saves stay parked (#429) ------------------------------------------------------------------------
+
+mesh_ctab_diff_t mesh_ctab_diff(uint8_t const *a, uint8_t const *b, size_t n) {
+    mesh_ctab_diff_t worst = MESH_CTAB_SAME;
+    for (size_t i = 0; i < n; i++, a += MESH_CTAB_REC, b += MESH_CTAB_REC) {
+        if (memcmp(a, b, MESH_CTAB_REC) == 0) {
+            continue;
+        }
+        // Everything but the two timestamps must match: compare the spans around them
+        bool rest = memcmp(a, b, MESH_CTAB_AT_ADVERT) == 0 &&
+                    memcmp(a + MESH_CTAB_AT_ADVERT + 4, b + MESH_CTAB_AT_ADVERT + 4,
+                           MESH_CTAB_AT_LASTMOD - MESH_CTAB_AT_ADVERT - 4) == 0 &&
+                    memcmp(a + MESH_CTAB_AT_LASTMOD + 4, b + MESH_CTAB_AT_LASTMOD + 4,
+                           MESH_CTAB_REC - MESH_CTAB_AT_LASTMOD - 4) == 0;
+        if (!rest) {
+            return MESH_CTAB_CHANGED;
+        }
+        worst = MESH_CTAB_TIMES_ONLY;
+    }
+    return worst;
+}
+
+bool mesh_ctab_flush_due(uint32_t now_s, uint32_t last_write_s) {
+    return now_s - last_write_s >= MESH_CTAB_SAVE_INTERVAL_S; // unsigned: a clock that went back writes, never waits
+}
+
+bool mesh_ctab_defer(mesh_ctab_diff_t d, bool forced, uint32_t now_s, uint32_t last_write_s) {
+    return d == MESH_CTAB_TIMES_ONLY && !forced && !mesh_ctab_flush_due(now_s, last_write_s);
+}
+
 // ---- which contacts /storage keeps ----------------------------------------------------------------------------------
 
 // The newer record first; the earlier one on a tie

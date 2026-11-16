@@ -377,6 +377,44 @@ static void test_card_plan(void) {
     CHECK(mesh_ctab_aside_slot(true, true) == -1 && mesh_ctab_aside_slot(false, true) == 0);
 }
 
+static void test_defer(void) {
+    enum { NR = 3 };
+    uint8_t a[NR * MESH_CTAB_REC], b[NR * MESH_CTAB_REC];
+    memset(a, 0x11, sizeof(a));
+    memcpy(b, a, sizeof(a));
+    CHECK(mesh_ctab_diff(a, b, NR) == MESH_CTAB_SAME);
+    // the advert time and lastmod of one record, every byte of both
+    for (int i = 0; i < 4; i++) {
+        b[MESH_CTAB_REC + MESH_CTAB_AT_ADVERT + i] ^= 0xff;
+        b[2 * MESH_CTAB_REC + MESH_CTAB_AT_LASTMOD + i] ^= 0xff;
+    }
+    CHECK(mesh_ctab_diff(a, b, NR) == MESH_CTAB_TIMES_ONLY);
+    // every other byte of a record is a real change, the bytes next to the timestamps included
+    for (int i = 0; i < MESH_CTAB_REC; i++) {
+        bool ts = (i >= MESH_CTAB_AT_ADVERT && i < MESH_CTAB_AT_ADVERT + 4) ||
+                  (i >= MESH_CTAB_AT_LASTMOD && i < MESH_CTAB_AT_LASTMOD + 4);
+        memcpy(b, a, sizeof(a));
+        b[MESH_CTAB_REC + i] ^= 1;
+        CHECK(mesh_ctab_diff(a, b, NR) == (ts ? MESH_CTAB_TIMES_ONLY : MESH_CTAB_CHANGED));
+    }
+    // a timestamp change and a name change together: changed
+    memcpy(b, a, sizeof(a));
+    b[MESH_CTAB_AT_LASTMOD] ^= 1;
+    b[2 * MESH_CTAB_REC + MESH_CTAB_AT_NAME] ^= 1;
+    CHECK(mesh_ctab_diff(a, b, NR) == MESH_CTAB_CHANGED);
+
+    uint32_t last = 1000, iv = MESH_CTAB_SAVE_INTERVAL_S;
+    CHECK(iv == 900);
+    CHECK(mesh_ctab_defer(MESH_CTAB_TIMES_ONLY, false, last + 1, last));
+    CHECK(mesh_ctab_defer(MESH_CTAB_TIMES_ONLY, false, last + iv - 1, last));
+    CHECK(!mesh_ctab_defer(MESH_CTAB_TIMES_ONLY, false, last + iv, last));  // the interval is up
+    CHECK(!mesh_ctab_defer(MESH_CTAB_TIMES_ONLY, true, last + 1, last));    // a stop or the owner
+    CHECK(!mesh_ctab_defer(MESH_CTAB_CHANGED, false, last + 1, last));
+    CHECK(!mesh_ctab_defer(MESH_CTAB_SAME, false, last + 1, last));
+    CHECK(!mesh_ctab_flush_due(last + iv - 1, last) && mesh_ctab_flush_due(last + iv, last));
+    CHECK(mesh_ctab_flush_due(5, last)); // the uptime clock cannot go back: if it did, write
+}
+
 int main(void) {
     test_select();
     test_digest();
@@ -384,6 +422,7 @@ int main(void) {
     test_deleted();
     test_file();
     test_card_plan();
+    test_defer();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

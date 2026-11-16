@@ -345,8 +345,28 @@ void fs_shim_hold(char const *path) {
 }
 
 void fs_shim_take_held(fs_shim_held_t *out) {
+    if (held_slot.deferred) {
+        *out = fs_shim_held_t{};
+        return;
+    }
     *out      = held_slot;
     held_slot = fs_shim_held_t{};
+}
+
+void fs_shim_defer_held(fs_shim_held_t *h) {
+    if (!h->set || held_slot.set) {
+        fs_shim_free_held(h); // a newer save came in meanwhile (or nothing was held)
+        return;
+    }
+    held_slot          = *h;
+    held_slot.deferred = true;
+    *h                 = fs_shim_held_t{};
+}
+
+bool fs_shim_release_deferred(void) {
+    bool was           = held_slot.set && held_slot.deferred;
+    held_slot.deferred = false;
+    return was;
 }
 
 void fs_shim_free_held(fs_shim_held_t *h) {
@@ -682,7 +702,7 @@ void File::hold() {
         buf_free(buf_);
     } else {
         buf_free(held_slot.buf); // an older save of the same file: this one is newer
-        held_slot     = fs_shim_held_t{buf_, len_, cap_, true, path};
+        held_slot     = fs_shim_held_t{buf_, len_, cap_, true, path, false};
         held_last_len = len_; // the next save's reserve
     }
     NOTE_HELD_CLOSE(timed_now());

@@ -64,6 +64,7 @@ static bool     keep_old; // the last merge left card contacts out (a full table
 static uint32_t merge_full_before;
 static uint32_t generation, last_card_try_s, retry_at_s, last_internal_s, last_digest;
 static bool     have_digest;
+static bool     deferred; // a save of timestamp changes only stays parked in the shim (#429)
 
 // The deleted keys: touched only with the mesh lock (or before the task exists)
 static mesh_ctab_del_t del;
@@ -446,6 +447,9 @@ void mesh_ctab_run_tick_locked(void) {
         c.last_try_s          = last_card_try_s;
         due                   = mesh_advtab_due(&c);
     }
+    if (deferred && mesh_ctab_flush_due(now, last_internal_s) && fs_shim_release_deferred()) {
+        deferred = false; // the interval is up: this loop's take picks the parked save up and the write follows (#429)
+    }
     if ((due || want_save) && !fs_shim_wiped()) {
         card_take = due;
         want_save = false;
@@ -590,6 +594,47 @@ static void write_card(uint8_t const *recs, size_t n, uint32_t wait_ms) {
              (unsigned long)card_last_ms);
 }
 
+// #429: how the save differs from contacts3 on /storage, read in chunks of whole records into the scratch buffer (no new
+// memory; the file is as big as the save, so one pass of a few ms). Anything unreadable counts as changed.
+static mesh_ctab_diff_t file_diff(fs_shim_held_t const *h) {
+    char        path[PATH_MAX_LEN];
+    struct stat st;
+    if (!chunk || !h->path || snprintf(path, sizeof(path), "%s%s", dir, h->path) >= (int)sizeof(path) ||
+        stat(path, &st) != 0 || (size_t)st.st_size != h->len || h->len % MESH_CTAB_REC) {
+        return MESH_CTAB_CHANGED;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return MESH_CTAB_CHANGED;
+    }
+    size_t const     step  = CHUNK / MESH_CTAB_REC * MESH_CTAB_REC;
+    mesh_ctab_diff_t worst = MESH_CTAB_SAME;
+    for (size_t at = 0; at < h->len && worst != MESH_CTAB_CHANGED; at += step) {
+        size_t want = h->len - at < step ? h->len - at : step;
+        mesh_ctab_diff_t d = fread(chunk, 1, want, f) == want
+                                 ? mesh_ctab_diff(chunk, h->buf + at, want / MESH_CTAB_REC)
+                                 : MESH_CTAB_CHANGED;
+        worst = d > worst ? d : worst;
+    }
+    fclose(f);
+    return worst;
+}
+
+// #429: a save that only moved timestamps goes back into the shim's slot (the screens and MeshCore still read it) and
+// is written when the interval is up. The slot is the mesh lock's: taken for this one call, no file work under it.
+static bool park_again(fs_shim_held_t *h, bool forced, uint32_t now) {
+    if (forced || mesh_ctab_flush_due(now, last_internal_s) ||
+        !mesh_ctab_defer(file_diff(h), false, now, last_internal_s)) {
+        return false;
+    }
+    mesh_lock();
+    fs_shim_defer_held(h);
+    mesh_unlock();
+    deferred       = true;
+    internal_skips = internal_skips + 1;
+    return true;
+}
+
 // contacts3 on /storage. While the card holds the list: the core set, and only when the owner changed something, at
 // the interval or at a stop. Otherwise everything (the newest MESH_CTAB_CAP_INTERNAL of a larger table), every time.
 static void write_internal(fs_shim_held_t *h, size_t n, int contacts) {
@@ -599,6 +644,7 @@ static void write_internal(fs_shim_held_t *h, size_t n, int contacts) {
     size_t   kept   = n;
     uint32_t digest = 0, now = mesh_uptime_s();
     bool     owner  = __atomic_exchange_n(&owner_dirty, false, __ATOMIC_ACQ_REL);
+    deferred        = false; // this save is the newest: nothing older stays parked behind it
     if (filter) {
         kept   = mesh_ctab_select(h->buf, n, limit, always_in, NULL, keep, order);
         digest = mesh_ctab_digest(h->buf, n, keep);
@@ -611,6 +657,9 @@ static void write_internal(fs_shim_held_t *h, size_t n, int contacts) {
     }
     if (filter) {
         h->len = mesh_ctab_compact(h->buf, n, keep) * MESH_CTAB_REC;
+    }
+    if (park_again(h, stopping || owner, now)) {
+        return;
     }
     fs_shim_wrote_t w = File::writeHeld(h);
     ESP_LOGI(TAG, "contacts saved after the unlock: %d contacts, %u B, %u B rewritten, %lu ms%s (%u on /storage)",

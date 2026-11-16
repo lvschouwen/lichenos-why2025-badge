@@ -16,6 +16,7 @@ typedef struct {
     size_t   len, cap; // bytes in it, and the block's size
     bool     set;      // something is held (an empty file too: it truncates)
     char const *path;  // the held path it was parked for (the owner's string): writeHeld writes there
+    bool     deferred; // kept parked on purpose (#429): fs_shim_take_held leaves it until it is released
 } fs_shim_held_t;
 
 // What writing a held file did, for the owner's log
@@ -162,6 +163,12 @@ char const *fs_shim_op_name(uint8_t op);
 void fs_shim_hold(char const *path);
 // Moves the held save into out (out->set false when nothing was held)
 void fs_shim_take_held(fs_shim_held_t *out);
+// A save that was taken and is not to be written yet (#429: only timestamps moved) goes back into the slot, marked
+// deferred: reads still see it, fs_shim_take_held skips it, a newer save replaces it. If a newer save is already in the
+// slot, h is freed instead. h is emptied. The owner's lock.
+void fs_shim_defer_held(fs_shim_held_t *h);
+// A deferred save becomes an ordinary parked one: the next take returns it. False when none is deferred.
+bool fs_shim_release_deferred(void);
 // Forgets what is held, unwritten (a save of the newest state follows)
 void fs_shim_drop_held(void);
 // Frees a save that was taken and is not written after all (#472); h is emptied

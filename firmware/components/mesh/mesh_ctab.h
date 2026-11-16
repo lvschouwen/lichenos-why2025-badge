@@ -20,6 +20,7 @@ extern "C" {
 #define MESH_CTAB_NAME         32
 #define MESH_CTAB_AT_TYPE      64
 #define MESH_CTAB_AT_FLAGS     65
+#define MESH_CTAB_AT_ADVERT    72 // last_advert_timestamp
 #define MESH_CTAB_AT_LASTMOD   140
 #define MESH_CTAB_FAV          0x01
 #define MESH_CTAB_CAP_CARD     4000 // owner, #472
@@ -50,6 +51,24 @@ typedef enum { MESH_CTAB_SKIP, MESH_CTAB_ADD, MESH_CTAB_REPLACE } mesh_ctab_merg
 // One record of the card: a contact the owner deleted stays deleted; one the table lacks is added; one it has is
 // replaced only by a newer lastmod
 mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t table_lastmod, uint32_t card_lastmod);
+
+// ---- timestamp-only saves stay parked (#429) ------------------------------------------------------------------------
+
+#define MESH_CTAB_SAVE_INTERVAL_S (15 * 60) // owner, #429: a save that only moved timestamps is written this often
+
+typedef enum {
+    MESH_CTAB_SAME,       // every byte equal
+    MESH_CTAB_TIMES_ONLY, // only last_advert_timestamp and/or lastmod differ
+    MESH_CTAB_CHANGED,    // anything else
+} mesh_ctab_diff_t;
+
+// Compares n records of a (the file) with n of b (the save); the worst difference found
+mesh_ctab_diff_t mesh_ctab_diff(uint8_t const *a, uint8_t const *b, size_t n);
+// Whether a save with this difference stays parked: only timestamps moved, nothing forces a write (a stop, the owner,
+// the interval), and the last write is less than the interval ago
+bool mesh_ctab_defer(mesh_ctab_diff_t d, bool forced, uint32_t now_s, uint32_t last_write_s);
+// Whether a parked save is due to be written
+bool mesh_ctab_flush_due(uint32_t now_s, uint32_t last_write_s);
 
 // ---- contacts the owner deleted (kept on /storage until both files no longer hold them) ------------------------------
 
