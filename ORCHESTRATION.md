@@ -68,7 +68,8 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 ### RESUME HERE (written 2026-11-17 about 17:10 UTC; NEWEST, read this one first)
 - **#476 use soak PASSED and CLOSED** (run 6afb34e0, 24 h on fw-b013428b; verdict on #476 and #407): no reboot/crash/C6 restart, every planned figure ok (whole, awake, night), largest block one step at 0.8 h then flat, jpend flat after 4 h, 80/80 on air, 75/80 heard (misses = on-air losses in busy traffic). Follow-up #482 (epoch CSV, inbound receipts). Peer meshcore-1b told the soak side is done.
 - The badge still runs fw-b013428b; main = origin; slots free except wt-3 (#322).
-- **Next:** flash + bench of waves L/M (#399 100+ unread, #415, #413, #429 hour check) and the older queue (#462, #456, #461, #443 A8 ...); flash is a main-session step: ask the owner first.
+- **No flash was needed:** fw-b013428b already holds waves L+M (only tools/docs changed since). Wave L/M bench done 2026-11-17 about 17:30 UTC: #415 and #429 CLOSED; #413 step 1 passed, rest `needs-lucas` (Log in pre-fill, reset preview); #399 passed at 10 unread, 100+ left open until it happens naturally. Badge rebooted once (`fw reboot`, not `fw restart`), slot valid, C6 skip boot.
+- **Next:** the older bench queue (#462, #456, #461, #443 A8 ...): compile steps with a read-only prep agent first, then one remote pass.
 
 ### Soak run 6afb34e0 (written 2026-11-16 about 17:00 UTC; superseded by the section above)
 - **Run 6afab8a7 STOPPED by the owner's choice** at 16:37 UTC after 8 h 35 min, clean (partial result on #476: nothing flagged). Reason: soak the image that will be kept.
