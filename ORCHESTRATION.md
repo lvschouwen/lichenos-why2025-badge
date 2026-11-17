@@ -65,7 +65,12 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-16 about 17:00 UTC; NEWEST, read this one first)
+### RESUME HERE (written 2026-11-17 about 17:10 UTC; NEWEST, read this one first)
+- **#476 use soak PASSED and CLOSED** (run 6afb34e0, 24 h on fw-b013428b; verdict on #476 and #407): no reboot/crash/C6 restart, every planned figure ok (whole, awake, night), largest block one step at 0.8 h then flat, jpend flat after 4 h, 80/80 on air, 75/80 heard (misses = on-air losses in busy traffic). Follow-up #482 (epoch CSV, inbound receipts). Peer meshcore-1b told the soak side is done.
+- The badge still runs fw-b013428b; main = origin; slots free except wt-3 (#322).
+- **Next:** flash + bench of waves L/M (#399 100+ unread, #415, #413, #429 hour check) and the older queue (#462, #456, #461, #443 A8 ...); flash is a main-session step: ask the owner first.
+
+### Soak run 6afb34e0 (written 2026-11-16 about 17:00 UTC; superseded by the section above)
 - **Run 6afab8a7 STOPPED by the owner's choice** at 16:37 UTC after 8 h 35 min, clean (partial result on #476: nothing flagged). Reason: soak the image that will be kept.
 - **The badge runs fw-b013428b** (waves L + M + #480; P4 over Wi-Fi, C6 unchanged; list off; developer mode on). Main = origin = 844b5720 (#481 fix). All slots free except wt-3 (#322). #480 and #481 CLOSED.
 - **#476 24 h use-soak RUNNING, run 6afb34e0**, since 16:52:48 UTC, to about 16:53 UTC 2026-11-17. Awake to about 08:53 UTC, night (relative: owner's choice) 08:53-16:53 UTC. Driver = background Bash of session b8f63224 (check once with `ps -ef | grep '[s]oak_driver'`, never a poll loop). Run dir `/tmp/claude-1000/-home-lucas-coding-why2025-badge/b8f63224-8038-4cdd-b4f6-586bbccfb43e/scratchpad/soak-24h-3` (`STOP` / `BLOCKER` / `state.txt` as before; ledger now has a `tx_air` column, `soak_report.py air <run dir>`). Helpers `fw.sh`, `badge-ip`, `scope_leak.py`, `scope_now.py` copied into that scratchpad. Ignore `soak-24h-2` (3-min false start that found #481).
