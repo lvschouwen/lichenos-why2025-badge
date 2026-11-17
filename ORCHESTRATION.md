@@ -65,7 +65,13 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
 
-### RESUME HERE (written 2026-11-17 about 17:10 UTC; NEWEST, read this one first)
+### RESUME HERE (written 2026-11-17 about 23:05 UTC; NEWEST, read this one first)
+- **Older bench queue, remote pass done on fw-b013428b** (no flash, no reboot). Closed: #461, #463, #445, #459, #448, #444 (remote + host tests), #385, #468 (owner chose paper closes). Gate on `ppa-async` clean (DMA sweep x3, `psram dma 15` x7, hist scan); evidence comments on #464, #475, #467, #322, #233.
+- Owner said no (2026-11-17) to: #274 Files copy race, #453 Backup Save/Load, #462 repeater login. Enter-gated walks were out of scope (#233 Weather page, MeshCore contact list).
+- **Still open, hands or owner word:** #456 (USB `token new` + reboot), #233 (Weather page + Clear data), #464 A16.3 + #454 (allow list on via `owner-onair.sh`), #322/#467/#475 (picture), #274, #453, #462. The factory-reset refusal probes were blocked by the permission classifier (passed on fw-27e38301).
+- Side effect seen under the DMA sweep: two late esp_hosted RPC replies (>5 s) and two TCA8418 I2C timeouts, recovered, C6 restarts 0 (noted on #475).
+
+### RESUME HERE (written 2026-11-17 about 17:10 UTC; superseded by the section above)
 - **#476 use soak PASSED and CLOSED** (run 6afb34e0, 24 h on fw-b013428b; verdict on #476 and #407): no reboot/crash/C6 restart, every planned figure ok (whole, awake, night), largest block one step at 0.8 h then flat, jpend flat after 4 h, 80/80 on air, 75/80 heard (misses = on-air losses in busy traffic). Follow-up #482 (epoch CSV, inbound receipts). Peer meshcore-1b told the soak side is done.
 - The badge still runs fw-b013428b; main = origin; slots free except wt-3 (#322).
 - **No flash was needed:** fw-b013428b already holds waves L+M (only tools/docs changed since). Wave L/M bench done 2026-11-17 about 17:30 UTC: #415 and #429 CLOSED; #413 step 1 passed, rest `needs-lucas` (Log in pre-fill, reset preview); #399 passed at 10 unread, 100+ left open until it happens naturally. Badge rebooted once (`fw reboot`, not `fw restart`), slot valid, C6 skip boot.
