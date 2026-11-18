@@ -68,7 +68,8 @@ Environment: every subagent on Sonnet, forced (`CLAUDE_CODE_SUBAGENT_MODEL=sonne
 ### RESUME HERE (written 2026-11-17 about 23:05 UTC; NEWEST, read this one first)
 - **Older bench queue, remote pass done on fw-b013428b** (no flash, no reboot). Closed: #461, #463, #445, #459, #448, #444 (remote + host tests), #385, #468 (owner chose paper closes). Gate on `ppa-async` clean (DMA sweep x3, `psram dma 15` x7, hist scan); evidence comments on #464, #475, #467, #322, #233.
 - Owner said no (2026-11-17) to: #274 Files copy race, #453 Backup Save/Load, #462 repeater login. Enter-gated walks were out of scope (#233 Weather page, MeshCore contact list).
-- **Still open, hands or owner word:** #456 (USB `token new` + reboot), #233 (Weather page + Clear data), #464 A16.3 + #454 (allow list on via `owner-onair.sh`), #322/#467/#475 (picture), #274, #453, #462. The factory-reset refusal probes were blocked by the permission classifier (passed on fw-27e38301).
+- **#456 CLOSED 2026-11-18:** the owner ran `~/.config/why2025-badge/owner-token.sh` with `!` (rotation over USB, token straight into the host file, new 200 / old 401, 0 token lines in the serial log). The badge was rebooted once by it and is healthy.
+- **Still open, hands or owner word:** #233 (Weather page + Clear data), #464 A16.3 + #454 (allow list on via `owner-onair.sh`), #322/#467/#475 (picture), #274, #453, #462. The factory-reset refusal probes were blocked by the permission classifier (passed on fw-27e38301).
 - Side effect seen under the DMA sweep: two late esp_hosted RPC replies (>5 s) and two TCA8418 I2C timeouts, recovered, C6 restarts 0 (noted on #475).
 
 ### RESUME HERE (written 2026-11-17 about 17:10 UTC; superseded by the section above)
