@@ -10,6 +10,9 @@
 #define MESHCORE_APP_ID "meshcore"
 #define MESHCORE_ALIAS  "mesh"
 
+// #163: the key a settings-level factory reset leaves (factory_plan.h FACTORY_SCOPE_CLEAR_KEY); the next start clears the scopes
+#define MESHCORE_SCOPE_CLEAR_KEY "scope_clr"
+
 #define MESHCORE_STORAGE_ROOT   MESHCORE_APP_ID // /storage/meshcore: the identity and keys
 #define MESHCORE_STORAGE_SECRET true
 #define MESHCORE_BACKUP_KEYS    3

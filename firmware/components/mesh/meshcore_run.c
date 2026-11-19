@@ -16,6 +16,7 @@
 #include "mesh_ctab_run.h"
 #include "mesh_pw_sweep.h"
 #include "mesh_remote.h"
+#include "meshcore_app_record.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -69,6 +70,14 @@ bool meshcore_pw_forget(uint8_t const prefix[6]) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
     return app_secret_erase(app_ctx, key);
+}
+
+bool meshcore_scope_clear_pending(void) {
+    return app_settings_get_u8(app_ctx, MESHCORE_SCOPE_CLEAR_KEY, 0) != 0;
+}
+
+bool meshcore_scope_clear_done(void) {
+    return app_settings_erase(app_ctx, MESHCORE_SCOPE_CLEAR_KEY);
 }
 
 bool meshcore_autostart(void) {

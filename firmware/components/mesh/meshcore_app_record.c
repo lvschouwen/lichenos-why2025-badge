@@ -2,8 +2,8 @@
 
 #include "mesh_advert_cfg.h"
 
-// Kept over a factory reset: the last advert, so the advert interval (#52) holds and a reset loop never floods
-char const *const meshcore_keep_keys[] = {ADV_KEY_LAST, NULL};
+// Kept over a factory reset: the scope-clear marker (#163, consumed at start), and the last advert, so the advert interval (#52) holds and a reset loop never floods
+char const *const meshcore_keep_keys[] = {ADV_KEY_LAST, MESHCORE_SCOPE_CLEAR_KEY, NULL};
 
 // The notification switches may go in the SD backup (#169); what the badge transmits stays out of it
 sb_key_t const meshcore_backup_keys[MESHCORE_BACKUP_KEYS] = {

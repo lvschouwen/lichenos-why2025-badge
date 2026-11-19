@@ -27,8 +27,11 @@ int main(void) {
     CHECK(!factory_nvs_erases("a.meshcore", "mc_advlast", FACTORY_SETTINGS));
     CHECK(!factory_nvs_erases("a.meshcore", "mc_advlast", FACTORY_ALL));
     CHECK(factory_nvs_erases("a.meshcore", "mc_advint", FACTORY_ALL) && factory_nvs_erases("a.meshcore", "identity", FACTORY_ALL));
+    // #163: the settings reset's scope marker survives the erase, and is the one factory_plan.h names
+    CHECK(!strcmp(MESHCORE_SCOPE_CLEAR_KEY, FACTORY_SCOPE_CLEAR_KEY) && !strcmp("a." MESHCORE_APP_ID, FACTORY_SCOPE_CLEAR_NS));
+    CHECK(!factory_nvs_erases("a.meshcore", MESHCORE_SCOPE_CLEAR_KEY, FACTORY_SETTINGS));
     // a bad id declares nothing and says so
-    CHECK(app_ns_declare_keep("Bad id", NULL, meshcore_keep_keys, factory_keep_app_key) == 1);
+    CHECK(app_ns_declare_keep("Bad id", NULL, meshcore_keep_keys, factory_keep_app_key) == 2); // both keys refused (the advert and the #163 marker)
     CHECK(app_ns_declare_keep("x", NULL, NULL, factory_keep_app_key) == 0);
     // the identity directory is protected and secret once the record's root is added
     files_app_roots_clear();

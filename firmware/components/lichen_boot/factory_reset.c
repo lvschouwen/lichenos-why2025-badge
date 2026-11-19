@@ -50,13 +50,29 @@ typedef struct {
     char key[NVS_KEY_NAME_MAX_SIZE];
 } nvs_name_t;
 
+// #163: the settings level leaves MeshCore's scope-clear marker (factory_plan.h); false when it could not be saved
+static bool scope_marker_save(factory_level_t level) {
+    if (!factory_scope_marker(level)) {
+        return true;
+    }
+    nvs_handle_t app;
+    if (nvs_open(FACTORY_SCOPE_CLEAR_NS, NVS_READWRITE, &app) != ESP_OK) {
+        return false;
+    }
+    bool ok = fw_nvs_ok(TAG, FACTORY_SCOPE_CLEAR_KEY, nvs_set_u8(app, FACTORY_SCOPE_CLEAR_KEY, 1)) &&
+              fw_nvs_ok(TAG, FACTORY_SCOPE_CLEAR_KEY, nvs_commit(app));
+    nvs_close(app);
+    return ok;
+}
+
 bool factory_reset_request(factory_level_t level) {
     psram_speed_no_rearm(); // the restart that follows comes back at 80 MHz, then arms 120 from the erased record (#121, #353)
     nvs_handle_t nvs;
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;
     }
-    bool ok = fw_nvs_ok(TAG, FACTORY_WIFI_WIPE_KEY, nvs_set_u8(nvs, FACTORY_WIFI_WIPE_KEY, 1)) && // first: pending implies it
+    bool ok = scope_marker_save(level) && // before the pending value, like the Wi-Fi order: pending implies both
+              fw_nvs_ok(TAG, FACTORY_WIFI_WIPE_KEY, nvs_set_u8(nvs, FACTORY_WIFI_WIPE_KEY, 1)) &&
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level)) &&
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_commit(nvs));
     nvs_close(nvs);
@@ -617,6 +633,7 @@ static void plan_print(factory_level_t level) {
     }
     nvs_collect(level, NULL, 0, true);
     if (level != FACTORY_ALL) {
+        console_reply("  MeshCore flood scope (default and channels): CLEARED at the next MeshCore start (console scope kept)");
         console_reply("  %s: all kept; SD card: not touched", STORAGE_BASE);
         return;
     }

@@ -366,6 +366,24 @@ void BadgeMesh::loadChannelScopes() {
     noteChannelScopes();
 }
 
+bool BadgeMesh::resetScopes() {
+    NodePrefs *p = getNodePrefs();
+    bool       had = mesh_scope_reset_apply(p->default_scope_name, sizeof(p->default_scope_name), p->default_scope_key,
+                                            sizeof(p->default_scope_key), &chscopes_);
+    if (SPIFFS.exists(CHANNEL_SCOPE_TMP) && !SPIFFS.remove(CHANNEL_SCOPE_TMP)) {
+        return false; // a start would promote it back
+    }
+    bool ok = saveChannelScopes(); // an empty table removes the file
+    if (ok) {
+        chscope_unreadable_ = false;
+    }
+    if (had) {
+        savePrefs();
+    }
+    noteChannelScopes();
+    return ok;
+}
+
 // A console line's flood: under the console scope, or dropped (false) while that is not set. The console refuses
 // before queueing; this is the net for a scope gone in between. Never unscoped: that would flood everywhere.
 bool BadgeMesh::floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis) {

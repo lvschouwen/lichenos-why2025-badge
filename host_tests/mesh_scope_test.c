@@ -108,7 +108,28 @@ static void chscope_checks(void) {
                        "them on, so members who only reach you through them stop receiving them.") == 0);
 }
 
+// #163: the settings-level factory reset's marker is consumed at MeshCore's start: default and every channel scope go
+static void reset_apply_checks(void) {
+    static mesh_chscope_t t;
+    char                  name[31] = "nl-limburg";
+    uint8_t               key[16]  = {1, 2, 3};
+    uint8_t               a[MESH_CHSCOPE_ID] = {1}, b[MESH_CHSCOPE_ID] = {2};
+    mesh_chscope_clear(&t);
+    mesh_chscope_put(&t, a, "zz-local");
+    mesh_chscope_put(&t, b, "zz-test");
+    CHECK(mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t));
+    CHECK(name[0] == 0 && key[0] == 0 && key[2] == 0 && t.n == 0 && mesh_chscope_find(&t, a)[0] == 0);
+    CHECK(!mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t)); // nothing set: nothing to save
+    name[0] = 'x';                                                           // only the default was set
+    CHECK(mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t) && name[0] == 0);
+    mesh_chscope_put(&t, a, "zz-local");                                     // only a channel
+    CHECK(mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t) && t.n == 0);
+    key[5] = 9;                                                              // a key without a name still goes
+    CHECK(mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t) && key[5] == 0);
+}
+
 int main(void) {
+    reset_apply_checks();
     char out[40], text[200];
     // None: empty (also spaces, a lone '#') is no scope
     CHECK(parse("", out) == NULL && out[0] == 0);

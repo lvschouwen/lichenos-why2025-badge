@@ -869,6 +869,13 @@ static bool start_locked(char const *files_dir) {
     n->loadConsoleScope(); // #290: before the task runs, so the first console flood already has it
     mesh_cscope_note(n->consoleScope());
     n->loadChannelScopes(); // #291: after begin() loaded the channels
+    if (meshcore_scope_clear_pending()) { // #163: a settings-level factory reset asked for no flood scope
+        if (n->resetScopes() && meshcore_scope_clear_done()) {
+            ESP_LOGI(TAG, "factory reset: flood scopes cleared");
+        } else {
+            ESP_LOGE(TAG, "factory reset: flood scopes not cleared: the marker stays for the next start");
+        }
+    }
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];

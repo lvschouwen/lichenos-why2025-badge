@@ -41,6 +41,14 @@ typedef struct {
 // does the restore once the driver is initialised and then erases the key; a failed restore leaves it for the next boot.
 #define FACTORY_WIFI_WIPE_KEY "wifi_drv_wipe"
 
+// #163: the flood scope (the default and the channels') is in MeshCore's files on /storage, so the early-boot NVS erase of
+// a settings reset does not touch it. factory_reset_request leaves this marker in the app's namespace (MeshCore declares
+// it kept, meshcore_app_record.c); MeshCore's start clears both scopes and erases it. The console scope is left alone.
+// "Everything" erases those files with the drive and writes no marker.
+#define FACTORY_SCOPE_CLEAR_NS  "a.meshcore"
+#define FACTORY_SCOPE_CLEAR_KEY "scope_clr"
+bool factory_scope_marker(factory_level_t level);
+
 // The drive's erase is tried this many boots before the reset gives up with an error notice
 #define FACTORY_TRIES_KEY     "fr_tries"
 #define FACTORY_STORAGE_TRIES 3

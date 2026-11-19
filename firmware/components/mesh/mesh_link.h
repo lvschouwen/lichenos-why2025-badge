@@ -247,6 +247,9 @@ class BadgeMesh : public MyMesh {
     // At start, after begin() loaded the channels: the saved channel scopes, without those whose channel is gone
     // (none dropped while no channel loaded at all). Only reads: the file is written when the table changes.
     void        loadChannelScopes();
+    // #163, after loadChannelScopes: a settings-level factory reset asked for no flood scope. Clears the default (saved to the
+    // prefs) and every channel's own (the file goes, a damaged one too). false when a save failed (ask again next start).
+    bool        resetScopes();
     // Tells mesh_chscope_noted the damaged channels: after every set (also one that changes nothing), add, remove,
     // rename and load
     void        noteChannelScopes();

@@ -48,6 +48,10 @@ bool meshcore_setup_done(void);
 bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap);
 bool meshcore_pw_set(uint8_t const prefix[6], char const *password);
 bool meshcore_pw_forget(uint8_t const prefix[6]);
+// #163: a settings-level factory reset left its marker (meshcore_app_record.h): mesh_start clears the flood scopes, then
+// meshcore_scope_clear_done erases it (a failed clear leaves it for the next start)
+bool meshcore_scope_clear_pending(void);
+bool meshcore_scope_clear_done(void);
 
 // The one-shot move to 2 B path hashes (#129): done already / now done, in the app's settings
 // One-time (#130): the stored routes of another hash size than the setting were forgotten

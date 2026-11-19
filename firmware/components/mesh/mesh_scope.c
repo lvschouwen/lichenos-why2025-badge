@@ -240,3 +240,17 @@ void mesh_scope_channel_ask_text(char const *channel, char const *name, char *ou
              "only reach you through them stop receiving them.",
              channel, name);
 }
+
+bool mesh_scope_reset_apply(char *def_name, size_t name_cap, uint8_t *def_key, size_t key_cap, mesh_chscope_t *t) {
+    bool had = t->n > 0;
+    for (size_t i = 0; i < name_cap; i++) {
+        had |= def_name[i] != 0;
+    }
+    for (size_t i = 0; i < key_cap; i++) {
+        had |= def_key[i] != 0;
+    }
+    memset(def_name, 0, name_cap);
+    memset(def_key, 0, key_cap);
+    mesh_chscope_clear(t);
+    return had;
+}

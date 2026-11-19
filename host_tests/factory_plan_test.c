@@ -99,6 +99,29 @@ static void wifi_wipe_order_survives(void) {
     CHECK(!factory_nvs_erases("badge_fw", FACTORY_WIFI_WIPE_KEY, A));
 }
 
+// #163: a settings reset also clears MeshCore's flood scope, which is in its files on /storage, not NVS: the request
+// leaves a marker in the app's namespace for MeshCore's next start. "Everything" erases the files, so needs none.
+static void scope_clear_marker(void) {
+    CHECK(factory_scope_marker(S) && !factory_scope_marker(A) && !factory_scope_marker(FACTORY_NONE));
+    CHECK(strcmp(FACTORY_SCOPE_CLEAR_NS, "a.meshcore") == 0 && strcmp(FACTORY_SCOPE_CLEAR_KEY, "scope_clr") == 0);
+    CHECK(strlen(FACTORY_SCOPE_CLEAR_KEY) < 16); // an NVS key
+    // the marker must outlive the early-boot erase (MeshCore declares it kept, meshcore_app_record_test.c)
+    factory_keep_app_keys_clear();
+    CHECK(factory_nvs_erases(FACTORY_SCOPE_CLEAR_NS, FACTORY_SCOPE_CLEAR_KEY, S)); // not kept until declared
+    CHECK(factory_keep_app_key(FACTORY_SCOPE_CLEAR_NS, FACTORY_SCOPE_CLEAR_KEY));
+    CHECK(!factory_nvs_erases(FACTORY_SCOPE_CLEAR_NS, FACTORY_SCOPE_CLEAR_KEY, S));
+    factory_keep_app_keys_clear();
+    factory_keep_app_key("a.meshcore", "mc_advlast");
+}
+
+// #288: "2 secrets when 1 moved": the preview counts '~' keys of a.<id> whose second character is not ':'
+static void secret_count_rule(void) {
+    CHECK(factory_nvs_secret("a.meshcore", "~pw0123456789ab"));  // a stored password
+    CHECK(!factory_nvs_secret("a.meshcore", "~:moved"));         // the OS's record of the move: hidden, not counted
+    CHECK(!factory_nvs_secret("a.meshcore", "~:x") && !factory_nvs_secret("a.meshcore", "~:pw0123456789ab")); // any "~:"
+    CHECK(!factory_nvs_secret("a.meshcore", "pw0123456789ab"));  // the old plain key is an ordinary setting
+}
+
 static void identity_only_at_all(void) {
     CHECK(factory_nvs_erases("badge_fw", "identity", S)); // a stale private-key copy goes at every level
     CHECK(factory_nvs_erases("badge_fw", "identity", A));
@@ -296,6 +319,8 @@ int main(void) {
     boot_plan_per_pending_value();
     settings_go_at_both_levels();
     badge_state_stays();
+    scope_clear_marker();
+    secret_count_rule();
     identity_only_at_all();
     wifi_wipe_order_survives();
     other_namespaces_stay();

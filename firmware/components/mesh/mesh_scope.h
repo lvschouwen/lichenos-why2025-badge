@@ -97,6 +97,10 @@ void        mesh_scope_channel_text(char const *own, char const *default_name, c
 // The question before a channel gets its own region (not asked for going back to the default)
 void        mesh_scope_channel_ask_text(char const *channel, char const *name, char *out, size_t cap);
 
+// #163, MeshCore's start after a settings-level factory reset: clears the default scope (name and key) and every
+// channel's own scope. true when something was set (what has to be saved). The console scope is not touched.
+bool        mesh_scope_reset_apply(char *def_name, size_t name_cap, uint8_t *def_key, size_t key_cap, mesh_chscope_t *t);
+
 #ifdef __cplusplus
 }
 #endif

@@ -73,6 +73,10 @@ factory_boot_t factory_boot_plan(uint8_t pending) {
     return p;
 }
 
+bool factory_scope_marker(factory_level_t level) {
+    return level == FACTORY_SETTINGS;
+}
+
 static bool listed(char const *const *list, size_t n, char const *s) {
     for (size_t i = 0; i < n; i++) {
         if (strcmp(list[i], s) == 0) {
