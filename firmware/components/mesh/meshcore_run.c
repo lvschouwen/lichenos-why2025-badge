@@ -76,8 +76,19 @@ bool meshcore_scope_clear_pending(void) {
     return app_settings_get_u8(app_ctx, MESHCORE_SCOPE_CLEAR_KEY, 0) != 0;
 }
 
-bool meshcore_scope_clear_done(void) {
-    return app_settings_erase(app_ctx, MESHCORE_SCOPE_CLEAR_KEY);
+#define SCOPE_TRIES_KEY "scope_try" // the failed starts so far; not kept over a reset, it is written after the erase
+
+uint8_t meshcore_scope_clear_tries(void) {
+    return app_settings_get_u8(app_ctx, SCOPE_TRIES_KEY, 0);
+}
+
+void meshcore_scope_clear_record(bool erase, uint8_t tries) {
+    if (erase) {
+        app_settings_erase(app_ctx, SCOPE_TRIES_KEY);
+        app_settings_erase(app_ctx, MESHCORE_SCOPE_CLEAR_KEY);
+    } else {
+        app_settings_set_u8(app_ctx, SCOPE_TRIES_KEY, tries);
+    }
 }
 
 bool meshcore_autostart(void) {

@@ -128,8 +128,26 @@ static void reset_apply_checks(void) {
     CHECK(mesh_scope_reset_apply(name, sizeof(name), key, sizeof(key), &t) && key[5] == 0);
 }
 
+// #163 review: every save step must hold, and a failing clear gives up after MESH_SCOPE_RESET_TRIES starts
+static void reset_outcome_checks(void) {
+    CHECK(mesh_scope_reset_saved(true, true, true));
+    CHECK(!mesh_scope_reset_saved(false, true, true) && !mesh_scope_reset_saved(true, false, true));
+    CHECK(!mesh_scope_reset_saved(true, true, false)); // a failed prefs save keeps the marker
+    mesh_scope_reset_next_t n = mesh_scope_reset_next(true, 2);
+    CHECK(n.erase_marker && !n.gave_up && n.tries == 0);
+    n = mesh_scope_reset_next(false, 0);
+    CHECK(!n.erase_marker && !n.gave_up && n.tries == 1);
+    n = mesh_scope_reset_next(false, 1);
+    CHECK(!n.erase_marker && n.tries == 2);
+    n = mesh_scope_reset_next(false, MESH_SCOPE_RESET_TRIES - 1);
+    CHECK(n.erase_marker && n.gave_up); // the owner's scope is not wiped at every boot
+    n = mesh_scope_reset_next(false, 255);
+    CHECK(n.erase_marker && n.gave_up);
+}
+
 int main(void) {
     reset_apply_checks();
+    reset_outcome_checks();
     char out[40], text[200];
     // None: empty (also spaces, a lone '#') is no scope
     CHECK(parse("", out) == NULL && out[0] == 0);

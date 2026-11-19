@@ -254,3 +254,18 @@ bool mesh_scope_reset_apply(char *def_name, size_t name_cap, uint8_t *def_key, s
     mesh_chscope_clear(t);
     return had;
 }
+
+bool mesh_scope_reset_saved(bool tmp_gone, bool channels_saved, bool prefs_saved) {
+    return tmp_gone && channels_saved && prefs_saved;
+}
+
+mesh_scope_reset_next_t mesh_scope_reset_next(bool saved, uint8_t tries_before) {
+    if (saved) {
+        return (mesh_scope_reset_next_t){.erase_marker = true};
+    }
+    uint8_t tries = (uint8_t)(tries_before < 255 ? tries_before + 1 : 255);
+    if (tries >= MESH_SCOPE_RESET_TRIES) {
+        return (mesh_scope_reset_next_t){.erase_marker = true, .gave_up = true};
+    }
+    return (mesh_scope_reset_next_t){.tries = tries};
+}

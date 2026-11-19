@@ -870,10 +870,15 @@ static bool start_locked(char const *files_dir) {
     mesh_cscope_note(n->consoleScope());
     n->loadChannelScopes(); // #291: after begin() loaded the channels
     if (meshcore_scope_clear_pending()) { // #163: a settings-level factory reset asked for no flood scope
-        if (n->resetScopes() && meshcore_scope_clear_done()) {
+        bool saved = n->resetScopes();
+        mesh_scope_reset_next_t next = mesh_scope_reset_next(saved, meshcore_scope_clear_tries());
+        meshcore_scope_clear_record(next.erase_marker, next.tries);
+        if (saved) {
             ESP_LOGI(TAG, "factory reset: flood scopes cleared");
+        } else if (next.gave_up) {
+            ESP_LOGE(TAG, "factory reset: flood scopes could not be cleared after repeated starts: the owner clears them by hand");
         } else {
-            ESP_LOGE(TAG, "factory reset: flood scopes not cleared: the marker stays for the next start");
+            ESP_LOGE(TAG, "factory reset: flood scopes not cleared (start %u): the marker stays for the next start", next.tries);
         }
     }
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the

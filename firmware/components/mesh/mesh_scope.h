@@ -101,6 +101,19 @@ void        mesh_scope_channel_ask_text(char const *channel, char const *name, c
 // channel's own scope. true when something was set (what has to be saved). The console scope is not touched.
 bool        mesh_scope_reset_apply(char *def_name, size_t name_cap, uint8_t *def_key, size_t key_cap, mesh_chscope_t *t);
 
+// Did the clear hold: the leftover temp file gone, the channel file written (or removed), the default saved to the prefs.
+// Every step is tried, none is skipped for an earlier failure; only all three make it done.
+bool        mesh_scope_reset_saved(bool tmp_gone, bool channels_saved, bool prefs_saved);
+// What the marker and its try counter (a.meshcore, MESH_SCOPE_RESET_TRIES) hold after a start's attempt. A persistent
+// failure must not wipe a scope the owner sets again at every boot: the last try erases the marker and gives up.
+#define MESH_SCOPE_RESET_TRIES 3
+typedef struct {
+    bool    erase_marker; // done or given up: the marker and the counter go
+    uint8_t tries;        // else the counter to save
+    bool    gave_up;      // log an error
+} mesh_scope_reset_next_t;
+mesh_scope_reset_next_t mesh_scope_reset_next(bool saved, uint8_t tries_before);
+
 #ifdef __cplusplus
 }
 #endif

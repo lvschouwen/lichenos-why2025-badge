@@ -65,17 +65,30 @@ static bool scope_marker_save(factory_level_t level) {
     return ok;
 }
 
+static void scope_marker_erase(void) {
+    nvs_handle_t app;
+    if (nvs_open(FACTORY_SCOPE_CLEAR_NS, NVS_READWRITE, &app) == ESP_OK) {
+        nvs_erase_key(app, FACTORY_SCOPE_CLEAR_KEY);
+        nvs_commit(app);
+        nvs_close(app);
+    }
+}
+
 bool factory_reset_request(factory_level_t level) {
     psram_speed_no_rearm(); // the restart that follows comes back at 80 MHz, then arms 120 from the erased record (#121, #353)
     nvs_handle_t nvs;
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;
     }
-    bool ok = scope_marker_save(level) && // before the pending value, like the Wi-Fi order: pending implies both
+    bool marker = scope_marker_save(level); // before the pending value, like the Wi-Fi order: pending implies both
+    bool ok = marker &&
               fw_nvs_ok(TAG, FACTORY_WIFI_WIPE_KEY, nvs_set_u8(nvs, FACTORY_WIFI_WIPE_KEY, 1)) &&
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level)) &&
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_commit(nvs));
     nvs_close(nvs);
+    if (!ok && factory_scope_marker(level)) {
+        scope_marker_erase(); // no reset was requested: an orphan marker would clear scopes at some later start
+    }
     ESP_LOG_LEVEL(
         ok ? ESP_LOG_INFO : ESP_LOG_ERROR,
         TAG,

@@ -370,18 +370,18 @@ bool BadgeMesh::resetScopes() {
     NodePrefs *p = getNodePrefs();
     bool       had = mesh_scope_reset_apply(p->default_scope_name, sizeof(p->default_scope_name), p->default_scope_key,
                                             sizeof(p->default_scope_key), &chscopes_);
-    if (SPIFFS.exists(CHANNEL_SCOPE_TMP) && !SPIFFS.remove(CHANNEL_SCOPE_TMP)) {
-        return false; // a start would promote it back
+    // The prefs first, then the files, and no step skipped for another's failure (the caller retries the whole)
+    bool prefs_ok = !had || store_.savePrefs(*p);
+    if (prefs_ok && had) {
+        p->clearDirty();
     }
-    bool ok = saveChannelScopes(); // an empty table removes the file
-    if (ok) {
+    bool tmp_ok = !SPIFFS.exists(CHANNEL_SCOPE_TMP) || SPIFFS.remove(CHANNEL_SCOPE_TMP); // a start would promote it back
+    bool files_ok = saveChannelScopes(); // an empty table removes the file
+    if (files_ok) {
         chscope_unreadable_ = false;
     }
-    if (had) {
-        savePrefs();
-    }
     noteChannelScopes();
-    return ok;
+    return mesh_scope_reset_saved(tmp_ok, files_ok, prefs_ok);
 }
 
 // A console line's flood: under the console scope, or dropped (false) while that is not set. The console refuses
