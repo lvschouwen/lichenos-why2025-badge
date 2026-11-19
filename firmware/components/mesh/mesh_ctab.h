@@ -52,15 +52,36 @@ typedef enum { MESH_CTAB_SKIP, MESH_CTAB_ADD, MESH_CTAB_REPLACE } mesh_ctab_merg
 // replaced only by a newer lastmod
 mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t table_lastmod, uint32_t card_lastmod);
 
-// Whether /storage's contact write waits: from the moment the card's list is read until the merge is through, the table
-// is half a union and /storage must keep what it has. A pulled card, or one that failed, releases the hold, and so does
-// a card that already holds the list (card_current).
-bool mesh_ctab_hold_internal(bool merging, bool card_mounted, bool card_current, bool card_failed);
-// Whether the merged table has anything the card's file lacks, so the card is written: a new list, a file that lost
-// blocks, contacts that did not fit, a table contact newer than the card's (table_newer), or a different count
-// (/storage had contacts the card lacks, or the card had deleted ones). False: the card's file is the table.
-bool mesh_ctab_card_write_needed(bool fresh, bool complete, size_t card_n, size_t table_n, size_t table_newer,
-                                 size_t full);
+typedef struct {
+    bool merging;      // the card's list is being merged into the table
+    bool card_pending; // a card is mounted but its file has not been looked at yet
+    bool card_mounted;
+    bool card_current; // the card already holds the table
+    bool card_failed;  // the last card write failed
+} mesh_ctab_hold_t;
+// Whether /storage's contact write waits: from before the card's list is read until the merge is through, the table is
+// not the one /storage should keep. No card, a failed card or a card that already holds the table releases the hold.
+bool mesh_ctab_hold_internal(mesh_ctab_hold_t const *h);
+
+// What the merge saw of the card's file against the table, record by record (set-based, not counts)
+typedef struct {
+    size_t table_only; // table contacts the card's file lacks, or holds differently (a newer or edited record)
+    size_t card_only;  // card records the table does not have (deleted by hand, empty, a duplicate)
+    size_t matched;    // card records that are in the table afterwards (there, or added)
+    size_t full;       // card records that did not fit
+    bool   fresh;      // there is no file to compare with
+    bool   complete;   // the file read whole (every block passed)
+} mesh_ctab_diffstat_t;
+// One card record: card, with the table's record for the same key (table NULL: the table lacks it) and the plan the
+// merge made for it. Call before the merge replaces the table's record.
+void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool none, uint8_t const *table,
+                       uint8_t const *card);
+// A card record the table had no room for
+void mesh_ctab_account_full(mesh_ctab_diffstat_t *st);
+// The merge is through; table_n contacts are in the table
+void mesh_ctab_account_done(mesh_ctab_diffstat_t *st, size_t table_n);
+// Whether the card's file is not the table (so the card is written, and /storage may not shrink to the core set)
+bool mesh_ctab_card_write_needed(mesh_ctab_diffstat_t const *st);
 
 // ---- timestamp-only saves stay parked (#429) ------------------------------------------------------------------------
 

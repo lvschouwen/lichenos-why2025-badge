@@ -64,8 +64,8 @@ static bool     keep_old; // the last merge left card contacts out (a full table
 static uint32_t merge_full_before;
 static uint32_t generation, last_card_try_s, retry_at_s, last_internal_s, last_digest;
 static bool     have_digest;
-static bool     merge_complete, card_failed; // the file read whole; the last card write failed
-static uint32_t table_newer; // merge: records where the table's was newer than the card's
+static bool     card_failed; // the last card write failed
+static mesh_ctab_diffstat_t merge_stat; // what the merge in progress saw of the card's file against the table
 static bool     deferred; // a save of timestamp changes only stays parked in the shim (#429)
 
 // The deleted keys: touched only with the mesh lock (or before the task exists)
@@ -226,14 +226,14 @@ static bool probe(uint32_t wait_ms, probe_t *p) {
 static void start_card(probe_t const *p) {
     switch (p->plan) {
     case MESH_CTAB_CARD_USE:
-        merge      = p->buf;
-        merge_complete = p->info.complete;
-        table_newer    = 0;
-        card_failed    = false;
-        merge_n    = p->info.good;
-        merge_at   = 0;
-        generation = p->info.generation;
-        merge_full_before = merged_full;
+        merge               = p->buf;
+        merge_stat          = {};
+        merge_stat.complete = p->info.complete;
+        card_failed         = false;
+        merge_n             = p->info.good;
+        merge_at            = 0;
+        generation          = p->info.generation;
+        merge_full_before   = merged_full;
         __atomic_store_n(&card_bad_blocks, p->info.bad_blocks, __ATOMIC_RELAXED);
         merge_fresh = merge_n == 0; // an empty file: the same path as none at all, but the file is this badge's
         if (p->info.bad_blocks) {
@@ -247,6 +247,7 @@ static void start_card(probe_t const *p) {
         }
         break;
     case MESH_CTAB_CARD_FRESH:
+        merge_stat  = {};
         card_failed = false;
         generation  = 0;
         merge_fresh = true;
@@ -279,13 +280,36 @@ static void contact_from_rec(ContactInfo &c, uint8_t const *rec) {
     memcpy(&c.gps_lon, rec + 148, 4);
 }
 
+static void contact_to_rec(uint8_t *rec, ContactInfo const &c) {
+    memset(rec, 0, MESH_CTAB_REC); // byte 66 is the unused one DataStore writes as 0
+    memcpy(rec, c.id.pub_key, MESH_CTAB_PUB);
+    memcpy(rec + MESH_CTAB_AT_NAME, c.name, MESH_CTAB_NAME);
+    rec[MESH_CTAB_AT_TYPE]  = c.type;
+    rec[MESH_CTAB_AT_FLAGS] = c.flags;
+    memcpy(rec + 67, &c.sync_since, 4);
+    rec[71] = c.out_path_len;
+    memcpy(rec + 72, &c.last_advert_timestamp, 4);
+    memcpy(rec + 76, c.out_path, 64);
+    memcpy(rec + MESH_CTAB_AT_LASTMOD, &c.lastmod, 4);
+    memcpy(rec + 144, &c.gps_lat, 4);
+    memcpy(rec + 148, &c.gps_lon, 4);
+}
+
 static void merge_one(uint8_t const *rec) {
-    if (rec[MESH_CTAB_AT_TYPE] == ADV_TYPE_NONE) {
+    ContactInfo *c = nd->lookupContactByPubKey(rec, PUB_KEY_SIZE);
+    uint8_t      table_rec[MESH_CTAB_REC] = {};
+    if (c) {
+        contact_to_rec(table_rec, *c);
+    }
+    bool none = rec[MESH_CTAB_AT_TYPE] == ADV_TYPE_NONE;
+    mesh_ctab_merge_t plan =
+        mesh_ctab_merge_plan(mesh_ctab_del_has(&del, rec), c != NULL, c ? c->lastmod : 0, mesh_ctab_lastmod(rec));
+    mesh_ctab_account(&merge_stat, plan, none, c ? table_rec : NULL, rec);
+    if (none) {
         return;
     }
-    ContactInfo *c = nd->lookupContactByPubKey(rec, PUB_KEY_SIZE);
-    ContactInfo  from;
-    switch (mesh_ctab_merge_plan(mesh_ctab_del_has(&del, rec), c != NULL, c ? c->lastmod : 0, mesh_ctab_lastmod(rec))) {
+    ContactInfo from;
+    switch (plan) {
     case MESH_CTAB_ADD:
         contact_from_rec(from, rec);
         // Never through MeshCore's "overwrite the oldest" for a full table: a merge adds, it does not replace
@@ -293,17 +317,14 @@ static void merge_one(uint8_t const *rec) {
             merged_added = merged_added + 1;
         } else {
             merged_full = merged_full + 1;
+            mesh_ctab_account_full(&merge_stat);
         }
         break;
     case MESH_CTAB_REPLACE:
         contact_from_rec(*c, rec); // shared_secret_valid is false again: the key is the same, the secret is recomputed
         merged_newer = merged_newer + 1;
         break;
-    case MESH_CTAB_SKIP:
-        if (c && c->lastmod > mesh_ctab_lastmod(rec)) {
-            table_newer++;
-        }
-        break;
+    case MESH_CTAB_SKIP: break;
     }
 }
 
@@ -330,8 +351,9 @@ static void merge_step(size_t max) {
     // The table now also holds what only /storage had: /storage keeps everything it may until the card holds this
     // table. A card file that already is the table is not written again (#472); otherwise the save is asked for at
     // once (MESH_ADVTAB_RETRY_S), not at the interval
-    bool need = mesh_ctab_card_write_needed(fresh, merge_complete, merge_n, (size_t)nd->getNumContacts(),
-                                            table_newer, merged_full - merge_full_before);
+    merge_stat.fresh = fresh;
+    mesh_ctab_account_done(&merge_stat, (size_t)nd->getNumContacts());
+    bool need = mesh_ctab_card_write_needed(&merge_stat);
     drop_merge();
     card_current    = !need;
     card_force      = need;
@@ -662,12 +684,23 @@ static bool park_again(fs_shim_held_t *h, bool forced, uint32_t now) {
     return true;
 }
 
+static bool internal_held(void) {
+    // From a mounted card not yet looked at until its list is merged, /storage keeps what it has (not at a stop, which
+    // writes what the table holds). The save after the merge writes it; owner_dirty stays set for that one. A card
+    // that mounts after this save cannot be held.
+    mesh_ctab_hold_t hold = {};
+    hold.merging          = merge || merge_fresh;
+    hold.card_mounted     = lichen_fs_sd_mounted();
+    hold.card_pending     = hold.card_mounted && !mounted_seen && have_key && !wipe;
+    hold.card_current     = card_current;
+    hold.card_failed      = card_failed;
+    return mesh_ctab_hold_internal(&hold);
+}
+
 // contacts3 on /storage. While the card holds the list: the core set, and only when the owner changed something, at
 // the interval or at a stop. Otherwise everything (the newest MESH_CTAB_CAP_INTERNAL of a larger table), every time.
 static void write_internal(fs_shim_held_t *h, size_t n, int contacts) {
-    // While the card's list is merged the table is half a union: /storage keeps what it has (not at a stop, which
-    // writes the superset it has). The save after the merge writes it; owner_dirty stays set for that one.
-    if (!stopping && mesh_ctab_hold_internal(merge || merge_fresh, lichen_fs_sd_mounted(), card_current, card_failed)) {
+    if (!stopping && internal_held()) {
         fs_shim_free_held(h);
         internal_skips = internal_skips + 1;
         return;

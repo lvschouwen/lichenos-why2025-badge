@@ -474,20 +474,87 @@ static void test_file_diff(void) {
     CHECK(!mesh_ctab_park(false, last + 10, last, fake_diff, &changed));
 }
 
-static void test_hold_and_write_needed(void) {
-    CHECK(mesh_ctab_hold_internal(true, true, false, false));   // merging: /storage waits
-    CHECK(!mesh_ctab_hold_internal(false, true, false, false)); // merge through
-    CHECK(!mesh_ctab_hold_internal(true, false, false, false)); // the card was pulled
-    CHECK(!mesh_ctab_hold_internal(true, true, false, true));   // the card failed: /storage keeps everything
-    CHECK(!mesh_ctab_hold_internal(true, true, true, false));   // the card already holds the list
-    // The card's list is a subset with equal timestamps and nothing else differs: no write
-    CHECK(!mesh_ctab_card_write_needed(false, true, 575, 575, 0, 0));
-    CHECK(mesh_ctab_card_write_needed(true, true, 0, 10, 0, 0));    // a new list
-    CHECK(mesh_ctab_card_write_needed(false, false, 575, 575, 0, 0)); // lost blocks: repair
-    CHECK(mesh_ctab_card_write_needed(false, true, 575, 575, 0, 3));  // contacts did not fit
-    CHECK(mesh_ctab_card_write_needed(false, true, 575, 575, 1, 0));  // the table's record is newer
-    CHECK(mesh_ctab_card_write_needed(false, true, 250, 575, 0, 0));  // /storage had contacts the card lacks
-    CHECK(mesh_ctab_card_write_needed(false, true, 576, 575, 0, 0));  // the card had a deleted one
+static mesh_ctab_diffstat_t stat_new(void) {
+    mesh_ctab_diffstat_t st = {0};
+    st.complete             = true;
+    return st;
+}
+
+// The merge's accounting over a card file (cards) and a table (tab) with the real plan; table_after contacts are in
+// the table afterwards; the card record whose key starts with deleted_id was deleted by hand (0xFFFF: none)
+static mesh_ctab_diffstat_t run_merge(uint8_t const *cards, size_t nc, uint8_t const *tab, size_t nt, size_t table_after,
+                                      unsigned deleted_id) {
+    mesh_ctab_diffstat_t st = stat_new();
+    for (size_t i = 0; i < nc; i++) {
+        uint8_t const *c = cards + i * MESH_CTAB_REC;
+        uint8_t const *t = NULL;
+        for (size_t j = 0; j < nt; j++) {
+            if (memcmp(tab + j * MESH_CTAB_REC, c, MESH_CTAB_PUB) == 0) {
+                t = tab + j * MESH_CTAB_REC;
+            }
+        }
+        bool              del  = c[0] == deleted_id;
+        mesh_ctab_merge_t plan = mesh_ctab_merge_plan(del, t != NULL, t ? mesh_ctab_lastmod(t) : 0, mesh_ctab_lastmod(c));
+        mesh_ctab_account(&st, plan, c[MESH_CTAB_AT_TYPE] == 0, t, c);
+    }
+    mesh_ctab_account_done(&st, table_after);
+    return st;
+}
+
+static bool need(mesh_ctab_diffstat_t st) {
+    return mesh_ctab_card_write_needed(&st);
+}
+
+static void test_hold(void) {
+    mesh_ctab_hold_t h = {.merging = true, .card_mounted = true};
+    CHECK(mesh_ctab_hold_internal(&h)); // merging: /storage waits
+    h.merging = false;
+    CHECK(!mesh_ctab_hold_internal(&h)); // merge through
+    h.card_pending = true;
+    CHECK(mesh_ctab_hold_internal(&h)); // a card not looked at yet
+    h.card_mounted = false;
+    CHECK(!mesh_ctab_hold_internal(&h)); // pulled
+    h.card_mounted = true;
+    h.card_failed  = true;
+    CHECK(!mesh_ctab_hold_internal(&h)); // failed: /storage keeps everything
+    h.card_failed  = false;
+    h.card_current = true;
+    CHECK(!mesh_ctab_hold_internal(&h)); // the card already holds the table
+}
+
+static void test_write_needed(void) {
+    uint8_t card[2 * MESH_CTAB_REC], tab[2 * MESH_CTAB_REC];
+    rec_set(card, 1, 10, false);
+    rec_set(card + MESH_CTAB_REC, 2, 10, false);
+    memcpy(tab, card, sizeof(tab));
+    CHECK(!need(run_merge(card, 2, tab, 2, 2, 0xFFFF))); // the same list: nothing to write
+    CHECK(!need(run_merge(card, 2, tab, 1, 2, 0xFFFF))); // a subset with equal timestamps: the table becomes the card's
+    // Card {1,2}; 2 deleted by hand while it was out, 3 only on /storage: {1,3} has as many contacts as the card
+    rec_set(tab + MESH_CTAB_REC, 3, 10, false);
+    mesh_ctab_diffstat_t st = run_merge(card, 2, tab, 2, 2, 2);
+    CHECK(st.card_only == 1 && st.table_only == 1 && mesh_ctab_card_write_needed(&st));
+    memcpy(tab, card, MESH_CTAB_REC); // only the deleted card contact: the table lacks it
+    st = run_merge(card, 2, tab, 1, 1, 2);
+    CHECK(st.card_only == 1 && mesh_ctab_card_write_needed(&st));
+    memcpy(tab, card, sizeof(tab)); // equal lastmod, the table's favourite flag differs
+    tab[MESH_CTAB_AT_FLAGS] |= MESH_CTAB_FAV;
+    st = run_merge(card, 2, tab, 2, 2, 0xFFFF);
+    CHECK(st.table_only == 1 && mesh_ctab_card_write_needed(&st));
+    memcpy(tab, card, sizeof(tab)); // the table's record is newer
+    rec_set(tab, 1, 20, false);
+    CHECK(need(run_merge(card, 2, tab, 2, 2, 0xFFFF)));
+    rec_set(tab, 1, 5, false); // the card's is newer: the table takes it and equals the card
+    CHECK(!need(run_merge(card, 2, tab, 2, 2, 0xFFFF)));
+    CHECK(need(run_merge(card, 2, tab, 2, 3, 0xFFFF))); // a contact only /storage had
+    st       = stat_new();
+    st.fresh = true; // a new list
+    CHECK(mesh_ctab_card_write_needed(&st));
+    st          = stat_new();
+    st.complete = false; // a file that lost blocks
+    CHECK(mesh_ctab_card_write_needed(&st));
+    st = run_merge(card, 2, tab, 0, 1, 0xFFFF); // a card record without room
+    mesh_ctab_account_full(&st);
+    CHECK(mesh_ctab_card_write_needed(&st));
 }
 
 int main(void) {
@@ -499,7 +566,8 @@ int main(void) {
     test_card_plan();
     test_defer();
     test_file_diff();
-    test_hold_and_write_needed();
+    test_hold();
+    test_write_needed();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

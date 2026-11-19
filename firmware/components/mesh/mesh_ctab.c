@@ -171,13 +171,46 @@ mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t tab
     return card_lastmod > table_lastmod ? MESH_CTAB_REPLACE : MESH_CTAB_SKIP;
 }
 
-bool mesh_ctab_hold_internal(bool merging, bool card_mounted, bool card_current, bool card_failed) {
-    return merging && card_mounted && !card_current && !card_failed;
+bool mesh_ctab_hold_internal(mesh_ctab_hold_t const *h) {
+    return (h->merging || h->card_pending) && h->card_mounted && !h->card_current && !h->card_failed;
 }
 
-bool mesh_ctab_card_write_needed(bool fresh, bool complete, size_t card_n, size_t table_n, size_t table_newer,
-                                 size_t full) {
-    return fresh || !complete || full > 0 || table_newer > 0 || table_n != card_n;
+void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool none, uint8_t const *table,
+                       uint8_t const *card) {
+    if (none) {
+        st->card_only++;
+    } else if (!table) {
+        if (plan == MESH_CTAB_ADD) {
+            st->matched++;
+        } else {
+            st->card_only++; // deleted by hand: the table never gets it back
+        }
+    } else {
+        st->matched++;
+        // A newer card record replaces the table's; otherwise the table's stays, and a differing one (older, or the
+        // same time with an edited flag or name) is something the card's file does not have
+        if (plan != MESH_CTAB_REPLACE && memcmp(table, card, MESH_CTAB_REC) != 0) {
+            st->table_only++;
+        }
+    }
+}
+
+void mesh_ctab_account_full(mesh_ctab_diffstat_t *st) {
+    st->full++;
+}
+
+void mesh_ctab_account_done(mesh_ctab_diffstat_t *st, size_t table_n) {
+    // An added record that found no room was counted as matched: take it back
+    size_t matched = st->matched > st->full ? st->matched - st->full : 0;
+    if (table_n > matched) {
+        st->table_only += table_n - matched; // contacts only /storage had
+    } else if (matched > table_n) {
+        st->card_only += matched - table_n; // the card's file repeats a key
+    }
+}
+
+bool mesh_ctab_card_write_needed(mesh_ctab_diffstat_t const *st) {
+    return st->fresh || !st->complete || st->full > 0 || st->table_only > 0 || st->card_only > 0;
 }
 
 // ---- contacts the owner deleted --------------------------------------------------------------------------------------
