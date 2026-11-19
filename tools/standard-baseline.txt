@@ -94,7 +94,7 @@ size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	39133
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	16422
+size	libfw_console.a	16455
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
@@ -111,7 +111,7 @@ size	liblichen_notify.a	13378
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	74299
 size	liblichen_random.a	63
-size	liblichen_shell.a	192887
+size	liblichen_shell.a	192881
 size	liblog.a	2726
 size	liblora.a	36269
 size	liblvgl__lvgl.a	541799

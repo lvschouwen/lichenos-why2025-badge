@@ -66,7 +66,11 @@ static pin_t const PINS[] = {
     {"reboot",                     "RRR", "RRR", "RRR", false},
     {"dev",                        "RRR", "RRR", "???", false},
     {"dev status",                 "RRR", "RRR", "???", false},
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+    {"dev on",                     "RRO", "RRO", "???", false}, // #488: Wi-Fi too in the bench-open developer image
+#else
     {"dev on",                     "ROO", "ROO", "???", false},
+#endif
     {"dev off",                    "RRR", "RRR", "???", false},
     {"dev bogus",                  "RRR", "RRR", "???", false},
     {"nosuchcommand",              "???", "???", "???", false},

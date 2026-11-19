@@ -10,7 +10,10 @@ expect() { local want=$1 got; shift; got=$(rc "$@"); case $want in
 
 bash "$tool" --selftest >/dev/null
 printf 'a\0Switch developer mode off?\0' > "$tmp/clean.bin"
-printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0' > "$tmp/marked.bin"
+printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0LICHEN-BENCH-OPEN-MARKER\0' > "$tmp/marked.bin"
+printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0' > "$tmp/debug_only.bin"
+printf 'a\0LICHEN-BENCH-OPEN-MARKER\0' > "$tmp/bench_only.bin"
+printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_LICHEN_BENCH_OPEN=y\n' > "$tmp/bench.cfg"
 printf 'a\0fw dev on\0' > "$tmp/canary.bin"
 printf 'CONFIG_A=y\n# CONFIG_LICHEN_DEV_COMMANDS is not set\n' > "$tmp/off.cfg"
 printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=y\n' > "$tmp/on.cfg"
@@ -18,6 +21,12 @@ printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_LICHEN_NVS_ENCRYPT_BURN_
 expect 0 release "$tmp/clean.bin"
 expect 1 release "$tmp/marked.bin"
 expect 1 release "$tmp/canary.bin"
+# #488: the bench-open marker alone fails a release image, and its absence fails a developer one
+expect 1 release "$tmp/bench_only.bin"
+expect 1 release "$tmp/debug_only.bin"
+expect 1 dev "$tmp/debug_only.bin"
+expect 1 dev "$tmp/bench_only.bin"
+expect 1 config "$tmp/bench.cfg"
 expect 0 dev "$tmp/marked.bin"
 expect 1 dev "$tmp/clean.bin"
 expect 1 release "$tmp/missing.bin"

@@ -19,6 +19,12 @@ static int failures;
 #define R DLG_REMOTE_REFUSE
 #define A DLG_REMOTE_ALLOW
 #define O DLG_REMOTE_ALLOW_ONAIR_SCOPED
+// The local DANGER dialogs: hand-only, or the bench's under CONFIG_LICHEN_BENCH_OPEN (#488; the dialog_remote_policy_bench_test)
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+#define D DLG_REMOTE_ALLOW
+#else
+#define D DLG_REMOTE_REFUSE
+#endif
 
 typedef struct {
     char const          *label;
@@ -28,21 +34,21 @@ typedef struct {
 
 // One or more per table row, as the call sites fill them in
 static case_t const cases[] = {
-    {"reset settings", "Reset all settings and restart? MeshCore and files stay.", R},
-    {"continue", "Erase everything from flash? Settings and every file on the badge.", R},
-    {"continue", "Erases everything on the card. Format as LICHEN?", R},
-    {"continue", "Are you sure?", R},
+    {"reset settings", "Reset all settings and restart? MeshCore and files stay.", D},
+    {"continue", "Erase everything from flash? Settings and every file on the badge.", D},
+    {"continue", "Erases everything on the card. Format as LICHEN?", D},
+    {"continue", "Are you sure?", D},
     {"erase everything",
      "Sure? The MeshCore identity is erased from flash for good: nobody's contacts will know this badge.",
-     R},
-    {"format now", "Sure? All files on the card are lost.", R},
-    {"power off", "Power off the badge?", R},
-    {"forget", "Forget Home? Its password is deleted.", R},
-    {"clear data", "Clear all data of Weather? Its settings and files are erased and cannot come back.", R}, // #233
-    {"clear data", "Clear all data of a 24 character app? Its settings and files are erased and cannot come back.", R},
-    {"forget", "Forget the saved password of this repeater or room? Log in asks for it again.", R},
-    {"remove", "Remove Alice from MeshCore? The chat stays.", R},
-    {"remove", "Remove #badgetest? Messages already received stay.", R},
+     D},
+    {"format now", "Sure? All files on the card are lost.", D},
+    {"power off", "Power off the badge?", D},
+    {"forget", "Forget Home? Its password is deleted.", D},
+    {"clear data", "Clear all data of Weather? Its settings and files are erased and cannot come back.", D}, // #233
+    {"clear data", "Clear all data of a 24 character app? Its settings and files are erased and cannot come back.", D},
+    {"forget", "Forget the saved password of this repeater or room? Log in asks for it again.", D},
+    {"remove", "Remove Alice from MeshCore? The chat stays.", D},
+    {"remove", "Remove #badgetest? Messages already received stay.", D},
     {"set radio", "Set the radio of Rep1 to 869.618 MHz, BW 62.5, SF 8, CR 8?", R},
     {"restart", "Restart Rep1? It is off the air for a while; log in again after.", R},
     {"restart", "Restart the badge? It is off the air for a while; log in again after.", R}, // a repeater so named
@@ -212,6 +218,27 @@ static void test_region_max(void) {
     CHECK(dlg_remote_verdict("set region", kept) == O);
 }
 
+// #488: the switch moves exactly the eight local DANGER labels, whatever the title, and nothing else
+static void test_bench_switch(void) {
+    char const *const labels[] = {"reset settings", "continue", "erase everything", "format now",
+                                  "power off",      "forget",   "clear data",       "remove"};
+    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
+        CHECK(dlg_remote_verdict(labels[i], "any title at all") == D);
+    }
+    // Kept hand-only in both builds (owner decision on #488)
+    CHECK(dlg_remote_verdict("set radio", "Set the radio of x?") == R);
+    CHECK(dlg_remote_verdict("restart", "Restart Rep1? It is off the air for a while; log in again after.") == R);
+    CHECK(dlg_remote_verdict("send", "Send \"reboot\" to Rep1?") == R);
+    CHECK(dlg_remote_verdict("switch off", "Switch off updates over Wi-Fi? The Wi-Fi console goes too.") == R);
+    CHECK(dlg_remote_verdict("switch off", "Switch developer mode off? The developer rows and commands go away.") == R);
+    CHECK(dlg_remote_verdict("unlisted", "x") == R);
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+    CHECK(D == A);
+#else
+    CHECK(D == R);
+#endif
+}
+
 static void test_glob(void) {
     CHECK(dlg_remote_glob("", ""));
     CHECK(!dlg_remote_glob("", "a"));
@@ -241,6 +268,7 @@ int main(void) {
     test_backup_load_max();
     test_title_with_tail();
     test_region_max();
+    test_bench_switch();
     test_glob();
     test_names();
     if (failures) {

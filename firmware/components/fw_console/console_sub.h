@@ -46,6 +46,9 @@ typedef enum {
     CON_ORIGIN_ANY,   // the USB console, Wi-Fi and the Console app
     CON_ORIGIN_LOCAL, // on the badge: the USB console or the Console app, not Wi-Fi
     CON_ORIGIN_UART,  // the USB console only: a person at the cable (epic-395 rule 4)
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+    CON_ORIGIN_UART_OR_WIFI, // the USB console or Wi-Fi, not the Console app (#488: the bench's `fw dev on`)
+#endif
 } console_origin_rule_t;
 
 // What a row does: the build check reads CON_F_TX and CON_F_RESTART; the others shape the refusal and document

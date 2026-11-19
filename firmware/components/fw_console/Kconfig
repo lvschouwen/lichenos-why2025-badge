@@ -7,4 +7,15 @@ menu "Lichen console"
             run only while developer mode is on (About: press Enter 7 times, or `fw dev on` from the USB console;
             never over Wi-Fi) and are hidden from `fw help` while it is off. Off in the release build
             (sdkconfig.release.defaults, `build.sh release build`): the commands are then not in the image.
+
+    config LICHEN_BENCH_OPEN
+        bool "Bench-open: remote reach for the bench in a developer image (#488)"
+        default y
+        depends on LICHEN_DEV_COMMANDS
+        help
+            Lets the main session bench the developer image without hands: `fw ui answer` may confirm the local DANGER
+            dialogs (not the ones that change what a third node does, the Wi-Fi updates or developer mode switches off),
+            `fw dev on` works over Wi-Fi, and injected keys count for About's taps and the boot factory-reset combo.
+            Off in the release build (sdkconfig.release.defaults; tools/check_release_image.sh config wants it off and
+            LICHEN-BENCH-OPEN-MARKER absent from the image): the release keeps every hand-only refusal.
 endmenu

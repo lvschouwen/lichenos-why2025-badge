@@ -22,4 +22,5 @@ typedef enum { DEV_ENTER_NONE, DEV_ENTER_SWITCH_ON, DEV_ENTER_ASK_OFF, DEV_ENTER
 // What an Enter press on About does: while on it asks to switch off (the count stays at 0), while off it is a tap and
 // the seventh switches on. An injected press (lichen_sys_keys_last_injected, #391) is REFUSED and leaves t as it was:
 // developer mode is switched on by a hand or over USB only (#373), so keys sent over Wi-Fi neither count nor ask.
+// With CONFIG_LICHEN_BENCH_OPEN (the developer image, #488) injected presses count as a hand's.
 dev_enter_action_t dev_enter_action(dev_tap_t *t, bool dev_on, bool injected, uint32_t now);

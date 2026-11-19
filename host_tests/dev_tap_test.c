@@ -69,6 +69,16 @@ int main(void) {
     CHECK(dev_enter_action(&t, true, false, 7) == DEV_ENTER_ASK_OFF);
     CHECK(t.n == 0);
 
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+    // Bench-open (#488): an injected Enter is a tap like a hand's; while on it asks to switch off
+    dev_tap_reset(&t);
+    for (int i = 0; i < DEV_TAP_COUNT - 1; i++) {
+        CHECK(dev_enter_action(&t, false, true, (uint32_t)i * 100) == DEV_ENTER_NONE);
+    }
+    CHECK(dev_enter_action(&t, false, true, 600) == DEV_ENTER_SWITCH_ON);
+    CHECK(dev_enter_action(&t, true, true, 700) == DEV_ENTER_ASK_OFF);
+    CHECK(t.n == 0);
+#else
     // Injected Enters (#374 H1, fw keys send over Wi-Fi): seven of them never switch on, while on they never ask to
     // switch off, and they leave a hand's count where it was
     dev_tap_reset(&t);
@@ -84,6 +94,7 @@ int main(void) {
     CHECK(dev_enter_action(&t, false, true, 3700) == DEV_ENTER_REFUSED);
     CHECK(t.n == DEV_TAP_COUNT - 1 && t.last == 3000 + (DEV_TAP_COUNT - 2) * 100);
     CHECK(dev_enter_action(&t, false, false, 3800) == DEV_ENTER_SWITCH_ON); // the hand's seventh still counts
+#endif
 
     if (failures) {
         printf("%d failure(s)\n", failures);

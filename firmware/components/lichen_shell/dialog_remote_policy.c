@@ -12,19 +12,27 @@
 #define V_REFUSE DLG_REMOTE_REFUSE
 #define V_ALLOW  DLG_REMOTE_ALLOW
 #define V_ONAIR  DLG_REMOTE_ALLOW_ONAIR_SCOPED
+// The DANGER dialogs that act on this badge only: hand-only, except in a developer image with the bench-open switch
+// (#488), where the bench confirms them with `fw ui answer`. The rows that change what a third node does or end the
+// console's own way in stay V_REFUSE below, switch or not.
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+#define V_LOCAL_DANGER DLG_REMOTE_ALLOW
+#else
+#define V_LOCAL_DANGER DLG_REMOTE_REFUSE
+#endif
 
 // Every row that matches counts and the strictest wins, so a DANGER row with a wide title can never be undercut by an
 // ALLOW row that happens to match too (a contact named to look like another dialog's words)
 static dlg_remote_row_t const table[] = {
-    // DANGER, hand-only
-    {"reset settings", "*", V_REFUSE},   // factory_screen.c: Reset settings
-    {"continue", "*", V_REFUSE},         // factory_screen.c Reset everything, sd_screen.c format, menu.c's default
-    {"erase everything", "*", V_REFUSE}, // factory_screen.c: Reset everything, second question
-    {"format now", "*", V_REFUSE},       // sd_screen.c: format, second question
-    {"power off", "*", V_REFUSE},        // app_power.c
-    {"forget", "*", V_REFUSE},           // wifi_screen.c network, meshcore_contact.c repeater password
-    {"clear data", "*", V_REFUSE},       // app_page.c: Settings > Apps > Clear data (#233): erases an app's settings and files
-    {"remove", "*", V_REFUSE},           // meshcore_contact.c contact, meshcore_settings.c channel
+    // DANGER, hand-only (V_LOCAL_DANGER: or the bench's, #488)
+    {"reset settings", "*", V_LOCAL_DANGER},   // factory_screen.c: Reset settings
+    {"continue", "*", V_LOCAL_DANGER},         // factory_screen.c Reset everything, sd_screen.c format, menu.c's default
+    {"erase everything", "*", V_LOCAL_DANGER}, // factory_screen.c: Reset everything, second question
+    {"format now", "*", V_LOCAL_DANGER},       // sd_screen.c: format, second question
+    {"power off", "*", V_LOCAL_DANGER},        // app_power.c
+    {"forget", "*", V_LOCAL_DANGER},           // wifi_screen.c network, meshcore_contact.c repeater password
+    {"clear data", "*", V_LOCAL_DANGER},       // app_page.c: Settings > Apps > Clear data (#233): erases an app's settings and files
+    {"remove", "*", V_LOCAL_DANGER},           // meshcore_contact.c contact, meshcore_settings.c channel
     {"set radio", "*", V_REFUSE},        // meshcore_rset.c: a third node's radio
     {"restart", "Restart *? It is off the air for a while; log in again after.", V_REFUSE}, // meshcore_rset.c repeater
     {"send", "Send \"*\" to *?", V_REFUSE}, // meshcore_remote.c: an admin command to a third node

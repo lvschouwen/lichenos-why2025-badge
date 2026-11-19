@@ -73,6 +73,12 @@ static void test_origin(void) {
     CHECK(!console_origin_allows(CON_ORIGIN_UART, CONSOLE_ORIGIN_WIFI));
     CHECK(!console_origin_allows(CON_ORIGIN_UART, CONSOLE_ORIGIN_UNKNOWN));
     CHECK(!console_origin_allows(7, CONSOLE_ORIGIN_UART)); // an unknown rule fails closed
+#ifdef CONFIG_LICHEN_BENCH_OPEN // #488: the bench's "dev on": USB and Wi-Fi, never the Console app or unknown
+    CHECK(console_origin_allows(CON_ORIGIN_UART_OR_WIFI, CONSOLE_ORIGIN_UART));
+    CHECK(console_origin_allows(CON_ORIGIN_UART_OR_WIFI, CONSOLE_ORIGIN_WIFI));
+    CHECK(!console_origin_allows(CON_ORIGIN_UART_OR_WIFI, CONSOLE_ORIGIN_LOCAL));
+    CHECK(!console_origin_allows(CON_ORIGIN_UART_OR_WIFI, CONSOLE_ORIGIN_UNKNOWN));
+#endif
 }
 
 static void test_rule(void) {

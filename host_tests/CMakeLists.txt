@@ -1506,6 +1506,24 @@ add_executable(dev_tap_test
 target_include_directories(dev_tap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(dev_tap_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME dev_tap_test COMMAND dev_tap_test)
+# #488: the same with the developer image's bench-open switch: injected Enters count
+add_executable(dev_tap_bench_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/dev_tap_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/dev_tap.c
+)
+target_include_directories(dev_tap_bench_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(dev_tap_bench_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(dev_tap_bench_test PRIVATE CONFIG_LICHEN_BENCH_OPEN=1)
+add_test(NAME dev_tap_bench_test COMMAND dev_tap_bench_test)
+
+# #488: whether the boot combo sees a key as injected, with and without the bench-open switch
+foreach(t factory_combo_key_test factory_combo_key_bench_test)
+    add_executable(${t} ${CMAKE_CURRENT_SOURCE_DIR}/factory_combo_key_test.c)
+    target_include_directories(${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+    target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()
+target_compile_definitions(factory_combo_key_bench_test PRIVATE CONFIG_LICHEN_BENCH_OPEN=1)
 
 add_executable(saver_layout_test
     ${CMAKE_CURRENT_SOURCE_DIR}/saver_layout_test.c
@@ -2533,6 +2551,15 @@ add_executable(dialog_remote_policy_test
 target_include_directories(dialog_remote_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(dialog_remote_policy_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME dialog_remote_policy_test COMMAND dialog_remote_policy_test)
+# #488: the same with the bench-open switch: the local DANGER rows allow, the kept ones refuse
+add_executable(dialog_remote_policy_bench_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/dialog_remote_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/dialog_remote_policy.c
+)
+target_include_directories(dialog_remote_policy_bench_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(dialog_remote_policy_bench_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(dialog_remote_policy_bench_test PRIVATE CONFIG_LICHEN_BENCH_OPEN=1)
+add_test(NAME dialog_remote_policy_bench_test COMMAND dialog_remote_policy_bench_test)
 
 # Developer mode (#373): debug commands run and show in fw help only while it is on; on only from the USB console
 add_executable(dev_mode_test
@@ -2725,6 +2752,14 @@ foreach(t console_pin_test console_pin_dev_test)
 endforeach()
 target_compile_definitions(console_pin_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1
     CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=1 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=1)
+# #488: the developer image with the bench-open switch (what firmware/build compiles): "dev on" also from Wi-Fi
+add_executable(console_pin_bench_test ${CONSOLE_PIN_SRCS})
+get_target_property(_pin_inc console_pin_dev_test INCLUDE_DIRECTORIES)
+target_include_directories(console_pin_bench_test PRIVATE ${_pin_inc})
+target_compile_options(console_pin_bench_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(console_pin_bench_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1 CONFIG_LICHEN_BENCH_OPEN=1
+    CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=1 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=1)
+add_test(NAME console_pin_bench_test COMMAND console_pin_bench_test)
 
 # #464: the sub-command table type: matching, the gate, the origin rules and the USB hold
 add_executable(console_sub_test ${CMAKE_CURRENT_SOURCE_DIR}/console_sub_test.c ${NPT_FW}/fw_console/console_sub.c
@@ -2738,6 +2773,12 @@ target_include_directories(console_sub_dev_test PRIVATE ${NPT_FW}/fw_console)
 target_compile_options(console_sub_dev_test PRIVATE -Wall -Wextra -Werror)
 target_compile_definitions(console_sub_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
 add_test(NAME console_sub_dev_test COMMAND console_sub_dev_test)
+add_executable(console_sub_bench_test ${CMAKE_CURRENT_SOURCE_DIR}/console_sub_test.c ${NPT_FW}/fw_console/console_sub.c
+    ${NPT_FW}/fw_console/dev_mode.c)
+target_include_directories(console_sub_bench_test PRIVATE ${NPT_FW}/fw_console)
+target_compile_options(console_sub_bench_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(console_sub_bench_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1 CONFIG_LICHEN_BENCH_OPEN=1)
+add_test(NAME console_sub_bench_test COMMAND console_sub_bench_test)
 
 # #464: the console rule guard's fixtures: open transmitting rows, unreadable tables, and the registration tie
 add_test(NAME check_console_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_console_rules_test.py)

@@ -41,6 +41,9 @@ bool console_origin_allows(uint8_t rule, console_origin_t origin) {
         case CON_ORIGIN_ANY: return true;
         case CON_ORIGIN_LOCAL: return origin == CONSOLE_ORIGIN_UART || origin == CONSOLE_ORIGIN_LOCAL;
         case CON_ORIGIN_UART: return origin == CONSOLE_ORIGIN_UART;
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+        case CON_ORIGIN_UART_OR_WIFI: return origin == CONSOLE_ORIGIN_UART || origin == CONSOLE_ORIGIN_WIFI;
+#endif
         default: return false; // fail closed
     }
 }

@@ -202,6 +202,10 @@ static atomic_bool s_dev_on;
 // What tools/check_release_image.sh looks for (#401): a string only debug code holds, unlike UI wording such as
 // "developer mode". `retain` keeps it through --gc-sections; the developer image is checked to hold it.
 __attribute__((used, retain)) char const lichen_debug_build_marker[] = "LICHEN-DEBUG-BUILD-MARKER";
+#ifdef CONFIG_LICHEN_BENCH_OPEN
+// Same idea for the bench-open switch (#488): present in the developer image, absent from the release image
+__attribute__((used, retain)) char const lichen_bench_open_marker[] = "LICHEN-BENCH-OPEN-MARKER";
+#endif
 
 static fw_set_u8_fn s_dev_save;
 

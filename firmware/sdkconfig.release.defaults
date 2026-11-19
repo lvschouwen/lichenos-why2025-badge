@@ -2,6 +2,8 @@
 # directory (firmware/build-release). Debug and test commands are left out of the image, and the LVGL lock-owner
 # check's wraps with them.
 CONFIG_LICHEN_DEV_COMMANDS=n
+# The bench-open switch (#488) depends on the debug commands; pinned off by name so the release gate can check it
+CONFIG_LICHEN_BENCH_OPEN=n
 CONFIG_LICHEN_UI_LOCK_CHECK_OFF=y
 # The irreversible eFuse burn command: off in sdkconfig.defaults too, said here so a release never gets it
 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=n
