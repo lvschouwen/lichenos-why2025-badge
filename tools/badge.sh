@@ -187,15 +187,15 @@ refuse_control_chars() {
     fi
 }
 
-# Every console line passes here before it is sent (#287): on air only #badgetest and the test node. A line that
-# changes what the badge floods (advert interval/manual) is refused too, with no override (an agent could set one):
-# Lucas changes those in MeshCore Settings on the badge.
+# Every console line passes here before it is sent (#287): on air only #badgetest and the test node. An "ask" line
+# (changes what or where the badge transmits, or erases) is sent (#487): the guard hook's prompt in the session is
+# the check, badge.sh only notes it.
 onair_gate() {
     local verdict
     verdict=$(onair_verdict "$1")
     case $verdict in
         deny\ *) echo "refusing: ${verdict#deny }" >&2; exit 1 ;;
-        ask\ *) echo "refusing: ${verdict#ask } (he does it at the badge)" >&2; exit 1 ;;
+        ask\ *) echo "note: ${verdict#ask } (sent, #487)" >&2 ;;
     esac
 }
 

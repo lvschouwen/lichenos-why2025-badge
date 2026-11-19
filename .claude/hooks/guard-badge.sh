@@ -5,27 +5,29 @@
 #     contacts and channels.
 #  2. `git checkout -b/-B`, `git switch`, `git reset` issued from the MAIN checkout (a resumed agent once
 #     did this and turned the ff-merge into a silent no-op). Agents work in .claude/worktrees/*.
-# "ask" prompts the user in the main session and stops a subagent, which must then report. Fails open.
+# "ask" prompts the user in the main session and stops a subagent, which must then report. It is held until every
+# rule ran, so a deny anywhere in the command wins (#487). Fails open.
 set -u
 input=$(cat 2>/dev/null || true)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
-file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
+# An ask is held until every rule has run (#487): a later deny in the same command still refuses it
+pending_ask=
 ask() {
-  jq -cn --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
+  [ -n "$pending_ask" ] || pending_ask=$1
+}
+finish() {
+  [ -z "$pending_ask" ] ||
+    jq -cn --arg r "$pending_ask" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
   exit 0
 }
 deny() {
   jq -cn --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
-# The on-air allow list (rule 3) and its overrides are Lucas's alone: refused, not asked (an ask can be settled
-# without him in auto mode). He edits the file himself.
-case "$file$cmd" in
-  *onair-allow.local* | *ONAIR_ALLOW_FILE*)
-    deny "the on-air allow list (.claude/onair-allow.local) and its overrides are Lucas's to change or use himself (#287)" ;;
-esac
-[ -n "$cmd" ] || exit 0
+# The on-air allow list (rule 3) is editable from the main session (#487: one dev badge, the bench adds its test
+# nodes); only what it lets on air is judged below.
+[ -n "$cmd" ] || finish
 if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
 fi
@@ -86,14 +88,14 @@ if printf '%s\n%s' "$cmd_joined" "$cmd" | grep -qE "$reach"; then
     verdict=$(onair_verdict "$hit")
     case "$verdict" in
       deny\ *) deny "${verdict#deny }" ;;
-      ask\ *) deny "${verdict#ask }: he does it at the badge" ;;
+      ask\ *) ask "${verdict#ask }: confirm to run it (#487)" ;;
     esac
   done < <(onair_hits "$cmd_joined"; onair_hits "$cmd")
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
 main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}
 if [ "$main_dir" = "$main_checkout" ] && printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+(-C\s+\S+\s+)?(checkout\s+-[bB]\b|switch\b|reset\b)'; then
-  case "$cmd" in *"/.claude/worktrees/"*) exit 0 ;; esac
+  case "$cmd" in *"/.claude/worktrees/"*) finish ;; esac
   ask "git checkout -b/-B, switch or reset in the MAIN checkout: agents work in .claude/worktrees/*; main only merges ff-only. Confirm if this is deliberate."
 fi
-exit 0
+finish

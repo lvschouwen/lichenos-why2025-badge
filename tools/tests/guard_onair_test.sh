@@ -41,7 +41,7 @@ expect deny "$b mesh trace 0123456789ab"
 expect deny "$b mesh discover 0123456789ab"
 expect pass "$b mesh trace"
 expect pass "$b mesh advert"
-expect deny "$b mesh advert interval 6h"
+expect ask "$b mesh advert interval 6h"
 expect pass "$b mesh out"
 # #438: opening a chat is judged like a send; closing one and the bare forms pass
 expect pass "$b mesh chat open '#badgetest'"
@@ -109,21 +109,24 @@ expect deny "echo 'mesh send #badgetest\r#general' > /dev/ttyACM0"
 expect deny "printf 'mesh remote settings\nx' > /dev/ttyACM0"
 expect deny "$b mesh dm abcdef123456\nfoo"
 expect deny "echo 'mesh remote mesh status' > /dev/ttyACM0"
-# #450: lines that change what or where the badge transmits, or erase, are refused; the forms that read pass
+# #450/#487: lines that change what or where the badge transmits, or erase, prompt (ask); the forms that read pass
 for line in "mesh radio 869.618 62.5 8 8 22" "mesh radio eu-narrow" "mesh name Other" "mesh loc 1.0 2.0" \
   "mesh path abcdef123456 reset" "mesh pathhash 2" "mesh autoadd off" "channel add '#badgetest' AAAAAAAAAAAAAAAAAAAAAA==" \
   "channel rm '#badgetest'" "channel rename 1 other" "contacts import abc" "factory-reset all YES" \
   "factory-reset settings YES" "nvs-down YES" "nvs-enc burn YES" "c6 reflash" "meshcore channel add '#x'" \
   "fw meshcore mesh radio eu-narrow"; do
-  expect deny "$b $line"
+  expect ask "$b $line"
 done
 for line in "mesh radio" "mesh loc" "mesh pathhash" "mesh autoadd" "channel show 1" "channels" "contacts" \
   "contacts export" "factory-reset plan all" "factory-reset" "nvs-enc" "c6" "c6 status"; do
   expect pass "$b $line"
 done
-expect deny "ssh pi 'tools/badge.sh console /dev/ttyACM0 \"fw nvs-enc burn YES\"'"
-expect deny "echo 'channel rm #badgetest' > /dev/badge-console"
-expect deny "printf 'mesh out\nchannel add #badgetest AAAA' > /dev/ttyACM0"
+expect ask "ssh pi 'tools/badge.sh console /dev/ttyACM0 \"fw nvs-enc burn YES\"'"
+expect ask "echo 'channel rm #badgetest' > /dev/badge-console"
+expect ask "printf 'mesh out\nchannel add #badgetest AAAA' > /dev/ttyACM0"
+# an ask never hides a deny later in the same command
+expect deny "$b mesh radio eu-narrow; $b mesh send Public hi"
+expect deny "tools/badge.sh flash-fw /dev/ttyACM0 --wipe-storage; $b mesh send Public hi"
 expect pass "grep -n 'channel add' firmware/components/mesh/mesh_cmd_table.c"
 expect pass "git commit -m 'the guard asks for mesh radio and channel rm'"
 # #450: routes the hook did not see
@@ -190,10 +193,10 @@ lines that reach the badge (badge.sh, ssh) are checked'"
 expect deny "$b mesh dm \\
   0123456789ab ping"
 expect deny "curl -s -X POST --data-binary 'mesh send Public hi' http://192.0.2.1:8080/console"
-expect deny "echo x >> .claude/onair-allow.local"
-got=$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"/r/.claude/onair-allow.local"}}' | bash "$hook" |
-  jq -r '.hookSpecificOutput.permissionDecision')
-[ "$got" = deny ] || { echo "FAIL: Edit of the allow list: $got, expected deny" >&2; fail=1; }
+# #487: the allow list is the main session's to edit
+expect pass "echo x >> .claude/onair-allow.local"
+got=$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"/r/.claude/onair-allow.local"}}' | bash "$hook")
+[ -z "$got" ] || { echo "FAIL: Edit of the allow list: $got, expected pass" >&2; fail=1; }
 # Without an allow file only #badgetest passes
 expect deny "$b mesh dm abcdef123456 hi" "$tmp/missing"
 expect pass "$b mesh send '#badgetest' hi" "$tmp/missing"
@@ -245,12 +248,13 @@ sent refused fw 192.0.2.1 mesh send Public hello
 sent refused fw 192.0.2.1 "mesh send #other hi"
 sent refused fw 192.0.2.1 mesh dm 0123456789ab hi
 sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
-sent refused fw 192.0.2.1 mesh advert interval 6h
-sent refused fw 192.0.2.1 mesh radio eu-narrow
-sent refused fw 192.0.2.1 channel rm '#badgetest'
-sent refused fw 192.0.2.1 meshcore channel add '#badgetest' AAAA
-sent refused console /dev/null "fw nvs-enc burn YES"
-sent refused console /dev/null "fw factory-reset all YES"
+# #487: "ask" lines are sent; the hook's prompt is the check
+sent sent fw 192.0.2.1 mesh advert interval 6h
+sent sent fw 192.0.2.1 mesh radio eu-narrow
+sent sent fw 192.0.2.1 channel rm '#badgetest'
+sent sent fw 192.0.2.1 meshcore channel add '#badgetest' AAAA
+sent sent fw 192.0.2.1 nvs-enc burn YES
+sent sent fw 192.0.2.1 factory-reset all YES
 sent sent fw 192.0.2.1 mesh radio
 sent sent fw 192.0.2.1 channel show 1
 sent refused console /dev/null "fw mesh send Public hi"
@@ -262,7 +266,7 @@ sent refused console /dev/null "fw onair allow #zz-other"
 sent sent fw 192.0.2.1 meshcore mesh send '#badgetest' hello
 sent refused fw 192.0.2.1 meshcore mesh send Public hello
 sent refused fw 192.0.2.1 meshcore mesh dm 0123456789ab hi
-sent refused fw 192.0.2.1 meshcore mesh advert interval 6h
+sent sent fw 192.0.2.1 meshcore mesh advert interval 6h
 sent refused fw 192.0.2.1 meshcore onair off
 sent refused console /dev/null "fw meshcore onair allow #zz-other"
 sent sent fw 192.0.2.1 meshcore onair on
