@@ -83,6 +83,29 @@ bool mesh_advtab_internal_ok(mesh_advtab_clock_t const *c, bool at_stop);
 // The key in an old per-node file's name (16 hex digits, either case); false for any other name
 bool mesh_advtab_key_from_name(char const *name, uint8_t key[MESH_ADVTAB_KEY]);
 
+// ---- the one-time takeover of older firmware's per-node files, in slices (#469, paced like #471's walks) ------------------
+// A walk of a folder of a few hundred files is too long for one go on the mesh task (core 0 starves IDLE, the task
+// watchdog fires), so the caller runs mesh_advtab_walk_step once per loop. The directory cursor lives in the caller's
+// ctx and survives between calls; the walk's progress is in mesh_advtab_walk_t (zero it to begin).
+typedef struct {
+    bool     done;       // the folder was read to its end: the old files may go once a snapshot holds the result
+    uint32_t names;      // names seen so far
+    uint32_t taken_over; // nodes added to the table
+} mesh_advtab_walk_t;
+typedef struct {
+    // The next name of the folder, NULL at its end; valid until the next call
+    char const *(*next)(void *ctx);
+    // Reads the file called name into data (MESH_ADVTAB_DATA bytes of room); its length, 0 when it cannot be read
+    size_t (*read)(void *ctx, char const *name, uint8_t *data);
+    // The table is the mesh lock's (not thread safe): held around every lookup and put, never around next or read
+    void (*lock)(void *ctx);
+    void (*unlock)(void *ctx);
+} mesh_advtab_walk_ops_t;
+// At most max_names names this call: each one that is a node key the table does not have is read and put. true once
+// the end was reached (w->done); then it is not to be called again.
+bool mesh_advtab_walk_step(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_walk_ops_t const *ops, void *ctx,
+                           size_t max_names);
+
 #ifdef __cplusplus
 }
 #endif

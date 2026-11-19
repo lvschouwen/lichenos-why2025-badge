@@ -217,7 +217,66 @@ static void due_and_names(void) {
     CHECK(!mesh_advtab_key_from_name("adverts.bin", key));
 }
 
+typedef struct {
+    char const *names[64];
+    size_t      count, pos, calls_next, reads;
+    int         locked, lock_errors;
+} fake_dir_t;
+
+static void fake_lock(void *ctx) {
+    ((fake_dir_t *)ctx)->locked++;
+}
+
+static void fake_unlock(void *ctx) {
+    ((fake_dir_t *)ctx)->locked--;
+}
+
+static char const *fake_next(void *ctx) {
+    fake_dir_t *d = ctx;
+    d->calls_next++;
+    d->lock_errors += d->locked != 0; // never walks the folder under the lock
+    return d->pos < d->count ? d->names[d->pos++] : NULL;
+}
+
+static size_t fake_read(void *ctx, char const *name, uint8_t *data) {
+    fake_dir_t *d = ctx;
+    (void)name;
+    d->reads++;
+    d->lock_errors += d->locked != 0;
+    memset(data, 0x5a, MESH_ADVTAB_MIN);
+    return MESH_ADVTAB_MIN;
+}
+
+static void takeover_walks_in_slices(void) {
+    static char const *names[] = {".",  "..", "0000000000000001", "0000000000000002", "junk.txt", "0000000000000003",
+                                  "0000000000000004", "0000000000000005", "0000000000000006", "0000000000000007"};
+    fresh(32);
+    fake_dir_t d = {.count = sizeof(names) / sizeof(names[0])};
+    memcpy(d.names, names, sizeof(names));
+    uint8_t key[MESH_ADVTAB_KEY], got[MESH_ADVTAB_DATA] = {0};
+    CHECK(mesh_advtab_key_from_name("0000000000000003", key)); // the snapshot already has node 3
+    CHECK(mesh_advtab_put(&t, key, sizeof(key), got, MESH_ADVTAB_MIN + 1));
+    uint32_t           had = t.count;
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock};
+    mesh_advtab_walk_t w   = {0};
+    size_t             calls = 0;
+    while (!mesh_advtab_walk_step(&t, &w, &ops, &d, 3)) {
+        calls++;
+        CHECK(!w.done);
+        CHECK(d.calls_next == calls * 3); // never more than 3 names per call; the cursor kept its place
+        CHECK(calls < 10);
+    }
+    CHECK(w.done && calls == 3);          // 10 names: 3 + 3 + 3, then the call that finds the end
+    CHECK(w.names == 10);
+    CHECK(w.taken_over == 6 && d.reads == 6); // nodes 1 2 4 5 6 7 once each; 3 was in the table, junk and dots skipped
+    CHECK(t.count == had + 6 && d.locked == 0 && d.lock_errors == 0);
+    size_t before = d.calls_next;
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 3) && d.calls_next == before); // done stays done
+    CHECK(mesh_advtab_get(&t, key, sizeof(key), got) == MESH_ADVTAB_MIN + 1); // the snapshot's copy was kept
+}
+
 int main(void) {
+    takeover_walks_in_slices();
     put_reads_back_and_replaces();
     refuses_bad_sizes_and_a_full_table();
     removed_slot_is_used_again();

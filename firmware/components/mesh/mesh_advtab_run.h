@@ -27,6 +27,9 @@ void mesh_advtab_run_write(void);
 void mesh_advtab_run_save_locked(void);
 // MeshCore's files were erased (factory reset): the table is empty and the snapshots go at the next write
 void mesh_advtab_run_wiped(void);
+// The mesh lock (mesh_advtab_lock.cpp), for the takeover walk's table access from this C file
+void mesh_advtab_run_lock(void);
+void mesh_advtab_run_unlock(void);
 // One console line: where the snapshot lives, counts, the last write and errors
 void mesh_advtab_run_console(void);
 

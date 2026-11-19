@@ -8,6 +8,8 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -28,6 +30,7 @@ static char const TAG[] = "mesh_adverts";
 #define STOP_WAIT_MS  3000
 #define RETRY_S       5 // after a busy card lock, as the journal waits
 #define OLD_PER_CALL  16 // old per-node files removed per loop of the mesh task: never a long walk (#471)
+#define SLICE_US      20000 // one stretch of the takeover walk before it blocks a tick (#471: WALK_SLICE_US)
 #define SNAPSHOT_MAX  (MESH_ADVTAB_HEAD + MESH_ADVTAB_CAP * (MESH_ADVTAB_REC + MESH_ADVTAB_DATA))
 
 static mesh_advtab_t table;
@@ -39,6 +42,9 @@ static uint32_t      generation;
 static uint32_t      last_save_s, last_internal_s;
 static bool          internal_written; // since boot: the 6 h rule counts from the last one
 static bool          old_files;        // <dir>/bl still holds per-node files
+static DIR          *old_dir;          // open while the takeover walk is under way: its cursor
+static mesh_advtab_walk_t walk;
+static int64_t       slice_start_us; // when this loop's stretch of the walk began
 static bool          wipe_files;
 static uint32_t      retry_at_s;       // a busy card: no new try before this
 static bool          force;            // the takeover's first snapshot does not wait for its interval
@@ -116,33 +122,69 @@ static void load_snapshot(void) {
     saved_changes = table.changes;
 }
 
-// The per-node files of older firmware fill in the nodes the snapshot does not have
-static void load_old_files(void) {
-    char path[PATH_MAX_LEN], file[PATH_MAX_LEN + 260];
+// The per-node files of older firmware fill in the nodes the snapshot does not have. Boot only opens the folder; the
+// walk runs a slice per loop of the mesh task (walk_step_old), the folder staying open between loops as the cursor.
+static void open_old_files(void) {
+    char path[PATH_MAX_LEN];
     path_in(path, dir, "bl");
-    DIR *d = opendir(path);
-    if (!d) {
+    old_dir = opendir(path);
+    if (old_dir) {
+        old_files = true;
+        memset(&walk, 0, sizeof(walk));
+    }
+}
+
+static char const *old_next(void *ctx) {
+    (void)ctx;
+    struct dirent *e = readdir(old_dir);
+    if (esp_timer_get_time() - slice_start_us >= SLICE_US) { // as #471's walk_pace, which an app may not include
+        vTaskDelay(1);                                       // a block, so IDLE on this core gets its turn
+        slice_start_us = esp_timer_get_time();
+    }
+    return e ? e->d_name : NULL;
+}
+
+static size_t old_read(void *ctx, char const *name, uint8_t *data) {
+    (void)ctx;
+    char file[PATH_MAX_LEN + 260];
+    snprintf(file, sizeof(file), "%s/bl/%s", dir, name);
+    FILE  *f = fopen(file, "rb");
+    size_t n = f ? fread(data, 1, MESH_ADVTAB_DATA, f) : 0;
+    if (f) {
+        fclose(f);
+    }
+    return n;
+}
+
+static void old_lock(void *ctx) {
+    (void)ctx;
+    mesh_advtab_run_lock();
+}
+
+static void old_unlock(void *ctx) {
+    (void)ctx;
+    mesh_advtab_run_unlock();
+}
+
+static mesh_advtab_walk_ops_t const old_ops = {old_next, old_read, old_lock, old_unlock};
+
+static void close_old_dir(void) {
+    if (old_dir) {
+        closedir(old_dir);
+        old_dir = NULL;
+    }
+}
+
+// One slice of the takeover. At its end the files go only after a snapshot holds what they added (force asks for it).
+static void walk_step_old(void) {
+    slice_start_us = esp_timer_get_time();
+    bool done = mesh_advtab_walk_step(&table, &walk, &old_ops, NULL, OLD_PER_CALL);
+    if (!done) {
         return;
     }
-    size_t         taken_over = 0;
-    struct dirent *e;
-    uint8_t        key[MESH_ADVTAB_KEY], data[MESH_ADVTAB_DATA];
-    old_files = true;
-    while ((e = readdir(d)) != NULL) {
-        if (!mesh_advtab_key_from_name(e->d_name, key) || mesh_advtab_get(&table, key, sizeof(key), data)) {
-            continue;
-        }
-        snprintf(file, sizeof(file), "%s/%s", path, e->d_name);
-        FILE *f = fopen(file, "rb");
-        if (f) {
-            size_t n = fread(data, 1, sizeof(data), f);
-            fclose(f);
-            taken_over += mesh_advtab_put(&table, key, sizeof(key), data, n) ? 1 : 0;
-        }
-    }
-    closedir(d);
-    force = table.changes != saved_changes; // the files go only after a snapshot holds what they added
-    ESP_LOGI(TAG, "%u adverts taken over from the per-node files", (unsigned)taken_over);
+    close_old_dir();
+    force = table.changes != saved_changes;
+    ESP_LOGI(TAG, "%u adverts taken over from the per-node files", (unsigned)walk.taken_over);
 }
 
 mesh_advtab_t *mesh_advtab_run_boot(char const *files_dir) {
@@ -153,7 +195,7 @@ mesh_advtab_t *mesh_advtab_run_boot(char const *files_dir) {
     snprintf(dir, sizeof(dir), "%s", files_dir);
     mesh_advtab_init(&table, mem, MESH_ADVTAB_CAP);
     load_snapshot();
-    load_old_files();
+    open_old_files();
     last_save_s = mesh_uptime_s();
     return &table;
 }
@@ -361,7 +403,9 @@ void mesh_advtab_run_write(void) {
     if (taken) {
         write_taken(WRITE_WAIT_MS, false);
     }
-    if (old_files && !force && !taken) {
+    if (old_dir) {
+        walk_step_old(); // the removal below starts only when the walk has ended and a snapshot holds its result
+    } else if (old_files && !force && !taken) {
         remove_old_files();
     }
 }
@@ -388,6 +432,7 @@ void mesh_advtab_run_save_locked(void) {
 void mesh_advtab_run_wiped(void) {
     if (table.keys) {
         mesh_advtab_clear(&table);
+        close_old_dir(); // a takeover under way would put the old nodes back; the files are removed
         unalloc(taken); // a copy taken before the erase is not written after it
         taken         = NULL;
         saved_changes = table.changes;
