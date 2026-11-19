@@ -167,32 +167,32 @@ onair_verdict_words() {
     case "$w1" in
         channel)
             case "$w2" in
-                add | rm | rename) echo "ask 'channel $w2' changes the channel list a later send goes out on: needs Lucas (#450)" ;;
+                add | rm | rename) echo "ask 'channel $w2' changes the channel list a later send goes out on (#450)" ;;
                 *) echo pass ;;
             esac
             return ;;
         contacts)
-            if [ "$w2" = import ]; then echo "ask 'contacts import' adds a contact a later send can reach: needs Lucas (#450)"; else echo pass; fi
+            if [ "$w2" = import ]; then echo "ask 'contacts import' adds a contact a later send can reach (#450)"; else echo pass; fi
             return ;;
         factory-reset)
             case "$w2" in
                 "" | plan) echo pass ;;
-                *) echo "ask 'factory-reset $w2' erases the badge's settings or identity: needs Lucas (#450)" ;;
+                *) echo "ask 'factory-reset $w2' erases the badge's settings or identity (#450)" ;;
             esac
             return ;;
-        nvs-down) echo "ask 'nvs-down' boots the badge without its settings: needs Lucas (#450)"; return ;;
+        nvs-down) echo "ask 'nvs-down' boots the badge without its settings (#450)"; return ;;
         nvs-enc)
-            if [ -n "$w2" ]; then echo "ask 'nvs-enc $w2' is irreversible (an eFuse key): needs Lucas (#450)"; else echo pass; fi
+            if [ -n "$w2" ]; then echo "ask 'nvs-enc $w2' is irreversible (an eFuse key) (#450)"; else echo pass; fi
             return ;;
         c6)
-            if [ "$w2" = reflash ]; then echo "ask 'c6 reflash' rewrites the radio chip at the next boot: needs Lucas (#450)"; else echo pass; fi
+            if [ "$w2" = reflash ]; then echo "ask 'c6 reflash' rewrites the radio chip at the next boot (#450)"; else echo pass; fi
             return ;;
     esac
     [ "$w1" = mesh ] || { echo pass; return; }
     case "$w2" in
         radio | name | loc | path | pathhash | autoadd) # the bare form reads; with a value it changes every later send
             if [ -z "$w3" ]; then echo pass; else
-                echo "ask 'mesh $w2 <value>' changes what or where the badge transmits: needs Lucas (#450)"
+                echo "ask 'mesh $w2 <value>' changes what or where the badge transmits (#450)"
             fi ;;
         send)
             if [ "$w3" = "#badgetest" ]; then echo pass; else
@@ -222,7 +222,7 @@ onair_verdict_words() {
             fi ;;
         advert)
             case "$w3" in
-                interval | manual) echo "ask mesh advert $w3 changes what the badge floods on air: needs Lucas (#287)" ;;
+                interval | manual) echo "ask mesh advert $w3 changes what the badge floods on air (#287)" ;;
                 *) echo pass ;;
             esac ;;
         *) echo pass ;;
