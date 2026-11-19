@@ -490,7 +490,7 @@ static void mesh_task(void *arg) {
         }
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
-            // (16 KB, the saves keep File objects on it) is the one that is big enough
+            // (MESH_STACK, 12 KB; the saves keep File objects on it) is the one that is big enough
             bool final = __atomic_load_n(&stop_final, __ATOMIC_ACQUIRE);
             if (!final) {
                 // A stop on request (#103): nothing waiting goes out late after the next start; the journal gets the

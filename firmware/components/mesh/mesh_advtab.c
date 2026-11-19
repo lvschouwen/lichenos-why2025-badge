@@ -250,38 +250,51 @@ bool mesh_advtab_key_from_name(char const *name, uint8_t key[MESH_ADVTAB_KEY]) {
     return true;
 }
 
+// One name of the folder: a node key the table does not have is read and put
+static void walk_name(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_walk_ops_t const *ops, void *ctx,
+                      char const *name) {
+    uint8_t key[MESH_ADVTAB_KEY], data[MESH_ADVTAB_DATA];
+    if (!mesh_advtab_key_from_name(name, key)) {
+        return;
+    }
+    ops->lock(ctx);
+    uint8_t have = mesh_advtab_get(t, key, sizeof(key), data);
+    ops->unlock(ctx);
+    if (have) {
+        return; // the snapshot (or an advert since) has the node: it is the newer
+    }
+    size_t n = ops->read(ctx, name, data);
+    if (n < MESH_ADVTAB_MIN) {
+        return; // unreadable or cut short: put would refuse it anyway
+    }
+    ops->lock(ctx);
+    // an advert may have put the node while the file was read: the file is older, it does not replace it
+    bool put = !mesh_advtab_get(t, key, sizeof(key), (uint8_t[MESH_ADVTAB_DATA]){0}) &&
+               mesh_advtab_put(t, key, sizeof(key), data, n);
+    ops->unlock(ctx);
+    w->taken_over += put ? 1 : 0;
+}
+
 bool mesh_advtab_walk_step(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_walk_ops_t const *ops, void *ctx,
                            size_t max_names) {
-    uint8_t key[MESH_ADVTAB_KEY], data[MESH_ADVTAB_DATA];
-    if (w->done) {
+    if (w->done || w->failed) {
         return true;
     }
     for (size_t i = 0; i < max_names; i++) {
         char const *name = ops->next(ctx);
         if (!name) {
-            w->done = true;
+            if (ops->end_clean && !ops->end_clean(ctx)) {
+                w->failed = true; // an I/O error is not the end of the folder: the old files stay
+            } else {
+                w->done = true;
+            }
             return true;
         }
         w->names++;
-        if (!mesh_advtab_key_from_name(name, key)) {
-            continue;
+        walk_name(t, w, ops, ctx, name);
+        if (ops->spent && ops->spent(ctx)) {
+            return false; // at least one name per call was handled; the rest waits for the next loop
         }
-        ops->lock(ctx);
-        uint8_t have = mesh_advtab_get(t, key, sizeof(key), data);
-        ops->unlock(ctx);
-        if (have) {
-            continue; // the snapshot (or an advert since) has the node: it is the newer
-        }
-        size_t n = ops->read(ctx, name, data);
-        if (n == 0) {
-            continue;
-        }
-        ops->lock(ctx);
-        // an advert may have put the node while the file was read: the file is older, it does not replace it
-        bool put = !mesh_advtab_get(t, key, sizeof(key), (uint8_t[MESH_ADVTAB_DATA]){0}) &&
-                   mesh_advtab_put(t, key, sizeof(key), data, n);
-        ops->unlock(ctx);
-        w->taken_over += put ? 1 : 0;
     }
     return false;
 }

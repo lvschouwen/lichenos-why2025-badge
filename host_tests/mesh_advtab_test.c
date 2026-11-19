@@ -221,6 +221,12 @@ typedef struct {
     char const *names[64];
     size_t      count, pos, calls_next, reads;
     int         locked, lock_errors;
+    size_t      budget;       // names a step may handle before spent says so; 0: no limit
+    size_t      handled;      // names since the step began (next calls count)
+    size_t      read_len;     // what read returns; 0: MESH_ADVTAB_MIN
+    bool        read_zero;    // read returns 0
+    char const *race_name;    // read puts this node into the table first (an advert arrived mid-read); NULL: none
+    bool        io_error;     // the end of the folder is an error
 } fake_dir_t;
 
 static void fake_lock(void *ctx) {
@@ -243,8 +249,109 @@ static size_t fake_read(void *ctx, char const *name, uint8_t *data) {
     (void)name;
     d->reads++;
     d->lock_errors += d->locked != 0;
-    memset(data, 0x5a, MESH_ADVTAB_MIN);
-    return MESH_ADVTAB_MIN;
+    uint8_t key[MESH_ADVTAB_KEY], newer[MESH_ADVTAB_DATA];
+    if (d->race_name && strcmp(d->race_name, name) == 0 && mesh_advtab_key_from_name(name, key)) {
+        memset(newer, 0xee, sizeof(newer));
+        mesh_advtab_put(&t, key, sizeof(key), newer, 150); // the newer advert, in while the file is read
+    }
+    if (d->read_zero) {
+        return 0;
+    }
+    size_t n = d->read_len ? d->read_len : MESH_ADVTAB_MIN;
+    memset(data, 0x5a, n);
+    return n;
+}
+
+static bool fake_spent(void *ctx) {
+    fake_dir_t *d = ctx;
+    return d->budget && ++d->handled >= d->budget;
+}
+
+static bool fake_end_clean(void *ctx) {
+    return !((fake_dir_t *)ctx)->io_error;
+}
+
+static void fill_names(fake_dir_t *d, size_t first, size_t last) {
+    static char store[64][17];
+    d->count = 0;
+    for (size_t n = first; n <= last; n++) {
+        snprintf(store[n], sizeof(store[n]), "%016zx", n);
+        d->names[d->count++] = store[n];
+    }
+}
+
+static void budget_stops_a_step_and_the_walk_resumes(void) {
+    fresh(32);
+    fake_dir_t d = {.budget = 2};
+    fill_names(&d, 1, 7);
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, fake_spent, fake_end_clean};
+    mesh_advtab_walk_t     w   = {0};
+    size_t                 steps = 0;
+    while (!mesh_advtab_walk_step(&t, &w, &ops, &d, 16)) {
+        steps++;
+        CHECK(d.calls_next == steps * 2); // 2 names per step although 16 were allowed
+        d.handled = 0;
+        CHECK(steps < 10);
+    }
+    CHECK(w.done && !w.failed && steps == 3 && w.taken_over == 7 && t.count == 7);
+    // A budget already gone still lets one name through
+    fresh(32);
+    fake_dir_t one = {.budget = 1};
+    fill_names(&one, 1, 3);
+    mesh_advtab_walk_t w1 = {0};
+    CHECK(!mesh_advtab_walk_step(&t, &w1, &ops, &one, 16) && w1.names == 1 && w1.taken_over == 1);
+}
+
+static void a_newer_advert_during_the_read_is_kept(void) {
+    uint8_t got[MESH_ADVTAB_DATA], key[MESH_ADVTAB_KEY];
+    fresh(32);
+    fake_dir_t d = {0};
+    fill_names(&d, 1, 3);
+    d.race_name = d.names[1];
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, NULL};
+    mesh_advtab_walk_t     w   = {0};
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16) && w.done);
+    CHECK(mesh_advtab_key_from_name(d.race_name, key));
+    CHECK(mesh_advtab_get(&t, key, sizeof(key), got) == 150 && got[0] == 0xee); // the advert's, not the file's
+    CHECK(w.taken_over == 2 && t.count == 3 && d.locked == 0 && d.lock_errors == 0);
+}
+
+static void unreadable_and_short_files_add_nothing(void) {
+    fresh(32);
+    fake_dir_t d = {.read_zero = true};
+    fill_names(&d, 1, 3);
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, NULL};
+    mesh_advtab_walk_t     w   = {0};
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16) && w.done);
+    CHECK(d.reads == 3 && w.taken_over == 0 && t.count == 0);
+    fresh(32);
+    fake_dir_t s = {.read_len = MESH_ADVTAB_MIN - 1};
+    fill_names(&s, 1, 3);
+    memset(&w, 0, sizeof(w));
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &s, 16) && w.done);
+    CHECK(s.reads == 3 && w.taken_over == 0 && t.count == 0 && t.refused == 0);
+}
+
+static void a_full_table_takes_no_more(void) {
+    fresh(2);
+    fake_dir_t d = {0};
+    fill_names(&d, 1, 5);
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, NULL};
+    mesh_advtab_walk_t     w   = {0};
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16) && w.done);
+    CHECK(w.taken_over == 2 && t.count == 2 && t.refused == 3);
+}
+
+static void an_io_error_is_not_the_end(void) {
+    fresh(32);
+    fake_dir_t d = {.io_error = true};
+    fill_names(&d, 1, 2);
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, fake_end_clean};
+    mesh_advtab_walk_t     w   = {0};
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16));
+    CHECK(!w.done && w.failed && w.taken_over == 2);
+    size_t before = d.calls_next;
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16) && d.calls_next == before && !w.done); // not retried
 }
 
 static void takeover_walks_in_slices(void) {
@@ -257,7 +364,7 @@ static void takeover_walks_in_slices(void) {
     CHECK(mesh_advtab_key_from_name("0000000000000003", key)); // the snapshot already has node 3
     CHECK(mesh_advtab_put(&t, key, sizeof(key), got, MESH_ADVTAB_MIN + 1));
     uint32_t           had = t.count;
-    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock};
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, NULL};
     mesh_advtab_walk_t w   = {0};
     size_t             calls = 0;
     while (!mesh_advtab_walk_step(&t, &w, &ops, &d, 3)) {
@@ -276,6 +383,11 @@ static void takeover_walks_in_slices(void) {
 }
 
 int main(void) {
+    budget_stops_a_step_and_the_walk_resumes();
+    a_newer_advert_during_the_read_is_kept();
+    unreadable_and_short_files_add_nothing();
+    a_full_table_takes_no_more();
+    an_io_error_is_not_the_end();
     takeover_walks_in_slices();
     put_reads_back_and_replaces();
     refuses_bad_sizes_and_a_full_table();

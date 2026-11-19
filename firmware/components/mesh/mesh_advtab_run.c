@@ -8,8 +8,6 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -30,7 +28,7 @@ static char const TAG[] = "mesh_adverts";
 #define STOP_WAIT_MS  3000
 #define RETRY_S       5 // after a busy card lock, as the journal waits
 #define OLD_PER_CALL  16 // old per-node files removed per loop of the mesh task: never a long walk (#471)
-#define SLICE_US      20000 // one stretch of the takeover walk before it blocks a tick (#471: WALK_SLICE_US)
+#define SLICE_US      20000 // time budget of one takeover step (#471: WALK_SLICE_US)
 #define SNAPSHOT_MAX  (MESH_ADVTAB_HEAD + MESH_ADVTAB_CAP * (MESH_ADVTAB_REC + MESH_ADVTAB_DATA))
 
 static mesh_advtab_t table;
@@ -136,12 +134,21 @@ static void open_old_files(void) {
 
 static char const *old_next(void *ctx) {
     (void)ctx;
+    errno = 0; // readdir leaves it alone at the end of the folder, so an error shows
     struct dirent *e = readdir(old_dir);
-    if (esp_timer_get_time() - slice_start_us >= SLICE_US) { // as #471's walk_pace, which an app may not include
-        vTaskDelay(1);                                       // a block, so IDLE on this core gets its turn
-        slice_start_us = esp_timer_get_time();
-    }
     return e ? e->d_name : NULL;
+}
+
+static bool old_end_clean(void *ctx) {
+    (void)ctx;
+    return errno == 0;
+}
+
+// The slice ends at its budget, so the mesh loop gets back to the radio (an SD file takes 25-30 ms). SLICE_US is a
+// copy of #471's WALK_SLICE_US: an app may not include walk_pace.h (layer rule).
+static bool old_spent(void *ctx) {
+    (void)ctx;
+    return esp_timer_get_time() - slice_start_us >= SLICE_US;
 }
 
 static size_t old_read(void *ctx, char const *name, uint8_t *data) {
@@ -166,7 +173,7 @@ static void old_unlock(void *ctx) {
     mesh_advtab_run_unlock();
 }
 
-static mesh_advtab_walk_ops_t const old_ops = {old_next, old_read, old_lock, old_unlock};
+static mesh_advtab_walk_ops_t const old_ops = {old_next, old_read, old_lock, old_unlock, old_spent, old_end_clean};
 
 static void close_old_dir(void) {
     if (old_dir) {
@@ -183,6 +190,12 @@ static void walk_step_old(void) {
         return;
     }
     close_old_dir();
+    if (walk.failed) { // a read error: nothing is removed, the next boot walks again
+        old_files = false;
+        force     = table.changes != saved_changes;
+        ESP_LOGW(TAG, "the per-node files could not be read to their end (errno %d): they stay", errno);
+        return;
+    }
     force = table.changes != saved_changes;
     ESP_LOGI(TAG, "%u adverts taken over from the per-node files", (unsigned)walk.taken_over);
 }

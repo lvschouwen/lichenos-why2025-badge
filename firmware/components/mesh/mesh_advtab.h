@@ -89,6 +89,7 @@ bool mesh_advtab_key_from_name(char const *name, uint8_t key[MESH_ADVTAB_KEY]);
 // ctx and survives between calls; the walk's progress is in mesh_advtab_walk_t (zero it to begin).
 typedef struct {
     bool     done;       // the folder was read to its end: the old files may go once a snapshot holds the result
+    bool     failed;     // the folder read failed (not its end): the old files must stay; not to be called again
     uint32_t names;      // names seen so far
     uint32_t taken_over; // nodes added to the table
 } mesh_advtab_walk_t;
@@ -100,9 +101,15 @@ typedef struct {
     // The table is the mesh lock's (not thread safe): held around every lookup and put, never around next or read
     void (*lock)(void *ctx);
     void (*unlock)(void *ctx);
+    // Optional. Asked after each name: true when this call's time budget is spent, the step then returns at once
+    // (the walk resumes next call). Never asked before the first name, so every call makes progress.
+    bool (*spent)(void *ctx);
+    // Optional. Asked when next returned NULL: false when that was an error and not the end of the folder
+    bool (*end_clean)(void *ctx);
 } mesh_advtab_walk_ops_t;
-// At most max_names names this call: each one that is a node key the table does not have is read and put. true once
-// the end was reached (w->done); then it is not to be called again.
+// At most max_names names this call (fewer when ops->spent says the budget is gone, never fewer than one): each one
+// that is a node key the table does not have is read and put. true once the end was reached (w->done) or the folder
+// failed (w->failed); then it is not to be called again.
 bool mesh_advtab_walk_step(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_walk_ops_t const *ops, void *ctx,
                            size_t max_names);
 
