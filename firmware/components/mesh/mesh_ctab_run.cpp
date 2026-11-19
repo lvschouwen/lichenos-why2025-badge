@@ -39,6 +39,7 @@ static char const TAG[] = "mesh_contacts";
 #define WRITE_WAIT_MS  100 // the card's batch lock: when another batch has it, a later loop tries again
 #define STOP_WAIT_MS   3000
 #define RETRY_S        5
+#define PENDING_MAX_S  (3 * RETRY_S) // a card whose probe keeps failing does not hold /storage longer than this
 #define MERGE_PER_LOOP 64   // card records merged per loop of the mesh task: each is a walk over the table
 #define CHUNK          4096 // the read-back check's buffer
 #define PW_BUF         96
@@ -66,6 +67,8 @@ static uint32_t generation, last_card_try_s, retry_at_s, last_internal_s, last_d
 static bool     have_digest;
 static bool     card_failed; // the last card write failed
 static mesh_ctab_diffstat_t merge_stat; // what the merge in progress saw of the card's file against the table
+static bool     save_held; // a /storage save was dropped by the hold: made up when the hold ends, whatever the outcome
+static uint32_t pending_since_s; // when the card was first seen mounted and not looked at (0: not pending)
 static bool     deferred; // a save of timestamp changes only stays parked in the shim (#429)
 
 // The deleted keys: touched only with the mesh lock (or before the task exists)
@@ -304,7 +307,11 @@ static void merge_one(uint8_t const *rec) {
     bool none = rec[MESH_CTAB_AT_TYPE] == ADV_TYPE_NONE;
     mesh_ctab_merge_t plan =
         mesh_ctab_merge_plan(mesh_ctab_del_has(&del, rec), c != NULL, c ? c->lastmod : 0, mesh_ctab_lastmod(rec));
-    mesh_ctab_account(&merge_stat, plan, none, c ? table_rec : NULL, rec);
+    bool dup = false;
+    for (size_t i = 0; c && !dup && i < merge_at; i++) { // c: the table has the key, so only then can it be a repeat
+        dup = memcmp(merge + i * MESH_CTAB_REC, rec, MESH_CTAB_PUB) == 0;
+    }
+    mesh_ctab_account(&merge_stat, plan, none, dup, c ? table_rec : NULL, rec);
     if (none) {
         return;
     }
@@ -691,7 +698,8 @@ static bool internal_held(void) {
     mesh_ctab_hold_t hold = {};
     hold.merging          = merge || merge_fresh;
     hold.card_mounted     = lichen_fs_sd_mounted();
-    hold.card_pending     = hold.card_mounted && !mounted_seen && have_key && !wipe;
+    hold.card_pending     = hold.card_mounted && !mounted_seen && have_key && !wipe && pending_since_s &&
+                        mesh_uptime_s() - pending_since_s < PENDING_MAX_S;
     hold.card_current     = card_current;
     hold.card_failed      = card_failed;
     return mesh_ctab_hold_internal(&hold);
@@ -701,6 +709,7 @@ static bool internal_held(void) {
 // the interval or at a stop. Otherwise everything (the newest MESH_CTAB_CAP_INTERNAL of a larger table), every time.
 static void write_internal(fs_shim_held_t *h, size_t n, int contacts) {
     if (!stopping && internal_held()) {
+        save_held = true;
         fs_shim_free_held(h);
         internal_skips = internal_skips + 1;
         return;
@@ -893,12 +902,20 @@ static void use_card(void) {
         ESP_LOGI(TAG, "the owner gave this card to the contact list: the file there was moved aside");
         set_place(MESH_CTAB_ON_STORAGE);
         generation  = 0;
+        merge_stat  = {};
         merge_fresh = true; // the next loop makes the card the list's place and writes it
     }
 }
 
 void mesh_ctab_run_work(void) {
     bool mounted = lichen_fs_sd_mounted();
+    uint32_t now = mesh_uptime_s();
+    bool     pending = mounted && !mounted_seen && have_key && !wipe;
+    pending_since_s  = !pending ? 0 : pending_since_s ? pending_since_s : (now ? now : 1);
+    if (save_held && !internal_held()) { // refused, no file, failed, pulled or timed out: the save is still owed
+        save_held = false;
+        want_save = true;
+    }
     if (!mounted && mounted_seen) {
         card_gone();
     } else if (mounted && !mounted_seen && have_key && !wipe) {

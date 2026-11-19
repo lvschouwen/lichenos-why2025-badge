@@ -73,8 +73,8 @@ typedef struct {
     bool   complete;   // the file read whole (every block passed)
 } mesh_ctab_diffstat_t;
 // One card record: card, with the table's record for the same key (table NULL: the table lacks it) and the plan the
-// merge made for it. Call before the merge replaces the table's record.
-void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool none, uint8_t const *table,
+// merge made for it. Call before the merge replaces the table's record. dup: an earlier record of the card has this key.
+void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool none, bool dup, uint8_t const *table,
                        uint8_t const *card);
 // A card record the table had no room for
 void mesh_ctab_account_full(mesh_ctab_diffstat_t *st);

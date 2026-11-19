@@ -493,9 +493,13 @@ static mesh_ctab_diffstat_t run_merge(uint8_t const *cards, size_t nc, uint8_t c
                 t = tab + j * MESH_CTAB_REC;
             }
         }
+        bool              dup  = false;
+        for (size_t k = 0; t && k < i; k++) { // an earlier card record with this key
+            dup = dup || memcmp(cards + k * MESH_CTAB_REC, c, MESH_CTAB_PUB) == 0;
+        }
         bool              del  = c[0] == deleted_id;
         mesh_ctab_merge_t plan = mesh_ctab_merge_plan(del, t != NULL, t ? mesh_ctab_lastmod(t) : 0, mesh_ctab_lastmod(c));
-        mesh_ctab_account(&st, plan, c[MESH_CTAB_AT_TYPE] == 0, t, c);
+        mesh_ctab_account(&st, plan, c[MESH_CTAB_AT_TYPE] == 0, dup, t, c);
     }
     mesh_ctab_account_done(&st, table_after);
     return st;
@@ -552,6 +556,19 @@ static void test_write_needed(void) {
     st          = stat_new();
     st.complete = false; // a file that lost blocks
     CHECK(mesh_ctab_card_write_needed(&st));
+    // The card repeats key 1 and the table has {1, 3}: 3 is on neither medium unless the card is written
+    uint8_t dupc[2 * MESH_CTAB_REC], dupt[2 * MESH_CTAB_REC];
+    rec_set(dupc, 1, 10, false);
+    memcpy(dupc + MESH_CTAB_REC, dupc, MESH_CTAB_REC);
+    rec_set(dupt, 1, 10, false);
+    rec_set(dupt + MESH_CTAB_REC, 3, 10, false);
+    st = run_merge(dupc, 2, dupt, 2, 2, 0xFFFF);
+    CHECK(st.table_only == 1 && st.card_only == 1 && mesh_ctab_card_write_needed(&st));
+    // A table contact of type none (from /storage) that the card also holds as it is: nothing to write
+    uint8_t nonec[MESH_CTAB_REC];
+    rec_set(nonec, 4, 10, false);
+    nonec[MESH_CTAB_AT_TYPE] = 0;
+    CHECK(!need(run_merge(nonec, 1, nonec, 1, 1, 0xFFFF)));
     st = run_merge(card, 2, tab, 0, 1, 0xFFFF); // a card record without room
     mesh_ctab_account_full(&st);
     CHECK(mesh_ctab_card_write_needed(&st));
