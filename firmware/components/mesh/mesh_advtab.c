@@ -264,6 +264,10 @@ static void walk_name(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_walk_
         return; // the snapshot (or an advert since) has the node: it is the newer
     }
     size_t n = ops->read(ctx, name, data);
+    if (n == MESH_ADVTAB_READ_ERROR) {
+        w->read_errors++;
+        return;
+    }
     if (n < MESH_ADVTAB_MIN) {
         return; // unreadable or cut short: put would refuse it anyway
     }
@@ -283,7 +287,7 @@ bool mesh_advtab_walk_step(mesh_advtab_t *t, mesh_advtab_walk_t *w, mesh_advtab_
     for (size_t i = 0; i < max_names; i++) {
         char const *name = ops->next(ctx);
         if (!name) {
-            if (ops->end_clean && !ops->end_clean(ctx)) {
+            if ((ops->end_clean && !ops->end_clean(ctx)) || w->read_errors) {
                 w->failed = true; // an I/O error is not the end of the folder: the old files stay
             } else {
                 w->done = true;

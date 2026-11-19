@@ -224,6 +224,7 @@ typedef struct {
     size_t      budget;       // names a step may handle before spent says so; 0: no limit
     size_t      handled;      // names since the step began (next calls count)
     size_t      read_len;     // what read returns; 0: MESH_ADVTAB_MIN
+    bool        read_error;   // read fails with MESH_ADVTAB_READ_ERROR for the second file
     bool        read_zero;    // read returns 0
     char const *race_name;    // read puts this node into the table first (an advert arrived mid-read); NULL: none
     bool        io_error;     // the end of the folder is an error
@@ -253,6 +254,9 @@ static size_t fake_read(void *ctx, char const *name, uint8_t *data) {
     if (d->race_name && strcmp(d->race_name, name) == 0 && mesh_advtab_key_from_name(name, key)) {
         memset(newer, 0xee, sizeof(newer));
         mesh_advtab_put(&t, key, sizeof(key), newer, 150); // the newer advert, in while the file is read
+    }
+    if (d->read_error && d->reads == 2) {
+        return MESH_ADVTAB_READ_ERROR;
     }
     if (d->read_zero) {
         return 0;
@@ -342,6 +346,16 @@ static void a_full_table_takes_no_more(void) {
     CHECK(w.taken_over == 2 && t.count == 2 && t.refused == 3);
 }
 
+static void a_failed_file_read_keeps_the_old_files(void) {
+    fresh(32);
+    fake_dir_t d = {.read_error = true};
+    fill_names(&d, 1, 3);
+    mesh_advtab_walk_ops_t ops = {fake_next, fake_read, fake_lock, fake_unlock, NULL, NULL};
+    mesh_advtab_walk_t     w   = {0};
+    CHECK(mesh_advtab_walk_step(&t, &w, &ops, &d, 16));
+    CHECK(!w.done && w.failed && w.read_errors == 1 && w.taken_over == 2); // the others are still taken
+}
+
 static void an_io_error_is_not_the_end(void) {
     fresh(32);
     fake_dir_t d = {.io_error = true};
@@ -387,6 +401,7 @@ int main(void) {
     a_newer_advert_during_the_read_is_kept();
     unreadable_and_short_files_add_nothing();
     a_full_table_takes_no_more();
+    a_failed_file_read_keeps_the_old_files();
     an_io_error_is_not_the_end();
     takeover_walks_in_slices();
     put_reads_back_and_replaces();

@@ -89,14 +89,16 @@ bool mesh_advtab_key_from_name(char const *name, uint8_t key[MESH_ADVTAB_KEY]);
 // ctx and survives between calls; the walk's progress is in mesh_advtab_walk_t (zero it to begin).
 typedef struct {
     bool     done;       // the folder was read to its end: the old files may go once a snapshot holds the result
-    bool     failed;     // the folder read failed (not its end): the old files must stay; not to be called again
+    bool     failed;     // the folder or a file could not be read (not its end): the old files must stay
+    uint32_t read_errors; // files whose read returned MESH_ADVTAB_READ_ERROR
     uint32_t names;      // names seen so far
     uint32_t taken_over; // nodes added to the table
 } mesh_advtab_walk_t;
+#define MESH_ADVTAB_READ_ERROR ((size_t)-1) // read's answer for an I/O error (the file is not to be removed)
 typedef struct {
     // The next name of the folder, NULL at its end; valid until the next call
     char const *(*next)(void *ctx);
-    // Reads the file called name into data (MESH_ADVTAB_DATA bytes of room); its length, 0 when it cannot be read
+    // Reads the file called name into data (MESH_ADVTAB_DATA bytes of room); its length, 0 when empty, MESH_ADVTAB_READ_ERROR on an I/O error
     size_t (*read)(void *ctx, char const *name, uint8_t *data);
     // The table is the mesh lock's (not thread safe): held around every lookup and put, never around next or read
     void (*lock)(void *ctx);

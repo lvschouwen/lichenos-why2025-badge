@@ -39,7 +39,8 @@ static uint32_t      taken_changes, saved_changes;
 static uint32_t      generation;
 static uint32_t      last_save_s, last_internal_s;
 static bool          internal_written; // since boot: the 6 h rule counts from the last one
-static bool          old_files;        // <dir>/bl still holds per-node files
+static bool          old_files;        // <dir>/bl still holds per-node files, to be removed
+static bool          old_kept;         // they stay: the takeover or the removal met an I/O error (console shows it)
 static DIR          *old_dir;          // open while the takeover walk is under way: its cursor
 static mesh_advtab_walk_t walk;
 static int64_t       slice_start_us; // when this loop's stretch of the walk began
@@ -155,12 +156,14 @@ static size_t old_read(void *ctx, char const *name, uint8_t *data) {
     (void)ctx;
     char file[PATH_MAX_LEN + 260];
     snprintf(file, sizeof(file), "%s/bl/%s", dir, name);
-    FILE  *f = fopen(file, "rb");
-    size_t n = f ? fread(data, 1, MESH_ADVTAB_DATA, f) : 0;
-    if (f) {
-        fclose(f);
+    FILE *f = fopen(file, "rb");
+    if (!f) {
+        return MESH_ADVTAB_READ_ERROR; // not "empty": the file must survive
     }
-    return n;
+    size_t n   = fread(data, 1, MESH_ADVTAB_DATA, f);
+    bool   bad = ferror(f) != 0;
+    fclose(f);
+    return bad ? MESH_ADVTAB_READ_ERROR : n;
 }
 
 static void old_lock(void *ctx) {
@@ -191,9 +194,12 @@ static void walk_step_old(void) {
     }
     close_old_dir();
     if (walk.failed) { // a read error: nothing is removed, the next boot walks again
+        int err   = errno; // before anything else can change it
         old_files = false;
+        old_kept  = true;
         force     = table.changes != saved_changes;
-        ESP_LOGW(TAG, "the per-node files could not be read to their end (errno %d): they stay", errno);
+        ESP_LOGW(TAG, "the per-node files were not all read (%u read errors, errno %d): they stay",
+                 (unsigned)walk.read_errors, err);
         return;
     }
     force = table.changes != saved_changes;
@@ -386,19 +392,27 @@ static void remove_old_files(void) {
     char           names[OLD_PER_CALL][2 * MESH_ADVTAB_KEY + 1];
     int            n = 0, others = 0;
     struct dirent *e;
-    while (n < OLD_PER_CALL && (e = readdir(d)) != NULL) { // names first: no unlink while the walk is open
+    int            err = 0;
+    while (n < OLD_PER_CALL && (errno = 0, e = readdir(d)) != NULL) { // names first: no unlink while the walk is open
         if (strlen(e->d_name) == 2 * MESH_ADVTAB_KEY) {
             memcpy(names[n++], e->d_name, 2 * MESH_ADVTAB_KEY + 1);
         } else if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
             others++;
         }
     }
+    if (!e) {
+        err = errno; // an error ends the loop like the end of the folder does
+    }
     closedir(d);
     for (int i = 0; i < n; i++) {
         snprintf(file, sizeof(file), "%s/%.16s", path, names[i]);
         unlink(file);
     }
-    if (n == 0) {
+    if (n == 0 && err != 0) {
+        old_files = false; // not retried in every loop; the console still reports them
+        old_kept  = true;
+        ESP_LOGW(TAG, "the per-node files could not be listed (errno %d): they stay", err);
+    } else if (n == 0) {
         bool gone = others == 0 && rmdir(path) == 0;
         old_files = false; // a folder that holds something else stays; nothing more is tried
         ESP_LOGI(TAG, "the per-node advert files are gone%s", gone ? "" : " (the folder holds other files and stays)");
@@ -460,5 +474,5 @@ void mesh_advtab_run_console(void) {
                   (unsigned)table.count, (unsigned)table.cap, (unsigned long)table.refused, (unsigned long)generation,
                   writes ? (last_on_card ? "on the card" : "on /storage") : "none yet", (unsigned long)last_bytes,
                   (unsigned long)last_write_ms, (unsigned long)writes, (unsigned long)write_errors,
-                  (unsigned long)alloc_failures, old_files ? " | old per-node files still there" : "");
+                  (unsigned long)alloc_failures, old_files || old_kept ? " | old per-node files still there" : "");
 }
