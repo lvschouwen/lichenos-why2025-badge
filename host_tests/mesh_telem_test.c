@@ -52,6 +52,16 @@ static void lpp(void) {
     uint8_t z[] = {0, 0, 1, 1, 116, 0x01, 0x9C};
     CHECK(tl_lpp_lines(z, sizeof(z), l, TL_LINES_MAX) == 2);
     CHECK(strcmp(l[0].text, "Input (channel 0): on") == 0 && strcmp(l[1].text, "Battery: 4.12 V") == 0);
+    // #490: an answer in a PATH return carries the AES block's zero padding after the values (the #162 bench answer:
+    // 1 + 0 + 1 + 4 + 8 = 14 bytes padded to 16); a zero-only tail after a value is padding, not a cut-off value
+    uint8_t pad[16 + 15] = {1, 116, 0x01, 0x93, 1, 103, 0x01, 0xCC};
+    for (size_t k = 1; k <= 15; k++) {
+        CHECK(tl_lpp_lines(pad, 8 + k, l, TL_LINES_MAX) == 2);
+        CHECK(strcmp(l[0].text, "Battery: 4.03 V") == 0 && strcmp(l[1].text, "Temperature: 46.0 \xC2\xB0""C") == 0);
+    }
+    // a short tail that is not all zero still says it is cut off
+    uint8_t tail[] = {1, 116, 0x01, 0x93, 5, 0};
+    CHECK(tl_lpp_lines(tail, sizeof(tail), l, TL_LINES_MAX) == 2 && strstr(l[1].text, "cut off"));
 }
 
 // #212: every Cayenne LPP type the decoder knows, pinned byte for byte before its switch ladders became a table. Per type:

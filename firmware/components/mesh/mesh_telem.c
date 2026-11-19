@@ -139,6 +139,15 @@ static void one_value(tl_line_t *out, size_t max, size_t *n, uint8_t ch, lpp_typ
     }
 }
 
+static bool all_zero(uint8_t const *p, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (p[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max) {
     size_t n = 0, at = 0;
     while (at < len) {
@@ -157,6 +166,9 @@ size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max) 
                 snprintf(out[max - 1].text, TL_LINE_MAX, "%u more values not shown", (unsigned)more + 1u); // replaces the last
             }
             break;
+        }
+        if (n > 0 && all_zero(lpp + at, len - at)) {
+            break; // #490: the AES block's zero padding after the values (a PATH return keeps it), not a value
         }
         if (len - at < 2) {
             put(out, max, &n, "(the answer is cut off)");
