@@ -1,5 +1,14 @@
 #include "dev_tap.h"
 
+#if __has_include("sdkconfig.h") // host tests have none and pass CONFIG_LICHEN_BENCH_OPEN by hand
+#include "sdkconfig.h"
+#endif
+// ESP-IDF does not force-include sdkconfig.h: a file that tests the switch must include it itself, or the dev image
+// silently builds the release behaviour (#488)
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET)
+#error "sdkconfig.h not seen: CONFIG_LICHEN_BENCH_OPEN would read as off"
+#endif
+
 void dev_tap_reset(dev_tap_t *t) {
     t->n    = 0;
     t->last = 0;

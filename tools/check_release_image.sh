@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # check_release_image.sh <release|dev> <image.bin> | config <sdkconfig> | --selftest (#401).
-# release: the debug-build and bench-open markers (console.c holds it only with CONFIG_LICHEN_DEV_COMMANDS) and two older debug-only
+# release: the debug-build marker (console.c holds it only with CONFIG_LICHEN_DEV_COMMANDS) and the bench-open marker (console.c and
+#   dialog_remote_policy.c, only with CONFIG_LICHEN_BENCH_OPEN) and two older debug-only
 #   wordings must be absent from a release image. dev: both markers must be present in a developer image, so the release
 #   check cannot go vacuous if the marker is optimised away or renamed. config: the release sdkconfig has every
 #   debug-command symbol off. --selftest runs all three on fakes.

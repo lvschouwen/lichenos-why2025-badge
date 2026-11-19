@@ -973,7 +973,7 @@ void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_
 }
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-// "fw dev [on|off|status]" (#373): on only from the USB console, never over Wi-Fi (the OTA token is not enough)
+// "fw dev [on|off|status]" (#373): on only from the USB console, never over Wi-Fi (the OTA token is not enough); a dev image with CONFIG_LICHEN_BENCH_OPEN (#488) also over Wi-Fi
 static void cmd_dev(char const *args) {
     switch (dev_mode_request(args)) { // "on" is the USB console's only: its row, checked by run_command (#464)
         case DEV_REQ_STATUS: console_reply("developer mode %s", console_dev_mode() ? "on" : "off"); break;

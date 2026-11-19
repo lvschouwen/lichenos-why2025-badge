@@ -3,7 +3,7 @@
 // off. Release builds (LICHEN_DEV_COMMANDS=n) leave them out of the image. The rules are here, pure and host-tested
 // (host_tests/dev_mode_test.c); console.c holds the table, its lock and the saved state.
 //
-// Why on is refused over Wi-Fi: the Wi-Fi console is authenticated by the OTA token, which also installs firmware.
+// (A dev image with CONFIG_LICHEN_BENCH_OPEN, #488, allows it over Wi-Fi too.) Why on is refused over Wi-Fi: the Wi-Fi console is authenticated by the OTA token, which also installs firmware.
 // Developer mode is release hygiene, so turning it on needs a person at the USB cable or the owner's taps in About.
 // Off works from anywhere.
 
@@ -95,7 +95,7 @@ int dev_mode_help_topic(help_view_t const *v, char const *const *ids, int n_ids,
 
 typedef enum {
     DEV_REQ_STATUS, // "", "status"
-    DEV_REQ_ON,     // "on": the USB console only, its row in console_os_rules.h (#464)
+    DEV_REQ_ON,     // "on": the USB console only (also Wi-Fi with CONFIG_LICHEN_BENCH_OPEN, #488), its row in console_os_rules.h (#464)
     DEV_REQ_OFF,    // "off", from anywhere
     DEV_REQ_USAGE,  // anything else
 } dev_req_t;

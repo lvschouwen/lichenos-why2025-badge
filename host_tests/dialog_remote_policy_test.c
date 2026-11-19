@@ -37,7 +37,7 @@ static case_t const cases[] = {
     {"reset settings", "Reset all settings and restart? MeshCore and files stay.", D},
     {"continue", "Erase everything from flash? Settings and every file on the badge.", D},
     {"continue", "Erases everything on the card. Format as LICHEN?", D},
-    {"continue", "Are you sure?", D},
+    {"continue", "Are you sure?", R},
     {"erase everything",
      "Sure? The MeshCore identity is erased from flash for good: nobody's contacts will know this badge.",
      D},
@@ -223,7 +223,7 @@ static void test_bench_switch(void) {
     char const *const labels[] = {"reset settings", "continue", "erase everything", "format now",
                                   "power off",      "forget",   "clear data",       "remove"};
     for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
-        CHECK(dlg_remote_verdict(labels[i], "any title at all") == D);
+        CHECK(dlg_remote_verdict(labels[i], "any title at all") == (strcmp(labels[i], "continue") == 0 ? R : D));
     }
     // Kept hand-only in both builds (owner decision on #488)
     CHECK(dlg_remote_verdict("set radio", "Set the radio of x?") == R);
@@ -232,11 +232,10 @@ static void test_bench_switch(void) {
     CHECK(dlg_remote_verdict("switch off", "Switch off updates over Wi-Fi? The Wi-Fi console goes too.") == R);
     CHECK(dlg_remote_verdict("switch off", "Switch developer mode off? The developer rows and commands go away.") == R);
     CHECK(dlg_remote_verdict("unlisted", "x") == R);
-#ifdef CONFIG_LICHEN_BENCH_OPEN
-    CHECK(D == A);
-#else
-    CHECK(D == R);
-#endif
+    // "continue" is also menu.c's default label: only the two known titles move with the switch
+    CHECK(dlg_remote_verdict("continue", "Erase everything from flash? Settings and every file on the badge.") == D);
+    CHECK(dlg_remote_verdict("continue", "Erases everything on the card. Format as LICHEN?") == D);
+    CHECK(dlg_remote_verdict("continue", "Something else?") == R);
 }
 
 static void test_glob(void) {

@@ -8,6 +8,15 @@
 
 #include <string.h>
 
+#if __has_include("sdkconfig.h") // host tests have none and pass CONFIG_LICHEN_BENCH_OPEN by hand
+#include "sdkconfig.h"
+#endif
+// ESP-IDF does not force-include sdkconfig.h: a file that tests the switch must include it itself, or the dev image
+// silently builds the release behaviour (#488)
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET)
+#error "sdkconfig.h not seen: CONFIG_LICHEN_BENCH_OPEN would read as off"
+#endif
+
 // Short names for the table only
 #define V_REFUSE DLG_REMOTE_REFUSE
 #define V_ALLOW  DLG_REMOTE_ALLOW
@@ -15,8 +24,13 @@
 // The DANGER dialogs that act on this badge only: hand-only, except in a developer image with the bench-open switch
 // (#488), where the bench confirms them with `fw ui answer`. The rows that change what a third node does or end the
 // console's own way in stay V_REFUSE below, switch or not.
+// These labels (continue, remove, forget, ...) must never be reused for a dialog that changes what the badge transmits
+// or what a third node does: keep this label set and the ALLOW/ONAIR/REFUSE sets below disjoint.
 #ifdef CONFIG_LICHEN_BENCH_OPEN
 #define V_LOCAL_DANGER DLG_REMOTE_ALLOW
+// Proves in the developer image that this unit saw the switch: tools/check_release_image.sh wants it there and not in a
+// release
+__attribute__((used, retain)) char const lichen_bench_open_policy_marker[] = "LICHEN-BENCH-OPEN-MARKER";
 #else
 #define V_LOCAL_DANGER DLG_REMOTE_REFUSE
 #endif
@@ -26,7 +40,9 @@
 static dlg_remote_row_t const table[] = {
     // DANGER, hand-only (V_LOCAL_DANGER: or the bench's, #488)
     {"reset settings", "*", V_LOCAL_DANGER},   // factory_screen.c: Reset settings
-    {"continue", "*", V_LOCAL_DANGER},         // factory_screen.c Reset everything, sd_screen.c format, menu.c's default
+    // "continue" is menu.c's default confirm label too: only the two known titles are the bench's; any other title is unmatched, so refused (a "*" REFUSE row would win strictest-wins over them)
+    {"continue", "Erase everything from flash? Settings and every file on the badge.", V_LOCAL_DANGER}, // factory_screen.c
+    {"continue", "Erases everything on the card. Format as LICHEN?", V_LOCAL_DANGER},                   // sd_screen.c
     {"erase everything", "*", V_LOCAL_DANGER}, // factory_screen.c: Reset everything, second question
     {"format now", "*", V_LOCAL_DANGER},       // sd_screen.c: format, second question
     {"power off", "*", V_LOCAL_DANGER},        // app_power.c
