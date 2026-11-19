@@ -524,6 +524,15 @@ static void test_hold(void) {
     h.card_failed  = false;
     h.card_current = true;
     CHECK(!mesh_ctab_hold_internal(&h)); // the card already holds the table
+    h.card_current   = false;
+    h.pending_age_s  = MESH_CTAB_PENDING_MAX_S - 1;
+    CHECK(mesh_ctab_hold_internal(&h)); // still within the limit
+    h.pending_age_s = MESH_CTAB_PENDING_MAX_S;
+    CHECK(!mesh_ctab_hold_internal(&h)); // a probe that keeps failing: /storage writes
+    h.merging = true;
+    CHECK(mesh_ctab_hold_internal(&h)); // a merge in progress holds whatever the age
+    // a dropped save is owed once the hold ends, and not before
+    CHECK(mesh_ctab_save_owed(true, false) && !mesh_ctab_save_owed(true, true) && !mesh_ctab_save_owed(false, false));
 }
 
 static void test_write_needed(void) {
@@ -564,11 +573,11 @@ static void test_write_needed(void) {
     rec_set(dupt + MESH_CTAB_REC, 3, 10, false);
     st = run_merge(dupc, 2, dupt, 2, 2, 0xFFFF);
     CHECK(st.table_only == 1 && st.card_only == 1 && mesh_ctab_card_write_needed(&st));
-    // A table contact of type none (from /storage) that the card also holds as it is: nothing to write
+    // A type-none record on the card is never in the table (getNumContacts leaves such slots out): rewritten without it
     uint8_t nonec[MESH_CTAB_REC];
     rec_set(nonec, 4, 10, false);
     nonec[MESH_CTAB_AT_TYPE] = 0;
-    CHECK(!need(run_merge(nonec, 1, nonec, 1, 1, 0xFFFF)));
+    CHECK(need(run_merge(nonec, 1, NULL, 0, 0, 0xFFFF)));
     st = run_merge(card, 2, tab, 0, 1, 0xFFFF); // a card record without room
     mesh_ctab_account_full(&st);
     CHECK(mesh_ctab_card_write_needed(&st));

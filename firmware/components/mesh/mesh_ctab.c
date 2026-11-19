@@ -172,12 +172,17 @@ mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t tab
 }
 
 bool mesh_ctab_hold_internal(mesh_ctab_hold_t const *h) {
-    return (h->merging || h->card_pending) && h->card_mounted && !h->card_current && !h->card_failed;
+    bool pending = h->card_pending && h->pending_age_s < MESH_CTAB_PENDING_MAX_S;
+    return (h->merging || pending) && h->card_mounted && !h->card_current && !h->card_failed;
+}
+
+bool mesh_ctab_save_owed(bool save_held, bool held) {
+    return save_held && !held;
 }
 
 void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool none, bool dup, uint8_t const *table,
                        uint8_t const *card) {
-    if (dup || (none && !table)) {
+    if (none || dup) {
         st->card_only++; // a repeated key counts once, so a table contact it hides still shows as table-only
     } else if (!table) {
         if (plan == MESH_CTAB_ADD) {
@@ -189,8 +194,7 @@ void mesh_ctab_account(mesh_ctab_diffstat_t *st, mesh_ctab_merge_t plan, bool no
         st->matched++;
         // A newer card record replaces the table's; otherwise the table's stays, and a differing one (older, or the
         // same time with an edited flag or name) is something the card's file does not have
-        // A type-none record is never merged (plan SKIP): a table contact of that type, from /storage, equals it
-        if ((none || plan != MESH_CTAB_REPLACE) && memcmp(table, card, MESH_CTAB_REC) != 0) {
+        if (plan != MESH_CTAB_REPLACE && memcmp(table, card, MESH_CTAB_REC) != 0) {
             st->table_only++;
         }
     }

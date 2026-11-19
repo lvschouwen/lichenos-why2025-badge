@@ -39,7 +39,7 @@ static char const TAG[] = "mesh_contacts";
 #define WRITE_WAIT_MS  100 // the card's batch lock: when another batch has it, a later loop tries again
 #define STOP_WAIT_MS   3000
 #define RETRY_S        5
-#define PENDING_MAX_S  (3 * RETRY_S) // a card whose probe keeps failing does not hold /storage longer than this
+#define SEEN_BITS      65536 // the merge's first-look filter for repeated keys
 #define MERGE_PER_LOOP 64   // card records merged per loop of the mesh task: each is a walk over the table
 #define CHUNK          4096 // the read-back check's buffer
 #define PW_BUF         96
@@ -68,6 +68,7 @@ static bool     have_digest;
 static bool     card_failed; // the last card write failed
 static mesh_ctab_diffstat_t merge_stat; // what the merge in progress saw of the card's file against the table
 static bool     save_held; // a /storage save was dropped by the hold: made up when the hold ends, whatever the outcome
+static uint8_t *seen_bits; // PSRAM, during a merge only: bit set = a key with this hash was merged already
 static uint32_t pending_since_s; // when the card was first seen mounted and not looked at (0: not pending)
 static bool     deferred; // a save of timestamp changes only stays parked in the shim (#429)
 
@@ -133,6 +134,8 @@ void mesh_ctab_run_deleted_locked(uint8_t const *pub) {
 
 static void drop_merge(void) {
     unalloc(merge);
+    unalloc(seen_bits);
+    seen_bits   = NULL;
     merge       = NULL;
     merge_n     = merge_at = 0;
     merge_fresh = false;
@@ -238,6 +241,11 @@ static void start_card(probe_t const *p) {
         generation          = p->info.generation;
         merge_full_before   = merged_full;
         __atomic_store_n(&card_bad_blocks, p->info.bad_blocks, __ATOMIC_RELAXED);
+        unalloc(seen_bits);
+        seen_bits   = (uint8_t *)psram(SEEN_BITS / 8); // NULL: every record is checked by the exact scan
+        if (seen_bits) {
+            memset(seen_bits, 0, SEEN_BITS / 8);
+        }
         merge_fresh = merge_n == 0; // an empty file: the same path as none at all, but the file is this badge's
         if (p->info.bad_blocks) {
             ESP_LOGW(TAG, "card file: %lu of %lu blocks failed their check, %lu of %lu contacts read",
@@ -298,6 +306,25 @@ static void contact_to_rec(uint8_t *rec, ContactInfo const &c) {
     memcpy(rec + 148, &c.gps_lon, 4);
 }
 
+// Whether an earlier record of the card has this key. Only a key the table has can matter (a repeat of an added one
+// finds it there). The hash filter keeps the exact scan, O(n) per record, to the rare record whose bit is already set.
+static bool card_key_repeats(uint8_t const *rec, bool in_table) {
+    if (seen_bits) {
+        unsigned h    = (unsigned)(rec[0] | (rec[1] << 8));
+        bool     seen = seen_bits[h >> 3] & (1u << (h & 7));
+        seen_bits[h >> 3] |= (uint8_t)(1u << (h & 7));
+        if (!seen) {
+            return false;
+        }
+    }
+    for (size_t i = 0; in_table && i < merge_at; i++) {
+        if (memcmp(merge + i * MESH_CTAB_REC, rec, MESH_CTAB_PUB) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void merge_one(uint8_t const *rec) {
     ContactInfo *c = nd->lookupContactByPubKey(rec, PUB_KEY_SIZE);
     uint8_t      table_rec[MESH_CTAB_REC] = {};
@@ -307,10 +334,7 @@ static void merge_one(uint8_t const *rec) {
     bool none = rec[MESH_CTAB_AT_TYPE] == ADV_TYPE_NONE;
     mesh_ctab_merge_t plan =
         mesh_ctab_merge_plan(mesh_ctab_del_has(&del, rec), c != NULL, c ? c->lastmod : 0, mesh_ctab_lastmod(rec));
-    bool dup = false;
-    for (size_t i = 0; c && !dup && i < merge_at; i++) { // c: the table has the key, so only then can it be a repeat
-        dup = memcmp(merge + i * MESH_CTAB_REC, rec, MESH_CTAB_PUB) == 0;
-    }
+    bool dup = card_key_repeats(rec, c != NULL);
     mesh_ctab_account(&merge_stat, plan, none, dup, c ? table_rec : NULL, rec);
     if (none) {
         return;
@@ -698,8 +722,16 @@ static bool internal_held(void) {
     mesh_ctab_hold_t hold = {};
     hold.merging          = merge || merge_fresh;
     hold.card_mounted     = lichen_fs_sd_mounted();
-    hold.card_pending     = hold.card_mounted && !mounted_seen && have_key && !wipe && pending_since_s &&
-                        mesh_uptime_s() - pending_since_s < PENDING_MAX_S;
+    hold.card_pending     = hold.card_mounted && !mounted_seen && have_key && !wipe;
+    // Armed here and not in the loop's work step, which runs after the save: a save in the loop the card appears in
+    // is held too
+    uint32_t now          = mesh_uptime_s();
+    if (!hold.card_pending) {
+        pending_since_s = 0;
+    } else if (!pending_since_s) {
+        pending_since_s = now ? now : 1; // 0 means not pending
+    }
+    hold.pending_age_s    = pending_since_s ? now - pending_since_s : 0;
     hold.card_current     = card_current;
     hold.card_failed      = card_failed;
     return mesh_ctab_hold_internal(&hold);
@@ -909,10 +941,7 @@ static void use_card(void) {
 
 void mesh_ctab_run_work(void) {
     bool mounted = lichen_fs_sd_mounted();
-    uint32_t now = mesh_uptime_s();
-    bool     pending = mounted && !mounted_seen && have_key && !wipe;
-    pending_since_s  = !pending ? 0 : pending_since_s ? pending_since_s : (now ? now : 1);
-    if (save_held && !internal_held()) { // refused, no file, failed, pulled or timed out: the save is still owed
+    if (mesh_ctab_save_owed(save_held, internal_held())) { // refused, no file, failed, pulled or timed out: the save is still owed
         save_held = false;
         want_save = true;
     }

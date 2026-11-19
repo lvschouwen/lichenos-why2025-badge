@@ -55,6 +55,7 @@ mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t tab
 typedef struct {
     bool merging;      // the card's list is being merged into the table
     bool card_pending; // a card is mounted but its file has not been looked at yet
+    uint32_t pending_age_s; // for how long
     bool card_mounted;
     bool card_current; // the card already holds the table
     bool card_failed;  // the last card write failed
@@ -62,6 +63,9 @@ typedef struct {
 // Whether /storage's contact write waits: from before the card's list is read until the merge is through, the table is
 // not the one /storage should keep. No card, a failed card or a card that already holds the table releases the hold.
 bool mesh_ctab_hold_internal(mesh_ctab_hold_t const *h);
+#define MESH_CTAB_PENDING_MAX_S 15 // a card whose probe keeps failing does not hold /storage longer than this
+// A save the hold dropped is still owed once the hold is gone, whatever ended it
+bool mesh_ctab_save_owed(bool save_held, bool held);
 
 // What the merge saw of the card's file against the table, record by record (set-based, not counts)
 typedef struct {
