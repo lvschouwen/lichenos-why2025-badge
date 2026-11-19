@@ -52,6 +52,16 @@ typedef enum { MESH_CTAB_SKIP, MESH_CTAB_ADD, MESH_CTAB_REPLACE } mesh_ctab_merg
 // replaced only by a newer lastmod
 mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t table_lastmod, uint32_t card_lastmod);
 
+// Whether /storage's contact write waits: from the moment the card's list is read until the merge is through, the table
+// is half a union and /storage must keep what it has. A pulled card, or one that failed, releases the hold, and so does
+// a card that already holds the list (card_current).
+bool mesh_ctab_hold_internal(bool merging, bool card_mounted, bool card_current, bool card_failed);
+// Whether the merged table has anything the card's file lacks, so the card is written: a new list, a file that lost
+// blocks, contacts that did not fit, a table contact newer than the card's (table_newer), or a different count
+// (/storage had contacts the card lacks, or the card had deleted ones). False: the card's file is the table.
+bool mesh_ctab_card_write_needed(bool fresh, bool complete, size_t card_n, size_t table_n, size_t table_newer,
+                                 size_t full);
+
 // ---- timestamp-only saves stay parked (#429) ------------------------------------------------------------------------
 
 #define MESH_CTAB_SAVE_INTERVAL_S (15 * 60) // owner, #429: a save that only moved timestamps is written this often

@@ -171,6 +171,15 @@ mesh_ctab_merge_t mesh_ctab_merge_plan(bool deleted, bool in_table, uint32_t tab
     return card_lastmod > table_lastmod ? MESH_CTAB_REPLACE : MESH_CTAB_SKIP;
 }
 
+bool mesh_ctab_hold_internal(bool merging, bool card_mounted, bool card_current, bool card_failed) {
+    return merging && card_mounted && !card_current && !card_failed;
+}
+
+bool mesh_ctab_card_write_needed(bool fresh, bool complete, size_t card_n, size_t table_n, size_t table_newer,
+                                 size_t full) {
+    return fresh || !complete || full > 0 || table_newer > 0 || table_n != card_n;
+}
+
 // ---- contacts the owner deleted --------------------------------------------------------------------------------------
 
 static int del_find(mesh_ctab_del_t const *d, uint8_t const *pub) {

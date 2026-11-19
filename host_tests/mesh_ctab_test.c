@@ -474,6 +474,22 @@ static void test_file_diff(void) {
     CHECK(!mesh_ctab_park(false, last + 10, last, fake_diff, &changed));
 }
 
+static void test_hold_and_write_needed(void) {
+    CHECK(mesh_ctab_hold_internal(true, true, false, false));   // merging: /storage waits
+    CHECK(!mesh_ctab_hold_internal(false, true, false, false)); // merge through
+    CHECK(!mesh_ctab_hold_internal(true, false, false, false)); // the card was pulled
+    CHECK(!mesh_ctab_hold_internal(true, true, false, true));   // the card failed: /storage keeps everything
+    CHECK(!mesh_ctab_hold_internal(true, true, true, false));   // the card already holds the list
+    // The card's list is a subset with equal timestamps and nothing else differs: no write
+    CHECK(!mesh_ctab_card_write_needed(false, true, 575, 575, 0, 0));
+    CHECK(mesh_ctab_card_write_needed(true, true, 0, 10, 0, 0));    // a new list
+    CHECK(mesh_ctab_card_write_needed(false, false, 575, 575, 0, 0)); // lost blocks: repair
+    CHECK(mesh_ctab_card_write_needed(false, true, 575, 575, 0, 3));  // contacts did not fit
+    CHECK(mesh_ctab_card_write_needed(false, true, 575, 575, 1, 0));  // the table's record is newer
+    CHECK(mesh_ctab_card_write_needed(false, true, 250, 575, 0, 0));  // /storage had contacts the card lacks
+    CHECK(mesh_ctab_card_write_needed(false, true, 576, 575, 0, 0));  // the card had a deleted one
+}
+
 int main(void) {
     test_select();
     test_digest();
@@ -483,6 +499,7 @@ int main(void) {
     test_card_plan();
     test_defer();
     test_file_diff();
+    test_hold_and_write_needed();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
