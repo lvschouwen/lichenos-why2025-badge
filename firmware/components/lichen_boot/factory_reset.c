@@ -87,6 +87,8 @@ bool factory_reset_request(factory_level_t level) {
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_commit(nvs));
     nvs_close(nvs);
     if (!ok && factory_scope_marker(level)) {
+        // Also erases a marker left by an earlier request that has not run yet (a double request without a reboot):
+        // that fails safe, the scope then only stays uncleared.
         scope_marker_erase(); // no reset was requested: an orphan marker would clear scopes at some later start
     }
     ESP_LOG_LEVEL(

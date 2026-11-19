@@ -872,8 +872,9 @@ static bool start_locked(char const *files_dir) {
     if (meshcore_scope_clear_pending()) { // #163: a settings-level factory reset asked for no flood scope
         bool saved = n->resetScopes();
         mesh_scope_reset_next_t next = mesh_scope_reset_next(saved, meshcore_scope_clear_tries());
-        meshcore_scope_clear_record(next.erase_marker, next.tries);
-        if (saved) {
+        if (!meshcore_scope_clear_record(next.erase_marker, next.tries)) {
+            ESP_LOGE(TAG, "factory reset: the scope clear outcome was not recorded (scopes %s)", saved ? "cleared" : "not cleared");
+        } else if (saved) {
             ESP_LOGI(TAG, "factory reset: flood scopes cleared");
         } else if (next.gave_up) {
             ESP_LOGE(TAG, "factory reset: flood scopes could not be cleared after repeated starts: the owner clears them by hand");

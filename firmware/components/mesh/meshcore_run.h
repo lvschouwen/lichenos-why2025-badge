@@ -52,8 +52,9 @@ bool meshcore_pw_forget(uint8_t const prefix[6]);
 // meshcore_scope_clear_record erases it (a failed clear leaves it for a few more starts, mesh_scope.h)
 bool meshcore_scope_clear_pending(void);
 uint8_t meshcore_scope_clear_tries(void);
-// After an attempt: erase the marker and the counter (erase true), else keep the marker and save the counter
-void meshcore_scope_clear_record(bool erase, uint8_t tries);
+// After an attempt: erase the marker, then the counter (erase true), else keep the marker and save the counter.
+// False when a write failed (logged here).
+bool meshcore_scope_clear_record(bool erase, uint8_t tries);
 
 // The one-shot move to 2 B path hashes (#129): done already / now done, in the app's settings
 // One-time (#130): the stored routes of another hash size than the setting were forgotten

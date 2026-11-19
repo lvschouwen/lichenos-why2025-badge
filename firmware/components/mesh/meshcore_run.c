@@ -82,13 +82,24 @@ uint8_t meshcore_scope_clear_tries(void) {
     return app_settings_get_u8(app_ctx, SCOPE_TRIES_KEY, 0);
 }
 
-void meshcore_scope_clear_record(bool erase, uint8_t tries) {
+bool meshcore_scope_clear_record(bool erase, uint8_t tries) {
     if (erase) {
-        app_settings_erase(app_ctx, SCOPE_TRIES_KEY);
-        app_settings_erase(app_ctx, MESHCORE_SCOPE_CLEAR_KEY);
-    } else {
-        app_settings_set_u8(app_ctx, SCOPE_TRIES_KEY, tries);
+        // The marker first: it is what makes the next start clear again, so its erase is the one that must succeed
+        if (!app_settings_erase(app_ctx, MESHCORE_SCOPE_CLEAR_KEY)) {
+            ESP_LOGE(TAG, "scope clear: marker not erased");
+            return false;
+        }
+        if (!app_settings_erase(app_ctx, SCOPE_TRIES_KEY)) {
+            ESP_LOGE(TAG, "scope clear: try counter not erased"); // harmless: the counter only counts while a marker lives
+            return false;
+        }
+        return true;
     }
+    if (!app_settings_set_u8(app_ctx, SCOPE_TRIES_KEY, tries)) {
+        ESP_LOGE(TAG, "scope clear: try counter not saved");
+        return false;
+    }
+    return true;
 }
 
 bool meshcore_autostart(void) {
