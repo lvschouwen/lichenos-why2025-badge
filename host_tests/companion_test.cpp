@@ -120,7 +120,20 @@ mesh::LocalIdentity radio_new_identity() {
     } rng;
     return mesh::LocalIdentity(&rng);
 }
-void BadgeBoard::reboot() {}
+// Stands in for the badge's BadgeBoard::reboot (mesh_task.cpp, not linkable here): the restart save and the mesh task's
+// stop save both skip when a format erased the files since the last save (#426). The test below drives MyMesh's real
+// factory reset command into it, so what it proves is the shim's mark and the order, not a copy of the task's code.
+static BadgeMesh *reset_mesh;
+static int        reboots;
+static void       owner_save() {
+    if (reset_mesh && !fs_shim_wiped()) {
+        reset_mesh->saveAll();
+    }
+}
+void BadgeBoard::reboot() {
+    reboots++;
+    owner_save();
+}
 uint16_t BadgeBoard::getBattMilliVolts() { return 0; }
 
 // The outbox is shared with the UI on the badge (a critical section there); one thread here
@@ -638,6 +651,43 @@ static void console_scope_reset_checks(BadgeMesh &mesh, char const *root) {
     mesh.loadConsoleScope();
     CHECK(strcmp(mesh.consoleScope(), "zz-test") == 0);
     CHECK(mesh.setConsoleScope("") == NULL);
+    fs_shim_set_root(root);
+}
+
+// #426: the companion's factory reset formats, then MyMesh asks for the reboot; the save the reboot (and a stop) makes
+// must not write the old prefs, contacts and channels back into the emptied directory
+static void factory_reset_checks(BadgeMesh &mesh, char const *root) {
+    static char const files[][16] = {"/prefs.json", "/contacts3", "/channels2"};
+    std::string       sub         = std::string(root) + "/freset";
+    CHECK(mkdir(sub.c_str(), 0700) == 0 || errno == EEXIST);
+    fs_shim_set_root(sub.c_str());
+    CHECK(SPIFFS.begin(true));
+    CHECK(mesh.getNumContacts() > 0);
+    mesh.saveAll();
+    for (auto const &f : files) {
+        CHECK(SPIFFS.exists(f));
+    }
+    reset_mesh   = &mesh;
+    reboots      = 0;
+    uint8_t cmd[] = {51, 'r', 'e', 's', 'e', 't'}; // CMD_FACTORY_RESET
+    CHECK(mesh.pipe().queue_cmd(cmd, sizeof(cmd)));
+    settle(mesh, 3);
+    CHECK(reboots == 1 && fs_shim_wiped());
+    for (auto const &f : files) {
+        CHECK(!SPIFFS.exists(f));
+    }
+    owner_save(); // the mesh task's stop after it
+    for (auto const &f : files) {
+        CHECK(!SPIFFS.exists(f));
+    }
+    // The next start lowers the mark: saves work again
+    fs_shim_set_root(sub.c_str());
+    CHECK(!fs_shim_wiped());
+    owner_save();
+    for (auto const &f : files) {
+        CHECK(SPIFFS.exists(f));
+    }
+    reset_mesh = nullptr;
     fs_shim_set_root(root);
 }
 
@@ -1363,6 +1413,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     CHECK(st.confirmed == 1);
     console_scope_checks(mesh, ob, pub.channel);
     console_scope_reset_checks(mesh, root);
+    factory_reset_checks(mesh, root);
     channel_scope_checks(mesh, ob, pub.channel, root);
     channel_scope_damage_checks(mesh, ob, pub.channel, root);
     trace_checks(mesh, mt);
