@@ -13,11 +13,11 @@
 // is acceptable while only first-party apps open dialogs; a third-party app API needs a dialog id instead.
 
 typedef enum {
-    DLG_REMOTE_REFUSE,            // hand-only (DANGER), unknown, or a NULL label or title
-    DLG_REMOTE_ALLOW,             // a remote Enter may answer it
-    DLG_REMOTE_ALLOW_ONAIR_SCOPED, // it makes the badge transmit: only under the bench console scope, and only when the
-                                   // screen's send is scoped too (the default scope is the bench region, #485)
-    DLG_REMOTE_ALLOW_REGION_SET    // it sets a region and sends nothing (#485): the bench console scope must be set,
+    DLG_REMOTE_REFUSE,             // hand-only (DANGER), unknown, or a NULL label or title
+    DLG_REMOTE_ALLOW,              // a remote Enter may answer it
+    DLG_REMOTE_ALLOW_ONAIR_SCOPED, // it makes the badge transmit: only under the bench console scope, and only when
+                                   // the screen's send is scoped too (default scope = bench region, #485)
+    DLG_REMOTE_ALLOW_REGION_SET    // it sets a region and sends nothing (#485): needs the bench console scope set,
                                    // the default scope may be anything, so the bench can still set it remotely
 } dlg_remote_verdict_t;
 

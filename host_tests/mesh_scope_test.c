@@ -157,8 +157,17 @@ static void screen_scoped_checks(void) {
     CHECK(!mesh_scope_screen_scoped("nl", "nl-ams")); // a prefix is another region
 }
 
+// Through the real parse: the names the settings and the console file hold are lowercased and trimmed first
+static void screen_scoped_parsed_checks(void) {
+    char def[40], con[40];
+    CHECK(!parse("NL-AMS", def) && !parse("#nl-ams ", con) && mesh_scope_screen_scoped(def, con));
+    CHECK(!parse("nl-ams", def) && !parse("nl-amsx", con) && !mesh_scope_screen_scoped(def, con)); // trailing char
+    CHECK(!parse("", def) && !parse("nl-ams", con) && !mesh_scope_screen_scoped(def, con));         // None
+}
+
 int main(void) {
     screen_scoped_checks();
+    screen_scoped_parsed_checks();
     reset_apply_checks();
     reset_outcome_checks();
     char out[40], text[200];
