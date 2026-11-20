@@ -123,7 +123,7 @@ static rans_t page_enter(remote_view_t const *v) {
         return v->scope_set ? RANS_OK : RANS_NEEDS_SCOPE;
     }
     if (chat_screen(v->top_screen)) {
-        return chat_rule(v);
+        return v->chat_known && v->chat_selecting ? RANS_OK : chat_rule(v); // select-mode Enter never sends (#486)
     }
     if (v->top_screen == SCREEN_ADVERT && !v->enter_starts) { // a start is refused below, whatever the row
         return remote_advert_opens_field(v->focus) ? RANS_OK : RANS_ADVERT_HAND; // no row read: fail closed

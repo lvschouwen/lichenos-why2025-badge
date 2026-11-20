@@ -254,3 +254,21 @@ bool mesh_chat_mention(mesh_msg_t const *m, char *out, size_t cap) {
 bool mesh_chat_mention_fits(char const *draft, char const *mention, size_t max_bytes) {
     return strlen(draft ? draft : "") + strlen(mention ? mention : "") <= max_bytes;
 }
+
+// LVGL delivers an Esc the shell's indev hook already acted on (on_esc) to the textarea too, so select mode (now left)
+// no longer saw it and a control byte landed in the draft (#486): Esc never goes through, selecting or not.
+mesh_key_route_t mesh_chat_key_route(bool selecting, bool draft_empty, bool has_msgs, uint32_t key) {
+    if (key == MESH_CHAT_KEY_ESC) {
+        return MESH_KEY_SWALLOW;
+    }
+    if (selecting) {
+        return MESH_KEY_SELECT;
+    }
+    if (key == '/' && draft_empty) {
+        return MESH_KEY_SEARCH;
+    }
+    if (key == MESH_CHAT_KEY_UP && draft_empty && has_msgs) {
+        return MESH_KEY_SELECT_START;
+    }
+    return MESH_KEY_PASS;
+}

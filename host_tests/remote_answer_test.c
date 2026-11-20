@@ -223,6 +223,22 @@ static void test_chat(void) {
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);
     v = chat(SCREEN_DM, "#badgetest", true); // a DM never, whatever its name
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);
+    // Select mode (#486): its Enter picks (a mention or back), never sends, so it goes in any chat; Tab does not
+    v                = chat(SCREEN_DM, "@badgetest", true);
+    v.chat_selecting = true;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+    CHECK(remote_key_check(RKEY_TAB, &v) == RANS_CHAT_TEST);
+    v.chat_selecting = false; // the first Enter left select mode: the next one is judged as before
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);
+    v                = chat(SCREEN_CHAT, "Public", false);
+    v.chat_selecting = true;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+    v.chat_selecting = false;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);
+    v                = chat(SCREEN_DM, "@badgetest", true);
+    v.chat_known     = false; // selecting is only believed when the chat was read: fail closed
+    v.chat_selecting = true;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);
     v            = chat(SCREEN_CHAT, "#badgetest", false);
     v.chat_known = false; // the chat could not be read: fail closed
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_CHAT_TEST);

@@ -182,7 +182,29 @@ static void heard_time_checks(void) {
     CHECK(strlen((mesh_msg_status(&d, big, sizeof(big)), big)) < MESH_STATUS_CAP);
 }
 
+static void test_key_route(void) {
+    // Esc never reaches the draft (#486): the shell's on_esc acted on it, and LVGL hands it on to the textarea
+    for (int sel = 0; sel < 2; sel++) {
+        for (int empty = 0; empty < 2; empty++) {
+            CHECK(mesh_chat_key_route(sel, empty, true, MESH_CHAT_KEY_ESC) == MESH_KEY_SWALLOW);
+            CHECK(mesh_chat_key_route(sel, empty, false, MESH_CHAT_KEY_ESC) == MESH_KEY_SWALLOW);
+        }
+    }
+    CHECK(mesh_chat_key_route(true, true, true, '\n') == MESH_KEY_SELECT); // select-mode Enter never goes on
+    CHECK(mesh_chat_key_route(true, false, true, MESH_CHAT_KEY_UP) == MESH_KEY_SELECT);
+    CHECK(mesh_chat_key_route(true, true, true, '/') == MESH_KEY_SELECT);
+    CHECK(mesh_chat_key_route(true, true, true, 'a') == MESH_KEY_SELECT); // swallowed while a message is framed
+    CHECK(mesh_chat_key_route(false, true, true, '/') == MESH_KEY_SEARCH);
+    CHECK(mesh_chat_key_route(false, false, true, '/') == MESH_KEY_PASS);
+    CHECK(mesh_chat_key_route(false, true, true, MESH_CHAT_KEY_UP) == MESH_KEY_SELECT_START);
+    CHECK(mesh_chat_key_route(false, true, false, MESH_CHAT_KEY_UP) == MESH_KEY_PASS);
+    CHECK(mesh_chat_key_route(false, false, true, MESH_CHAT_KEY_UP) == MESH_KEY_PASS);
+    CHECK(mesh_chat_key_route(false, true, true, 'a') == MESH_KEY_PASS);
+    CHECK(mesh_chat_key_route(false, true, true, '\n') == MESH_KEY_PASS);
+}
+
 int main(void) {
+    test_key_route();
     char s[MESH_STATUS_CAP];
     CHECK(status(0, MESH_OUT_FAILED, 0, s) == MESH_STATUS_NONE && s[0] == '\0'); // incoming: no state
     CHECK(status(1, MESH_OUT_QUEUED, 0, s) == MESH_STATUS_PENDING && strcmp(s, "queued") == 0);

@@ -19,16 +19,18 @@ static bool fake_scope(void) {
     return scope_now;
 }
 
-static bool fake_chat(char *name, size_t cap, bool *dm) {
+static bool fake_chat(char *name, size_t cap, bool *dm, bool *selecting) {
     snprintf(name, cap, "%s", "#badgetest-but-longer");
-    *dm = false;
+    *dm        = false;
+    *selecting = true;
     return true;
 }
 
-static bool no_chat(char *name, size_t cap, bool *dm) {
+static bool no_chat(char *name, size_t cap, bool *dm, bool *selecting) {
     (void)name;
     (void)cap;
-    *dm = true; // a binder that leaves junk on false: the cell clears it
+    *dm        = true; // a binder that leaves junk on false: the cell clears it
+    *selecting = true;
     return false;
 }
 
@@ -52,12 +54,12 @@ static void test_starts(void) {
 
 static void test_chat(void) {
     char name[11];
-    bool dm = true;
-    CHECK(!bench_chat_on_top(name, sizeof(name), &dm) && name[0] == '\0' && !dm); // unbound
+    bool dm = true, sel = true;
+    CHECK(!bench_chat_on_top(name, sizeof(name), &dm, &sel) && name[0] == '\0' && !dm && !sel); // unbound
     bench_chat_bind(fake_chat);
-    CHECK(bench_chat_on_top(name, sizeof(name), &dm) && strcmp(name, "#badgetest") == 0 && !dm); // cut, terminated
+    CHECK(bench_chat_on_top(name, sizeof(name), &dm, &sel) && strcmp(name, "#badgetest") == 0 && !dm && sel); // cut, terminated
     bench_chat_bind(no_chat);
-    CHECK(!bench_chat_on_top(name, sizeof(name), &dm) && name[0] == '\0' && !dm);
+    CHECK(!bench_chat_on_top(name, sizeof(name), &dm, &sel) && name[0] == '\0' && !dm && !sel);
     bench_chat_bind(NULL);
 }
 

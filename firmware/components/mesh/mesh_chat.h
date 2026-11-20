@@ -94,6 +94,19 @@ bool mesh_chat_mention(mesh_msg_t const *m, char *out, size_t cap);
 // Does mention + the draft stay within max_bytes (the compose line's limit)?
 bool mesh_chat_mention_fits(char const *draft, char const *mention, size_t max_bytes);
 
+// What the compose line does with a key before the textarea sees it (#486)
+// LVGL's LV_KEY_ESC and LV_KEY_UP (meshcore_chat.c asserts it), kept here so the routing stays ESP/LVGL-free
+#define MESH_CHAT_KEY_ESC 27u
+#define MESH_CHAT_KEY_UP  17u
+typedef enum {
+    MESH_KEY_PASS,         // the textarea takes it
+    MESH_KEY_SELECT,       // select mode takes it (Up/Down step, Enter picks, the rest is swallowed)
+    MESH_KEY_SEARCH,       // "/" on an empty line starts a search
+    MESH_KEY_SELECT_START, // Up on an empty line with messages frames the newest
+    MESH_KEY_SWALLOW,      // Esc: the shell's on_esc already acted on it, so it never becomes a byte in the draft
+} mesh_key_route_t;
+mesh_key_route_t mesh_chat_key_route(bool selecting, bool draft_empty, bool has_msgs, uint32_t key);
+
 #ifdef __cplusplus
 }
 #endif

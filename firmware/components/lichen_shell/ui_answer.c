@@ -92,7 +92,7 @@ bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label,
     read_dialog(&v, &info);
     v.top_screen   = nav_current();
     v.focus        = focus;
-    v.chat_known   = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm);
+    v.chat_known   = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm, &v.chat_selecting);
     v.chat_name    = chat;
     v.enter_starts = bench_enter_starts(v.top_screen, focus);
     rans_t r     = answer_label && key == RKEY_ENTER ? remote_answer_still(&v, answer_label, answer_gen)

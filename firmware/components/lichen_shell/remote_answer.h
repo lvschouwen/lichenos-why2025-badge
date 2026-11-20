@@ -17,6 +17,10 @@
 //   - A chat or DM screen sends its compose line on Enter and retries a failed message on Tab, with no dialog: there
 //     both go only when the open chat is the channel "#badgetest" (Lucas 2026-11-13); every other channel and every DM
 //     is refused ("fw mesh send/dm" is the console's way). Typing text is fine.
+//     Exception: a chat known to be in select mode takes Enter as "pick", which never sends (a DM inserts nothing,
+//     a channel a mention), so that Enter goes; Tab stays refused. Each key is judged against the view at its own
+//     time (the stepper waits KEY_GAP_MS between keys, the shell leaves select mode on the first Enter), so a
+//     second Enter finds the chat no longer selecting and is refused as before.
 //   - The other screens where Enter goes on air with no dialog are refused outright: Trace and Discover path, Status
 //     and Telemetry (their Again rows), the repeater login, command and settings pages, the contact page's rows that
 //     open them or send (remote_contact_send_row), a "Send advert" or "Start MeshCore" row anywhere (MeshCore's
@@ -64,6 +68,7 @@ typedef struct {
     char const          *focus;      // what "fw ui" reports as the focus (NULL or "" for none)
     bool                 chat_known; // a chat screen on top whose target was read (bench_chat_on_top)
     bool                 chat_dm;
+    bool                 chat_selecting; // that chat is in select mode: its Enter inserts a mention or leaves (#486)
     char const          *chat_name;  // its channel name, "#" included
     bool                 enter_starts; // bench_enter_starts(): Enter here would start MeshCore
 } remote_view_t;

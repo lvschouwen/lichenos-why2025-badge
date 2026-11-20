@@ -435,17 +435,22 @@ static void select_key(chat_t *c, uint32_t key) {
 
 // The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
 // draft
+_Static_assert(MESH_CHAT_KEY_ESC == LV_KEY_ESC && MESH_CHAT_KEY_UP == LV_KEY_UP, "mesh_chat_key_route keys");
+
 static void on_compose_key(lv_event_t *e) {
     chat_t  *c   = lv_event_get_user_data(e);
     uint32_t key = lv_event_get_key(e);
-    if (c->selecting) {
-        lv_event_stop_processing(e);
+    // with a draft Up keeps scrolling the list (on_key)
+    mesh_key_route_t route = mesh_chat_key_route(c->selecting, !lv_textarea_get_text(c->ta)[0], c->copy_n != 0, key);
+    if (route == MESH_KEY_PASS) {
+        return;
+    }
+    lv_event_stop_processing(e);
+    if (route == MESH_KEY_SELECT) {
         select_key(c, key);
-    } else if (key == '/' && !lv_textarea_get_text(c->ta)[0]) {
-        lv_event_stop_processing(e);
+    } else if (route == MESH_KEY_SEARCH) {
         search_enter(c);
-    } else if (key == LV_KEY_UP && !lv_textarea_get_text(c->ta)[0] && c->copy_n) {
-        lv_event_stop_processing(e); // with a draft Up keeps scrolling the list (on_key)
+    } else if (route == MESH_KEY_SELECT_START) {
         select_enter(c);
     }
 }
@@ -722,13 +727,14 @@ typedef struct {
 static void open_target(mesh_chat_target_t const *want);
 
 // bench_chat_on_top (#377): the shell lets a remote Enter send only in #badgetest, and reads the chat on top here
-static bool remote_chat_on_top(char *name, size_t cap, bool *dm) {
+static bool remote_chat_on_top(char *name, size_t cap, bool *dm, bool *selecting) {
     chat_t const *c = chat_on_top();
     if (!c) {
         return false;
     }
     snprintf(name, cap, "%s", c->target.title);
-    *dm = c->target.dm;
+    *dm        = c->target.dm;
+    *selecting = c->selecting;
     return true;
 }
 

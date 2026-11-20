@@ -14,8 +14,9 @@
 
 typedef bool (*bench_scope_fn)(void); // true while the console scope is set; any task, never blocks long
 // The chat screen on top: false when the top screen is no chat; else its channel name ("#" included; a DM's "@name")
-// in name (always terminated) and whether it is a DM. LVGL task.
-typedef bool (*bench_chat_fn)(char *name, size_t cap, bool *dm);
+// in name (always terminated), whether it is a DM and whether it is in select mode (a message framed: Enter then only
+// inserts a mention or leaves, it never sends; #486). LVGL task.
+typedef bool (*bench_chat_fn)(char *name, size_t cap, bool *dm, bool *selecting);
 // top_screen: nav_current() (0 = home); focus: what "fw ui" reports (NULL for none). LVGL task.
 typedef bool (*bench_starts_fn)(int top_screen, char const *focus);
 
@@ -25,8 +26,8 @@ void bench_scope_bind(bench_scope_fn fn);
 bool bench_scope_set(void);
 // Any task; NULL unbinds. The last bind wins.
 void bench_chat_bind(bench_chat_fn fn);
-// LVGL task. False while nothing is bound or no chat is on top (name "", dm false then).
-bool bench_chat_on_top(char *name, size_t cap, bool *dm);
+// LVGL task. False while nothing is bound or no chat is on top (name "", dm and selecting false then).
+bool bench_chat_on_top(char *name, size_t cap, bool *dm, bool *selecting);
 // Any task; NULL unbinds. The last bind wins.
 void bench_starts_bind(bench_starts_fn fn);
 // LVGL task. False while nothing is bound (MeshCore is not registered).

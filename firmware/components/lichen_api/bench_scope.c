@@ -28,17 +28,19 @@ bool bench_enter_starts(int top_screen, char const *focus) {
     return fn != NULL && fn(top_screen, focus);
 }
 
-bool bench_chat_on_top(char *name, size_t cap, bool *dm) {
+bool bench_chat_on_top(char *name, size_t cap, bool *dm, bool *selecting) {
     bench_chat_fn fn = __atomic_load_n(&bound_chat, __ATOMIC_ACQUIRE);
     if (cap) {
         name[0] = '\0';
     }
-    *dm = false;
-    if (!fn || !cap || !fn(name, cap, dm)) {
+    *dm        = false;
+    *selecting = false;
+    if (!fn || !cap || !fn(name, cap, dm, selecting)) {
         if (cap) {
             name[0] = '\0';
         }
-        *dm = false;
+        *dm        = false;
+        *selecting = false;
         return false;
     }
     name[cap - 1] = '\0';
