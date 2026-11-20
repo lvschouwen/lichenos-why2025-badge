@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define SCOPE_WHY_LEN     "A region name is at most 30 characters"
+#define SCOPE_WHY_CHARSET "A region name takes letters, digits and '-'"
+
 char const *mesh_scope_parse(char const *in, char *out, size_t cap) {
     if (cap == 0) {
         return "no room";
@@ -24,19 +27,32 @@ char const *mesh_scope_parse(char const *in, char *out, size_t cap) {
         return NULL; // None
     }
     if (len > MESH_SCOPE_MAX || len >= cap) {
-        return "A region name is at most 30 characters";
+        return SCOPE_WHY_LEN;
     }
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)in[i];
         bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c >= 0x80;
         if (!ok) {
             out[0] = '\0';
-            return "A region name takes letters, digits and '-'";
+            return SCOPE_WHY_CHARSET;
         }
         out[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
     }
     out[len] = '\0';
     return NULL;
+}
+
+// A value cell holds about 33 characters: the refusals above are too long for it (#484), so each has a short note
+void mesh_scope_not_saved_text(char const *why, char *out, size_t cap) {
+    char const *note = "not a valid region";
+    if (why && strcmp(why, SCOPE_WHY_LEN) == 0) {
+        note = "max 30 characters";
+    } else if (why && strcmp(why, SCOPE_WHY_CHARSET) == 0) {
+        note = "letters, digits, -";
+    } else if (why && strcmp(why, "no room") == 0) {
+        note = "name too long";
+    }
+    snprintf(out, cap, "Not saved: %s", note);
 }
 
 void mesh_scope_text(char const *name, char *out, size_t cap) {
@@ -78,7 +94,7 @@ char const *mesh_scope_console_arg(char const *args, char *out, size_t cap) {
     char   region[MESH_SCOPE_MAX + 2];
     size_t region_len = len - 3;
     if (region_len >= sizeof(region)) {
-        return "A region name is at most 30 characters";
+        return SCOPE_WHY_LEN;
     }
     memcpy(region, args, region_len);
     region[region_len] = '\0';

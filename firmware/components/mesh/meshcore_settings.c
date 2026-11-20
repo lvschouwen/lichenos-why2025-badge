@@ -337,7 +337,7 @@ static void on_scope(char const *text, void *arg) {
     }
     if (why) {
         char line[80];
-        snprintf(line, sizeof(line), "Not saved: %s", why);
+        mesh_scope_not_saved_text(why, line, sizeof(line));
         menu_set_value(scope_row, line);
         return;
     }
@@ -1361,7 +1361,7 @@ static void chan_scope_show_due(lv_timer_t *timer) {
 // R5 and R3: why it was not saved, then the real state again (the value never stays a stale message)
 static void chan_scope_not_saved(char const *why) {
     char line[80];
-    snprintf(line, sizeof(line), "Not saved: %s", why);
+    mesh_scope_not_saved_text(why, line, sizeof(line));
     menu_set_value(chan_scope_row, line);
     if (chan_scope_timer) {
         lv_timer_delete(chan_scope_timer); // a newer note: its own full time

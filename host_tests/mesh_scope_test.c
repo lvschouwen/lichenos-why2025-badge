@@ -167,6 +167,17 @@ int main(void) {
     CHECK(parse("abcdefghijklmnopqrstuvwxyz01234", out) != NULL);
     CHECK(mesh_scope_parse("abcdef", out, 4) != NULL && out[0] == 0);
     CHECK(mesh_scope_parse("abc", out, 4) == NULL && strcmp(out, "abc") == 0);
+    // The value cell holds about 33 characters: every refusal has a short note (#484)
+    {
+        char const *whys[] = {parse("a b", out), parse("abcdefghijklmnopqrstuvwxyz01234", out),
+                              mesh_scope_parse("abcdef", out, 4), "something new", NULL};
+        for (size_t i = 0; i < sizeof(whys) / sizeof(whys[0]); i++) {
+            mesh_scope_not_saved_text(whys[i], text, sizeof(text));
+            CHECK(strncmp(text, "Not saved: ", 11) == 0 && strlen(text) > 11 && strlen(text) <= 32);
+        }
+        mesh_scope_not_saved_text(parse("a b", out), text, sizeof(text));
+        CHECK(strcmp(text, "Not saved: letters, digits, -") == 0);
+    }
     // Texts
     mesh_scope_text("", text, sizeof(text));
     CHECK(strcmp(text, "None (everywhere)") == 0);

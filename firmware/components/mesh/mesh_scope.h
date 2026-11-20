@@ -18,6 +18,8 @@ extern "C" {
 // "" for None (empty input). Else the reason (out is ""). A name takes letters, digits and '-' (accented letters too);
 // MeshCore also lets '$' mark a private region, but that needs a stored key the badge has no way to enter.
 char const *mesh_scope_parse(char const *in, char *out, size_t cap);
+// The short value-cell text for a mesh_scope_parse refusal: "Not saved: letters, digits, -" (at most 32 characters)
+void mesh_scope_not_saved_text(char const *why, char *out, size_t cap);
 // What the Settings row shows: "None (everywhere)" for no name, else the name
 void mesh_scope_text(char const *name, char *out, size_t cap);
 // The question before a region is set (not asked for None)
