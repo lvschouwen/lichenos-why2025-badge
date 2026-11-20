@@ -386,7 +386,9 @@ The rule: **core 1 draws, core 0 talks to the world.**
   not in a release build). The stepper checks every remote Enter, Tab, Left and Right right before it goes down
   (`remote_answer.c`, host-tested; a second look before a tap's release only detects a change and stops the sequence). A
   dialog answers by its `dlg_remote_verdict` (#376): REFUSE is hand-only, ALLOW_ONAIR_SCOPED needs the bench console
-  scope of #290 (`fw mesh scope console <region> YES`). The badge's radio pages (Region & radio with TX power, Custom
+  scope of #290 (`fw mesh scope console <region> YES`) and, since a screen-started send floods under the default scope
+  and never the console scope, a default scope equal to that region (#485); ALLOW_REGION_SET (the set-region dialogs,
+  which send nothing) needs only the bench scope. The badge's radio pages (Region & radio with TX power, Custom
   radio, Switch radio) need that scope too. A chat sends (Enter, Tab-retry) only in `#badgetest`, a DM never. The other
   Enters that go on air with no dialog are refused: Trace and Discover path, Status, Telemetry, the repeater login,
   command and settings pages, the contact rows that open them or log out, the "Send advert" and "Start MeshCore" rows

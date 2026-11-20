@@ -42,6 +42,9 @@ typedef enum {
 // A screen's: the channel's own scope when it has one (#291; channel_name NULL or "" = none, and every flood that is
 // not a channel message), refused for MESH_CHSCOPE_DAMAGED, else the default.
 mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name, char const *channel_name);
+// #485: does a screen's flood (it takes the default scope) go under the region the bench console scope names? Both
+// must be set and the same name (mesh_scope_parse lowercases both); NULL or empty is not a scope. Fails closed.
+bool mesh_scope_screen_scoped(char const *default_name, char const *console_name);
 // "fw mesh scope console <region> YES": the text after "console". NULL when out holds the region (mesh_scope_parse's
 // rules, never empty), else why not (out is "").
 char const *mesh_scope_console_arg(char const *args, char *out, size_t cap);

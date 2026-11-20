@@ -52,6 +52,7 @@ typedef enum {
     RANS_OK,
     RANS_HAND_ONLY,    // the dialog's verdict is REFUSE
     RANS_NEEDS_SCOPE,  // a dialog or a radio page that transmits, without the bench console scope
+    RANS_NEEDS_DEFAULT_SCOPE, // a dialog whose send starts from the screen: the default scope is not the bench region (#485)
     RANS_UNSURE,       // a dialog is opening, or its state could not be read: ask again shortly
     RANS_NO_DIALOG,    // answer: no dialog is open
     RANS_OTHER_DIALOG, // answer: the open dialog has another confirm label, or is another open (gen)
@@ -68,6 +69,7 @@ typedef struct {
     uint32_t             gen;        // its open number (shell_dialog_info_t.gen)
     int                  top_screen; // nav_current(); only the stepper's check reads it
     bool                 scope_set;  // bench_scope_set()
+    bool                 screen_scoped; // bench_screen_scoped(): a screen-started send floods under the bench region (#485)
     char const          *focus;      // what "fw ui" reports as the focus (NULL or "" for none)
     bool                 chat_known; // a chat screen on top whose target was read (bench_chat_on_top)
     bool                 chat_dm;

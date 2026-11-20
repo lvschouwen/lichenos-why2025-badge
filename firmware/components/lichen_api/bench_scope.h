@@ -24,6 +24,13 @@ typedef bool (*bench_starts_fn)(int top_screen, char const *focus);
 void bench_scope_bind(bench_scope_fn fn);
 // Any task. False while nothing is bound (MeshCore not started): fail closed.
 bool bench_scope_set(void);
+// #485: true while a send started from a screen would go out under the region the console scope names (the default
+// scope is set and equal to it; a screen's flood never uses the console scope itself). Any task, never blocks long.
+typedef bool (*bench_screen_scoped_fn)(void);
+// Any task; NULL unbinds. The last bind wins.
+void bench_screen_scoped_bind(bench_screen_scoped_fn fn);
+// Any task. False while nothing is bound: fail closed.
+bool bench_screen_scoped(void);
 // Any task; NULL unbinds. The last bind wins.
 void bench_chat_bind(bench_chat_fn fn);
 // LVGL task. False while nothing is bound or no chat is on top (name "", dm and selecting false then).

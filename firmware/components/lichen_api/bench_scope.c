@@ -4,6 +4,7 @@
 
 static bench_scope_fn bound_scope;
 static bench_chat_fn  bound_chat;
+static bench_screen_scoped_fn bound_screen;
 static bench_starts_fn bound_starts;
 
 void bench_scope_bind(bench_scope_fn fn) {
@@ -12,6 +13,15 @@ void bench_scope_bind(bench_scope_fn fn) {
 
 bool bench_scope_set(void) {
     bench_scope_fn fn = __atomic_load_n(&bound_scope, __ATOMIC_ACQUIRE);
+    return fn != NULL && fn();
+}
+
+void bench_screen_scoped_bind(bench_screen_scoped_fn fn) {
+    __atomic_store_n(&bound_screen, fn, __ATOMIC_RELEASE);
+}
+
+bool bench_screen_scoped(void) {
+    bench_screen_scoped_fn fn = __atomic_load_n(&bound_screen, __ATOMIC_ACQUIRE);
     return fn != NULL && fn();
 }
 

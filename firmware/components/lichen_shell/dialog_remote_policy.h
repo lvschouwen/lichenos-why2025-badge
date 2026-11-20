@@ -15,7 +15,10 @@
 typedef enum {
     DLG_REMOTE_REFUSE,            // hand-only (DANGER), unknown, or a NULL label or title
     DLG_REMOTE_ALLOW,             // a remote Enter may answer it
-    DLG_REMOTE_ALLOW_ONAIR_SCOPED // it makes the badge transmit: only under the bench console scope
+    DLG_REMOTE_ALLOW_ONAIR_SCOPED, // it makes the badge transmit: only under the bench console scope, and only when the
+                                   // screen's send is scoped too (the default scope is the bench region, #485)
+    DLG_REMOTE_ALLOW_REGION_SET    // it sets a region and sends nothing (#485): the bench console scope must be set,
+                                   // the default scope may be anything, so the bench can still set it remotely
 } dlg_remote_verdict_t;
 
 typedef struct {
@@ -32,7 +35,7 @@ dlg_remote_verdict_t dlg_remote_verdict(char const *confirm_label, char const *t
 dlg_remote_verdict_t
     dlg_remote_match(dlg_remote_row_t const *rows, size_t n, char const *confirm_label, char const *title);
 
-// "refuse", "allow" or "allow-onair-scoped"
+// "refuse", "allow", "allow-onair-scoped" or "allow-region-set"
 char const *dlg_remote_verdict_name(dlg_remote_verdict_t v);
 
 // '*' matches any run of characters (also none); every other character itself. Exposed for the host test.

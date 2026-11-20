@@ -73,12 +73,27 @@ static bool console_scope_set(void) {
     return mesh_cscope_refusal(true) == NULL;
 }
 
+static void cscope_get(char *out, size_t cap);
+
+// #485: a screen's flood takes the default scope, so the bench's scope covers a screen-started send only when the
+// default is that same region. mesh_get_settings is the settings cache (a spinlock), safe on any task.
+static bool screen_send_scoped(void) {
+    mesh_settings_t s;
+    char            name[MESH_SCOPE_MAX + 1];
+    if (!mesh_get_settings(&s)) {
+        return false; // MeshCore not up: unknown, refused
+    }
+    cscope_get(name, sizeof(name));
+    return mesh_scope_screen_scoped(s.scope, name);
+}
+
 void mesh_cscope_note(char const *name) {
     SemaphoreHandle_t lock = cscope_lock_made();
     xSemaphoreTake(lock, portMAX_DELAY);
     snprintf(cscope_name, sizeof(cscope_name), "%s", name ? name : "");
     xSemaphoreGive(lock);
     bench_scope_bind(console_scope_set); // from the first note on (MeshCore's start); again is harmless
+    bench_screen_scoped_bind(screen_send_scoped);
 }
 
 static void cscope_get(char *out, size_t cap) {

@@ -63,7 +63,24 @@ static void test_chat(void) {
     bench_chat_bind(NULL);
 }
 
+static bool screen_now;
+
+static bool fake_screen(void) {
+    return screen_now;
+}
+
+static void test_screen_scoped(void) {
+    CHECK(!bench_screen_scoped()); // unbound: fail closed
+    bench_screen_scoped_bind(fake_screen);
+    CHECK(!bench_screen_scoped());
+    screen_now = true;
+    CHECK(bench_screen_scoped());
+    bench_screen_scoped_bind(NULL);
+    CHECK(!bench_screen_scoped());
+}
+
 int main(void) {
+    test_screen_scoped();
     CHECK(!bench_scope_set()); // MeshCore not started
     bench_scope_bind(fake_scope);
     CHECK(!bench_scope_set());

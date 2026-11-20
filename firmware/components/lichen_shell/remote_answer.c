@@ -140,12 +140,18 @@ bool remote_radio_page(int screen_id) {
     return screen_id == SCREEN_RADIO || screen_id == SCREEN_CUSTOM || screen_id == SCREEN_SWITCH;
 }
 
-static rans_t by_verdict(dlg_remote_verdict_t verdict, bool scope_set) {
+// A confirmed dialog's send starts from the screen, which floods under the default scope, never the console scope: so
+// the bench scope alone does not make it scoped (#485). Dialogs that send nothing need only the bench scope set.
+static rans_t by_verdict(remote_view_t const *v) {
+    dlg_remote_verdict_t verdict = v->verdict;
     if (verdict == DLG_REMOTE_ALLOW) {
         return RANS_OK;
     }
+    if (verdict == DLG_REMOTE_ALLOW_REGION_SET) {
+        return v->scope_set ? RANS_OK : RANS_NEEDS_SCOPE;
+    }
     if (verdict == DLG_REMOTE_ALLOW_ONAIR_SCOPED) {
-        return scope_set ? RANS_OK : RANS_NEEDS_SCOPE;
+        return !v->scope_set ? RANS_NEEDS_SCOPE : v->screen_scoped ? RANS_OK : RANS_NEEDS_DEFAULT_SCOPE;
     }
     return RANS_HAND_ONLY; // REFUSE and anything else: fail closed
 }
@@ -156,7 +162,7 @@ rans_t remote_key_check(rkey_t key, remote_view_t const *v) {
     }
     if (key == RKEY_ENTER && v->dialog != RDLG_NONE) {
         // The Enter goes to the dialog (or to one about to be built), not to the page below it
-        return v->dialog == RDLG_OPEN ? by_verdict(v->verdict, v->scope_set) : RANS_UNSURE;
+        return v->dialog == RDLG_OPEN ? by_verdict(v) : RANS_UNSURE;
     }
     if (key == RKEY_ENTER) {
         return page_enter(v);
@@ -231,7 +237,7 @@ rans_t remote_answer_check(remote_view_t const *v, char const *want_label, uint3
     if (want_gen && v->gen != *want_gen) {
         return RANS_OTHER_DIALOG; // the same words, but another open of them
     }
-    return by_verdict(v->verdict, v->scope_set);
+    return by_verdict(v);
 }
 
 rans_t remote_answer_still(remote_view_t const *v, char const *want_label, uint32_t want_gen) {

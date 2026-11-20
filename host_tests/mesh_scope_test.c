@@ -145,7 +145,20 @@ static void reset_outcome_checks(void) {
     CHECK(n.erase_marker && n.gave_up);
 }
 
+// #485: a screen's flood goes under the default scope, so it is the bench's only when both are the same region
+static void screen_scoped_checks(void) {
+    CHECK(mesh_scope_screen_scoped("nl-ams", "nl-ams"));
+    CHECK(!mesh_scope_screen_scoped("", "nl-ams"));       // default None: everywhere
+    CHECK(!mesh_scope_screen_scoped("nl-ams", ""));       // no bench scope
+    CHECK(!mesh_scope_screen_scoped("", ""));             // two empties are not a scope
+    CHECK(!mesh_scope_screen_scoped("nl-ams", "nl-hhw")); // another region
+    CHECK(!mesh_scope_screen_scoped(NULL, "nl-ams"));
+    CHECK(!mesh_scope_screen_scoped("nl-ams", NULL));
+    CHECK(!mesh_scope_screen_scoped("nl", "nl-ams")); // a prefix is another region
+}
+
 int main(void) {
+    screen_scoped_checks();
     reset_apply_checks();
     reset_outcome_checks();
     char out[40], text[200];

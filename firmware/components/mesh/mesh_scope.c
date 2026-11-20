@@ -55,6 +55,10 @@ void mesh_scope_not_saved_text(char const *why, char *out, size_t cap) {
     snprintf(out, cap, "Not saved: %s", note);
 }
 
+bool mesh_scope_screen_scoped(char const *default_name, char const *console_name) {
+    return default_name && console_name && default_name[0] && strcmp(default_name, console_name) == 0;
+}
+
 void mesh_scope_text(char const *name, char *out, size_t cap) {
     snprintf(out, cap, "%s", name && name[0] ? name : "None (everywhere)");
 }

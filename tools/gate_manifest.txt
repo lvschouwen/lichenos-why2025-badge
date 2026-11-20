@@ -70,6 +70,8 @@ bench_chat_on_top	-	lvgl	bench_scope.h
 bench_enter_starts	-	lvgl	bench_scope.h
 bench_scope_bind	-	any	bench_scope.h
 bench_scope_set	-	any	bench_scope.h
+bench_screen_scoped	-	any	bench_scope.h
+bench_screen_scoped_bind	-	any	bench_scope.h
 bench_starts_bind	-	any	bench_scope.h
 clock_bind_store	SYSTEM	unspecified	lichen_clock.h
 clock_boot_info	SYSTEM	unspecified	lichen_clock.h

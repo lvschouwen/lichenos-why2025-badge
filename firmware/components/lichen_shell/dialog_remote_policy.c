@@ -21,6 +21,7 @@
 #define V_REFUSE DLG_REMOTE_REFUSE
 #define V_ALLOW  DLG_REMOTE_ALLOW
 #define V_ONAIR  DLG_REMOTE_ALLOW_ONAIR_SCOPED
+#define V_REGION DLG_REMOTE_ALLOW_REGION_SET
 // The DANGER dialogs that act on this badge only: hand-only, except in a developer image with the bench-open switch
 // (#488), where the bench confirms them with `fw ui answer`. The rows that change what a third node does or end the
 // console's own way in stay V_REFUSE below, switch or not.
@@ -64,8 +65,9 @@ static dlg_remote_row_t const table[] = {
     {"switch on", "Ask * for its status every *?", V_ONAIR}, // meshcore_rhist.c
     {"change", "Ask * for its status more often, every *?", V_ONAIR},
     // meshcore_settings.c: the badge's region and a channel's; the tail is a wildcard, as long names cut these titles
-    {"set region", "Adverts and messages will only travel in region *", V_ONAIR},
-    {"set region", "Messages you send on * are sent to region *", V_ONAIR},
+    // They send nothing (#485): the bench's scope must be set, the default scope need not be (it is what they set)
+    {"set region", "Adverts and messages will only travel in region *", V_REGION},
+    {"set region", "Messages you send on * are sent to region *", V_REGION},
     // The rest
     {"restart", "Restart the badge?", V_ALLOW},                                 // app_power.c
     {"restart", "The radio chip (Wi-Fi and LoRa) is not responding.", V_ALLOW}, // main.c: the C6 is gone
@@ -124,9 +126,9 @@ bool dlg_remote_glob(char const *pattern, char const *text) {
     return *pattern == '\0';
 }
 
-// REFUSE is strictest, then ONAIR, then ALLOW
+// REFUSE is strictest, then ONAIR, then REGION, then ALLOW (an unknown verdict counts as REFUSE)
 static int strictness(dlg_remote_verdict_t v) {
-    return v == V_ALLOW ? 0 : v == V_ONAIR ? 1 : 2;
+    return v == V_ALLOW ? 0 : v == V_REGION ? 1 : v == V_ONAIR ? 2 : 3;
 }
 
 dlg_remote_verdict_t
@@ -156,6 +158,7 @@ char const *dlg_remote_verdict_name(dlg_remote_verdict_t v) {
     switch (v) {
         case V_ALLOW: return "allow";
         case V_ONAIR: return "allow-onair-scoped";
+        case V_REGION: return "allow-region-set";
         default: return "refuse";
     }
 }

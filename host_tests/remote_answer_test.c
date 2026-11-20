@@ -42,6 +42,8 @@ static void test_dialog_enter(void) {
     v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", false);
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_NEEDS_SCOPE);
     v.scope_set = true;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_NEEDS_DEFAULT_SCOPE); // #485: the screen's send is unscoped
+    v.screen_scoped = true;
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
     v.verdict = (dlg_remote_verdict_t)42; // not a verdict: fail closed
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_HAND_ONLY);
@@ -90,8 +92,31 @@ static void test_dismiss(void) {
     CHECK(remote_dismiss_check(&v) == RANS_UNSURE);
 }
 
+// #485: a screen's send floods under the default scope, never the console scope the bench set
+static void test_screen_scope(void) {
+    remote_view_t v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", true); // "Ask * for its telemetry?"
+    CHECK(remote_answer_check(&v, "send", NULL) == RANS_NEEDS_DEFAULT_SCOPE); // default None: refused
+    CHECK(remote_answer_still(&v, "send", 7) == RANS_NEEDS_DEFAULT_SCOPE);
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_NEEDS_DEFAULT_SCOPE);
+    v.screen_scoped = true; // default scope == the bench scope
+    CHECK(remote_answer_check(&v, "send", NULL) == RANS_OK);
+    CHECK(remote_answer_still(&v, "send", 7) == RANS_OK);
+    v.scope_set = false; // no bench scope at all: the older refusal comes first
+    CHECK(remote_answer_check(&v, "send", NULL) == RANS_NEEDS_SCOPE);
+    v = dialog(DLG_REMOTE_ALLOW_REGION_SET, "set region", true); // sends nothing: default None is fine
+    CHECK(remote_answer_check(&v, "set region", NULL) == RANS_OK);
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+    v.scope_set = false; // but the bench scope must still be set, as before
+    CHECK(remote_answer_check(&v, "set region", NULL) == RANS_NEEDS_SCOPE);
+    v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", true);
+    v.screen_scoped = true;
+    v.verdict       = (dlg_remote_verdict_t)42; // unknown verdict: fail closed
+    CHECK(remote_answer_check(&v, "send", NULL) == RANS_HAND_ONLY);
+}
+
 static void test_answer_label(void) {
     remote_view_t v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", true);
+    v.screen_scoped = true;
     CHECK(remote_answer_check(&v, "send", NULL) == RANS_OK);
     CHECK(remote_answer_check(&v, "Send", NULL) == RANS_OTHER_DIALOG); // exact, a stale or different dialog never
     CHECK(remote_answer_check(&v, "sen", NULL) == RANS_OTHER_DIALOG);
@@ -119,6 +144,7 @@ static void test_answer_gen(void) {
     v.dialog = RDLG_NONE; // answered by hand meanwhile
     CHECK(remote_answer_still(&v, "delete", 7) == RANS_OTHER_DIALOG);
     v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", true);
+    v.screen_scoped = true;
     CHECK(remote_answer_still(&v, "send", 7) == RANS_OK);
     v.scope_set = false; // the scope went in the wait
     CHECK(remote_answer_still(&v, "send", 7) == RANS_NEEDS_SCOPE);
@@ -385,6 +411,7 @@ int main(void) {
     test_dialog_enter();
     test_radio_pages();
     test_dismiss();
+    test_screen_scope();
     test_answer_label();
     test_answer_gen();
     test_wait();

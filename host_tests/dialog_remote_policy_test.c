@@ -19,6 +19,7 @@ static int failures;
 #define R DLG_REMOTE_REFUSE
 #define A DLG_REMOTE_ALLOW
 #define O DLG_REMOTE_ALLOW_ONAIR_SCOPED
+#define S DLG_REMOTE_ALLOW_REGION_SET // sends nothing: only the bench scope must be set (#485)
 // The local DANGER dialogs: hand-only, or the bench's under CONFIG_LICHEN_BENCH_OPEN (#488; the dialog_remote_policy_bench_test)
 #ifdef CONFIG_LICHEN_BENCH_OPEN
 #define D DLG_REMOTE_ALLOW
@@ -65,11 +66,11 @@ static case_t const cases[] = {
     {"change", "Ask Rep1 for its status more often, every 30 min?", O},
     {"set region",
      "Adverts and messages will only travel in region nl-ams. Contacts outside it can no longer reach you.",
-     O},
+     S},
     {"set region",
      "Messages you send on #badgetest are sent to region nl-ams. Repeaters outside it do not pass them "
      "on, so members who only reach you through them stop receiving them.",
-     O},
+     S},
     {"restart", "Restart the badge?", A},
     {"restart", "The radio chip (Wi-Fi and LoRa) is not responding.", A},
     {"restart", "Switch PSRAM to 120 MHz? Restarts the badge. If 120 MHz fails, it comes back at 80.", A},
@@ -215,7 +216,7 @@ static void test_region_max(void) {
     );
     keep_like_dialog(kept, title);
     CHECK(strlen(kept) == 191);
-    CHECK(dlg_remote_verdict("set region", kept) == O);
+    CHECK(dlg_remote_verdict("set region", kept) == S);
 }
 
 // #488: the switch moves exactly the eight local DANGER labels, whatever the title, and nothing else
@@ -256,6 +257,7 @@ static void test_names(void) {
     CHECK(strcmp(dlg_remote_verdict_name(R), "refuse") == 0);
     CHECK(strcmp(dlg_remote_verdict_name(A), "allow") == 0);
     CHECK(strcmp(dlg_remote_verdict_name(O), "allow-onair-scoped") == 0);
+    CHECK(strcmp(dlg_remote_verdict_name(S), "allow-region-set") == 0);
     CHECK(strcmp(dlg_remote_verdict_name((dlg_remote_verdict_t)99), "refuse") == 0);
 }
 

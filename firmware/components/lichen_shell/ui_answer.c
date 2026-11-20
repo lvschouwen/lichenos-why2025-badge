@@ -32,6 +32,7 @@ static void read_dialog(remote_view_t *v, shell_dialog_info_t *info) {
                .gen        = info->gen,
                .top_screen = -1,
                .scope_set  = bench_scope_set(),
+               .screen_scoped = bench_screen_scoped(),
     };
 }
 
@@ -46,6 +47,12 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
             } else {
                 snprintf(why, cap, "dialog '%s' transmits: only under the bench console scope (" SCOPE_HOW ")", v->label);
             }
+            break;
+        case RANS_NEEDS_DEFAULT_SCOPE:
+            snprintf(why, cap,
+                     "dialog '%s' transmits from the screen, which floods under the default scope, not the console "
+                     "scope: set the default scope to the bench region first (Settings > Apps > MeshCore > Flood scope)",
+                     v->label);
             break;
         case RANS_UNSURE: snprintf(why, cap, "a dialog is opening (or could not be read); try again"); break;
         case RANS_NO_DIALOG: snprintf(why, cap, "no dialog open"); break;
@@ -127,9 +134,14 @@ static void answer_show(void) {
         console_reply(WHO ": %s", why);
         return;
     }
-    bool scoped = v.verdict == DLG_REMOTE_ALLOW_ONAIR_SCOPED;
-    console_reply(WHO ": %s%s, confirm '%s' #%u%s, open %u ms, %u s left: %s", dlg_remote_verdict_name(v.verdict),
-                  scoped ? (v.scope_set ? " (bench scope set)" : " (bench scope not set: " SCOPE_HOW ")") : "",
+    char const *note = "";
+    if (v.verdict == DLG_REMOTE_ALLOW_ONAIR_SCOPED || v.verdict == DLG_REMOTE_ALLOW_REGION_SET) {
+        note = !v.scope_set ? " (bench scope not set: " SCOPE_HOW ")"
+               : v.verdict == DLG_REMOTE_ALLOW_REGION_SET ? " (bench scope set)"
+               : v.screen_scoped ? " (bench scope set, default scope is the bench region)"
+                                 : " (default scope is not the bench region: this send would be unscoped, refused)";
+    }
+    console_reply(WHO ": %s%s, confirm '%s' #%u%s, open %u ms, %u s left: %s", dlg_remote_verdict_name(v.verdict), note,
                   info.confirm_label, (unsigned)info.gen, info.careful ? ", careful" : "", (unsigned)info.ms_open,
                   (unsigned)info.left_s, info.title);
 }
