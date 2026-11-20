@@ -433,10 +433,10 @@ static void select_key(chat_t *c, uint32_t key) {
     }
 }
 
-// The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
-// draft
 _Static_assert(MESH_CHAT_KEY_ESC == LV_KEY_ESC && MESH_CHAT_KEY_UP == LV_KEY_UP, "mesh_chat_key_route keys");
 
+// The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
+// draft
 static void on_compose_key(lv_event_t *e) {
     chat_t  *c   = lv_event_get_user_data(e);
     uint32_t key = lv_event_get_key(e);

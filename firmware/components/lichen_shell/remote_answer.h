@@ -21,6 +21,9 @@
 //     a channel a mention), so that Enter goes; Tab stays refused. Each key is judged against the view at its own
 //     time (the stepper waits KEY_GAP_MS between keys, the shell leaves select mode on the first Enter), so a
 //     second Enter finds the chat no longer selecting and is refused as before.
+//     This is safe between the check and the key arriving because select mode only starts on an empty draft and
+//     swallows every key (mesh_chat_key_route): nothing in the draft can change the Enter's meaning. A change that
+//     lets text into the draft during select mode must revisit this rule.
 //   - The other screens where Enter goes on air with no dialog are refused outright: Trace and Discover path, Status
 //     and Telemetry (their Again rows), the repeater login, command and settings pages, the contact page's rows that
 //     open them or send (remote_contact_send_row), a "Send advert" or "Start MeshCore" row anywhere (MeshCore's
