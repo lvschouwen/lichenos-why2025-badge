@@ -112,7 +112,7 @@ static bool apply_eap(char const *s, wifi_eap_t const *eap, wifi_lock_t const *l
     esp_err_t      err = ESP_FAIL;
     if (why == WIFI_EAP_FAIL_NONE) {
         err = set_sta_config(s, "", true);
-        why = err == ESP_OK ? wifi_eap_drv_enable() : WIFI_EAP_FAIL_C6_OLD;
+        why = err == ESP_OK ? wifi_eap_drv_enable() : wifi_eap_config_fail((int)err);
     }
     if (why != WIFI_EAP_FAIL_NONE) {
         unsigned undo = wifi_apply_unwind(touched, have_prev, err == ESP_OK);

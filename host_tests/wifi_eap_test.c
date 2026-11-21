@@ -251,6 +251,11 @@ static void join_mapping(void) {
     CHECK(wifi_eap_rpc_fail(0x102, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_C6_OLD);
     CHECK(strstr(wifi_eap_fail_text(WIFI_EAP_FAIL_C6_OLD), "update the C6") != NULL);
     CHECK(wifi_eap_fail_text(WIFI_EAP_FAIL_NONE)[0] == '\0');
+    // A refused set_config is its own reason, not "update the C6"
+    CHECK(wifi_eap_config_fail(0) == WIFI_EAP_FAIL_NONE && wifi_eap_config_fail(-1) == WIFI_EAP_FAIL_CONFIG);
+    CHECK(wifi_eap_config_fail(0x103) == WIFI_EAP_FAIL_CONFIG && wifi_eap_config_fail(0x101) == WIFI_EAP_FAIL_NOMEM);
+    CHECK(strstr(wifi_eap_fail_text(WIFI_EAP_FAIL_CONFIG), "refused") != NULL &&
+          strstr(wifi_eap_fail_text(WIFI_EAP_FAIL_CONFIG), "update the C6") == NULL);
 
     wifi_eap_t e = good();
     CHECK(wifi_eap_ca_state(NULL) == WIFI_EAP_CA_NONE && wifi_eap_ca_state(&e) == WIFI_EAP_CA_UNVERIFIED);

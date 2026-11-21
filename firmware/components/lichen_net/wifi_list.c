@@ -190,6 +190,17 @@ static bool store_kind(char const *kk, wifi_saved_entry_t const *e) {
     return code ? store->set_u8(kk, code) : store->erase(kk);
 }
 
+// True when slot i already holds exactly this entry: a rewrite then touches nothing, so a power cut cannot hurt it
+static bool slot_same(int i, wifi_saved_entry_t const *e) {
+    char ks[10], kp[10], kk[10], ssid[33] = "", pass[64] = "";
+    store->get_str(slot_key(ks, 's', i), ssid, sizeof(ssid), "");
+    bool have = store->secret_get(slot_key(kp, 'p', i), pass, sizeof(pass));
+    bool same = have && strcmp(ssid, e->ssid) == 0 && strcmp(pass, entry_pass(e)) == 0 &&
+                store->get_u8(slot_key(kk, 'k', i), 0) == wifi_saved_kind_code(e);
+    memset(pass, 0, sizeof(pass));
+    return same;
+}
+
 // SSIDs as plain settings, passwords as secrets; slots past the list's end are erased, and so is every Enterprise record
 // no entry points at any more (a Forget, or a PSK that replaced an Enterprise entry)
 static bool saved_store(wifi_saved_t const *l) {
@@ -205,6 +216,9 @@ static bool saved_store(wifi_saved_t const *l) {
         slot_key(kp, 'p', i);
         slot_key(kk, 'k', i);
         bool done;
+        if ((size_t)i < l->n && slot_same(i, &l->e[i])) {
+            continue; // a GOT_IP save rewrites the whole list: only the slots that changed are written
+        }
         if ((size_t)i < l->n) {
             // Power-loss order: the kind and the password go first, the kind comes back last. Without a password a PSK
             // slot is dropped on load, so the SSID is never read with another network's password, and a record index

@@ -347,7 +347,7 @@ static char const *want_rec(char const *ssid) {
 }
 
 static int cut_checks;
-static void cut_verify(char const *what, int n) {
+static void cut_verify(char const *what, int n, char const *const *must) {
     wifi_saved_t l;
     char         rec[WIFI_EAP_BLOB_MAX];
     CHECK(wifi_saved_load(&l));
@@ -364,6 +364,17 @@ static void cut_verify(char const *what, int n) {
             printf("mixed pair after %s cut at %d: slot %zu\n", what, n, i);
         }
         CHECK(!bad);
+    }
+    // Networks the rewrite does not change survive every cut with their password or record intact
+    for (; must && *must; must++) {
+        int at = wifi_saved_find(&l, *must);
+        bool ok = at >= 0 && (l.e[at].kind == WIFI_SAVED_EAP
+                                  ? wifi_cred_eap_record(*must, rec, sizeof(rec)) == WIFI_EAP_REC_OK && strcmp(rec, want_rec(*must)) == 0
+                                  : strcmp(l.e[at].pass, want_pass(*must)) == 0);
+        if (!ok) {
+            printf("unchanged network lost after %s cut at %d: %s\n", what, n, *must);
+        }
+        CHECK(ok);
     }
     cut_checks++;
 }
@@ -384,22 +395,27 @@ static void cut_run(int which, int n) {
         case 0: wifi_cred_save_eap("newe", "E1-new"); break; // evicts oldeap, reuses its record slot
         case 1: wifi_cred_save("oldeap", "passwordold"); break; // a PSK replaces the Enterprise entry
         case 2: wifi_cred_forget("p4", &a, &b); break; // every slot behind it shifts
-        default: wifi_cred_activate("oldeap"); break; // the oldest, an Enterprise entry, to the front
+        case 3: wifi_cred_activate("oldeap"); break; // the oldest, an Enterprise entry, to the front
+        case 4: wifi_cred_save("p4", "passwordp4"); break; // the GOT_IP save of the network in front: the list is the same
+        default: wifi_cred_forget("oldeap", &a, &b); break; // only the last slot goes
     }
     budget = -1;
 }
 
 static void power_loss(void) {
-    static char const *const what[] = {"save_eap", "psk over eap", "forget", "activate"};
+    static char const *const what[]    = {"save_eap", "psk over eap", "forget", "activate", "same list", "forget last"};
+    static char const *const all[]     = {"oldeap", "p1", "p2", "p3", "p4", NULL};
+    static char const *const four[]    = {"p1", "p2", "p3", "p4", NULL};
+    static char const *const *const survivors[] = {NULL, NULL, NULL, NULL, all, four};
     wifi_list_bind_store(&cut_store);
-    for (int which = 0; which < 4; which++) {
+    for (int which = 0; which < 6; which++) {
         for (int n = 0; n <= 60; n++) {
             cut_run(which, n);
-            cut_verify(what[which], n);
+            cut_verify(what[which], n, survivors[which]);
         }
     }
     wifi_list_bind_store(&test_store);
-    CHECK(cut_checks == 4 * 61);
+    CHECK(cut_checks == 6 * 61);
     CHECK(wifi_cred_clear());
 }
 

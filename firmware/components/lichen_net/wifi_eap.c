@@ -177,11 +177,16 @@ wifi_eap_fail_t wifi_eap_rpc_fail(int err, wifi_eap_step_t step) {
     return WIFI_EAP_FAIL_C6_OLD;
 }
 
+wifi_eap_fail_t wifi_eap_config_fail(int err) {
+    return err == 0 ? WIFI_EAP_FAIL_NONE : err == ERR_NO_MEM ? WIFI_EAP_FAIL_NOMEM : WIFI_EAP_FAIL_CONFIG;
+}
+
 char const *wifi_eap_fail_text(wifi_eap_fail_t why) {
     switch (why) {
         case WIFI_EAP_FAIL_C6_OLD: return "update the C6 (it has no 802.1X support)";
         case WIFI_EAP_FAIL_NOMEM: return "out of memory";
         case WIFI_EAP_FAIL_CA_FILE: return "the CA file is missing, too large or not PEM";
+        case WIFI_EAP_FAIL_CONFIG: return "the C6 refused the Wi-Fi config";
         case WIFI_EAP_FAIL_CA_BAD: return "the C6 refused the CA certificate";
         case WIFI_EAP_FAIL_CRED: return "the saved credential is damaged, enter it again";
         default: return "";

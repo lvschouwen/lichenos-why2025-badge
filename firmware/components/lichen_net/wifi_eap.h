@@ -65,12 +65,15 @@ typedef enum {
     WIFI_EAP_FAIL_NOMEM,  // the C6 or the P4 ran out of memory
     WIFI_EAP_FAIL_CA_FILE, // the CA path is set but the file is missing, unreadable, too large or not PEM
     WIFI_EAP_FAIL_CA_BAD, // the C6 refused the CA certificate
+    WIFI_EAP_FAIL_CONFIG, // the C6 refused esp_wifi_set_config for the network
     WIFI_EAP_FAIL_CRED,   // the saved credential record is missing or damaged
 } wifi_eap_fail_t;
 typedef enum { WIFI_EAP_STEP_OTHER, WIFI_EAP_STEP_CA } wifi_eap_step_t;
 // Maps the esp_err_t of one EAP RPC (0 = ESP_OK): out of memory stays out of memory, a refused CA is a bad CA, anything
 // else (an RPC the C6 does not know answers with an error too) is "update the C6"
 wifi_eap_fail_t wifi_eap_rpc_fail(int err, wifi_eap_step_t step);
+// The same for esp_wifi_set_config: out of memory stays out of memory, any other refusal is the config, not an old C6
+wifi_eap_fail_t wifi_eap_config_fail(int err);
 // The reason as the console and the screen word it
 char const *wifi_eap_fail_text(wifi_eap_fail_t why);
 
