@@ -30,7 +30,9 @@ bool wifi_eap_ca_path_valid(char const *path) {
         return path != NULL;
     }
     size_t dir = strlen(WIFI_EAP_CA_DIR);
-    if (!wifi_eap_text_valid(path, dir + 1, WIFI_EAP_CA_MAX) || strncmp(path, WIFI_EAP_CA_DIR, dir) != 0 ||
+    // A backslash is no separator on /storage but a path-walking trick elsewhere: refused outright
+    if (strchr(path, '\\') || !wifi_eap_text_valid(path, dir + 1, WIFI_EAP_CA_MAX) ||
+        strncmp(path, WIFI_EAP_CA_DIR, dir) != 0 ||
         !(has_suffix(path, ".pem") || has_suffix(path, ".crt"))) {
         return false;
     }
@@ -105,6 +107,9 @@ static char const *take(char const *p, char *dst, size_t cap, bool last) {
 }
 
 bool wifi_eap_decode(char const *rec, wifi_eap_t *e) {
+    if (!e) {
+        return false;
+    }
     memset(e, 0, sizeof(*e));
     if (!rec || rec[0] != VER0 || rec[1] != VER1 || rec[2] != US || rec[4] != US || rec[6] != US) {
         return false;

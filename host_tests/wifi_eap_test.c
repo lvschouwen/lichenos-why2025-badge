@@ -49,6 +49,15 @@ static void validation(void) {
     CHECK(wifi_eap_valid(&b));
     b.username[WIFI_EAP_USER_MAX] = 'u'; // no NUL left: not a string any more
     CHECK(!wifi_eap_valid(&b));
+    b = good(); // UTF-8 at the length limit: the limit is bytes, 21 x 3 bytes fit, 22 do not
+    for (int i = 0; i < 21; i++) {
+        memcpy(b.username + 3 * i, "\xe2\x82\xac", 3);
+    }
+    b.username[63] = '\0';
+    CHECK(wifi_eap_valid(&b));
+    char rec[WIFI_EAP_BLOB_MAX];
+    wifi_eap_t d;
+    CHECK(wifi_eap_encode(&b, rec, sizeof(rec)) > 0 && wifi_eap_decode(rec, &d) && strcmp(d.username, b.username) == 0);
     b = good();
     b.method = WIFI_EAP_PEAP;
     b.phase2 = WIFI_EAP_P2_PAP; // PEAP-MSCHAPv2 only
@@ -72,6 +81,7 @@ static void ca_paths(void) {
     CHECK(!wifi_eap_ca_path_valid("/storage/../etc/ca.pem") && !wifi_eap_ca_path_valid("/storage/a/../ca.pem"));
     CHECK(!wifi_eap_ca_path_valid("/storage/./ca.pem") && !wifi_eap_ca_path_valid("/storage//ca.pem"));
     CHECK(!wifi_eap_ca_path_valid("/storage/ca\n.pem"));
+    CHECK(!wifi_eap_ca_path_valid("/storage/a\\..\\ca.pem") && !wifi_eap_ca_path_valid("/storage/a\\b.pem"));
     char longp[200] = "/storage/";
     memset(longp + 9, 'a', 150);
     strcpy(longp + 159, ".pem");
@@ -138,6 +148,7 @@ static void decode_rejects(void) {
         CHECK(memcmp(&d, &zero, sizeof(d)) == 0); // a failed decode leaves no half-read password
     }
     CHECK(!wifi_eap_decode(NULL, &d));
+    CHECK(!wifi_eap_decode(bad[1], NULL)); // no output struct: refused, not dereferenced
     // A field longer than its buffer is refused, not truncated
     char big[400] = "E1\x1f" "0\x1f" "0\x1f";
     memset(big + 7, 'a', 64);
@@ -164,7 +175,8 @@ static void saved_flag(void) {
     wifi_saved_t l = {0};
     CHECK(!wifi_saved_add_eap(&l, "") && l.n == 0);
     CHECK(wifi_saved_add(&l, "home", "password1") && wifi_saved_add_eap(&l, "camp") && l.n == 2);
-    CHECK(wifi_saved_is_eap(&l, 0) && !wifi_saved_is_eap(&l, 1) && !wifi_saved_is_eap(&l, 2) && !wifi_saved_is_eap(&l, -1));
+    CHECK(wifi_saved_is_eap(&l, 0) && !wifi_saved_is_eap(&l, 1));
+    CHECK(!wifi_saved_is_eap(&l, 2) && !wifi_saved_is_eap(&l, -1));
     CHECK(l.e[0].pass[0] == '\0'); // the credential is not in the list
     CHECK(wifi_saved_find(&l, "camp") == 0);
 

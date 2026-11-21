@@ -13,9 +13,9 @@
 #define WIFI_EAP_PASS_MAX     127
 #define WIFI_EAP_CA_MAX       95  // a path, not the PEM itself
 #define WIFI_EAP_CA_DIR       "/storage/"
-// "E1", five separators before the fields and the two digits (7 bytes), the three separators between the fields,
-// the four fields and the NUL
-#define WIFI_EAP_BLOB_MAX     (7 + 3 + WIFI_EAP_IDENTITY_MAX + WIFI_EAP_USER_MAX + WIFI_EAP_PASS_MAX + WIFI_EAP_CA_MAX + 1)
+// 7 header bytes ("E1", method, phase2 and their separators), 3 separators between the four fields, the fields, the NUL
+#define WIFI_EAP_BLOB_MAX \
+    (7 + 3 + WIFI_EAP_IDENTITY_MAX + WIFI_EAP_USER_MAX + WIFI_EAP_PASS_MAX + WIFI_EAP_CA_MAX + 1)
 
 typedef enum { WIFI_EAP_PEAP = 0, WIFI_EAP_TTLS = 1 } wifi_eap_method_t;
 typedef enum { WIFI_EAP_P2_MSCHAPV2 = 0, WIFI_EAP_P2_PAP = 1 } wifi_eap_phase2_t;

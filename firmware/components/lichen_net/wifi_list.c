@@ -223,7 +223,7 @@ bool wifi_saved_load(wifi_saved_t *l) {
 }
 
 size_t wifi_saved_names_with(wifi_lock_t const *lock, uint32_t wait_ms, char (*out)[33], size_t max) {
-    wifi_saved_t *l = lock->alloc(sizeof(*l)); // 528 B: not on the LVGL task's stack
+    wifi_saved_t *l = lock->alloc(sizeof(*l)); // ~500 B: not on the LVGL task's stack
     if (!l) {
         return WIFI_SAVED_BUSY;
     }
@@ -295,7 +295,7 @@ static void saved_remember(wifi_saved_t *l, char const *ssid, char const *pass) 
 }
 
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
-    wifi_saved_t *lp = list_alloc ? list_alloc(sizeof(*lp)) : NULL; // 528 B: the UI calls this on the LVGL task
+    wifi_saved_t *lp = list_alloc ? list_alloc(sizeof(*lp)) : NULL; // ~500 B: the UI calls this on the LVGL task
     if (!lp) {
         return false;
     }

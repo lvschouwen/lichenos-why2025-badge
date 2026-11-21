@@ -12,9 +12,13 @@ CONFIG_ESP_HOSTED_CP_FEAT_WIFI_EXT_ENT=y
 CONFIG_ESP_HOSTED_CP_FEAT_WIFI_EXT_EAP_FAST=n
 CONFIG_ESP_WIFI_SUITE_B_192=n
 CONFIG_ESP_WIFI_EAP_TLS1_3=n
+# No CA bundle (the owner's CA check uses a PEM on /storage) and nothing on the C6 serves TLS: esp_eap_client.c would
+# otherwise link the full bundle, and the server half of mbedTLS is dead weight
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # 802.11k/v (#495): neighbour reports and BSS transitions, so a multi-AP network can steer the badge to a better AP.
-# The P4 sets rm_enabled/btm_enabled in the STA config; the P4's WIFI_RMT_11KV_SUPPORT stays off (nothing on the P4 calls
-# the esp_rrm/esp_wnm APIs, and it would only build the 11k/v supplicant into the P4 for nothing)
+# The P4 sets rm_enabled/btm_enabled in the STA config; the P4's WIFI_RMT_11KV_SUPPORT stays off (nothing on the P4
+# calls the esp_rrm/esp_wnm APIs, and it would only build the 11k/v supplicant into the P4 for nothing)
 CONFIG_ESP_WIFI_11KV_SUPPORT=y
 
 # Bluetooth LE for the P4 (#50): controller only, HCI rides the SDIO link (VHCI); NimBLE runs on the P4
