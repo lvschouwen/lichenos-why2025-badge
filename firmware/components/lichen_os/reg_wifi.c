@@ -3,8 +3,10 @@
 #include <string.h>
 
 bool reg_wifi_is_key(reg_entry_t const *e) {
-    // wifi.ip6 is the P4's own netif (reg_p4_wifi_ip6_get), not a C6 driver read-back
-    return e && REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY) && e->id != REG_ID_WIFI_IP6;
+    // wifi.ip6 is the P4's own netif (reg_p4_wifi_ip6_get), wifi.auth and wifi.eap_ca the c6wifi task's cached state (#496):
+    // none of them is a C6 driver read-back
+    return e && REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY) && e->id != REG_ID_WIFI_IP6 &&
+           e->id != REG_ID_WIFI_AUTH && e->id != REG_ID_WIFI_EAP_CA;
 }
 
 static bool applied_of(uint16_t id, wifi_readback_t const *r, reg_value_t *out) {

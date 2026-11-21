@@ -25,6 +25,8 @@
 #include "lwip/dns.h"
 #include "lwip/tcpip.h"
 #include "wifi_cmd.h"
+#include "wifi_console.h"
+#include "wifi_join_apply.h"
 #include "wifi_ip6.h"
 #include "wifi_count.h"
 #include "wifi_regdom.h"
@@ -166,6 +168,7 @@ typedef struct {
     int        reason;
     char       ssid[33];
     char       pass[64];
+    wifi_eap_t *eap; // MSG_JOIN of an Enterprise network: a heap copy the c6wifi task owns from the post on (#496)
 } msg_t;
 
 static QueueHandle_t queue;
@@ -431,30 +434,6 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     }
 }
 
-// 802.11k (radio measurement: neighbour reports) and 802.11v (BSS transition: the network steers the badge to a better
-// AP of the same name, #495). The C6 is built with CONFIG_ESP_WIFI_11KV_SUPPORT; the join itself already takes the
-// strongest AP (the esp_hosted set-config handler forces an all-channel scan sorted by signal).
-static void sta_roam_flags(wifi_config_t *cfg) {
-    cfg->sta.rm_enabled  = 1;
-    cfg->sta.btm_enabled = 1;
-}
-
-static bool load_credentials(wifi_config_t *cfg) {
-    char s[33], p[64];
-    if (!wifi_cred_load(s, p)) {
-        return false;
-    }
-    // The config's SSID field is 32 bytes without a terminator for a 32-byte name
-    memcpy(cfg->sta.ssid, s, strlen(s));
-    memcpy(cfg->sta.password, p, strlen(p));
-    if (p[0]) {
-        cfg->sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // a password was set: never join an open AP of that name
-    }
-    sta_roam_flags(cfg);
-    memset(p, 0, sizeof(p));
-    return true;
-}
-
 static void on_time_sync(struct timeval *tv) {
     ESP_LOGI(TAG, "clock set from SNTP: %lld", (long long)tv->tv_sec);
     boot_progress_end(BOOT_CLOCK, STEP_DONE, NULL);
@@ -581,6 +560,9 @@ static bool start_wifi(void) {
     return true;
 }
 
+static int         auth_cached; // under state_lock, valid while rssi_known (wifi.auth, #496)
+static bool apply_config(char const *s, char const *p);
+
 static atomic_bool driver_up; // esp_wifi is initialised and started on the C6 that is attached now (#14)
 
 // The part of the Wi-Fi bring-up that belongs to one ESP-Hosted attach (#14): a re-attach after a C6 reset runs it
@@ -605,16 +587,18 @@ static drv_result_t wifi_driver_up(char const **why) {
         ESP_LOGW(TAG, "Wi-Fi storage: %s", esp_err_to_name(err));
     }
     set_country(); // before either esp_wifi_start below, and before handle_wifi_sync's
-    wifi_config_t cfg = {0};
-    bool          have = load_credentials(&cfg);
+    wifi_apply_reset(); // a new driver on the C6 holds no Enterprise state
+    char cred_ssid[33], cred_pass[64];
+    bool have = wifi_cred_load(cred_ssid, cred_pass);
     portENTER_CRITICAL(&state_lock);
     have_credentials = have;
     portEXIT_CRITICAL(&state_lock);
     if (!atomic_load(&wifi_on)) {
         // Not started: Settings or "fw wifi on" does it (wifi_enable). The saved pair goes to the driver then
         if (have) {
-            esp_wifi_set_config(WIFI_IF_STA, &cfg);
+            apply_config(cred_ssid, cred_pass);
         }
+        memset(cred_pass, 0, sizeof(cred_pass));
         ESP_LOGI(TAG, "Wi-Fi is switched off");
         return DRV_OFF;
     }
@@ -633,10 +617,15 @@ static drv_result_t wifi_driver_up(char const **why) {
         return DRV_NO_CREDENTIALS;
     }
     portENTER_CRITICAL(&state_lock);
-    wifi_text_copy(ssid, sizeof(ssid), (char const *)cfg.sta.ssid);
+    wifi_text_copy(ssid, sizeof(ssid), cred_ssid);
     portEXIT_CRITICAL(&state_lock);
     atomic_store(&driver_up, true); // before esp_wifi_start, see above
-    if ((err = esp_wifi_set_config(WIFI_IF_STA, &cfg)) != ESP_OK || (err = esp_wifi_start()) != ESP_OK) {
+    // A pair that cannot be applied (an Enterprise network on a C6 without 802.1X) still lets the radio start: scans
+    // and the Wi-Fi screen work, config_bad only keeps it from connecting
+    bool applied = apply_config(cred_ssid, cred_pass);
+    memset(cred_pass, 0, sizeof(cred_pass));
+    err = applied || wifi_apply_blocked() ? esp_wifi_start() : ESP_FAIL; // any other refusal is the old failure
+    if (err != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
         atomic_store(&driver_up, false);
         *why = "Wi-Fi start";
@@ -709,6 +698,19 @@ bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n) {
 
 
 static char     trial_pass[64];
+static wifi_eap_t *trial_eap; // c6wifi task only: the Enterprise credential being tried (heap), like trial_pass
+
+static void saved_release(void *p);
+
+// Wipes what a trial held; every path that ends or drops one calls this
+static void trial_wipe(void) {
+    memset(trial_pass, 0, sizeof(trial_pass));
+    if (trial_eap) {
+        memset(trial_eap, 0, sizeof(*trial_eap));
+        saved_release(trial_eap);
+        trial_eap = NULL;
+    }
+}
 static bool     retry_pending;
 static bool     retry_roam; // the pending retry is a roam's fallback: a CONNECTED cancels it (#495)
 static uint32_t retry_at;
@@ -800,22 +802,6 @@ static void clean(char const *in, char *out, size_t cap) {
     wifi_ssid_sanitize(in, out, cap);
 }
 
-static bool apply_config(char const *s, char const *p) {
-    wifi_config_t cfg = {0};
-    memcpy(cfg.sta.ssid, s, strlen(s));
-    memcpy(cfg.sta.password, p, strlen(p));
-    if (p[0]) {
-        cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // see load_credentials
-    }
-    sta_roam_flags(&cfg);
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    memset(&cfg, 0, sizeof(cfg));
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Wi-Fi config: %s", esp_err_to_name(err));
-    }
-    return err == ESP_OK;
-}
-
 // The raw scan choose_network reads, c6wifi task only. In PSRAM (EXT_RAM_BSS, ~2 KB): a stronger open twin of a
 // saved secured name must not hide the real AP, so every BSSID is kept
 EXT_RAM_BSS_ATTR static wifi_ap_t pick_aps[SCAN_RECORDS];
@@ -868,6 +854,12 @@ static void handle_reconnect(bool force);
 static wifi_lock_t const saved_ops = {
     .take = saved_take, .give = saved_give, .alloc = saved_alloc, .release = saved_release};
 
+// ---- applying a pair to the driver (#496): wifi_join_apply.c -------------------------------------------------------
+
+static bool apply_config(char const *s, char const *p) {
+    return wifi_apply_saved(s, p, &saved_ops);
+}
+
 // Several networks saved (#160): scan, then load the strongest one in range into the driver. tried_mask holds the
 // networks that failed in this round (bit = list index); when all of them did, the round starts over. Scans disturb a
 // link (#146), so one at most every SCAN_GAP_MS. One saved network or no scan: the pair in use stays. Task only.
@@ -877,6 +869,56 @@ static wifi_lock_t const saved_ops = {
 static uint8_t  tried_mask;
 static uint8_t  fail_count;
 static uint32_t next_scan_at;
+
+// Loads the strongest saved network in range into the driver (the scan is in pick_aps). One that cannot even be applied
+// (an Enterprise network on a C6 without 802.1X) counts as tried and the next one gets its turn; when none applies the
+// pair in use goes back, so an old C6 still joins its PSK networks.
+static void join_strongest(wifi_saved_t *list, size_t n) {
+    bool failed = false;
+    for (int round = 0; round < WIFI_SAVED_MAX; round++) {
+        int pick = wifi_saved_pick(list, pick_aps, n, tried_mask);
+        if (pick < 0 && tried_mask && round == 0) { // all tried: start over with the strongest
+            tried_mask = 0;
+            pick       = wifi_saved_pick(list, pick_aps, n, 0);
+        }
+        if (pick < 0) {
+            break;
+        }
+        // The scan took seconds: a Forget may have come in meanwhile, so the pick is checked against the list as it is
+        // now. The C6 RPC runs with saved_lock released (#249: the UI must not wait on it) and the list is checked once
+        // more afterwards, since a Forget in that window does not know the driver holds the name yet.
+        char name[33];
+        wifi_text_copy(name, sizeof(name), list->e[pick].ssid);
+        wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config, pick_committed);
+        if (res == WIFI_APPLY_FAILED) {
+            tried_mask |= (uint8_t)(1u << pick);
+            failed = true;
+            continue;
+        }
+        if (res == WIFI_APPLY_APPLIED) {
+            ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list->n); // no names
+        } else if (res == WIFI_APPLY_FORGOTTEN) {
+            // Forgotten during the RPC: the driver holds it. We are the c6wifi task, so revoke directly (a queue post
+            // could be dropped): clear the driver when nothing is saved any more, else apply the pair now in use
+            char s[33], p[64];
+            bool left = wifi_cred_load(s, p);
+            memset(p, 0, sizeof(p));
+            if (left) {
+                handle_reconnect(true);
+            } else {
+                handle_forget();
+            }
+        }
+        return;
+    }
+    if (failed) {
+        char s[33], p[64];
+        if (wifi_cred_load(s, p)) {
+            apply_config(s, p);
+        }
+        memset(p, 0, sizeof(p));
+    }
+}
 
 static void choose_network(bool current_failed) {
     static wifi_saved_t list;
@@ -901,35 +943,8 @@ static void choose_network(bool current_failed) {
         tried_mask |= (uint8_t)(1u << at);
     }
     next_scan_at = now + SCAN_GAP_MS;
-    int pick = -1;
     if (wifi_scan_raw(pick_aps, SCAN_RECORDS, &n)) {
-        pick = wifi_saved_pick(&list, pick_aps, n, tried_mask);
-        if (pick < 0 && tried_mask) { // all tried: start over with the strongest
-            tried_mask = 0;
-            pick       = wifi_saved_pick(&list, pick_aps, n, 0);
-        }
-    }
-    if (pick >= 0) {
-        // The scan took seconds: a Forget may have come in meanwhile, so the pick is checked against the list as it is
-        // now. The C6 RPC runs with saved_lock released (#249: the UI must not wait on it) and the list is checked once
-        // more afterwards, since a Forget in that window does not know the driver holds the name yet.
-        char name[33];
-        wifi_text_copy(name, sizeof(name), list.e[pick].ssid);
-        wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config, pick_committed);
-        if (res == WIFI_APPLY_APPLIED) {
-            ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list.n); // no names
-        } else if (res == WIFI_APPLY_FORGOTTEN) {
-            // Forgotten during the RPC: the driver holds it. We are the c6wifi task, so revoke directly (a queue post
-            // could be dropped): clear the driver when nothing is saved any more, else apply the pair now in use
-            char s[33], p[64];
-            bool left = wifi_cred_load(s, p);
-            memset(p, 0, sizeof(p));
-            if (left) {
-                handle_reconnect(true);
-            } else {
-                handle_forget();
-            }
-        }
+        join_strongest(&list, n);
     }
     wifi_saved_wipe(&list);
 }
@@ -938,7 +953,7 @@ static void choose_network(bool current_failed) {
 static void rollback(void) {
     char s[33], p[64];
     bool had = wifi_cred_load(s, p);
-    memset(trial_pass, 0, sizeof(trial_pass));
+    trial_wipe();
     set_ip("");
     wifi_link_down(&link_ap);
     esp_wifi_disconnect();
@@ -948,7 +963,7 @@ static void rollback(void) {
     wifi_text_copy(kept_ssid, sizeof(kept_ssid), had ? s : "");
     wifi_text_copy(ssid, sizeof(ssid), had ? s : "");
     portEXIT_CRITICAL(&state_lock);
-    if (had && apply_config(s, p)) {
+    if (had && apply_config(s, p) && !wifi_apply_blocked()) {
         esp_wifi_connect();
     }
     char a[140], b[140];
@@ -959,8 +974,12 @@ static void rollback(void) {
     memset(p, 0, sizeof(p));
 }
 
-static void handle_join(msg_t const *m, uint32_t now) {
+static void handle_join(msg_t *m, uint32_t now) {
+    trial_wipe(); // a trial still held (a second request before the first ended) goes first
     memcpy(trial_pass, m->pass, sizeof(trial_pass));
+    trial_eap = m->eap; // ownership moves here; wiped by trial_wipe
+    m->eap    = NULL;
+    wifi_apply_clear_fail();
     portENTER_CRITICAL(&state_lock);
     wifi_join_start(&join, now);
     wifi_text_copy(trial_ssid, sizeof(trial_ssid), m->ssid);
@@ -971,10 +990,10 @@ static void handle_join(msg_t const *m, uint32_t now) {
     set_ip("");
     wifi_link_down(&link_ap);
     esp_wifi_disconnect();
-    if (apply_config(m->ssid, m->pass)) {
+    if (wifi_apply_net(m->ssid, m->pass, trial_eap, &saved_ops)) {
         esp_wifi_connect();
     } else {
-        rollback();
+        rollback(); // the apply module keeps the reason: fw wifi shows it next to "couldn't join"
     }
 }
 
@@ -990,7 +1009,7 @@ static void handle_reconnect(bool force) {
     }
     portEXIT_CRITICAL(&state_lock);
     if (force) {
-        memset(trial_pass, 0, sizeof(trial_pass));
+        trial_wipe();
     }
     if (trying || !atomic_load(&wifi_on)) {
         return;
@@ -1008,7 +1027,7 @@ static void handle_reconnect(bool force) {
     set_ip("");
     esp_wifi_disconnect();
     apply_wifi_bw(); // `fw wifi bw` reconnects to apply it (#146)
-    if (apply_config(s, p)) {
+    if (apply_config(s, p) && !wifi_apply_blocked()) {
         esp_wifi_connect();
     }
     memset(p, 0, sizeof(p));
@@ -1021,12 +1040,13 @@ static void handle_forget(void) {
     ssid[0]          = '\0';
     wifi_join_init(&join);
     portEXIT_CRITICAL(&state_lock);
-    memset(trial_pass, 0, sizeof(trial_pass));
+    trial_wipe();
     retry_pending = false;
     set_ip("");
     wifi_link_down(&link_ap);
     esp_wifi_disconnect();
-    apply_config("", ""); // the driver's RAM copy goes too
+    apply_config("", ""); // the driver's RAM copy goes too (and the Enterprise state with it)
+    wifi_apply_forgotten();
     // Whatever the C6's driver persisted in its own flash goes as well. This resets the driver's other settings to
     // defaults, which is why it only runs here and after a factory reset (wipe_driver_store_if_ordered).
     esp_err_t err = esp_wifi_restore();
@@ -1054,12 +1074,13 @@ static void handle_got_ip(void) {
     if (act == JOIN_ACT_COMMIT) {
         // Only a pair that works is saved: until now NVS held the previous one
         xSemaphoreTake(saved_lock, portMAX_DELAY);
-        bool saved = wifi_cred_save(trial_ssid, trial_pass);
+        bool saved = trial_eap ? wifi_apply_save_trial(trial_ssid, trial_eap, &saved_ops) : wifi_cred_save(trial_ssid, trial_pass);
         xSemaphoreGive(saved_lock);
         if (!saved) {
             ESP_LOGE(TAG, "wifi: joined, but saving the credentials failed");
         }
-        memset(trial_pass, 0, sizeof(trial_pass));
+        wifi_apply_clear_fail();
+        trial_wipe();
     } else if (!trial) {
         // One of the saved networks was picked by choose_network: it becomes the pair in use (first in the list)
         char cur[33];
@@ -1129,6 +1150,7 @@ static void poll_rssi(uint32_t now) {
     }
     portENTER_CRITICAL(&state_lock);
     rssi_cached = ap.rssi;
+    auth_cached = ap.authmode;
     rssi_known  = true;
     portEXIT_CRITICAL(&state_lock);
 }
@@ -1148,7 +1170,7 @@ static void abort_trial(void) {
     char s[33], p[64];
     bool had = wifi_cred_load(s, p);
     memset(p, 0, sizeof(p));
-    memset(trial_pass, 0, sizeof(trial_pass));
+    trial_wipe();
     portENTER_CRITICAL(&state_lock);
     have_credentials = had;
     wifi_text_copy(kept_ssid, sizeof(kept_ssid), had ? s : "");
@@ -1327,6 +1349,30 @@ static void on_sta_start(void) {
     read_back_if_up();
 }
 
+// STA_START: the driver is up; connect with the pair in use, after letting the saved list pick the strongest in range
+static void handle_connect(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool have = have_credentials;
+    portEXIT_CRITICAL(&state_lock);
+    if (!atomic_load(&driver_up)) {
+        return;
+    }
+    on_sta_start(); // the driver is up, also without credentials (scan only)
+    if (!have) {
+        return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
+    portEXIT_CRITICAL(&state_lock);
+    if (!trying) {
+        tried_mask = fail_count = 0;
+        choose_network(false);
+    }
+    if (!wifi_apply_blocked()) {
+        esp_wifi_connect();
+    }
+}
+
 static void wifi_task(void *arg) {
     (void)arg;
     msg_t m;
@@ -1335,25 +1381,7 @@ static void wifi_task(void *arg) {
         uint32_t now = now_ms();
         if (got) {
             switch (m.type) {
-                case MSG_CONNECT: {
-                    portENTER_CRITICAL(&state_lock);
-                    bool have = have_credentials;
-                    portEXIT_CRITICAL(&state_lock);
-                    if (atomic_load(&driver_up)) {
-                        on_sta_start(); // the driver is up, also without credentials (scan only)
-                    }
-                    if (have && atomic_load(&driver_up)) {
-                        portENTER_CRITICAL(&state_lock);
-                        bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
-                        portEXIT_CRITICAL(&state_lock);
-                        if (!trying) {
-                            tried_mask = fail_count = 0;
-                            choose_network(false);
-                        }
-                        esp_wifi_connect();
-                    }
-                    break;
-                }
+                case MSG_CONNECT: handle_connect(); break;
                 case MSG_JOIN: handle_join(&m, now); break;
                 case MSG_RECONNECT: handle_reconnect(m.reason == 1); break;
                 case MSG_FORGET: handle_forget(); break;
@@ -1372,7 +1400,7 @@ static void wifi_task(void *arg) {
         }
         if (retry_pending && (int32_t)(now - retry_at) >= 0) {
             retry_pending = false;
-            if (atomic_load(&driver_up)) {
+            if (atomic_load(&driver_up) && !wifi_apply_blocked()) {
                 esp_wifi_connect();
             }
         }
@@ -1391,6 +1419,29 @@ static void wifi_task(void *arg) {
     }
 }
 
+// Visible as PENDING at once; only the task starts the trial (SSID and credential together) and so only it decides what an
+// IP or a disconnect means. NVS is written once the pair has an IP. m.eap (a heap block) belongs to whoever takes the
+// message; when the post fails it is wiped and freed here.
+static bool request_join(msg_t *m) {
+    portENTER_CRITICAL(&state_lock);
+    wifi_join_t before = join;
+    wifi_join_request(&join);
+    wifi_text_copy(pending_ssid, sizeof(pending_ssid), m->ssid);
+    portEXIT_CRITICAL(&state_lock);
+    bool ok = post(m);
+    if (!ok) {
+        if (m->eap) {
+            memset(m->eap, 0, sizeof(*m->eap));
+            saved_release(m->eap);
+        }
+        portENTER_CRITICAL(&state_lock);
+        join = before;
+        portEXIT_CRITICAL(&state_lock);
+    }
+    memset(m, 0, sizeof(*m));
+    return ok;
+}
+
 bool wifi_set_credentials(char const *new_ssid, char const *pass) {
     if (!c6link_up() || !atomic_load(&wifi_on) || !wifi_cred_valid(new_ssid, pass)) {
         return false;
@@ -1398,21 +1449,29 @@ bool wifi_set_credentials(char const *new_ssid, char const *pass) {
     msg_t m = {.type = MSG_JOIN};
     snprintf(m.ssid, sizeof(m.ssid), "%s", new_ssid);
     snprintf(m.pass, sizeof(m.pass), "%s", pass);
-    // Visible as PENDING at once; only the task starts the trial (SSID and password together) and so only it decides
-    // what an IP or a disconnect means. NVS is written once the pair has an IP.
-    portENTER_CRITICAL(&state_lock);
-    wifi_join_t before = join;
-    wifi_join_request(&join);
-    wifi_text_copy(pending_ssid, sizeof(pending_ssid), new_ssid);
-    portEXIT_CRITICAL(&state_lock);
-    bool ok = post(&m);
-    memset(&m, 0, sizeof(m));
-    if (!ok) {
-        portENTER_CRITICAL(&state_lock);
-        join = before;
-        portEXIT_CRITICAL(&state_lock);
+    return request_join(&m);
+}
+
+bool wifi_set_eap_credentials(char const *new_ssid, wifi_eap_t const *eap) {
+    if (!c6link_up() || !atomic_load(&wifi_on) || !new_ssid || !wifi_cred_valid(new_ssid, "") || !wifi_eap_valid(eap)) {
+        return false;
     }
-    return ok;
+    msg_t m = {.type = MSG_JOIN};
+    m.eap   = saved_alloc(sizeof(*m.eap)); // the queue copies messages by value: the credential travels as a heap block
+    if (!m.eap) {
+        return false;
+    }
+    *m.eap = *eap;
+    snprintf(m.ssid, sizeof(m.ssid), "%s", new_ssid);
+    return request_join(&m);
+}
+
+wifi_auth_class_t wifi_auth_get(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool known = rssi_known;
+    int  mode  = auth_cached;
+    portEXIT_CRITICAL(&state_lock);
+    return wifi_auth_class(mode, known);
 }
 
 wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, size_t kept_cap) {
@@ -1490,23 +1549,13 @@ static void wifi_status_link(void) {
     }
 }
 
-// The IPv6 line of `fw wifi` (#497): the address to use, or why there is none
-static void wifi_status_ip6(void) {
-    char     text[WIFI_IP6_TEXT_MAX];
-    unsigned n;
-    switch (wifi_ip6_get(text, sizeof(text), &n)) {
-        case WIFI_IP6_GLOBAL: console_reply("wifi: ipv6 %s%s", text, n > 1 ? " (+more)" : ""); break;
-        case WIFI_IP6_LINKLOCAL: console_reply("wifi: ipv6 link-local only (no router advertisement yet)"); break;
-        default: console_reply("wifi: ipv6 none"); break;
-    }
-}
-
 static void cmd_wifi_status(wifi_cmd_t const *c) {
     (void)c;
     char a[140], b[140];
     wifi_status_link();
+    wifi_apply_console_status();
     if (wifi_has_ip(NULL, 0)) {
-        wifi_status_ip6();
+        wifi_console_ip6();
     }
     // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
     console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
@@ -1653,47 +1702,8 @@ static void cmd_wifi_reconnect(wifi_cmd_t const *c) {
     );
 }
 
-static void cmd_wifi_scan(wifi_cmd_t const *c) {
-    (void)c;
-    EXT_RAM_BSS_ATTR static wifi_ap_t aps[20];
-    char                              a[140];
-    size_t                            n = 0;
-    if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
-        console_reply("wifi: scan failed");
-        return;
-    }
-    console_reply("wifi: %u networks", (unsigned)n);
-    for (size_t i = 0; i < n; i++) {
-        clean(aps[i].ssid, a, sizeof(a)); // air-sourced: control bytes are escaped as \xNN
-        console_reply(
-            "  %4d dBm  bars %d  %s  %s",
-            aps[i].rssi,
-            wifi_bars(aps[i].rssi),
-            aps[i].open ? "open  " : "locked",
-            a
-        );
-    }
-}
-
-static void cmd_wifi_join_usage(wifi_cmd_t const *c) {
-    (void)c;
-    console_reply("wifi <ssid> <password> (SSID without spaces, at most 32 characters)");
-}
-
-static void cmd_wifi_join(wifi_cmd_t const *c) {
-    char a[140];
-    clean(c->ssid, a, sizeof(a));
-    if (!wifi_cred_valid(c->ssid, c->pass)) {
-        console_reply("wifi: the password is empty (open network) or 8-63 characters");
-    } else if (!wifi_set_credentials(c->ssid, c->pass)) {
-        console_reply("wifi: could not start (no C6 link or busy)");
-    } else {
-        console_reply(
-            "wifi: trying \"%s\", saved only if it gets an IP within %d s; fw wifi shows the result",
-            a,
-            WIFI_JOIN_TRIAL_MS / 1000
-        );
-    }
+static void cmd_wifi_eap(wifi_cmd_t const *c) {
+    wifi_apply_console_eap(c->eap_args, &saved_ops);
 }
 
 static void cmd_wifi(char const *args) {
@@ -1710,9 +1720,10 @@ static void cmd_wifi(char const *args) {
         [WIFI_CMD_BW]          = cmd_wifi_bw,
         [WIFI_CMD_CLEAR]       = cmd_wifi_clear,
         [WIFI_CMD_RECONNECT]   = cmd_wifi_reconnect,
-        [WIFI_CMD_SCAN]        = cmd_wifi_scan,
-        [WIFI_CMD_JOIN]        = cmd_wifi_join,
-        [WIFI_CMD_JOIN_USAGE]  = cmd_wifi_join_usage,
+        [WIFI_CMD_SCAN]        = wifi_console_scan,
+        [WIFI_CMD_JOIN]        = wifi_console_join,
+        [WIFI_CMD_JOIN_USAGE]  = wifi_console_join_usage,
+        [WIFI_CMD_EAP]         = cmd_wifi_eap,
     };
     wifi_cmd_t c;
     wifi_cmd_parse(args, &c);
@@ -1749,7 +1760,7 @@ void wifi_service_init(wifi_radio_hooks_t const *radio_hooks) {
     radio = radio_hooks ? *radio_hooks : (wifi_radio_hooks_t){0};
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
-    console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | --clear]", cmd_wifi);
+    console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password> | --clear]", cmd_wifi);
     scan_done   = xSemaphoreCreateBinary();
     scan_lock   = xSemaphoreCreateMutex();
     saved_lock  = xSemaphoreCreateMutex();

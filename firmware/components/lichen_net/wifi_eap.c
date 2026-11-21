@@ -138,3 +138,131 @@ void wifi_eap_wipe(wifi_eap_t *e) {
         p[i] = 0;
     }
 }
+
+// ---- joining (step 2) ----------------------------------------------------------------------------------------------
+
+bool wifi_eap_pem_ok(char const *buf, size_t len) {
+    static char const begin[] = "-----BEGIN CERTIFICATE-----";
+    if (!buf || len < sizeof(begin) || len > WIFI_EAP_CA_FILE_MAX) {
+        return false;
+    }
+    for (size_t i = 0; i + sizeof(begin) - 1 <= len; i++) {
+        if (memcmp(buf + i, begin, sizeof(begin) - 1) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+#define ERR_NO_MEM      0x101 // ESP_ERR_NO_MEM, spelt out to stay ESP-free
+#define ERR_INVALID_ARG 0x102 // ESP_ERR_INVALID_ARG
+
+wifi_eap_fail_t wifi_eap_rpc_fail(int err, wifi_eap_step_t step) {
+    if (err == 0) {
+        return WIFI_EAP_FAIL_NONE;
+    }
+    if (err == ERR_NO_MEM) {
+        return WIFI_EAP_FAIL_NOMEM;
+    }
+    if (step == WIFI_EAP_STEP_CA && err == ERR_INVALID_ARG) {
+        return WIFI_EAP_FAIL_CA_BAD;
+    }
+    return WIFI_EAP_FAIL_C6_OLD;
+}
+
+char const *wifi_eap_fail_text(wifi_eap_fail_t why) {
+    switch (why) {
+        case WIFI_EAP_FAIL_C6_OLD: return "update the C6 (it has no 802.1X support)";
+        case WIFI_EAP_FAIL_NOMEM: return "out of memory";
+        case WIFI_EAP_FAIL_CA_FILE: return "the CA file is missing, too large or not PEM";
+        case WIFI_EAP_FAIL_CA_BAD: return "the C6 refused the CA certificate";
+        case WIFI_EAP_FAIL_CRED: return "the saved credential is damaged, enter it again";
+        default: return "";
+    }
+}
+
+wifi_eap_ca_state_t wifi_eap_ca_state(wifi_eap_t const *e) {
+    return !e ? WIFI_EAP_CA_NONE : wifi_eap_unverified(e) ? WIFI_EAP_CA_UNVERIFIED : WIFI_EAP_CA_VERIFIED;
+}
+
+wifi_auth_class_t wifi_auth_class(int authmode, bool known) {
+    if (!known) {
+        return WIFI_AUTH_CLASS_NONE;
+    }
+    switch (authmode) { // wifi_auth_mode_t of ESP-IDF 6.1
+        case 0: return WIFI_AUTH_CLASS_OPEN;
+        case 1: return WIFI_AUTH_CLASS_WEP;
+        case 2: return WIFI_AUTH_CLASS_WPA;
+        case 3: return WIFI_AUTH_CLASS_WPA2;
+        case 4: return WIFI_AUTH_CLASS_WPA_WPA2;
+        case 5: return WIFI_AUTH_CLASS_WPA2_ENT;
+        case 6: return WIFI_AUTH_CLASS_WPA3;
+        case 7: return WIFI_AUTH_CLASS_WPA2_WPA3;
+        case 10: case 14: case 15: return WIFI_AUTH_CLASS_WPA3_ENT;
+        case 16: return WIFI_AUTH_CLASS_WPA_ENT;
+        default: return WIFI_AUTH_CLASS_OTHER;
+    }
+}
+
+// The next space-separated word of *p (runs of spaces between words count as one); false at the end of the line
+static bool next_word(char const **p, char const **w, size_t *n) {
+    while (**p == ' ') {
+        (*p)++;
+    }
+    if (!**p) {
+        return false;
+    }
+    *w = *p;
+    while (**p && **p != ' ') {
+        (*p)++;
+    }
+    *n = (size_t)(*p - *w);
+    return true;
+}
+
+static bool word_is(char const *w, size_t n, char const *s) {
+    return strlen(s) == n && memcmp(w, s, n) == 0;
+}
+
+static bool copy_word(char const *w, size_t n, char *out, size_t cap) {
+    if (n >= cap) {
+        return false;
+    }
+    memcpy(out, w, n);
+    out[n] = '\0';
+    return true;
+}
+
+wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t *e) {
+    memset(e, 0, sizeof(*e));
+    ssid[0] = '\0';
+    char const *p = args, *w[6];
+    size_t      n[6];
+    for (int i = 0; i < 6; i++) {
+        if (!next_word(&p, &w[i], &n[i])) {
+            return WIFI_EAP_PARSE_USAGE;
+        }
+    }
+    if (*p == ' ') {
+        p++; // one space separates the password from the CA path; the password is the rest, spaces and all
+    }
+    bool peap = word_is(w[1], n[1], "peap"), ttls = word_is(w[1], n[1], "ttls");
+    bool mschap = word_is(w[2], n[2], "mschapv2"), pap = word_is(w[2], n[2], "pap");
+    if ((!peap && !ttls) || (!mschap && !pap) || !*p) {
+        return WIFI_EAP_PARSE_USAGE;
+    }
+    e->method = ttls ? WIFI_EAP_TTLS : WIFI_EAP_PEAP;
+    e->phase2 = pap ? WIFI_EAP_P2_PAP : WIFI_EAP_P2_MSCHAPV2;
+    bool ok   = copy_word(w[0], n[0], ssid, 33) && (word_is(w[3], n[3], "-") || copy_word(w[3], n[3], e->identity, sizeof(e->identity))) &&
+              copy_word(w[4], n[4], e->username, sizeof(e->username)) &&
+              (word_is(w[5], n[5], "-") || copy_word(w[5], n[5], e->ca_path, sizeof(e->ca_path))) &&
+              strlen(p) < sizeof(e->password);
+    if (ok) {
+        strcpy(e->password, p);
+    }
+    if (!ok || ssid[0] == '\0' || !wifi_eap_valid(e)) {
+        wifi_eap_wipe(e);
+        return WIFI_EAP_PARSE_INVALID;
+    }
+    return WIFI_EAP_PARSE_OK;
+}

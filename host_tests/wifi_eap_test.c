@@ -203,7 +203,103 @@ static void saved_flag(void) {
     CHECK(wifi_saved_forget(&l, "n4") && !wifi_saved_is_eap(&l, 0));
 }
 
+// The kind key's mapping and the load rules (#496 step 2)
+static void kind_persistence(void) {
+    wifi_saved_t l = {0};
+    CHECK(wifi_saved_add_eap(&l, "camp") && wifi_saved_add(&l, "home", "password1") && wifi_saved_add_eap(&l, "hall"));
+    // list: hall, home, camp; two Enterprise entries never share a record slot
+    CHECK(l.e[0].kind == WIFI_SAVED_EAP && l.e[2].kind == WIFI_SAVED_EAP && l.e[0].rec != l.e[2].rec);
+    CHECK(wifi_saved_kind_code(&l.e[1]) == 0); // PSK: no key
+    CHECK(wifi_saved_kind_code(&l.e[0]) == 1 + l.e[0].rec && wifi_saved_rec_mask(&l) == ((1u << l.e[0].rec) | (1u << l.e[2].rec)));
+    CHECK(wifi_saved_eap_rec(&l, "camp") == l.e[2].rec && wifi_saved_eap_rec(&l, "home") == -1 && wifi_saved_eap_rec(&l, "x") == -1);
+
+    wifi_saved_entry_t e;
+    uint8_t            used = 0;
+    memset(&e, 0, sizeof(e));
+    strcpy(e.ssid, "net");
+    strcpy(e.pass, "password1");
+    CHECK(wifi_saved_slot_parse(&e, true, 0, &used) && e.kind == WIFI_SAVED_PSK && used == 0);
+    CHECK(!wifi_saved_slot_parse(&e, false, 0, &used)); // no password key and no kind: not a slot
+    strcpy(e.pass, "short");
+    CHECK(!wifi_saved_slot_parse(&e, true, 0, &used)); // invalid PSK
+    strcpy(e.pass, WIFI_SAVED_EAP_MARK);
+    CHECK(!wifi_saved_slot_parse(&e, true, 0, &used)); // the marker without its kind key: dropped, never open
+    CHECK(wifi_saved_slot_parse(&e, true, 3, &used) && e.kind == WIFI_SAVED_EAP && e.rec == 2 && e.pass[0] == '\0' && used == 4);
+    CHECK(!wifi_saved_slot_parse(&e, true, 3, &used)); // the record slot is taken
+    CHECK(wifi_saved_slot_parse(&e, false, 1, &used) && e.rec == 0 && used == 5); // an Enterprise slot needs no password
+    CHECK(!wifi_saved_slot_parse(&e, false, WIFI_SAVED_MAX + 1, &used) && !wifi_saved_slot_parse(&e, false, 200, &used));
+    e.ssid[0] = '\0';
+    CHECK(!wifi_saved_slot_parse(&e, false, 5, &used));
+
+    // promote moves an entry whole
+    CHECK(wifi_saved_promote(&l, 2) && strcmp(l.e[0].ssid, "camp") == 0 && l.e[0].kind == WIFI_SAVED_EAP &&
+          strcmp(l.e[1].ssid, "hall") == 0 && !wifi_saved_promote(&l, 3) && !wifi_saved_promote(&l, -1));
+    // the slot of a replaced entry is free for the new one
+    CHECK(wifi_saved_add_eap(&l, "camp") && wifi_saved_is_eap(&l, 0) && l.e[0].rec != l.e[1].rec);
+}
+
+// What the join says and shows (#496 step 2)
+static void join_mapping(void) {
+    CHECK(wifi_eap_rpc_fail(0, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_NONE);
+    CHECK(wifi_eap_rpc_fail(-1, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_C6_OLD); // ESP_FAIL: an RPC the C6 does not know
+    CHECK(wifi_eap_rpc_fail(0x103, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_C6_OLD);
+    CHECK(wifi_eap_rpc_fail(0x101, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_NOMEM);
+    CHECK(wifi_eap_rpc_fail(0x102, WIFI_EAP_STEP_CA) == WIFI_EAP_FAIL_CA_BAD);
+    CHECK(wifi_eap_rpc_fail(0x102, WIFI_EAP_STEP_OTHER) == WIFI_EAP_FAIL_C6_OLD);
+    CHECK(strstr(wifi_eap_fail_text(WIFI_EAP_FAIL_C6_OLD), "update the C6") != NULL);
+    CHECK(wifi_eap_fail_text(WIFI_EAP_FAIL_NONE)[0] == '\0');
+
+    wifi_eap_t e = good();
+    CHECK(wifi_eap_ca_state(NULL) == WIFI_EAP_CA_NONE && wifi_eap_ca_state(&e) == WIFI_EAP_CA_UNVERIFIED);
+    strcpy(e.ca_path, "/storage/ca.pem");
+    CHECK(wifi_eap_ca_state(&e) == WIFI_EAP_CA_VERIFIED);
+
+    char const pem[] = "junk\n-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    CHECK(wifi_eap_pem_ok(pem, sizeof(pem) - 1) && !wifi_eap_pem_ok(pem, 10) && !wifi_eap_pem_ok(NULL, 100));
+    char const der[] = "\x30\x82\x01\x0a binary DER of a certificate, no armour";
+    CHECK(!wifi_eap_pem_ok(der, sizeof(der) - 1));
+    static char big[WIFI_EAP_CA_FILE_MAX + 2];
+    memset(big, 'a', sizeof(big));
+    memcpy(big, pem, sizeof(pem) - 1);
+    CHECK(wifi_eap_pem_ok(big, WIFI_EAP_CA_FILE_MAX) && !wifi_eap_pem_ok(big, WIFI_EAP_CA_FILE_MAX + 1)); // larger: refused
+
+    CHECK(wifi_auth_class(0, false) == WIFI_AUTH_CLASS_NONE && wifi_auth_class(0, true) == WIFI_AUTH_CLASS_OPEN);
+    CHECK(wifi_auth_class(3, true) == WIFI_AUTH_CLASS_WPA2 && wifi_auth_class(5, true) == WIFI_AUTH_CLASS_WPA2_ENT);
+    CHECK(wifi_auth_class(6, true) == WIFI_AUTH_CLASS_WPA3 && wifi_auth_class(14, true) == WIFI_AUTH_CLASS_WPA3_ENT);
+    CHECK(wifi_auth_class(16, true) == WIFI_AUTH_CLASS_WPA_ENT && wifi_auth_class(99, true) == WIFI_AUTH_CLASS_OTHER);
+}
+
+// `fw wifi eap ...`
+static void console_line(void) {
+    char       ssid[33];
+    wifi_eap_t e;
+    CHECK(wifi_eap_parse_line("camp ttls pap anon@camp.example badge42 /storage/ca.pem pass word  x", ssid, &e) == WIFI_EAP_PARSE_OK);
+    CHECK(strcmp(ssid, "camp") == 0 && e.method == WIFI_EAP_TTLS && e.phase2 == WIFI_EAP_P2_PAP &&
+          strcmp(e.identity, "anon@camp.example") == 0 && strcmp(e.username, "badge42") == 0 &&
+          strcmp(e.ca_path, "/storage/ca.pem") == 0 && strcmp(e.password, "pass word  x") == 0); // the rest, spaces and all
+    CHECK(wifi_eap_parse_line("camp  peap  mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_OK && e.identity[0] == '\0' &&
+          e.ca_path[0] == '\0' && wifi_eap_unverified(&e) && strcmp(e.password, "secret") == 0);
+    CHECK(wifi_eap_parse_line("camp peap pap - user - secret", ssid, &e) == WIFI_EAP_PARSE_INVALID); // PEAP is MSCHAPv2
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user - ", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no password
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user", ssid, &e) == WIFI_EAP_PARSE_USAGE);
+    CHECK(wifi_eap_parse_line("", ssid, &e) == WIFI_EAP_PARSE_USAGE);
+    CHECK(wifi_eap_parse_line("camp tls mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no EAP-TLS
+    CHECK(wifi_eap_parse_line("camp peap chap - user - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE);
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user /etc/ca.pem secret", ssid, &e) == WIFI_EAP_PARSE_INVALID);
+    CHECK(strlen(e.password) == 0 && e.username[0] == '\0'); // an invalid line leaves nothing behind
+    char longssid[80] = "";
+    memset(longssid, 'a', 40);
+    strcpy(longssid + 40, " peap mschapv2 - user - secret");
+    CHECK(wifi_eap_parse_line(longssid, ssid, &e) == WIFI_EAP_PARSE_INVALID);
+    char big[400] = "camp peap mschapv2 - user - ";
+    memset(big + strlen(big), 'p', 200);
+    CHECK(wifi_eap_parse_line(big, ssid, &e) == WIFI_EAP_PARSE_INVALID); // password over 127 bytes
+}
+
 int main(void) {
+    kind_persistence();
+    join_mapping();
+    console_line();
     validation();
     ca_paths();
     record();

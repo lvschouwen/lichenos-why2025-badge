@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "wifi_eap.h"
 #include "wifi_ip6.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
@@ -72,6 +73,19 @@ size_t wifi_saved_names(char (*out)[33], size_t max);
 // authentication failure, the previous pair is put back and NVS was never touched. False if the pair is invalid or the
 // request could not be queued. Follow the outcome with wifi_join_state(); it does not depend on any screen.
 bool wifi_set_credentials(char const *ssid, char const *pass);
+// The same trial for a WPA2/WPA3-Enterprise network (#496): the credential is copied, so the caller wipes its own. The
+// record is saved with the SSID once the network gets an IP. A C6 without 802.1X support fails the trial (reason in
+// wifi_eap_last_fail), it never retries. False if the credential or SSID is invalid, there is no C6 link or memory, or
+// the request could not be queued.
+bool wifi_set_eap_credentials(char const *ssid, wifi_eap_t const *eap);
+// Why the last Enterprise join did not start (WIFI_EAP_FAIL_NONE after a join that got an IP, a Forget, or a new request)
+wifi_eap_fail_t wifi_eap_last_fail(void);
+// What the applied configuration does about the server certificate (registry wifi.eap_ca): none when the driver is not
+// set for an Enterprise network. Any task, no RPC.
+wifi_eap_ca_state_t wifi_eap_ca(void);
+// The authmode of the AP the badge is connected to (registry wifi.auth), refreshed every 5 s on the c6wifi task: none while
+// not connected. Any task, no RPC.
+wifi_auth_class_t wifi_auth_get(void);
 // TRYING / JOINED / FAILED_KEPT_OLD (NONE before the first trial). tried gets the SSID of the last trial; kept the SSID
 // that is back after a failure ("" if no network was saved).
 wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, size_t kept_cap);

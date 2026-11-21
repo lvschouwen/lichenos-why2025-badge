@@ -2,11 +2,11 @@
 
 #include <string.h>
 
-#define SLOTS 24
+#define SLOTS 32
 
 static struct {
     char key[16];
-    char value[130];
+    char value[400]; // an Enterprise record (#496) is up to ~355 bytes
     int  used;
 } table[SLOTS];
 

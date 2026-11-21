@@ -35,11 +35,11 @@ size	libeh_host_feat_rpc.a	8198
 size	libeh_host_feat_rpc_ext_v2.a	1930
 size	libeh_host_feat_system.a	1192
 size	libeh_host_feat_wifi.a	14178
-size	libeh_host_feat_wifi_ext_ent.a	1890
+size	libeh_host_feat_wifi_ext_ent.a	1906
 size	libeh_host_feat_wifi_ext_itwt.a	994
 size	libeh_host_mcu_transport.a	22667
 size	libeh_host_mcu_vserial.a	1040
-size	libeh_host_port_idf.a	6107
+size	libeh_host_port_idf.a	6115
 size	libeh_proto_v2.a	80331
 size	libesp_app_format.a	742
 size	libesp_common.a	1816
@@ -87,8 +87,8 @@ size	libesp_stdio.a	1182
 size	libesp_system.a	19184
 size	libesp_tca8418.a	1993
 size	libesp_timer.a	2854
-size	libesp_wifi.a	2267
-size	libesp_wifi_remote_glue.a	621
+size	libesp_wifi.a	3240
+size	libesp_wifi_remote_glue.a	629
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208

@@ -20,6 +20,10 @@ static char const *const bt_state_names[] = {"idle", "inited", "enabled"};
 static char const *const wifi_ps_names[] = {"none", "min"};
 // wifi_ip6_level_t (lichen_net/wifi_ip6.h): "global" is any preferred address beyond the link, a ULA (fc00::/7) included
 static char const *const wifi_ip6_names[] = {"none", "linklocal", "global"};
+// wifi_auth_class_t and wifi_eap_ca_state_t (lichen_net/wifi_eap.h): same order
+static char const *const wifi_auth_names[] = {"none", "open", "wep", "wpa", "wpa2", "wpa_wpa2", "wpa3", "wpa2_wpa3",
+                                              "wpa_ent", "wpa2_ent", "wpa3_ent", "other"};
+static char const *const wifi_eap_ca_names[] = {"none", "verified", "unverified"};
 // lora_state_t (shared/lora/lora_proto.h)
 static char const *const lora_state_names[] = {"unconfigured", "idle", "rx", "error", "tx"};
 
@@ -66,6 +70,10 @@ reg_entry_t const reg_p4_table[] = {
      .get_applied = reg_p4_wifi_get, .set = reg_p4_wifi_ps_set},
     {.id = REG_ID_WIFI_IP6, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.ip6", .min = 0, .max = 2,
      .enum_names = wifi_ip6_names, .get_applied = reg_p4_wifi_ip6_get},
+    {.id = REG_ID_WIFI_AUTH, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.auth", .min = 0, .max = 11,
+     .enum_names = wifi_auth_names, .get_applied = reg_p4_wifi_auth_get},
+    {.id = REG_ID_WIFI_EAP_CA, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.eap_ca", .min = 0, .max = 2,
+     .enum_names = wifi_eap_ca_names, .get_applied = reg_p4_wifi_eap_ca_get},
 };
 
 size_t const reg_p4_count = sizeof(reg_p4_table) / sizeof(reg_p4_table[0]);

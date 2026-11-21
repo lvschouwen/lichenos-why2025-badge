@@ -8,7 +8,7 @@
 //
 // Matching is per subcommand, exactly as cmd_wifi always did it: most subcommands match as a whole string, `ps` and
 // `tx` also with an argument, and ANY other line is "<ssid> <password>" (`wifi on hunter2` joins a network called
-// "on"). console_model.c (wifi_public) mirrors these rules for the remote shell; change both together.
+// "on"; `eap` is taken the same way, so an SSID called "eap" cannot be joined from the console). console_model.c (wifi_public) mirrors these rules for the remote shell; change both together.
 typedef enum {
     WIFI_CMD_STATUS,      // "" (also `fw net`)
     WIFI_CMD_SWITCH,      // on | off
@@ -25,6 +25,7 @@ typedef enum {
     WIFI_CMD_SCAN,        // scan
     WIFI_CMD_JOIN,        // <ssid> <password>
     WIFI_CMD_JOIN_USAGE,  // empty or over-long SSID
+    WIFI_CMD_EAP,         // eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password> (#496)
     WIFI_CMD_COUNT
 } wifi_cmd_kind_t;
 
@@ -40,6 +41,7 @@ typedef struct {
     unsigned        bw_mhz;                      // BW: 0 = read back only
     char            ssid[WIFI_CMD_SSID_MAX + 1]; // JOIN
     char const     *pass; // JOIN: the rest of the line, a pointer into the parsed line ("" when none)
+    char const     *eap_args; // EAP: the line after "eap ", for wifi_eap_parse_line ("" when none)
 } wifi_cmd_t;
 
 void wifi_cmd_parse(char const *args, wifi_cmd_t *out);

@@ -1,5 +1,6 @@
 #include "wifi_list.h"
 
+#include "wifi_eap.h" // WIFI_EAP_BLOB_MAX only: the record stays text here
 #include "wifi_saved.h"
 
 
@@ -178,7 +179,19 @@ static char *slot_key(char key[10], char kind, int i) {
     return key;
 }
 
-// SSIDs as plain settings, passwords as secrets; slots past the list's end are erased
+// What the password slot holds: the entry's PSK, or the marker for an Enterprise entry (wifi_saved.h)
+static char const *entry_pass(wifi_saved_entry_t const *e) {
+    return e->kind == WIFI_SAVED_EAP ? WIFI_SAVED_EAP_MARK : e->pass;
+}
+
+// The kind key k<i>: absent for a PSK entry, so an older list stays valid
+static bool store_kind(char const *kk, wifi_saved_entry_t const *e) {
+    uint8_t code = wifi_saved_kind_code(e);
+    return code ? store->set_u8(kk, code) : store->erase(kk);
+}
+
+// SSIDs as plain settings, passwords as secrets; slots past the list's end are erased, and so is every Enterprise record
+// no entry points at any more (a Forget, or a PSK that replaced an Enterprise entry)
 static bool saved_store(wifi_saved_t const *l) {
     if (!store) {
         return false;
@@ -187,18 +200,28 @@ static bool saved_store(wifi_saved_t const *l) {
     // that stopped half way would keep old passwords)
     bool ok = true;
     for (int i = 0; i < WIFI_SAVED_MAX; i++) {
-        char ks[10], kp[10];
+        char ks[10], kp[10], kk[10];
         slot_key(ks, 's', i);
         slot_key(kp, 'p', i);
+        slot_key(kk, 'k', i);
         bool done;
         if ((size_t)i < l->n) {
-            done = store->set_str(ks, l->e[i].ssid);
-            done = store->secret_set(kp, l->e[i].pass) && done;
+            done = store_kind(kk, &l->e[i]); // first: a slot never reads as PSK for a moment
+            done = store->set_str(ks, l->e[i].ssid) && done;
+            done = store->secret_set(kp, entry_pass(&l->e[i])) && done;
         } else {
-            done = store->erase(ks);
+            done = store->erase(kk);
+            done = store->erase(ks) && done;
             done = store->erase(kp) && done;
         }
         ok = ok && done;
+    }
+    uint8_t keep = wifi_saved_rec_mask(l);
+    for (int r = 0; r < WIFI_SAVED_MAX; r++) {
+        char ke[10];
+        if (!(keep >> r & 1)) {
+            ok = store->erase(slot_key(ke, 'e', r)) && ok;
+        }
     }
     return ok;
 }
@@ -208,15 +231,18 @@ bool wifi_saved_load(wifi_saved_t *l) {
     if (!store) {
         return false;
     }
+    uint8_t used = 0;
     for (int i = 0; i < WIFI_SAVED_MAX; i++) {
-        char ks[10], kp[10];
-        store->get_str(slot_key(ks, 's', i), l->e[l->n].ssid, sizeof(l->e[0].ssid), "");
-        if (l->e[l->n].ssid[0] &&
-            store->secret_get(slot_key(kp, 'p', i), l->e[l->n].pass, sizeof(l->e[0].pass)) &&
-            wifi_cred_valid(l->e[l->n].ssid, l->e[l->n].pass)) {
+        char ks[10], kp[10], kk[10];
+        wifi_saved_entry_t *e = &l->e[l->n];
+        store->get_str(slot_key(ks, 's', i), e->ssid, sizeof(e->ssid), "");
+        bool have = e->ssid[0] && store->secret_get(slot_key(kp, 'p', i), e->pass, sizeof(e->pass));
+        // A missing kind key is a PSK slot; a code we do not know drops the slot (fail closed, never open)
+        uint8_t code = store->get_u8(slot_key(kk, 'k', i), 0);
+        if (e->ssid[0] && (have || code) && wifi_saved_slot_parse(e, have, code, &used)) {
             l->n++;
         } else {
-            memset(&l->e[l->n], 0, sizeof(l->e[0])); // a half-read slot leaves nothing behind
+            memset(e, 0, sizeof(*e)); // a half-read slot leaves nothing behind
         }
     }
     return true;
@@ -307,7 +333,7 @@ bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
     bool ok     = wifi_saved_forget(l, ssid) && saved_store(l);
     // If the pair in use cannot be replaced, wifi_ssid still names the forgotten network: that is a failure, and the
     // caller still has to drop it from the driver (was_active)
-    bool swapped = !(ok && active) || set_active(l->n ? l->e[0].ssid : NULL, l->n ? l->e[0].pass : "");
+    bool swapped = !(ok && active) || set_active(l->n ? l->e[0].ssid : NULL, l->n ? entry_pass(&l->e[0]) : "");
     if (ok) {
         generation++;
     }
@@ -330,10 +356,8 @@ bool wifi_cred_activate(char const *ssid) {
     int  at = wifi_saved_find(&l, ssid);
     bool ok = at >= 0;
     if (ok && at > 0) {
-        char pass[64];
-        strcpy(pass, l.e[at].pass);
-        ok = wifi_saved_add(&l, ssid, pass) && saved_store(&l) && set_active(ssid, pass);
-        memset(pass, 0, sizeof(pass));
+        // Moved as it is: an Enterprise entry keeps its kind and record slot
+        ok = wifi_saved_promote(&l, at) && saved_store(&l) && set_active(ssid, entry_pass(&l.e[0]));
         generation++;
     }
     wifi_saved_wipe(&l);
@@ -365,6 +389,44 @@ bool wifi_cred_save(char const *ssid, char const *pass) {
         wifi_saved_wipe(&list);
     }
     return ok;
+}
+
+// The Enterprise record is opaque here (wifi_eap.h encodes it): list, record and then the pair in use, in that order, so
+// a failure half way never leaves an active pair without its credential
+bool wifi_cred_save_eap(char const *ssid, char const *rec) {
+    size_t n = rec ? strlen(rec) : 0;
+    if (!store || !wifi_cred_valid(ssid, "") || n == 0 || n >= WIFI_EAP_BLOB_MAX) {
+        return false;
+    }
+    wifi_saved_t list;
+    wifi_saved_load(&list);
+    char ke[10];
+    bool ok = wifi_saved_add_eap(&list, ssid) && store->secret_set(slot_key(ke, 'e', list.e[0].rec), rec) &&
+              saved_store(&list) && set_active(ssid, WIFI_SAVED_EAP_MARK);
+    wifi_saved_wipe(&list);
+    if (ok) {
+        generation++;
+    }
+    return ok;
+}
+
+wifi_eap_rec_t wifi_cred_eap_record(char const *ssid, char *rec, size_t cap) {
+    wifi_saved_t *l = list_alloc && store ? list_alloc(sizeof(*l)) : NULL;
+    if (cap) {
+        rec[0] = '\0';
+    }
+    if (!l) {
+        return WIFI_EAP_REC_BAD; // cannot tell: never read as "not Enterprise"
+    }
+    wifi_saved_load(l);
+    int r = wifi_saved_eap_rec(l, ssid);
+    wifi_saved_wipe(l);
+    list_release(l);
+    char ke[10];
+    if (r < 0) {
+        return WIFI_EAP_REC_NONE;
+    }
+    return cap && store->secret_get(slot_key(ke, 'e', r), rec, cap) && rec[0] ? WIFI_EAP_REC_OK : WIFI_EAP_REC_BAD;
 }
 
 bool wifi_driver_wipe_pending(void) {

@@ -10,11 +10,12 @@
 static char const *const secret_keys[] = {
     "wifi_pass",                                         // the Wi-Fi pair in use (#66)
     "wifi_p0", "wifi_p1", "wifi_p2", "wifi_p3", "wifi_p4", // the saved networks (#160, WIFI_SAVED_MAX)
+    "wifi_e0", "wifi_e1", "wifi_e2", "wifi_e3", "wifi_e4", // the Enterprise records (#496, one per saved network)
     "ota_token",                                         // the update server's NVS copy of its token (#112, #241)
     "identity",                                          // a stale NVS copy of the MeshCore private key: never readable here
 };
-_Static_assert(sizeof(secret_keys) / sizeof(secret_keys[0]) == WIFI_SAVED_MAX + 3,
-               "one secret per saved network, the pair in use, the OTA token and the old identity: a new WIFI_SAVED_MAX needs its wifi_pN here");
+_Static_assert(sizeof(secret_keys) / sizeof(secret_keys[0]) == WIFI_SAVED_MAX * 2 + 3,
+               "two secrets per saved network (password, Enterprise record), the pair in use, the OTA token and the old identity: a new WIFI_SAVED_MAX needs its wifi_pN and wifi_eN here");
 
 size_t settings_secret_count(void) {
     return sizeof(secret_keys) / sizeof(secret_keys[0]);

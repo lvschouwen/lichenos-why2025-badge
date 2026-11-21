@@ -62,6 +62,8 @@ reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v);
 reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out);
 // wifi.ip6: none / linklocal / global from the station's netif (never waits on the C6)
 reg_status_t reg_p4_wifi_ip6_get(reg_entry_t const *e, reg_value_t *out);
+reg_status_t reg_p4_wifi_auth_get(reg_entry_t const *e, reg_value_t *out);   // #496: the c6wifi task's cached authmode
+reg_status_t reg_p4_wifi_eap_ca_get(reg_entry_t const *e, reg_value_t *out); // #496: the applied configuration
 // wifi.ps: none / min through the Wi-Fi service (not saved, as `fw wifi ps`)
 reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v);
 // disp.engine (#468): developer mode only, under the LVGL lock, not saved

@@ -172,7 +172,8 @@ static void test_reg_ids(void) {
           REG_ID_LORA_CR == 0x0203 && REG_ID_LORA_SYNC == 0x0204 && REG_ID_LORA_PREAMBLE == 0x0205 &&
           REG_ID_LORA_POWER == 0x0206 && REG_ID_LORA_STATE == 0x0207);
     CHECK(REG_ID_WIFI_COUNTRY == 0x0300 && REG_ID_WIFI_PROTOCOL == 0x0301 &&
-          REG_ID_WIFI_PS == 0x0304 && REG_ID_WIFI_IP6 == 0x0305);
+          REG_ID_WIFI_PS == 0x0304 && REG_ID_WIFI_IP6 == 0x0305 && REG_ID_WIFI_AUTH == 0x0306 &&
+          REG_ID_WIFI_EAP_CA == 0x0307);
     // The P4-side switches domain (#501): ids are append-only too, and the cfg flag is a bit no older flag uses
     CHECK(REG_ID_RADIO_WIFI == 0x1600 && REG_ID_RADIO_AIRPLANE == 0x1603 && REG_ID_HAPTICS_ON == 0x1604 &&
           REG_ID_LED_MODE == 0x1606 && REG_ID_OTA_SERVER == 0x1607 && REG_ID_UI_SAVER == 0x1609 &&

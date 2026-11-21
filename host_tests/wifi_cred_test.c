@@ -2,6 +2,7 @@
 // Host test: Wi-Fi credential rules and the round trip through the settings service, passwords as secrets (#66, #235)
 #include "nvs.h"
 #include "settings_secret.h"
+#include "wifi_eap.h"
 #include "wifi_list.h"
 #include "wifi_saved.h"
 
@@ -220,6 +221,94 @@ static void saved_networks(void) {
     CHECK(wifi_saved_load(&l) && l.n == 0 && !wifi_cred_load(s, p));
 }
 
+// #496: an Enterprise network is a list entry with a kind key and a record in its own secret slot, and both move,
+// replace and go with the entry
+static bool has_secret(char const *key) {
+    char v[400];
+    return settings_secret_get(key, v, sizeof(v));
+}
+
+static void eap_networks(void) {
+    char s[33], p[64], rec[WIFI_EAP_BLOB_MAX];
+    wifi_saved_t l;
+    bool active = false, left = false;
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_cred_save("homenet", "homepassword"));
+    CHECK(wifi_cred_save_eap("campnet", "E1-record-one"));
+    CHECK(wifi_saved_load(&l) && l.n == 2 && strcmp(l.e[0].ssid, "campnet") == 0 && wifi_saved_is_eap(&l, 0) &&
+          l.e[0].pass[0] == '\0' && !wifi_saved_is_eap(&l, 1));
+    CHECK(plain_get_u8("wifi_k0", 0) == 1 + l.e[0].rec && plain_get_u8("wifi_k1", 0) == 0); // PSK: no key at all
+    CHECK(wifi_cred_load(s, p) && strcmp(s, "campnet") == 0 && strcmp(p, WIFI_SAVED_EAP_MARK) == 0);
+    CHECK(wifi_cred_eap_record("campnet", rec, sizeof(rec)) == WIFI_EAP_REC_OK && strcmp(rec, "E1-record-one") == 0);
+    CHECK(wifi_cred_eap_record("homenet", rec, sizeof(rec)) == WIFI_EAP_REC_NONE && rec[0] == '\0');
+    CHECK(wifi_cred_eap_record("unknown", rec, sizeof(rec)) == WIFI_EAP_REC_NONE);
+    CHECK(!wifi_cred_save_eap("campnet", "") && !wifi_cred_save_eap("", "E1-x") && !wifi_cred_save_eap("campnet", NULL));
+
+    // Another Enterprise network, then the first is activated: kind and record follow their entry through the shift
+    CHECK(wifi_cred_save_eap("hall", "E1-record-two"));
+    CHECK(wifi_cred_activate("campnet") && wifi_cred_load(s, p) && strcmp(s, "campnet") == 0);
+    CHECK(wifi_saved_load(&l) && l.n == 3 && strcmp(l.e[0].ssid, "campnet") == 0 && wifi_saved_is_eap(&l, 0) &&
+          strcmp(l.e[1].ssid, "hall") == 0 && wifi_saved_is_eap(&l, 1) && !wifi_saved_is_eap(&l, 2));
+    CHECK(wifi_cred_eap_record("campnet", rec, sizeof(rec)) == WIFI_EAP_REC_OK && strcmp(rec, "E1-record-one") == 0);
+    CHECK(wifi_cred_eap_record("hall", rec, sizeof(rec)) == WIFI_EAP_REC_OK && strcmp(rec, "E1-record-two") == 0);
+
+    // Saving the same SSID again replaces the record; a PSK for it replaces the entry and deletes the record
+    CHECK(wifi_cred_save_eap("hall", "E1-record-three"));
+    CHECK(wifi_cred_eap_record("hall", rec, sizeof(rec)) == WIFI_EAP_REC_OK && strcmp(rec, "E1-record-three") == 0);
+    CHECK(has_secret("wifi_e0") && has_secret("wifi_e1"));
+    CHECK(wifi_cred_save("hall", "hallpassword"));
+    CHECK(wifi_cred_eap_record("hall", rec, sizeof(rec)) == WIFI_EAP_REC_NONE);
+    CHECK(wifi_saved_load(&l) && !wifi_saved_is_eap(&l, wifi_saved_find(&l, "hall")) && wifi_saved_is_eap(&l, 1));
+    int records = 0;
+    for (int i = 0; i < WIFI_SAVED_MAX; i++) {
+        char k[10];
+        snprintf(k, sizeof(k), "wifi_e%d", i);
+        records += has_secret(k);
+    }
+    CHECK(records == 1); // campnet's only: nothing of the replaced entry is left
+
+    // Forget deletes the record, also for the entry in use
+    CHECK(wifi_cred_forget("campnet", &active, &left) && !active && left);
+    records = 0;
+    for (int i = 0; i < WIFI_SAVED_MAX; i++) {
+        char k[10];
+        snprintf(k, sizeof(k), "wifi_e%d", i);
+        records += has_secret(k);
+    }
+    CHECK(records == 0 && wifi_cred_eap_record("campnet", rec, sizeof(rec)) == WIFI_EAP_REC_NONE);
+    CHECK(wifi_cred_save_eap("campnet", "E1-record-one"));
+    CHECK(wifi_cred_forget("campnet", &active, &left) && active && left && wifi_cred_load(s, p) && strcmp(s, "hall") == 0);
+    CHECK(wifi_cred_clear());
+    CHECK(!has_secret("wifi_e0") && plain_get_u8("wifi_k0", 0) == 0);
+}
+
+// Fail closed: damage never turns an Enterprise entry into an open or PSK network
+static void eap_damage(void) {
+    char rec[WIFI_EAP_BLOB_MAX];
+    wifi_saved_t l;
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_cred_save_eap("campnet", "E1-record-one"));
+    CHECK(wifi_cred_save("homenet", "homepassword")); // list: homenet, campnet (kind key k1 = 1, record slot 0)
+    CHECK(wifi_saved_load(&l) && l.n == 2 && wifi_saved_is_eap(&l, 1) && plain_get_u8("wifi_k1", 0) == 1);
+    // The kind key lost: the slot's password is the marker, never a valid PSK, so the slot is dropped (not open)
+    CHECK(plain_erase("wifi_k1"));
+    CHECK(wifi_saved_load(&l) && l.n == 1 && strcmp(l.e[0].ssid, "homenet") == 0);
+    // An unknown kind code drops the slot as well
+    CHECK(plain_set_u8("wifi_k1", 9));
+    CHECK(wifi_saved_load(&l) && l.n == 1);
+    // A kind key without any password still loads as Enterprise (the password slot is not needed)
+    CHECK(plain_set_u8("wifi_k1", 1) && plain_erase("wifi_p1"));
+    CHECK(wifi_saved_load(&l) && l.n == 2 && wifi_saved_is_eap(&l, 1) && l.e[1].pass[0] == '\0');
+    // Two entries pointing at one record slot: the second is dropped
+    CHECK(plain_set_u8("wifi_k0", 1));
+    CHECK(wifi_saved_load(&l) && l.n == 1 && wifi_saved_is_eap(&l, 0) && strcmp(l.e[0].ssid, "homenet") == 0);
+    CHECK(plain_erase("wifi_k0"));
+    // The record is gone: the join gets BAD (it fails), never "not Enterprise"
+    CHECK(plain_erase("wifi_e0"));
+    CHECK(wifi_cred_eap_record("campnet", rec, sizeof(rec)) == WIFI_EAP_REC_BAD && rec[0] == '\0');
+    CHECK(wifi_cred_clear());
+}
+
 // #240: the Wi-Fi screen gets the SSIDs only, read under the list lock; no password byte reaches its buffer
 static void names_only(void) {
     char out[WIFI_SAVED_MAX][33];
@@ -367,6 +456,8 @@ int main(void) {
 
     secrets_and_defaults();
     saved_networks();
+    eap_networks();
+    eap_damage();
     names_only();
     names_busy();
     apply_outside_lock();

@@ -84,3 +84,14 @@ void wifi_list_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p))
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left);
 // Makes a saved network the pair in use (front of the list); false if it is not saved. No change if it is already.
 bool wifi_cred_activate(char const *ssid);
+
+// The Enterprise record of a saved network (#496), the text wifi_eap_encode makes: kept as a secret per record slot
+// (wifi_e0..wifi_e4), moving with its entry. Opaque here. Called with saved_lock held, like the rest.
+// Saves the entry at the front (replacing a PSK or Enterprise entry of that SSID, the oldest goes when full), writes the
+// record, then makes the pair in use that SSID. False when any step failed (the pair in use is then unchanged).
+bool wifi_cred_save_eap(char const *ssid, char const *rec);
+// NONE: not saved, or a PSK/open network. OK: rec holds the record. BAD: saved as Enterprise but the record is missing,
+// empty or could not be read (no memory included): the join fails, it is never treated as open. rec is "" unless OK;
+// the caller wipes it. Needs wifi_list_bind_alloc (the list copy is on the heap, this runs on the c6wifi task).
+typedef enum { WIFI_EAP_REC_NONE, WIFI_EAP_REC_OK, WIFI_EAP_REC_BAD } wifi_eap_rec_t;
+wifi_eap_rec_t wifi_cred_eap_record(char const *ssid, char *rec, size_t cap);

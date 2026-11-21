@@ -54,6 +54,10 @@ static void parse_join(char const *args, wifi_cmd_t *out) {
     out->ssid[len] = '\0';
 }
 
+static void fill_eap(char const *args, wifi_cmd_t *out) {
+    out->eap_args = args[3] ? args + 4 : ""; // args is "eap" or "eap <rest>"
+}
+
 static void fill_switch(char const *args, wifi_cmd_t *out) {
     out->on = args[1] == 'n';
 }
@@ -90,11 +94,13 @@ static rule_t const rules[] = {
     {"--clear", false, WIFI_CMD_CLEAR, NULL},
     {"reconnect", false, WIFI_CMD_RECONNECT, NULL},
     {"scan", false, WIFI_CMD_SCAN, NULL},
+    {"eap", true, WIFI_CMD_EAP, fill_eap},
 };
 
 void wifi_cmd_parse(char const *args, wifi_cmd_t *out) {
     memset(out, 0, sizeof(*out));
-    out->pass = "";
+    out->pass     = "";
+    out->eap_args = "";
     if (!*args) {
         out->kind = WIFI_CMD_STATUS;
         return;

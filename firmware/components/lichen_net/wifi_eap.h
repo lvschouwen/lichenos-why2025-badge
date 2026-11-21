@@ -46,3 +46,46 @@ size_t wifi_eap_encode(wifi_eap_t const *e, char *out, size_t cap);
 // Parses and validates a record; on any failure *e is zeroed and false is returned
 bool   wifi_eap_decode(char const *rec, wifi_eap_t *e);
 void   wifi_eap_wipe(wifi_eap_t *e);
+
+// ---- joining (step 2) ----------------------------------------------------------------------------------------------
+
+// The CA file is read whole and sent to the C6 in one RPC: a single root or a short chain. A larger file is refused (the
+// join fails), it never goes out cut. The PEM is sent with its NUL (mbedTLS parses PEM only when the length counts it).
+#define WIFI_EAP_CA_FILE_MAX 4096
+// The CA text is PEM: a certificate block, not DER binary and not an empty or unrelated file
+bool wifi_eap_pem_ok(char const *buf, size_t len);
+
+// Why an Enterprise join did not start (never an authentication failure: those come from the C6 as disconnect reasons)
+typedef enum {
+    WIFI_EAP_FAIL_NONE,
+    WIFI_EAP_FAIL_C6_OLD, // an esp_eap_client_* RPC failed: the C6 image has no 802.1X (or an older RPC set)
+    WIFI_EAP_FAIL_NOMEM,  // the C6 or the P4 ran out of memory
+    WIFI_EAP_FAIL_CA_FILE, // the CA path is set but the file is missing, unreadable, too large or not PEM
+    WIFI_EAP_FAIL_CA_BAD, // the C6 refused the CA certificate
+    WIFI_EAP_FAIL_CRED,   // the saved credential record is missing or damaged
+} wifi_eap_fail_t;
+typedef enum { WIFI_EAP_STEP_OTHER, WIFI_EAP_STEP_CA } wifi_eap_step_t;
+// Maps the esp_err_t of one EAP RPC (0 = ESP_OK): out of memory stays out of memory, a refused CA is a bad CA, anything
+// else (an RPC the C6 does not know answers with an error too) is "update the C6"
+wifi_eap_fail_t wifi_eap_rpc_fail(int err, wifi_eap_step_t step);
+// The reason as the console and the screen word it
+char const *wifi_eap_fail_text(wifi_eap_fail_t why);
+
+// wifi.eap_ca: what the applied configuration does about the server certificate
+typedef enum { WIFI_EAP_CA_NONE, WIFI_EAP_CA_VERIFIED, WIFI_EAP_CA_UNVERIFIED } wifi_eap_ca_state_t;
+// none: the driver is not set for an Enterprise network (e is NULL); else verified with a CA, unverified without
+wifi_eap_ca_state_t wifi_eap_ca_state(wifi_eap_t const *e);
+
+// wifi.auth: the applied authmode (wifi_auth_mode_t) as a small enum; known false = not connected
+typedef enum {
+    WIFI_AUTH_CLASS_NONE, WIFI_AUTH_CLASS_OPEN, WIFI_AUTH_CLASS_WEP, WIFI_AUTH_CLASS_WPA, WIFI_AUTH_CLASS_WPA2,
+    WIFI_AUTH_CLASS_WPA_WPA2, WIFI_AUTH_CLASS_WPA3, WIFI_AUTH_CLASS_WPA2_WPA3, WIFI_AUTH_CLASS_WPA_ENT,
+    WIFI_AUTH_CLASS_WPA2_ENT, WIFI_AUTH_CLASS_WPA3_ENT, WIFI_AUTH_CLASS_OTHER,
+    WIFI_AUTH_CLASS_COUNT
+} wifi_auth_class_t;
+wifi_auth_class_t wifi_auth_class(int authmode, bool known);
+
+// `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password...>` (the text after
+// "eap "): "-" is an empty identity or no CA; the password is the rest of the line and may hold spaces. ssid gets 33 bytes.
+typedef enum { WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID } wifi_eap_parse_t;
+wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t *e);

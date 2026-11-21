@@ -50,6 +50,10 @@ typedef enum {
     REG_ID_WIFI_PS       = 0x0304, // wifi.ps        ENUM none / min (wifi_ps_type_t), settable, not saved
     REG_ID_WIFI_IP6      = 0x0305, // wifi.ip6       ENUM none / linklocal / global (#497), RO, P4-local: the netif, never the C6; a ULA counts as global
 
+    // Enterprise (#496), both RO and P4-local (the P4 holds the credential and the last applied state, never the C6)
+    REG_ID_WIFI_AUTH   = 0x0306, // wifi.auth    ENUM none / open / wep / wpa / wpa2 / wpa_wpa2 / wpa3 / wpa2_wpa3 / wpa_ent / wpa2_ent / wpa3_ent / other: the connected AP's authmode (esp_wifi_sta_get_ap_info, read every 5 s)
+    REG_ID_WIFI_EAP_CA = 0x0307, // wifi.eap_ca  ENUM none / verified / unverified: none = not set for an Enterprise network
+
     // 0x04 Bluetooth
     REG_ID_BT_STATE = 0x0400, // bt.state  ENUM esp_bt_controller_status_t (idle / inited / enabled)
 

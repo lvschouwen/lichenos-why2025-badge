@@ -136,6 +136,10 @@ static reg_entry_t const ip6 = {.id = REG_ID_WIFI_IP6, .type = REG_T_ENUM, .flag
 static void test_ip6_key(void) {
     CHECK(reg_wifi_is_key(&country) && reg_wifi_is_key(&ps));
     CHECK(!reg_wifi_is_key(&ip6));
+    // #496: the applied authmode and the CA state are the c6wifi task's cache, not a C6 driver read-back
+    reg_entry_t const auth = {.id = REG_ID_WIFI_AUTH, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.auth"};
+    reg_entry_t const ca   = {.id = REG_ID_WIFI_EAP_CA, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.eap_ca"};
+    CHECK(!reg_wifi_is_key(&auth) && !reg_wifi_is_key(&ca));
 }
 
 static void test_views(void) {

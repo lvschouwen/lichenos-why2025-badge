@@ -15,14 +15,34 @@
 // Zero is the PSK / open kind, so a zeroed or older-layout entry stays what it was.
 enum { WIFI_SAVED_PSK = 0, WIFI_SAVED_EAP = 1 };
 
+typedef struct {
+    char    ssid[33];
+    char    pass[64]; // empty for an Enterprise entry, whatever the store holds for it
+    uint8_t kind;     // WIFI_SAVED_PSK or WIFI_SAVED_EAP
+    uint8_t rec;      // EAP: which record slot (0..WIFI_SAVED_MAX-1) holds its credential; it stays with the entry
+} wifi_saved_entry_t;
+
 typedef struct wifi_saved_s {
-    size_t n;
-    struct {
-        char    ssid[33];
-        char    pass[64];
-        uint8_t kind; // WIFI_SAVED_PSK or WIFI_SAVED_EAP
-    } e[WIFI_SAVED_MAX];
+    size_t             n;
+    wifi_saved_entry_t e[WIFI_SAVED_MAX];
 } wifi_saved_t;
+
+// What an Enterprise entry's password slot holds in the store: never a valid PSK (8-63 bytes), so an entry whose kind
+// key got lost reads back as an invalid slot and is dropped, never as an open network
+#define WIFI_SAVED_EAP_MARK "!eap"
+
+// The persisted kind key k<i>: absent or 0 = PSK / open, 1 + rec = Enterprise with its record in slot rec
+uint8_t wifi_saved_kind_code(wifi_saved_entry_t const *e);
+// Accepts or refuses one slot read from the store (e->ssid and e->pass filled, have_pass = the password key was there)
+// and sets kind and rec from the code. An Enterprise slot needs no password (it is cleared); a PSK slot needs a valid
+// one. An unknown code, or a record slot another entry took already (bit set in *used), refuses. Fails closed.
+bool wifi_saved_slot_parse(wifi_saved_entry_t *e, bool have_pass, uint8_t code, uint8_t *used);
+// Bit rec set for every Enterprise entry's record slot
+uint8_t wifi_saved_rec_mask(wifi_saved_t const *l);
+// The record slot of the saved Enterprise network, -1 when it is not saved or not Enterprise
+int wifi_saved_eap_rec(wifi_saved_t const *l, char const *ssid);
+// Moves the entry at index to the front unchanged (kind and record slot stay); false for an index outside the list
+bool wifi_saved_promote(wifi_saved_t *l, int index);
 
 // Index of the SSID in the list, -1 if it is not saved
 int  wifi_saved_find(wifi_saved_t const *l, char const *ssid);

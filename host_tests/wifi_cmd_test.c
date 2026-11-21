@@ -125,7 +125,17 @@ static void join(void) {
     CHECK(d.pass == line + 4);
 }
 
+// #496: `eap` is the Enterprise command, taken like ps and tx; the line after it goes to wifi_eap_parse_line
+static void eap(void) {
+    wifi_cmd_t c = parse("eap camp peap mschapv2 - user - secret pass");
+    CHECK(c.kind == WIFI_CMD_EAP && strcmp(c.eap_args, "camp peap mschapv2 - user - secret pass") == 0);
+    CHECK(parse("eap").kind == WIFI_CMD_EAP && parse("eap").eap_args[0] == '\0');
+    CHECK(parse("eapx hunter22").kind == WIFI_CMD_JOIN); // only the whole word
+    CHECK(parse("eap ").kind == WIFI_CMD_EAP);
+}
+
 int main(void) {
+    eap();
     whole_strings();
     whole_string_only();
     ps();
