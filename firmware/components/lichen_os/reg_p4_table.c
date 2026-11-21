@@ -1,6 +1,16 @@
 #include "reg_p4.h"
 
 #include "backlight_level.h"
+#include "switch_reg.h"
+
+static char const *const r16_names[]         = {"unknown", "fitted", "absent"};
+
+// bl.r16 (#501): the saved detection of the R16 bridge, read from the backlight driver's settings
+static reg_status_t r16_get(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    out->u = sw_r16_get();
+    return REG_OK;
+}
 
 static char const *const bl_idle_names[]     = {"bright", "dim", "off"};
 static char const *const bl_override_names[] = {"none", "thermal", "flashlight", "pulse"};
@@ -33,6 +43,8 @@ reg_entry_t const reg_p4_table[] = {
      .enum_names = bl_idle_names, .get_applied = reg_p4_bl_mode_get},
     {.id = REG_ID_BL_OVERRIDE, .type = REG_T_ENUM, .flags = REG_F_RO | REG_F_CFG, .name = "bl.override", .min = 0, .max = 3,
      .enum_names = bl_override_names, .get_applied = reg_p4_bl_mode_get},
+    {.id = REG_ID_BL_R16, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "bl.r16", .min = 0, .max = 2,
+     .enum_names = r16_names, .get_applied = r16_get, .saved_key = BACKLIGHT_KEY_R16},
     RADIO(REG_ID_LORA_FREQ, REG_T_U32, "lora.freq", "Hz"),
     RADIO(REG_ID_LORA_BW, REG_T_U32, "lora.bw", "Hz"),
     RADIO(REG_ID_LORA_SF, REG_T_U8, "lora.sf", NULL),

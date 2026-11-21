@@ -54,8 +54,7 @@ static void test_table(void) {
 static void test_cfg_flags(void) {
     static char const *const cfg[] = {"ui.saver", "ui.saver_style", "ui.lock", "ui.idle_dim", "ui.idle_off", "ui.kbd_pulse", "ui.layout", "app.bg_off"};
     static char const *const live[] = {"radio.wifi", "radio.lora", "radio.bt", "radio.airplane", "haptics.on", "haptics.strength",
-                                       "led.mode", "led.on", "ota.server", "ota.autooff", "sens.boot", "sens.imu_period",
-                                       "sens.env_period", "bl.r16"};
+                                       "led.mode", "led.on", "ota.server", "ota.autooff"};
     for (size_t i = 0; i < sizeof(cfg) / sizeof(cfg[0]); i++) {
         CHECK(find(cfg[i]) && (find(cfg[i])->flags & REG_F_CFG));
     }
@@ -106,7 +105,6 @@ static void test_refused(void) {
     CHECK(fw_set("ui.saver 2") != RC_OK && sw_stub.cfg_puts == 0);
     CHECK(fw_set("ui.idle_dim 256") != RC_OK && sw_stub.cfg_puts == 0);
     CHECK(fw_set("ui.layout grid") == RC_RO && sw_stub.cfg_puts == 0); // the home rebuilds from Settings only
-    CHECK(fw_set("sens.imu_period 50") == RC_RO && fw_set("sens.boot off") == RC_RO && fw_set("bl.r16 fitted") == RC_RO);
 }
 
 static char last_hook_key[16];
@@ -133,10 +131,6 @@ static void test_ui_policy(void) {
 
 static void test_new_ro_keys(void) {
     reg_value_t v;
-    CHECK(reg_get(find("sens.imu_period"), &v) == REG_OK && v.u == 100);
-    CHECK(reg_get(find("sens.env_period"), &v) == REG_OK && v.u == 1000);
-    CHECK(reg_get(find("bl.r16"), &v) == REG_OK && v.u == 2);
-    CHECK(reg_get(find("sens.boot"), &v) == REG_OK && v.u == 1);
     sw_stub.bg_off = 2;
     CHECK(reg_get(find("app.bg_off"), &v) == REG_OK && v.u == 2);
     CHECK(fw_set("app.bg_off 0") == RC_RO && sw_stub.bg_off == 2); // `fw app background` owns the list

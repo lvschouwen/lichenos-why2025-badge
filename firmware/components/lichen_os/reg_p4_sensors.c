@@ -1,4 +1,5 @@
 #include "reg_p4.h"
+#include "switch_reg.h"
 #include "ui_service.h"
 
 // The P4's registry keys of domain 0x13: sens.* (#318, row file split #315): the BMI270 and BME690 configuration read
@@ -26,6 +27,12 @@ static char const *const filter_size[] = {"off", "1", "3", "7", "15", "31", "63"
 // The domain's low byte is the sensors_cfg_key_t. live asks the sensors task and waits for it (up to its CFG_WAIT_MS)
 static reg_status_t sens_read(reg_entry_t const *e, bool live, reg_value_t *out) {
     uint32_t v = 0;
+    if (e->id >= REG_ID_SENS_BOOT) { // the service's own settings, no chip behind them (#501): never waits
+        uint32_t imu, env;
+        sw_sensors_periods(&imu, &env);
+        out->u = e->id == REG_ID_SENS_BOOT ? sw_sensors_boot_get() : e->id == REG_ID_SENS_IMU_PERIOD ? imu : env;
+        return REG_OK;
+    }
     if (!sensors_cfg_get(e->id & 0xFFu, live, &v)) {
         return REG_FAILED;
     }
@@ -68,6 +75,12 @@ static reg_entry_t const rows[] = {
     {.id = REG_ID_SENS_HEAT_TEMP, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.heat_temp", .unit = "C",
      .get_applied = sens_get},
     {.id = REG_ID_SENS_HEAT_MS, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.heat_ms", .unit = "ms",
+     .get_applied = sens_get},
+    {.id = REG_ID_SENS_BOOT, .type = REG_T_BOOL, .flags = REG_F_RO, .name = "sens.boot", .get_applied = sens_get,
+     .saved_key = "sens_boot"},
+    {.id = REG_ID_SENS_IMU_PERIOD, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.imu_period", .unit = "ms",
+     .get_applied = sens_get},
+    {.id = REG_ID_SENS_ENV_PERIOD, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.env_period", .unit = "ms",
      .get_applied = sens_get},
 };
 

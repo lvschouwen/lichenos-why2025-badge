@@ -150,6 +150,12 @@ static void test_cfg_flag(void) {
         reg_entry_t const *e = reg_p4_find_name(applied[i]);
         CHECK(e && !(e->flags & REG_F_CFG));
     }
+    // The keys of #501 in the domains that serve them, read-only, and the getters answer (stubs: 100/1000 ms, boot on, absent)
+    reg_value_t g;
+    CHECK(REG_ID_DOMAIN(REG_ID_BL_R16) == 0x10 && REG_ID_DOMAIN(REG_ID_SENS_IMU_PERIOD) == 0x13);
+    CHECK(reg_get(reg_p4_find_name("bl.r16"), &g) == REG_OK && g.u == 2);
+    CHECK(reg_get(reg_p4_find_name("sens.imu_period"), &g) == REG_OK && g.u == 100);
+    CHECK(reg_p4_find_name("sens.boot") && (reg_p4_find_name("sens.boot")->flags & REG_F_RO));
     // The `fw get` row says so in its last column, ahead of any other note
     reg_view_t v = {.has_applied = true};
     char       row[160];
@@ -556,7 +562,7 @@ static void test_cached_read_never_asks_live(void) {
     for (size_t i = 0; i < reg_p4_total(); i++) {
         reg_p4_get(reg_p4_nth(i), false, &v);
     }
-    CHECK(sens_reads == reg_p4_sensors.count); // every sens.* key reached its driver's cache
+    CHECK(sens_reads == reg_p4_sensors.count - 3); // every chip key reached its driver's cache (the 3 service keys have no chip)
     CHECK(sens_live_asks == 0);
     CHECK(reg_p4_get(reg_p4_find_name("sens.acc_odr"), true, &v) == REG_FAILED); // the stub has no chip
     CHECK(sens_live_asks == 1);                                                   // the console asks the chip

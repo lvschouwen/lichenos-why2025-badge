@@ -144,11 +144,9 @@ static void ask_live(reg_entry_t const *const *es, size_t n, bool *no_link) {
 
 static bool saved_of(reg_entry_t const *e, reg_value_t *v) {
     uint8_t d, k;
-    if (REG_ID_DOMAIN(e->id) == 0x16) {
-        return sw_saved(e->id, e->saved_key, &v->u); // the switches (#501)
-    }
     if (e->id != REG_ID_BL_DISPLAY && e->id != REG_ID_BL_KEYBOARD) {
-        return false;
+        // the switches (#501) and the keys with a saved setting (sens.boot, bl.r16)
+        return (REG_ID_DOMAIN(e->id) == 0x16 || e->saved_key) && sw_saved(e->id, e->saved_key, &v->u);
     }
     backlight_get(&d, &k);
     v->u = e->id == REG_ID_BL_DISPLAY ? d : k;

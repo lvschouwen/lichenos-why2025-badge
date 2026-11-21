@@ -176,8 +176,10 @@ static void test_reg_ids(void) {
     // The P4-side switches domain (#501): ids are append-only too, and the cfg flag is a bit no older flag uses
     CHECK(REG_ID_RADIO_WIFI == 0x1600 && REG_ID_RADIO_AIRPLANE == 0x1603 && REG_ID_HAPTICS_ON == 0x1604 &&
           REG_ID_LED_MODE == 0x1606 && REG_ID_OTA_SERVER == 0x1607 && REG_ID_UI_SAVER == 0x1609 &&
-          REG_ID_UI_LAYOUT == 0x160F && REG_ID_SENS_BOOT == 0x1610 && REG_ID_SENS_IMU_PERIOD == 0x1611 &&
-          REG_ID_SENS_ENV_PERIOD == 0x1612 && REG_ID_BL_R16 == 0x1613);
+          REG_ID_UI_LAYOUT == 0x160F && REG_ID_APP_BG_OFF == 0x1614 && REG_ID_LED_ON == 0x1615);
+    // The keys that moved to the domain that serves them: the high byte names it
+    CHECK(REG_ID_BL_R16 == 0x1002 && REG_ID_SENS_BOOT == 0x130F && REG_ID_SENS_IMU_PERIOD == 0x1310 &&
+          REG_ID_SENS_ENV_PERIOD == 0x1311);
     CHECK(REG_F_RO == 0x01 && REG_F_TX == 0x02 && REG_F_REBOOT == 0x04 && REG_F_CFG == 0x08);
     CHECK(REG_ID_BT_STATE == 0x0400 && REG_ID_C6_REG_CAPS == 0x0F00);
     CHECK(REG_CAP_BL == 1u << 1 && REG_CAP_LORA == 1u << 2 && REG_CAP_BT == 1u << 4 && REG_CAP_C6 == 1u << 15);

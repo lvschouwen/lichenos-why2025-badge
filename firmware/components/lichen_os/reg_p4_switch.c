@@ -16,7 +16,6 @@ static char const *const led_names[]      = {"auto", "off", "on", "blink"}; // l
 static char const *const style_names[]    = {"station", "digital"};
 static char const *const pulse_names[]    = {"off", "dms", "all"};
 static char const *const layout_names[]   = {"tiles", "grid"};
-static char const *const r16_names[]      = {"unknown", "fitted", "absent"};
 
 #define RADIO_ROW(id_, name_)                                                                                          \
     {.id = (id_), .type = REG_T_BOOL, .name = (name_), .get_applied = sw_get, .set = sw_set}
@@ -38,17 +37,8 @@ static reg_status_t sw_get(reg_entry_t const *e, reg_value_t *out) {
         case REG_ID_LED_MODE: v = sw_led_mode_get(); break;
         case REG_ID_OTA_SERVER: v = sw_ota_get(); break;
         case REG_ID_OTA_AUTOOFF: v = sw_ota_autooff_get(); break;
-        case REG_ID_SENS_BOOT: v = sw_sensors_boot_get(); break;
-        case REG_ID_BL_R16: v = sw_r16_get(); break;
         case REG_ID_APP_BG_OFF: v = sw_bg_off_count(); break;
         case REG_ID_LED_ON: v = sw_led_get(); break;
-        case REG_ID_SENS_IMU_PERIOD:
-        case REG_ID_SENS_ENV_PERIOD: {
-            uint32_t imu, env;
-            sw_sensors_periods(&imu, &env);
-            v = e->id == REG_ID_SENS_IMU_PERIOD ? imu : env;
-            break;
-        }
         default: // the ui.* rows: the saved setting
             if (!e->saved_key || !sw_cfg_get(e->saved_key, &v)) {
                 return REG_FAILED;
@@ -77,10 +67,6 @@ static reg_status_t sw_set(reg_entry_t const *e, reg_value_t const *v) {
     return ok ? REG_OK : REG_FAILED;
 }
 
-#define RO_ROW(id_, type_, name_, unit_, names_, max_)                                                                 \
-    {.id = (id_), .type = (type_), .flags = REG_F_RO, .name = (name_), .unit = (unit_), .max = (max_),                 \
-     .enum_names = (names_), .get_applied = sw_get}
-
 static reg_entry_t const rows[] = {
     RADIO_ROW(REG_ID_RADIO_WIFI, "radio.wifi"),
     RADIO_ROW(REG_ID_RADIO_LORA, "radio.lora"),
@@ -105,13 +91,8 @@ static reg_entry_t const rows[] = {
     UI_ROW(REG_ID_UI_IDLE_OFF, REG_T_U8, "ui.idle_off", "10s", "idle_off", 255, NULL, true),
     UI_ROW(REG_ID_UI_KBD_PULSE, REG_T_ENUM, "ui.kbd_pulse", NULL, "kbd_pulse", 2, pulse_names, true),
     UI_ROW(REG_ID_UI_LAYOUT, REG_T_ENUM, "ui.layout", NULL, "home_layout", 1, layout_names, false),
-    {.id = REG_ID_SENS_BOOT, .type = REG_T_BOOL, .flags = REG_F_RO, .name = "sens.boot", .get_applied = sw_get,
-     .saved_key = "sens_boot"},
-    RO_ROW(REG_ID_SENS_IMU_PERIOD, REG_T_U32, "sens.imu_period", "ms", NULL, 0),
-    RO_ROW(REG_ID_SENS_ENV_PERIOD, REG_T_U32, "sens.env_period", "ms", NULL, 0),
     {.id = REG_ID_APP_BG_OFF, .type = REG_T_U8, .flags = REG_F_RO | REG_F_CFG, .name = "app.bg_off",
      .get_applied = sw_get}, // the list is a string in the settings, only its size is a number
-    RO_ROW(REG_ID_BL_R16, REG_T_ENUM, "bl.r16", NULL, r16_names, 2),
 };
 
 reg_p4_dom_t const reg_p4_switch = {.rows = rows, .count = sizeof(rows) / sizeof(rows[0])};

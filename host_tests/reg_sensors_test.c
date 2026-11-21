@@ -33,6 +33,15 @@ bool sensors_cfg_get(unsigned key, bool live, uint32_t *out) {
     return sensors_cfg_value(&cfg, key, out);
 }
 
+bool sw_sensors_boot_get(void) {
+    return true;
+}
+
+void sw_sensors_periods(uint32_t *imu_ms, uint32_t *env_ms) {
+    *imu_ms = 100;
+    *env_ms = 1000;
+}
+
 static char const *show(char const *name, char *buf, size_t cap) {
     reg_entry_t const *e = reg_find_name(reg_p4_sensors.rows, reg_p4_sensors.count, name);
     reg_value_t        v;
@@ -44,15 +53,19 @@ static char const *show(char const *name, char *buf, size_t cap) {
 }
 
 static void test_table(void) {
-    CHECK(reg_p4_sensors.count == SENSORS_CFG_KEYS);
+    CHECK(reg_p4_sensors.count == SENSORS_CFG_KEYS + 3); // + sens.boot, imu_period, env_period (#501)
     CHECK(reg_table_check(reg_p4_sensors.rows, reg_p4_sensors.count) == reg_p4_sensors.count);
     for (size_t i = 0; i < reg_p4_sensors.count; i++) {
         reg_entry_t const *e = &reg_p4_sensors.rows[i];
         CHECK(REG_ID_DOMAIN(e->id) == 0x13);
-        CHECK((e->flags & REG_F_RO) && !e->set && !e->saved_key);
-        CHECK((e->id & 0xFFu) == i); // the low byte is sensors_cfg_key_t
+        CHECK((e->flags & REG_F_RO) && !e->set);
+        if (i < SENSORS_CFG_KEYS) {
+            CHECK(!e->saved_key && (e->id & 0xFFu) == i); // the low byte is sensors_cfg_key_t
+        }
         CHECK(strncmp(e->name, "sens.", 5) == 0);
     }
+    // The service's own keys follow the chip keys and read without a chip
+    CHECK(REG_ID_SENS_BOOT == 0x1300 + SENSORS_CFG_KEYS && REG_ID_SENS_ENV_PERIOD == REG_ID_SENS_BOOT + 2);
     CHECK(REG_ID_SENS_HEAT_MS == 0x1300 + SENSORS_CFG_HEAT_MS);
     CHECK(REG_ID_SENS_ENV_FILTER == 0x1300 + SENSORS_CFG_ENV_FILTER);
 }
@@ -62,8 +75,11 @@ static void test_missing_chip(void) {
     memset(&cfg, 0, sizeof cfg); // neither chip read: every key fails, none reads as 0 / "reserved"
     for (size_t i = 0; i < reg_p4_sensors.count; i++) {
         reg_value_t v;
-        CHECK(reg_get(&reg_p4_sensors.rows[i], &v) == REG_FAILED);
+        CHECK(reg_get(&reg_p4_sensors.rows[i], &v) == (i < SENSORS_CFG_KEYS ? REG_FAILED : REG_OK));
     }
+    char p[32];
+    CHECK(strcmp(show("sens.imu_period", p, sizeof p), "100") == 0 && strcmp(show("sens.env_period", p, sizeof p), "1000") == 0);
+    CHECK(strcmp(show("sens.boot", p, sizeof p), "on") == 0);
     cfg.imu_ok = true; // the IMU alone: the BME690 keys still fail
     CHECK(show("sens.acc_odr", b, sizeof b) != NULL);
     CHECK(show("sens.env_os_t", b, sizeof b) == NULL);

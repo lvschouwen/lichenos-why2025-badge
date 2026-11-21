@@ -35,7 +35,7 @@ extern reg_p4_dom_t const reg_p4_display;  // 0x12 disp.*     reg_p4_display.c
 extern reg_p4_dom_t const reg_p4_sensors;  // 0x13 sens.*     reg_p4_sensors.c
 extern reg_p4_dom_t const reg_p4_misc;     // 0x14 haptics.*, led.*, tz, hold.*   reg_p4_misc.c
 extern reg_p4_dom_t const reg_p4_settings; // 0x15 settings.* reg_p4_settings.c
-extern reg_p4_dom_t const reg_p4_switch;   // 0x16 radio.*, haptics.*, led.mode, ota.*, ui.*, ...   reg_p4_switch.c (#501)
+extern reg_p4_dom_t const reg_p4_switch;   // 0x16 radio.*, haptics.*, led.*, ota.*, ui.*, app.*   reg_p4_switch.c (#501)
 // The domains in iteration order: [0] the core table, [i] for i = 1..6 holds ids of domain 0x10 + i
 #define REG_P4_DOMS 7
 extern reg_p4_dom_t const *const reg_p4_doms[REG_P4_DOMS];

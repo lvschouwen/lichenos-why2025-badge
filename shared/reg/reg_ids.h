@@ -22,7 +22,7 @@
 //   0x13 sens.*      sensors (#318); reg_p4_sensors.c
 //   0x14 (misc)      haptics.*, led.*, tz, hold.* (GPIO holds) (#319); reg_p4_misc.c
 //   0x15 settings.*  write status of the settings store (#320); reg_p4_settings.c
-//   0x16 (switches)  radio.*, haptics.*, led.mode, ota.*, ui.*, sens.boot/period, bl.r16 (#501); reg_p4_switch.c
+//   0x16 (switches)  radio.*, haptics.*, led.*, ota.*, ui.*, app.* (#501); reg_p4_switch.c
 //   0x17-0x1F    reserved for further P4-side domains
 // Each P4-side domain has its own row file under firmware/components/lichen_os/ and appends its ids here in its block.
 typedef enum {
@@ -59,6 +59,7 @@ typedef enum {
     // 0x10 P4 backlight state (#310): the P4 driver's mode, served by the P4, never on the wire
     REG_ID_BL_IDLE     = 0x1000, // bl.idle      ENUM, RO: bright / dim / off (the screen timeout)
     REG_ID_BL_OVERRIDE = 0x1001, // bl.override  ENUM, RO: none / thermal / flashlight / pulse
+    REG_ID_BL_R16      = 0x1002, // bl.r16       ENUM, RO: the saved R16 bridge detection (unknown / fitted / absent) (#501)
 
     // 0x11 psram (#316): the MSPI controller's registers as they are now, served by the P4, never on the wire; all RO
     // (`fw psram dl` stays the only mutator). Clock = source / core divider / bus divider.
@@ -104,7 +105,7 @@ typedef enum {
     REG_ID_SETTINGS_LAST_ERR   = 0x1501, // settings.last_err    STR, RO: last failure "<key> 0x<esp_err>", key cut to fit 15 chars, no namespace
 
     // 0x16 the OS switches and the settings it keeps (#501). The radio, haptics, led, ota and ui rows are settable; the
-    // ui.* rows are configured-only (REG_F_CFG): the saved setting, as the shell reads it. sens.* and bl.r16 are RO.
+    // ui.* rows are configured-only (REG_F_CFG): the saved setting, as the shell reads it.
     REG_ID_RADIO_WIFI      = 0x1600, // radio.wifi       BOOL: the Wi-Fi switch as applied (a hold from the thermal watchdog reads off)
     REG_ID_RADIO_LORA      = 0x1601, // radio.lora       BOOL: the LoRa switch as applied
     REG_ID_RADIO_BT        = 0x1602, // radio.bt         BOOL: the Bluetooth switch as applied (no effect until #503)
@@ -121,10 +122,6 @@ typedef enum {
     REG_ID_UI_IDLE_OFF     = 0x160D, // ui.idle_off      U8 x10 s, CFG: screen off after (0 = never)
     REG_ID_UI_KBD_PULSE    = 0x160E, // ui.kbd_pulse     ENUM off / dms / all, CFG, RO: the message light
     REG_ID_UI_LAYOUT       = 0x160F, // ui.layout        ENUM tiles / grid, CFG, RO: the home layout
-    REG_ID_SENS_BOOT       = 0x1610, // sens.boot        BOOL, RO: the service starts at boot (`fw sensors boot`)
-    REG_ID_SENS_IMU_PERIOD = 0x1611, // sens.imu_period  U32 ms, RO: IMU sampling period
-    REG_ID_SENS_ENV_PERIOD = 0x1612, // sens.env_period  U32 ms, RO: environment sampling period
-    REG_ID_BL_R16          = 0x1613, // bl.r16           ENUM, RO: R16 bridge detection saved (unknown / fitted / absent)
     REG_ID_APP_BG_OFF      = 0x1614, // app.bg_off       U8, RO, CFG: how many apps have their background part off (#232, #233; the list is `fw app background`)
     REG_ID_LED_ON          = 0x1615, // led.on           BOOL: the status LED setting (Settings, saved; led.mode is the console override)
 
@@ -145,6 +142,10 @@ typedef enum {
     REG_ID_SENS_HEAT_ON    = 0x130C, // sens.heat_on     BOOL, RO: gas heater enabled
     REG_ID_SENS_HEAT_TEMP  = 0x130D, // sens.heat_temp   U32 C, RO: heater target, from the chip's resistance register
     REG_ID_SENS_HEAT_MS    = 0x130E, // sens.heat_ms     U32 ms, RO: heater duration
+    // Not chip registers (#501): the ids after sensors_cfg_key_t, read from the sensors service
+    REG_ID_SENS_BOOT       = 0x130F, // sens.boot        BOOL, RO: the service starts at boot (`fw sensors boot`)
+    REG_ID_SENS_IMU_PERIOD = 0x1310, // sens.imu_period  U32 ms, RO: IMU sampling period
+    REG_ID_SENS_ENV_PERIOD = 0x1311, // sens.env_period  U32 ms, RO: environment sampling period
 } reg_id_t;
 
 #define REG_ID_DOMAIN(id) ((unsigned)(id) >> 8)
