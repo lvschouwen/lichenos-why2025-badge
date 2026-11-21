@@ -13,11 +13,11 @@ void ota_server_start(void);
 bool ota_server_enabled(void);
 // No token read or saved anywhere this boot (#116: no /storage and NVS down): the server does not listen this boot
 bool ota_server_refused(void);
-void ota_server_set_enabled(bool on); // on also starts the auto-off time again
+bool ota_server_set_enabled(bool on); // on also starts the auto-off time again; false when not saved
 // Optional auto-off (#110): closes the server this many minutes after boot or after it was switched on, for this boot
 // only (the setting stays on). 0, the default, never closes. Saved in NVS; a new value counts from now.
 uint8_t ota_server_auto_off(void);
-void    ota_server_set_auto_off(uint8_t minutes);
+bool    ota_server_set_auto_off(uint8_t minutes); // false when not saved
 // The auto-off closed it this boot (ota_server_enabled() is false then)
 bool    ota_server_auto_closed(void);
 

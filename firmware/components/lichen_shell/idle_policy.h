@@ -23,6 +23,8 @@ typedef struct {
 #define IDLE_LOCK_KEY  "lock"
 // The saver's style (#119), u8: saver_style_t in saver_station.h, the station clock by default
 #define IDLE_SAVER_STYLE_KEY "saver_style"
+// The registry saved the setting `key` (#501): only the pocket lock switched off lifts a lock that is showing
+bool idle_key_lifts_lock(char const *key, bool lock_on); // key "lock" with the setting now off
 
 // What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
 // the clock starts again, so the timeout counts in full from when it ends. card (a test card is up, #355: `fw ui card` or

@@ -357,11 +357,11 @@ class HardAndConf(unittest.TestCase):
             self.assertFalse(forbidden(sym), sym)
 
     def test_only_the_console_paths_override_a_thermal_hold(self):
-        """#348: lichen_radio_set on lifts a thermal hold. Only the console's paths may call it (`fw lora on|off` and
-        `fw wifi on|off` in main.c, the Wi-Fi service through main's hook; since #501 both reach it through the registry's
-        radio.* rows, so switch_reg.c, the console's `fw set`, is the one call); the shell's rows flip the person's switch
-        with lichen_radio_switch_set, so a hot badge never transmits on a row press. lichen_reg_set_u32 (the registry's set,
-        which ends in lichen_radio_set for the radio.* keys) is scanned the same way."""
+        """#348: lichen_radio_set on lifts a thermal hold, so only the console's paths may call it.
+        Since #501 `fw lora on|off` and `fw wifi on|off` (main.c) reach it through the registry's radio.* rows:
+        main.c calls lichen_reg_set_u32 and switch_reg.c holds the one lichen_radio_set call. The scan therefore looks
+        for both names. The shell's rows flip the person's switch with lichen_radio_switch_set instead, so a hot badge
+        never transmits on a row press."""
         root = os.path.join(os.path.dirname(cl.__file__), "..")
         allowed = {"firmware/main/main.c", "firmware/components/lichen_os/lichen_radio.c",
                    "firmware/components/lichen_os/switch_reg.c", "firmware/components/lichen_os/lichen_reg.c",

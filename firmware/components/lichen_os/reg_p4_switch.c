@@ -7,7 +7,8 @@
 // through switch_reg.h, so the host test links this file with recording stubs. Keep ESP calls out of it.
 //
 // Settable rows end in the owner's own setter (the one its console command calls). The radio rows go through
-// lichen_radio_set (sw_radio_put), never around the owners' hooks (#108). The ui.* rows are configured-only (REG_F_CFG):
+// lichen_radio_set (sw_radio_put), never around the owners' hooks (#108). radio.wifi and radio.lora read what the driver
+// does now; radio.bt has no driver before #503 and is configured-only until then. The ui.* rows are configured-only (REG_F_CFG):
 // the saved setting as the shell reads it, so the value is exact and no read-back exists to disagree. The names and
 // ranges of the saved u8 settings are the ones in lichen_api/settings_backup.c (a host test compares them).
 
@@ -17,8 +18,8 @@ static char const *const style_names[]    = {"station", "digital"};
 static char const *const pulse_names[]    = {"off", "dms", "all"};
 static char const *const layout_names[]   = {"tiles", "grid"};
 
-#define RADIO_ROW(id_, name_)                                                                                          \
-    {.id = (id_), .type = REG_T_BOOL, .name = (name_), .get_applied = sw_get, .set = sw_set}
+#define RADIO_ROW(id_, name_, flags_)                                                                                  \
+    {.id = (id_), .type = REG_T_BOOL, .flags = (flags_), .name = (name_), .max = 1, .get_applied = sw_get, .set = sw_set}
 // UI policy rows: saved_key is the badge_fw key the shell reads. RO = no setter (the shell would have to rebuild)
 #define UI_ROW(id_, type_, name_, unit_, key_, max_, names_, set_)                                                     \
     {.id = (id_), .type = (type_), .flags = REG_F_CFG | ((set_) ? 0 : REG_F_RO), .name = (name_), .unit = (unit_),    \
@@ -59,19 +60,19 @@ static reg_status_t sw_set(reg_entry_t const *e, reg_value_t const *v) {
         case REG_ID_HAPTICS_ON: ok = sw_haptics_put(v->u != 0); break;
         case REG_ID_HAPTICS_STR: ok = sw_haptics_strength_put((uint8_t)v->u); break;
         case REG_ID_LED_MODE: sw_led_mode_put((uint8_t)v->u); break;
-        case REG_ID_LED_ON: sw_led_put(v->u != 0); break;
-        case REG_ID_OTA_SERVER: sw_ota_put(v->u != 0); break;
-        case REG_ID_OTA_AUTOOFF: sw_ota_autooff_put((uint8_t)v->u); break;
+        case REG_ID_LED_ON: ok = sw_led_put(v->u != 0); break;
+        case REG_ID_OTA_SERVER: ok = sw_ota_put(v->u != 0); break;
+        case REG_ID_OTA_AUTOOFF: ok = sw_ota_autooff_put((uint8_t)v->u); break;
         default: ok = e->saved_key && sw_cfg_put(e->saved_key, v->u); break;
     }
     return ok ? REG_OK : REG_FAILED;
 }
 
 static reg_entry_t const rows[] = {
-    RADIO_ROW(REG_ID_RADIO_WIFI, "radio.wifi"),
-    RADIO_ROW(REG_ID_RADIO_LORA, "radio.lora"),
-    RADIO_ROW(REG_ID_RADIO_BT, "radio.bt"),
-    RADIO_ROW(REG_ID_RADIO_AIRPLANE, "radio.airplane"),
+    RADIO_ROW(REG_ID_RADIO_WIFI, "radio.wifi", 0),
+    RADIO_ROW(REG_ID_RADIO_LORA, "radio.lora", 0),
+    RADIO_ROW(REG_ID_RADIO_BT, "radio.bt", REG_F_CFG), // no driver before #503: the switch itself,
+    RADIO_ROW(REG_ID_RADIO_AIRPLANE, "radio.airplane", 0),
     {.id = REG_ID_HAPTICS_ON, .type = REG_T_BOOL, .name = "haptics.on", .max = 1, .get_applied = sw_get, .set = sw_set,
      .saved_key = "haptics"},
     {.id = REG_ID_HAPTICS_STR, .type = REG_T_ENUM, .name = "haptics.strength", .max = 2, .enum_names = strength_names,

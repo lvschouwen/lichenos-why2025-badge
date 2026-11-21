@@ -29,9 +29,9 @@ void haptics_set_updating(bool on);         // main.c's OTA hooks: silent while 
 bool haptics_playing(void);
 // The person's setting (default on, strength high), saved; lichen_os's lichen_haptics.h calls these (#221)
 bool          haptics_enabled(void);
-void          haptics_set_enabled(bool on); // off stops a buzz at once
+bool          haptics_set_enabled(bool on); // off stops a buzz at once; false when it was not saved
 hp_strength_t haptics_strength(void);
-void          haptics_set_strength(hp_strength_t s); // out of range: ignored
+bool          haptics_set_strength(hp_strength_t s); // out of range: ignored (false); false too when not saved
 
 #ifdef __cplusplus
 }

@@ -86,11 +86,13 @@ bool led_enabled(void) {
     return atomic_load(&s_enabled);
 }
 
-void led_set_enabled(bool on) {
+bool led_set_enabled(bool on) {
     atomic_store(&s_enabled, on);
-    if (!led_setting_save(s_set, on)) {
+    bool saved = led_setting_save(s_set, on);
+    if (!saved) {
         ESP_LOGE(TAG, "setting not saved");
     }
+    return saved;
 }
 
 void led_set_dnd(bool on) {

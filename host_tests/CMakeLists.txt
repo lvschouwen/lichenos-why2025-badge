@@ -447,6 +447,8 @@ add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_misc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_settings.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_switch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/switch_logic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_switch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_psram.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_display.c
@@ -454,7 +456,8 @@ add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_misc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_settings.c)
 target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(reg_service_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_service_test COMMAND reg_service_test)
 
@@ -2833,10 +2836,12 @@ add_executable(reg_switch_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_switch_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_switch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/switch_logic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/idle_policy.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_switch.c)
 target_include_directories(reg_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
-    ${CMAKE_CURRENT_SOURCE_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(reg_switch_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_switch_test COMMAND reg_switch_test)

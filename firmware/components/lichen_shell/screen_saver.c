@@ -456,7 +456,7 @@ static void cmd_lock(char const *args) {
 // LVGL one). Lock off (key "lock") also lifts a lock that is showing, as `fw lock off` does; no other key does.
 void shell_ui_policy_changed(char const *key) {
     screen_idle_reload();
-    if (shell_up() && strcmp(key, IDLE_LOCK_KEY) == 0 && !setting(IDLE_LOCK_KEY, false)) {
+    if (shell_up() && idle_key_lifts_lock(key, setting(IDLE_LOCK_KEY, false))) {
         lichen_sys_ui_lock(0);
         screen_lock_release();
         lichen_sys_ui_unlock();

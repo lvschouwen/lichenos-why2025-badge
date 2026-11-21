@@ -4,6 +4,7 @@
 #include "reg.h"
 #include "reg_cmd.h"
 #include "reg_p4.h"
+#include "idle_policy.h"
 #include "reg_stubs_switch.h"
 #include "settings_backup.h"
 #include "switch_reg.h"
@@ -32,11 +33,9 @@ static reg_cmd_result_t fw_set(char const *args) {
     return reg_cmd_set(find, args, NULL, &e, &applied, &have);
 }
 
-// What an alias does (lichen_reg_set_u32): the same reg_set on the found key
+// What an alias does (lichen_reg_set_u32 is this on the P4 table): the registry's own pure core
 static bool alias_set(char const *name, uint32_t value) {
-    reg_entry_t const *e = find(name);
-    reg_value_t        v = {.u = value}, applied;
-    return e && reg_set(e, &v, &applied) == REG_OK;
+    return reg_cmd_set_u32(find, name, value);
 }
 
 static void test_table(void) {
@@ -52,8 +51,8 @@ static void test_table(void) {
 }
 
 static void test_cfg_flags(void) {
-    static char const *const cfg[] = {"ui.saver", "ui.saver_style", "ui.lock", "ui.idle_dim", "ui.idle_off", "ui.kbd_pulse", "ui.layout", "app.bg_off"};
-    static char const *const live[] = {"radio.wifi", "radio.lora", "radio.bt", "radio.airplane", "haptics.on", "haptics.strength",
+    static char const *const cfg[] = {"ui.saver", "ui.saver_style", "ui.lock", "ui.idle_dim", "ui.idle_off", "ui.kbd_pulse", "ui.layout", "app.bg_off", "radio.bt"};
+    static char const *const live[] = {"radio.wifi", "radio.lora", "radio.airplane", "haptics.on", "haptics.strength",
                                        "led.mode", "led.on", "ota.server", "ota.autooff"};
     for (size_t i = 0; i < sizeof(cfg) / sizeof(cfg[0]); i++) {
         CHECK(find(cfg[i]) && (find(cfg[i])->flags & REG_F_CFG));
@@ -72,8 +71,8 @@ static void test_ranges_follow_settings_table(void) {
             CHECK(k->type == SB_U8 && e->min == k->min && e->max == k->max);
         }
         if (e->flags & REG_F_CFG) {
-            // a cfg row is a saved setting the table knows, with its default; app.bg_off counts a string list
-            CHECK(k != NULL || e->id == REG_ID_APP_BG_OFF);
+            // a cfg row is a saved setting the table knows, with its default; app.bg_off counts a string list, radio.bt has no driver yet
+            CHECK(k != NULL || e->id == REG_ID_APP_BG_OFF || e->id == REG_ID_RADIO_BT);
         }
     }
 }
@@ -107,9 +106,15 @@ static void test_refused(void) {
     CHECK(fw_set("ui.layout grid") == RC_RO && sw_stub.cfg_puts == 0); // the home rebuilds from Settings only
 }
 
+// The shell's hook as shell_ui_policy_changed decides it: whether this set lifts a showing lock (the real policy
+// function, with the real saved lock setting behind it)
 static char last_hook_key[16];
+static int  lifts;
 static void hook(char const *key) {
     strncpy(last_hook_key, key, sizeof(last_hook_key) - 1);
+    uint32_t lock = 0;
+    sw_cfg_get("lock", &lock);
+    lifts += idle_key_lifts_lock(key, lock != 0);
 }
 
 static void test_ui_policy(void) {
@@ -126,7 +131,32 @@ static void test_ui_policy(void) {
     CHECK(fw_set("ui.kbd_pulse all") == RC_OK && sw_stub.cfg_val == 2);
     // The shell is told which setting changed: only the lock's own off lifts a showing lock (shell_ui_policy_changed)
     CHECK(fw_set("ui.idle_dim 12") == RC_OK && strcmp(last_hook_key, "idle_dim") == 0);
-    CHECK(fw_set("ui.lock off") == RC_OK && strcmp(last_hook_key, "lock") == 0);
+    CHECK(lifts == 0); // none of the sets above lifted a lock (ui.lock on, saver_style, idle_off, kbd_pulse, idle_dim)
+    CHECK(fw_set("ui.lock off") == RC_OK && strcmp(last_hook_key, "lock") == 0 && lifts == 1); // only this one does
+    CHECK(fw_set("ui.saver off") == RC_OK && lifts == 1);
+}
+
+// The saved column (sw_saved, the real code over the fake store): a stored value shows, a default does not
+static void test_saved_column(void) {
+    sw_stub_reset();
+    uint32_t v = 99;
+    CHECK(!sw_saved(REG_ID_UI_LOCK, "lock", &v));
+    CHECK(fw_set("ui.lock on") == RC_OK && sw_saved(REG_ID_UI_LOCK, "lock", &v) && v == 1);
+    CHECK(fw_set("ui.idle_dim 0") == RC_OK && sw_saved(REG_ID_UI_IDLE_DIM, "idle_dim", &v) && v == 0); // 0 is stored
+    sw_stub.radio_saved[1] = true;
+    CHECK(sw_saved(REG_ID_RADIO_LORA, NULL, &v) && v == 1); // the person's switch
+    CHECK(sw_saved(REG_ID_RADIO_AIRPLANE, NULL, &v) && v == 0);
+}
+
+// An owner that cannot save says so: the registry answers failed, never a value that will not survive a restart
+static void test_save_failures(void) {
+    sw_stub_reset();
+    sw_stub.save_fails = true;
+    CHECK(fw_set("ota.server on") == RC_FAILED && fw_set("ota.autooff 5") == RC_FAILED && fw_set("led.on on") == RC_FAILED);
+    CHECK(fw_set("haptics.on off") == RC_FAILED);
+    sw_stub.save_fails  = false;
+    sw_stub.store_fails = true; // the settings store itself
+    CHECK(fw_set("ui.lock on") == RC_FAILED && sw_stub.cfg_puts == 0);
 }
 
 static void test_new_ro_keys(void) {
@@ -143,6 +173,8 @@ int main(void) {
     test_set_reaches_owner();
     test_refused();
     test_ui_policy();
+    test_saved_column();
+    test_save_failures();
     test_new_ro_keys();
     if (failures) {
         printf("%d failure(s)\n", failures);

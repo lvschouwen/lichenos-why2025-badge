@@ -139,9 +139,9 @@ static void test_domain_split(void) {
 // Configured-only keys (#501): the rows whose value is a setting or a request, not a hardware read-back, say so
 static void test_cfg_flag(void) {
     static char const *const cfg[] = {"disp.cfg_lanes", "disp.cfg_lane_rate", "disp.cfg_phy_mv", "bl.override", "bl.idle",
-                                      "psram.want", "tz.zone", "ui.saver", "ui.lock", "ui.idle_dim", "ui.layout"};
+                                      "psram.want", "tz.zone", "ui.saver", "ui.lock", "ui.idle_dim", "ui.layout", "sens.boot", "bl.r16", "radio.bt"};
     static char const *const applied[] = {"disp.pclk", "disp.refresh", "psram.clk", "bl.display", "bl.freq", "radio.wifi",
-                                          "haptics.duty", "settings.write_fail", "sens.imu_period", "bl.r16"};
+                                          "haptics.duty", "settings.write_fail", "sens.imu_period"};
     for (size_t i = 0; i < sizeof(cfg) / sizeof(cfg[0]); i++) {
         reg_entry_t const *e = reg_p4_find_name(cfg[i]);
         CHECK(e && (e->flags & REG_F_CFG));

@@ -1,6 +1,7 @@
 #include "idle_policy.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static uint8_t const DIM_CHOICES[] = {0, 3, 6, 12, 30};   // off, 30 s, 1, 2, 5 min
 static uint8_t const OFF_CHOICES[] = {0, 12, 30, 60, 180}; // off, 2, 5, 10, 30 min
@@ -40,6 +41,10 @@ uint32_t idle_after_hold(bool card, uint32_t idle_s, idle_times_t t) {
     }
     uint32_t shifted = idle_s - IDLE_CARD_HOLD_S + t.dim_s;
     return shifted < idle_s ? shifted : idle_s;
+}
+
+bool idle_key_lifts_lock(char const *key, bool lock_on) {
+    return key && strcmp(key, IDLE_LOCK_KEY) == 0 && !lock_on;
 }
 
 bool idle_lock_lifted(bool must_show, bool card, uint32_t card_s) {

@@ -179,6 +179,12 @@ reg_cmd_result_t reg_cmd_set(reg_find_name_fn find, char const *args, reg_confir
     return st == REG_OK ? RC_OK : RC_FAILED;
 }
 
+bool reg_cmd_set_u32(reg_find_name_fn find, char const *name, uint32_t value) {
+    reg_entry_t const *e = find(name);
+    reg_value_t        v = {.u = value}, applied;
+    return e && reg_set(e, &v, &applied) == REG_OK;
+}
+
 static size_t applied_suffix(reg_entry_t const *e, reg_value_t const *applied, bool have, char *buf, size_t cap) {
     char v[REG_STR_MAX + 8];
     if (!have || !reg_format_ok(e, applied, v, sizeof(v))) {

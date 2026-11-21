@@ -7,7 +7,8 @@
 #include <stdint.h>
 
 // Radio switches by index: 0 Wi-Fi, 1 LoRa, 2 Bluetooth (radio_id_t, asserted in switch_reg.c)
-bool sw_radio_get(unsigned radio);   // what the radio does (a hold reads off)
+bool sw_radio_get(unsigned radio);   // what the driver does now (Wi-Fi: the service flag, LoRa: the driver switch, BT: the OS switch)
+bool sw_radio_saved(unsigned radio); // the person's switch (lichen_radio_switch_get)
 bool sw_radio_put(unsigned radio, bool on); // lichen_radio_set: saves, tells the owners; true when saved
 bool sw_airplane_get(void);
 bool sw_airplane_put(bool on);
@@ -21,10 +22,11 @@ uint8_t sw_led_mode_get(void);         // led_override_t
 void    sw_led_mode_put(uint8_t mode); // not saved, as `fw led`
 
 bool    sw_ota_get(void);
-void    sw_ota_put(bool on);
+bool    sw_ota_put(bool on); // false: not saved
 uint8_t sw_ota_autooff_get(void);
-void    sw_ota_autooff_put(uint8_t minutes);
+bool    sw_ota_autooff_put(uint8_t minutes);
 
+// The next four are switch_logic.c: pure, linked by the host test too.
 // A saved badge_fw u8 the shell or an app reads on its own (the ui.* rows, configured-only): its value or the default
 // the table of lichen_api/settings_backup.c gives. false: no such key there.
 bool sw_cfg_get(char const *key, uint32_t *out);
@@ -41,4 +43,4 @@ void sw_sensors_periods(uint32_t *imu_ms, uint32_t *env_ms);
 uint8_t sw_r16_get(void);
 uint8_t sw_bg_off_count(void); // apps with their background off
 bool    sw_led_get(void);       // the saved status LED setting
-void    sw_led_put(bool on); // r16_fit_t: 0 unknown, 1 fitted, 2 absent
+bool    sw_led_put(bool on);    // false: not saved

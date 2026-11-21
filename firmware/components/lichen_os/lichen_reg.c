@@ -462,9 +462,7 @@ static void cmd_bl(char const *args) {
 }
 
 bool lichen_reg_set_u32(char const *name, uint32_t value) {
-    reg_entry_t const *e = reg_p4_find_name(name);
-    reg_value_t        v = {.u = value}, applied;
-    return e && reg_set(e, &v, &applied) == REG_OK;
+    return reg_cmd_set_u32(reg_p4_find_name, name, value);
 }
 
 size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {

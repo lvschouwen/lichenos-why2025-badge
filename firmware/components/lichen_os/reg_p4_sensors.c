@@ -76,7 +76,7 @@ static reg_entry_t const rows[] = {
      .get_applied = sens_get},
     {.id = REG_ID_SENS_HEAT_MS, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.heat_ms", .unit = "ms",
      .get_applied = sens_get},
-    {.id = REG_ID_SENS_BOOT, .type = REG_T_BOOL, .flags = REG_F_RO, .name = "sens.boot", .get_applied = sens_get,
+    {.id = REG_ID_SENS_BOOT, .type = REG_T_BOOL, .flags = REG_F_RO | REG_F_CFG, .name = "sens.boot", .get_applied = sens_get,
      .saved_key = "sens_boot"},
     {.id = REG_ID_SENS_IMU_PERIOD, .type = REG_T_U32, .flags = REG_F_RO, .name = "sens.imu_period", .unit = "ms",
      .get_applied = sens_get},

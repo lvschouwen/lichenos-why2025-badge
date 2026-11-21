@@ -71,6 +71,10 @@ reg_cmd_result_t reg_cmd_set(reg_find_name_fn find, char const *args, reg_confir
 size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t const *applied, bool have_applied,
                          char const *args, char *buf, size_t cap);
 
+// What an alias does (`fw wifi on|off` ...): reg_set on the named key with a numeric value, through the same range check
+// and setter `fw set` reaches. True only when the key exists, was accepted and was read back.
+bool reg_cmd_set_u32(reg_find_name_fn find, char const *name, uint32_t value);
+
 // One key's cached view for a status line that never waits (`fw airplane`'s bt.state, #311): "idle (12.3 s ago)",
 // "idle (stale, 40 s ago)", "? (not supported by this C6)"
 size_t reg_cached_text(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t cap);

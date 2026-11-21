@@ -193,28 +193,32 @@ bool haptics_enabled(void) {
     return atomic_load(&s_enabled);
 }
 
-void haptics_set_enabled(bool on) {
+bool haptics_set_enabled(bool on) {
     atomic_store(&s_enabled, on);
     if (!on) {
         haptics_stop();
     }
-    if (!haptics_setting_save_enabled(s_set, on)) {
+    bool saved = haptics_setting_save_enabled(s_set, on);
+    if (!saved) {
         ESP_LOGE(TAG, "setting not saved");
     }
+    return saved;
 }
 
 hp_strength_t haptics_strength(void) {
     return (hp_strength_t)atomic_load(&s_strength);
 }
 
-void haptics_set_strength(hp_strength_t s) {
+bool haptics_set_strength(hp_strength_t s) {
     if ((int)s < 0 || (int)s >= HP_STRENGTH_COUNT) {
-        return;
+        return false;
     }
     atomic_store(&s_strength, (int)s);
-    if (!haptics_setting_save_strength(s_set, s)) {
+    bool saved = haptics_setting_save_strength(s_set, s);
+    if (!saved) {
         ESP_LOGE(TAG, "setting not saved");
     }
+    return saved;
 }
 
 // registry haptics.duty (#319): what the LEDC channel is driving now, read from the hardware (ledc_get_duty), not the

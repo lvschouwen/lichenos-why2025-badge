@@ -43,7 +43,7 @@ reg_entry_t const reg_p4_table[] = {
      .enum_names = bl_idle_names, .get_applied = reg_p4_bl_mode_get},
     {.id = REG_ID_BL_OVERRIDE, .type = REG_T_ENUM, .flags = REG_F_RO | REG_F_CFG, .name = "bl.override", .min = 0, .max = 3,
      .enum_names = bl_override_names, .get_applied = reg_p4_bl_mode_get},
-    {.id = REG_ID_BL_R16, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "bl.r16", .min = 0, .max = 2,
+    {.id = REG_ID_BL_R16, .type = REG_T_ENUM, .flags = REG_F_RO | REG_F_CFG, .name = "bl.r16", .min = 0, .max = 2,
      .enum_names = r16_names, .get_applied = r16_get, .saved_key = BACKLIGHT_KEY_R16},
     RADIO(REG_ID_LORA_FREQ, REG_T_U32, "lora.freq", "Hz"),
     RADIO(REG_ID_LORA_BW, REG_T_U32, "lora.bw", "Hz"),

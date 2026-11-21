@@ -137,7 +137,9 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   domain, dotted names live only in the tables. 0x01xx `bl.*` (C6), 0x02xx `lora.*` (C6, read-only/TX), 0x03xx
   `wifi.*` (P4 via esp_hosted RPC), 0x04xx `bt.*` (C6), 0x05-0x0E reserved for C6 domains, 0x0Fxx `c6.*` meta
   (`c6.reg_caps` 0x0F00: bit n = the C6 serves domain 0x0n), 0x10xx the P4's backlight driver state (`bl.idle`,
-  `bl.override`, #310), 0x11-0x1F reserved for P4 domains (#312).
+  `bl.override`, `bl.r16`, #310, #501), 0x11-0x15 P4 domains (`psram.*`, `disp.*`, `sens.*`, the misc rows, `settings.*`), 0x16 the
+  switches (`radio.*`, `haptics.*`, `led.*`, `ota.*`, `ui.*`, `app.*`, #501), 0x17-0x1F reserved for P4 domains. The high byte names the
+  domain that serves the key, so a new key goes into its own domain's block, appended.
 - **C6 registry (`c6/main/reg_c6.c`, #309):** served on the LoRa task between commands. `bl.display`/`bl.keyboard`
   (U8 %, the only settable C6 keys; same apply path as the UART `BL d k` line, which stays as the old-P4 and early-boot
   fallback; applied = the LEDC duty register read back, after the 10-80 % clamp), `bl.freq` (LEDC timer Hz) and
@@ -169,6 +171,24 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   LoRa task's 8-deep receive queue keeps room for RX_PACKET and REG_VAL); the restart close also pauses 20 ms when a
   REG_SET left in the last 100 ms.
   `lora_get_radio` / `lora_get_freq` and `lichen_sys_display_get` stay the requested / saved values.
+- **Switches and configured-only keys (#501, P4 domain 0x16, `lichen_os/reg_p4_switch.c`):** the saved OS switches
+  that `fw` commands used to set outside the registry are keys now. `radio.wifi|lora|bt|airplane` (a set is
+  `lichen_radio_set` / `lichen_airplane_set`, through the owners' hooks of #108; `fw wifi on|off`, `fw lora on|off` and
+  `fw airplane` end in the same registry setter via `lichen_reg_set_u32`), `haptics.on|strength`, `led.on` (saved) and
+  `led.mode` (the unsaved console override), `ota.server|autooff`, and the UI policy rows `ui.saver|saver_style|lock|
+  idle_dim|idle_off|kbd_pulse|layout`. Owner decision (2026-11-21): these switches are settable through `fw set`, with
+  the open `fw set` rules. The TX guard (`REG_GUARDED`) covers radio parameters only (`lora.*`, `wifi.country|txpwr|bw`),
+  not the on/off switches or `ota.server`; `fw lora on` keeps its `CON_F_TX` allow-list entry in `lora_rules.h`.
+  Getters read what the owner does now where it has a driver (`radio.wifi`: the Wi-Fi service flag, `radio.lora`: the
+  LoRa driver's switch) and never wait. The row flag `REG_F_CFG` (shown as `cfg` in the last column of `fw get`) marks
+  a configured-only key: the value is the setting or the request and no hardware read-back exists, so applied cannot
+  disagree with it. It is on the `ui.*` rows, `app.bg_off` (how many apps have their background off, #232/#233),
+  `radio.bt` (no driver before #503), `sens.boot`, `bl.r16`, `bl.idle`, `bl.override`, `psram.want`, `tz.zone` and
+  `disp.cfg_*`. The `ui.*` setters save under the key `lichen_api/settings_backup.c` lists (range and default come from
+  that table) and tell the shell through a hook bound in `main.c`, which re-reads the idle policy; only `ui.lock` off
+  lifts a lock that is showing. `ui.layout` is read-only (the home rebuilds from Settings). The vib, led, ota, screensaver
+  and lock commands still call the owner's function directly (their components cannot see the registry); it is the same
+  function the registry setter calls. `fw get` collects keys in an array of `REG_P4_KEYS_MAX` (100) on the console stack.
 - **Wi-Fi keys (#311, P4 domain 0x03):** the regulatory country is fixed in firmware: `esp_wifi_set_country_code("NL",
   false)` (esp_hosted RPC `Req_WifiSetCountryCode`; 802.11d off = policy manual, so an AP's country IE never changes
   it) before every `esp_wifi_start` (`lichen_net/wifi_service.c` `set_country`, in `wifi_driver_up` and the switch's

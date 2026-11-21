@@ -63,25 +63,27 @@ bool ota_server_refused(void) {
     return token_refused;
 }
 
-void ota_server_set_enabled(bool on) {
+bool ota_server_set_enabled(bool on) {
     if (on) {
         armed_s = (uint32_t)ota_now_s(); // the auto-off counts from now
     }
     auto_closed = false; // on or off by hand supersedes a timer close: the saved setting now says what it says (#125)
     server_on = on;
-    ota_os_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
+    bool saved = ota_os_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
     ESP_LOGI(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
+    return saved;
 }
 
 uint8_t ota_server_auto_off(void) {
     return auto_min;
 }
 
-void ota_server_set_auto_off(uint8_t minutes) {
+bool ota_server_set_auto_off(uint8_t minutes) {
     armed_s  = (uint32_t)ota_now_s(); // a new time counts from now, not from boot
     auto_min = minutes;
-    ota_os_set_u8(OTA_AUTO_KEY, minutes);
+    bool saved = ota_os_set_u8(OTA_AUTO_KEY, minutes);
     ESP_LOGI(TAG, "update server auto-off: %u min (0 = never)", (unsigned)minutes);
+    return saved;
 }
 
 bool ota_server_auto_closed(void) {

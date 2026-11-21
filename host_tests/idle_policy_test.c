@@ -184,6 +184,12 @@ int main(void) {
 
     CHECK(strcmp(idle_level_name(IDLE_DIM), "dim") == 0);
 
+    // #501: of the registry's ui.* keys only the pocket lock switched off lifts a lock that is showing
+    CHECK(idle_key_lifts_lock("lock", false));
+    CHECK(!idle_key_lifts_lock("lock", true));
+    CHECK(!idle_key_lifts_lock("idle_dim", false) && !idle_key_lifts_lock("saver", false) &&
+          !idle_key_lifts_lock("saver_style", false) && !idle_key_lifts_lock("locked", false) && !idle_key_lifts_lock(NULL, false));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -24,7 +24,7 @@ void led_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
 // setting ("status_led", default on), configures the pin and starts the 50 ms esp_timer. "fw led".
 void led_start(void);
 bool led_enabled(void);
-void led_set_enabled(bool on);     // Settings › Notifications › Status LED; saved
+bool led_set_enabled(bool on);     // Settings › Notifications › Status LED; saved (false: not saved)
 // notify_bind.h's state hooks: safe from any task and inside a critical section (each only stores the value); the next
 // 50 ms tick shows it. Both false until the first push.
 void led_set_dnd(bool on);

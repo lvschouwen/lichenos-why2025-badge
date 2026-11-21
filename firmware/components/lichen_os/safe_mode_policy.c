@@ -151,7 +151,7 @@ size_t safe_mode_list_count(char const *list) {
     char   entry[SAFE_MODE_LIST_MAX];
     size_t pos = 0, n = 0;
     while (list && next_entry(list, SAFE_MODE_LIST_MAX, &pos, entry)) {
-        n++;
+        n += entry[0] != '\0'; // an empty entry (",,") is no app
     }
     return n;
 }

@@ -120,7 +120,7 @@ typedef enum {
     REG_ID_UI_LOCK         = 0x160B, // ui.lock          BOOL, CFG: pocket lock
     REG_ID_UI_IDLE_DIM     = 0x160C, // ui.idle_dim      U8 x10 s, CFG: dim after (0 = never)
     REG_ID_UI_IDLE_OFF     = 0x160D, // ui.idle_off      U8 x10 s, CFG: screen off after (0 = never)
-    REG_ID_UI_KBD_PULSE    = 0x160E, // ui.kbd_pulse     ENUM off / dms / all, CFG, RO: the message light
+    REG_ID_UI_KBD_PULSE    = 0x160E, // ui.kbd_pulse     ENUM off / dms / all, CFG: the message light
     REG_ID_UI_LAYOUT       = 0x160F, // ui.layout        ENUM tiles / grid, CFG, RO: the home layout
     REG_ID_APP_BG_OFF      = 0x1614, // app.bg_off       U8, RO, CFG: how many apps have their background part off (#232, #233; the list is `fw app background`)
     REG_ID_LED_ON          = 0x1615, // led.on           BOOL: the status LED setting (Settings, saved; led.mode is the console override)
