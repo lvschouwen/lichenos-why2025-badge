@@ -144,6 +144,13 @@ CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 # The C6 flasher must release the C6 before esp_hosted starts (auto-init races it into a boot loop)
 CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
+# WPA2/WPA3-Enterprise (#496): typed wrappers for the esp_eap_client_* RPCs; the C6 build must match
+# (CONFIG_ESP_HOSTED_CP_FEAT_WIFI_EXT_ENT, CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT in c6/sdkconfig.defaults). PEAP and TTLS
+# only: no Suite-B 192, no TLS 1.3
+CONFIG_ESP_HOSTED_HOST_FEAT_WIFI_EXT_ENT=y
+CONFIG_WIFI_RMT_ENTERPRISE_SUPPORT=y
+CONFIG_WIFI_RMT_SUITE_B_192=n
+CONFIG_WIFI_RMT_EAP_TLS1_3=n
 # Liveness between the chips (#277): c6sup asks the C6 (its side is compiled in already) for one heartbeat event every
 # 30 s after each link-up and counts the ones that do not come (c6_watch)
 CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y

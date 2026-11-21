@@ -38,6 +38,19 @@ bool wifi_saved_add(wifi_saved_t *l, char const *ssid, char const *pass) {
     return true;
 }
 
+bool wifi_saved_add_eap(wifi_saved_t *l, char const *ssid) {
+    if (!wifi_cred_valid(ssid, "")) {
+        return false;
+    }
+    wifi_saved_add(l, ssid, ""); // the same list rules: front, replace by SSID, oldest goes
+    l->e[0].kind = WIFI_SAVED_EAP;
+    return true;
+}
+
+bool wifi_saved_is_eap(wifi_saved_t const *l, int index) {
+    return index >= 0 && (size_t)index < l->n && l->e[index].kind == WIFI_SAVED_EAP;
+}
+
 bool wifi_saved_forget(wifi_saved_t *l, char const *ssid) {
     int at = wifi_saved_find(l, ssid);
     if (at < 0) {
@@ -54,7 +67,8 @@ int wifi_saved_pick(wifi_saved_t const *l, wifi_ap_t const *aps, size_t n, uint3
         int at = wifi_saved_find(l, aps[i].ssid);
         // A saved open network (empty password) is never joined by itself: anyone can broadcast its name. Secured ones
         // only match an AP that is secured too (an open twin of a secured name is a trap)
-        if (at < 0 || (skip_mask >> at & 1) || l->e[at].pass[0] == '\0' || aps[i].open) {
+        bool secured = at >= 0 && (l->e[at].pass[0] != '\0' || l->e[at].kind == WIFI_SAVED_EAP);
+        if (at < 0 || (skip_mask >> at & 1) || !secured || aps[i].open) {
             continue;
         }
         if (aps[i].rssi > best_rssi) {
