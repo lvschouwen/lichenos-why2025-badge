@@ -41,7 +41,7 @@ unsigned wifi_ip6_global_count(wifi_ip6_set_t const *s);
 bool wifi_ip6_best(wifi_ip6_set_t const *s, uint8_t out[16]);
 // RFC 5952 text ("2001:db8::1": the longest run of two or more zero groups becomes "::", lower case); the length
 // written without the NUL, 0 when cap is under WIFI_IP6_TEXT_MAX
+size_t wifi_ip6_text(uint8_t const a[16], char *out, size_t cap);
 // The /64 prefix as text ("2001:db8:1:2::/64"), the low 64 bits (which hold the MAC with SLAAC EUI-64) dropped; for logs.
 // Needs cap >= WIFI_IP6_TEXT_MAX + 3; the length written, 0 when it does not fit
 size_t wifi_ip6_prefix_text(uint8_t const a[16], char *out, size_t cap);
-size_t wifi_ip6_text(uint8_t const a[16], char *out, size_t cap);

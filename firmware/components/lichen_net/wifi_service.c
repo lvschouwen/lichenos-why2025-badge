@@ -342,8 +342,17 @@ static void ip6_log(void) {
 // slots 0-1 whichever of IPv6 (RDNSS, DHCPv6) or IPv4 wrote last, slots 2-3 the IPv4 servers of the lease (copied here
 // at every got-IP, renewals included), so a network whose IPv6 resolvers fail still resolves over IPv4: lwIP's
 // resolver walks all slots on a timeout. Only a DHCPv6 reply with 3 or more servers reaches into slots 2-3.
+// Slots 2-3 are cleared first (and on a disconnect): IDF's dns_clear_servers keeps the last slot, and a lease with no
+// DNS must not leave the previous network's servers behind.
+static void clear_kept_dns(void) {
+    for (u8_t i = 2; i < DNS_MAX_SERVERS; i++) {
+        dns_setserver(i, NULL);
+    }
+}
+
 static void keep_v4_dns(void) {
     LOCK_TCPIP_CORE();
+    clear_kept_dns();
     u8_t out = 2;
     for (u8_t i = 0; i < 2 && out < DNS_MAX_SERVERS; i++) {
         ip_addr_t dns = *dns_getserver(i);
@@ -364,6 +373,10 @@ static void on_sta_connected_ip6(void *arg, esp_event_base_t base, int32_t id, v
     (void)base;
     (void)id;
     (void)data;
+    esp_ip6_addr_t have;
+    if (esp_netif_get_ip6_linklocal(sta_netif, &have) == ESP_OK) {
+        return; // a roam (11k/v) is a CONNECTED too: re-creating it would restart DAD on the working address
+    }
     esp_err_t err = esp_netif_create_ip6_linklocal(sta_netif);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wifi: no IPv6 link-local: %s", esp_err_to_name(err));
@@ -405,6 +418,11 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t const *gone = data;
         set_ip("");
+        if (!gone || !wifi_reason_is_roam(gone->reason)) { // a roam keeps the lease, so keep its servers
+            LOCK_TCPIP_CORE();
+            clear_kept_dns();
+            UNLOCK_TCPIP_CORE();
+        }
         m.type   = MSG_DISCONNECTED;
         m.reason = gone ? gone->reason : 0;
         post(&m);
