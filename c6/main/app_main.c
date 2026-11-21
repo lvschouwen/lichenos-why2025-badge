@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 uint8_t c6_bt_status(void)
@@ -24,22 +25,42 @@ uint8_t c6_bt_status(void)
 	return (uint8_t)esp_bt_controller_get_status();
 }
 
-bool c6_bt_set(bool on)
+// Leaves the controller idle or enabled, never inited: an init that was not followed by a working enable is undone, and
+// an off from INITED deinits too, so no state keeps the controller's RAM held
+static bool bt_set(bool on)
 {
+	bool inited_here = false;
 	if (on) {
 		if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
 			esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 			if (esp_bt_controller_init(&cfg) != ESP_OK) {
 				return false;
 			}
+			inited_here = true;
 		}
-		return esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED ||
-		       esp_bt_controller_enable(ESP_BT_MODE_BLE) == ESP_OK;
+		if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED ||
+		    esp_bt_controller_enable(ESP_BT_MODE_BLE) == ESP_OK) {
+			return true;
+		}
+		if (inited_here) {
+			esp_bt_controller_deinit();
+		}
+		return false;
 	}
 	if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED && esp_bt_controller_disable() != ESP_OK) {
 		return false;
 	}
 	return esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_INITED || esp_bt_controller_deinit() == ESP_OK;
+}
+
+// The duration is logged: it runs on the LoRa task between commands, which no radio packet waits for meanwhile
+bool c6_bt_set(bool on)
+{
+	int64_t const t0 = esp_timer_get_time();
+	bool const    ok = bt_set(on);
+	ESP_LOGI("bt", "controller %s %s in %lld ms", on ? "enable" : "disable", ok ? "done" : "FAILED",
+		 (long long)((esp_timer_get_time() - t0) / 1000));
+	return ok;
 }
 
 // The P4 sets the brightness with "BL <display%> <keyboard%>" lines on our console UART (its UART1, the line it

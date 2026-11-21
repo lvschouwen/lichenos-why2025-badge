@@ -1824,6 +1824,9 @@ add_test(NAME radio_state_test COMMAND radio_state_test)
 add_executable(bt_sync_test
     ${CMAKE_CURRENT_SOURCE_DIR}/bt_sync_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/bt_sync.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_proxy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
 )
 target_include_directories(bt_sync_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg)

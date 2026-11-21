@@ -36,6 +36,7 @@
 
 static char const TAG[] = "reg";
 
+#define BT_SET_WAIT_MS 1500          // a console set of bt.enable waits this long for the controller
 #define LIVE_WAIT_MS 500             // the console's wait for the C6's answers to one `fw get` (plus its pacing)
 #define POLL_US      (30 * 1000000)  // background refresh of the cache (screens read it) and the mismatch check
 #define REG_LINE_MAX     160
@@ -334,29 +335,11 @@ static void warn_mismatch(uint16_t id, reg_value_t const *req, uint32_t t) {
 
 // ---- Bluetooth (#503) -----------------------------------------------------------------------------------------------
 
-static bool     bt_asked, bt_want;       // the OS's wish, once main has told it (under lock)
-static uint8_t  bt_tries;                // SETs sent for this wish on this link (under lock)
-static uint32_t bt_sent_ms;
-static bool     bt_said;                 // the one log line per wish and link has been written
-
-static bt_sync_in_t bt_input(uint32_t t) {
-    portENTER_CRITICAL(&lock);
-    reg_proxy_slot_t const *s = reg_proxy_slot(&px, REG_ID_BT_ENABLE);
-    bt_sync_in_t const      in = {.want          = bt_want,
-                                  .support       = reg_proxy_support(&px, REG_ID_BT_ENABLE, t),
-                                  .applied_known = s && s->have && !s->stale && s->status == REG_OK,
-                                  .applied_on    = s && s->value != 0,
-                                  .unknown_id    = s && s->have && s->status == REG_UNKNOWN,
-                                  .tries         = bt_tries,
-                                  .since_sent_ms = t - bt_sent_ms};
-    portEXIT_CRITICAL(&lock);
-    return in;
-}
+static bt_sync_t bt; // under lock; the logic is bt_sync.c's
 
 static void bt_say(bt_sync_act_t act, bool want) {
     portENTER_CRITICAL(&lock);
-    bool say = !bt_said;
-    bt_said  = true;
+    bool say = bt_sync_say(&bt);
     portEXIT_CRITICAL(&lock);
     if (say && act == BT_SYNC_UNSUPPORTED) {
         ESP_LOGW(TAG, "bt.enable: not supported by this C6, the Bluetooth switch has no effect");
@@ -367,44 +350,55 @@ static void bt_say(bt_sync_act_t act, bool want) {
 }
 
 // Brings the C6's controller to the OS's wish: called on a new wish, on the answers that can settle it (c6.reg_caps,
-// bt.enable) and by the poll. The decision is bt_sync_decide's; a wait or a refusal sends nothing.
+// bt.enable) and by the poll. The decision is bt_sync_step's; a wait or a refusal sends nothing.
 static void bt_sync(void) {
-    uint32_t t = now_ms();
-    portENTER_CRITICAL(&lock);
-    bool asked = bt_asked;
-    portEXIT_CRITICAL(&lock);
-    if (!asked || !atomic_load(&started)) {
+    if (!atomic_load(&started)) {
         return;
     }
-    bt_sync_in_t const in  = bt_input(t);
-    bt_sync_act_t const act = bt_sync_decide(&in);
-    if (act == BT_SYNC_SEND && post(REG_ID_BT_ENABLE, true, in.want)) {
+    uint32_t t = now_ms();
+    portENTER_CRITICAL(&lock);
+    bt_sync_act_t act  = bt_sync_step(&bt, reg_proxy_slot(&px, REG_ID_BT_ENABLE), reg_proxy_support(&px, REG_ID_BT_ENABLE, t), t);
+    bool          want = bt.want;
+    portEXIT_CRITICAL(&lock);
+    if (act == BT_SYNC_SEND && post(REG_ID_BT_ENABLE, true, want)) {
         portENTER_CRITICAL(&lock);
-        bt_tries++;
-        bt_sent_ms = t;
+        bt_sync_sent(&bt, t);
         portEXIT_CRITICAL(&lock);
     } else if (act == BT_SYNC_UNSUPPORTED || act == BT_SYNC_GIVE_UP) {
-        bt_say(act, in.want);
+        bt_say(act, want);
     }
 }
 
 void lichen_reg_bt_request(bool on) {
     portENTER_CRITICAL(&lock);
-    bool changed = !bt_asked || bt_want != on;
-    bt_asked     = true;
-    bt_want      = on;
-    if (changed) {
-        bt_tries = 0;
-        bt_said  = false;
-    }
+    bt_sync_wish(&bt, on);
     portEXIT_CRITICAL(&lock);
     bt_sync();
 }
 
+// The OS switch is the one way in (saved, airplane mode and holds apply); its listener sends it on to the C6. A console
+// set then waits for the C6's answer (the controller takes a moment) and says so when it has none or not the asked
+// value, instead of letting the read-back show the old applied value.
 reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
-    // The OS switch is the one way in (saved, airplane mode and holds apply); its listener sends it on to the C6
-    return lichen_radio_set(RADIO_BT, v->u != 0) ? REG_OK : REG_FAILED;
+    if (!lichen_radio_set(RADIO_BT, v->u != 0)) {
+        return REG_FAILED;
+    }
+    uint16_t const id = REG_ID_BT_ENABLE;
+    if (!may_wait() || !atomic_load(&started) || support(id) != RP_OK) {
+        return REG_OK;
+    }
+    bool asked = pending(id);
+    wait_answers(&id, &asked, 1, BT_SET_WAIT_MS);
+    portENTER_CRITICAL(&lock);
+    reg_proxy_slot_t const *s    = reg_proxy_slot(&px, id);
+    bool                    done = s && s->have && !s->stale && !s->pending && s->status == REG_OK && (s->value != 0) == (v->u != 0);
+    portEXIT_CRITICAL(&lock);
+    if (!done) {
+        reg_cmd_set_why("the C6 has not applied it yet; fw get bt.enable shows the result");
+        return REG_FAILED;
+    }
+    return REG_OK;
 }
 
 static void on_answer(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, uint32_t value) {
@@ -418,7 +412,10 @@ static void on_answer(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, ui
         ESP_LOGW(TAG, "REG_VAL for 0x%04x with type %u dropped (not this build's)", id, type);
     }
     reg_value_t req;
-    if (r == RP_ACCEPTED && requested_of(id, &req)) {
+    portENTER_CRITICAL(&lock);
+    bool bt_retry = id == REG_ID_BT_ENABLE && bt_sync_in_flight(&bt, t); // its result may still come: no warning yet
+    portEXIT_CRITICAL(&lock);
+    if (r == RP_ACCEPTED && !bt_retry && requested_of(id, &req)) {
         warn_mismatch(id, &req, t);
     }
     if (r == RP_ACCEPTED && (id == REG_ID_C6_REG_CAPS || id == REG_ID_BT_ENABLE)) {
@@ -433,8 +430,7 @@ static void on_link(bool up) {
     uint32_t t = now_ms();
     portENTER_CRITICAL(&lock);
     reg_proxy_link(&px, t);
-    bt_tries = 0; // a C6 that came back starts with the controller idle
-    bt_said  = false;
+    bt_sync_link(&bt); // a C6 that came back starts with the controller idle
     portEXIT_CRITICAL(&lock);
     if (up) {
         post(REG_ID_C6_REG_CAPS, false, 0); // the backlight goes back to REG_SET once it is answered

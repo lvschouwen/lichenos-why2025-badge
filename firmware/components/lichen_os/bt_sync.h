@@ -36,3 +36,30 @@ typedef enum {
 } bt_sync_act_t;
 
 bt_sync_act_t bt_sync_decide(bt_sync_in_t const *in);
+
+// The bookkeeping lichen_reg.c keeps under its lock: the wish, the SETs sent for it and the one log line. All pure, so
+// the wish change, the link reset and the slot-to-input mapping are tested with a real reg_proxy_t.
+typedef struct {
+    bool     asked;   // main has told the wish at least once
+    bool     want;
+    bool     said;    // the one log line (unsupported or give up) for this wish and link is written
+    uint8_t  tries;
+    uint32_t sent_ms;
+} bt_sync_t;
+
+// A wish: a new value (or the first one) starts the count and the log line again
+void bt_sync_wish(bt_sync_t *s, bool on);
+// The C6 link changed (it may be reset or updated): the count and the log line start again
+void bt_sync_link(bt_sync_t *s);
+// What the registry knows about bt.enable (slot, may be NULL; support from reg_proxy_support) as a decision input. An
+// UNKNOWN answer counts only while it is not stale, so a C6 updated to a build with the key is asked again after the link
+// came back.
+bt_sync_in_t bt_sync_input(bt_sync_t const *s, reg_proxy_slot_t const *slot, rp_support_t support, uint32_t now_ms);
+// bt_sync_decide on that input; IDLE until a wish has been told
+bt_sync_act_t bt_sync_step(bt_sync_t const *s, reg_proxy_slot_t const *slot, rp_support_t support, uint32_t now_ms);
+// A SET went out
+void bt_sync_sent(bt_sync_t *s, uint32_t now_ms);
+// True once per wish and link: the caller writes its log line now
+bool bt_sync_say(bt_sync_t *s);
+// A SET went out less than BT_SYNC_RETRY_MS ago: its result may still come (the mismatch warning waits for it)
+bool bt_sync_in_flight(bt_sync_t const *s, uint32_t now_ms);
