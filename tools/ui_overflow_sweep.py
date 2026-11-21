@@ -235,6 +235,7 @@ SCREENS = [
 UNREACHABLE = {
     "SCREEN_WELCOME": "first-run only; showing it again needs 'fw setup reset' (changes state)",
     "SCREEN_WIFI_ANALYSER": "its row sits after the scanned networks, so its position is not fixed",
+    "SCREEN_WIFI_EAP": "it opens from a scanned network row (position not fixed) or after switching Locked networks to Login (a setting)",
     "SCREEN_CRASH_ENTRY": "needs a crash entry; Enter on the crash list's first row is Clear all when it is empty",
     "SCREEN_NOTIFY_DETAIL": "needs a notice in the centre, and the list may start with Clear all",
     "SCREEN_RADIO": "behind Region & radio: Enter there is forbidden (the badge refuses it without the bench scope, #377)",
