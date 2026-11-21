@@ -170,6 +170,10 @@ bool lichen_sys_wifi_ip(char *ip, size_t cap) {
     return wifi_has_ip(ip, cap);
 }
 
+bool lichen_sys_wifi_ip6(char *ip, size_t cap) {
+    return wifi_ip6_get(ip, cap, NULL) == WIFI_IP6_GLOBAL;
+}
+
 bool lichen_sys_wifi_joining(void) {
     return wifi_joining();
 }

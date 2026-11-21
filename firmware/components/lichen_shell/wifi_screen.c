@@ -63,12 +63,22 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
     if (!status) {
         return;
     }
-    char    text[96];
+    char    text[192]; // a long SSID, the IPv4 and a global IPv6 address
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(text, sizeof(text), fmt, ap);
     va_end(ap);
     lv_label_set_text(status, text);
+}
+
+// "Connected to <name>, IP <v4>", and on a second line the global IPv6 address when the network gave one (#497)
+static void set_connected_status(char const *name, char const *ip) {
+    char ip6[40];
+    if (lichen_sys_wifi_ip6(ip6, sizeof(ip6))) {
+        set_status("Connected to %s, IP %s\nIPv6 %s", name, ip, ip6);
+    } else {
+        set_status("Connected to %s, IP %s", name, ip);
+    }
 }
 
 static void start_scan(void);
@@ -220,7 +230,7 @@ static void on_poll(lv_timer_t *timer) {
     stop_poll();
     if (st == LICHEN_SYS_WIFI_JOIN_JOINED) {
         if (lichen_sys_wifi_ip(ip, sizeof(ip))) {
-            set_status("Connected to %s, IP %s", a, ip);
+            set_connected_status(a, ip);
         } else {
             set_status("Connected to %s", a);
         }
@@ -469,7 +479,7 @@ static void on_scan_done(void *data) {
         char name[140];
         lichen_sys_wifi_ssid_sanitize(joined, name, sizeof(name));
         if (online) {
-            set_status("Connected to %s, IP %s", name, ip);
+            set_connected_status(name, ip);
         } else {
             set_status("Choose a network");
         }

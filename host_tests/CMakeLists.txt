@@ -527,6 +527,13 @@ target_include_directories(wifi_reg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../
 target_compile_options(wifi_reg_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_reg_test COMMAND wifi_reg_test)
 
+# The station's IPv6 addresses (#497): classes, the wifi.ip6 level, the address to show and its RFC 5952 text
+add_executable(wifi_ip6_test ${CMAKE_CURRENT_SOURCE_DIR}/wifi_ip6_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_ip6.c)
+target_include_directories(wifi_ip6_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net)
+target_compile_options(wifi_ip6_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME wifi_ip6_test COMMAND wifi_ip6_test)
+
 # The LoRa task's registry request queue (#310): order, one entry per id, the newest seq, a full queue
 add_executable(lora_regq_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_regq_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora/lora_regq.c)

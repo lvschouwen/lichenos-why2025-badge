@@ -51,6 +51,9 @@ typedef struct {
 bool                   lichen_sys_wifi_up(void);
 // As lichen_sys_wifi_up; ip (may be NULL with cap 0) gets the address. Any task.
 bool                   lichen_sys_wifi_ip(char *ip, size_t cap);
+// The IPv6 address to show (a global one from SLAAC), "" while there is none beyond the link. Returns whether there is
+// one. Any task.
+bool                   lichen_sys_wifi_ip6(char *ip, size_t cap);
 // A join is under way (status bar amber). Any task.
 bool                   lichen_sys_wifi_joining(void);
 // The badge has a network saved (first-run setup skips the Wi-Fi step, the status bar tells off from down). Any task.

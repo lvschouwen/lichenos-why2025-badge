@@ -9,6 +9,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_net_stack.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
@@ -20,7 +21,10 @@
 #include "fw_console.h"
 #include "lichen_clock.h"
 #include "lichen_mdns.h"
+#include "lwip/dhcp6.h"
+#include "lwip/tcpip.h"
 #include "wifi_cmd.h"
+#include "wifi_ip6.h"
 #include "wifi_count.h"
 #include "wifi_regdom.h"
 #include "wifi_text.h"
@@ -57,6 +61,7 @@ static SemaphoreHandle_t saved_lock; // the saved-network list (#160): the task 
 static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the console may ask together)
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
+static wifi_ip6_set_t ip6_set; // #497: the netif's addresses, under ip_lock like ip_text
 static wifi_count_t counts; // #415: written by the c6wifi task, read by wifi_link_counts, both under state_lock
 
 bool wifi_has_ip(char *ip, size_t cap) {
@@ -67,6 +72,27 @@ bool wifi_has_ip(char *ip, size_t cap) {
     }
     portEXIT_CRITICAL(&ip_lock);
     return have;
+}
+
+wifi_ip6_level_t wifi_ip6_get(char *text, size_t cap, unsigned *globals) {
+    uint8_t best[16];
+    portENTER_CRITICAL(&ip_lock);
+    wifi_ip6_level_t level = wifi_ip6_level(&ip6_set);
+    bool             have  = wifi_ip6_best(&ip6_set, best);
+    unsigned         n     = wifi_ip6_global_count(&ip6_set);
+    portEXIT_CRITICAL(&ip_lock);
+    if (globals) {
+        *globals = n;
+    }
+    if (text && cap) {
+        text[0] = '\0';
+        if (have) {
+            char tmp[WIFI_IP6_TEXT_MAX];
+            wifi_ip6_text(best, tmp, sizeof(tmp));
+            wifi_text_copy(text, cap, tmp);
+        }
+    }
+    return level;
 }
 
 bool wifi_has_credentials(void) {
@@ -85,6 +111,9 @@ static bool first_connect_settled;
 static void set_ip(char const *text) {
     portENTER_CRITICAL(&ip_lock);
     wifi_text_copy(ip_text, sizeof(ip_text), text);
+    if (!text[0]) {
+        wifi_ip6_clear(&ip6_set); // the v6 addresses go with the link
+    }
     portEXIT_CRITICAL(&ip_lock);
     if (!text[0]) {
         portENTER_CRITICAL(&state_lock);
@@ -285,6 +314,41 @@ static char const *wifi_ps_name(wifi_ps_type_t ps) {
     return ps == WIFI_PS_NONE ? "off" : ps == WIFI_PS_MIN_MODEM ? "min (modem sleep)" : "max (modem sleep)";
 }
 
+// Rebuilds the address set from the netif (lwIP's own list: it also drops expired and duplicate ones), on every
+// IP_EVENT_GOT_IP6 (link-local ready, SLAAC address preferred)
+static void ip6_refresh(void) {
+    esp_ip6_addr_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
+    wifi_ip6_set_t set;
+    wifi_ip6_clear(&set);
+    int n = esp_netif_get_all_ip6(sta_netif, addrs);
+    for (int i = 0; i < n && i < CONFIG_LWIP_IPV6_NUM_ADDRESSES; i++) {
+        uint8_t raw[16];
+        memcpy(raw, addrs[i].addr, sizeof(raw)); // lwIP keeps the words in network order
+        wifi_ip6_add(&set, raw);
+    }
+    portENTER_CRITICAL(&ip_lock);
+    ip6_set = set; // the netif is down after a disconnect, so a late event reads an empty list
+    portEXIT_CRITICAL(&ip_lock);
+    char             text[WIFI_IP6_TEXT_MAX];
+    wifi_ip6_level_t level = wifi_ip6_get(text, sizeof(text), NULL);
+    char const      *name  = level == WIFI_IP6_GLOBAL ? "global" : level == WIFI_IP6_LINKLOCAL ? "link-local" : "none";
+    ESP_LOGI(TAG, "wifi: ipv6 %s %s", name, text);
+}
+
+static void on_ip_event(int32_t id, void *data) {
+    if (id == IP_EVENT_GOT_IP6) {
+        ip6_refresh();
+    } else if (id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t const *got = data;
+        char                     text[16];
+        snprintf(text, sizeof(text), IPSTR, IP2STR(&got->ip_info.ip));
+        set_ip(text);
+        ESP_LOGI(TAG, "wifi: got ip:%s", text);
+        msg_t m = {.type = MSG_GOT_IP};
+        post(&m);
+    }
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
     msg_t m = {0};
@@ -302,20 +366,17 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
             m.type      = MSG_CONNECTED;
             post(&m);
         }
+        // IDF makes the STA's link-local only for NAN (wifi_default.c): without one there is no router solicitation
+        // and so no SLAAC. The default handlers run first (registered earlier), so the netif is up by now
+        esp_netif_create_ip6_linklocal(sta_netif);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t const *gone = data;
         set_ip("");
         m.type   = MSG_DISCONNECTED;
         m.reason = gone ? gone->reason : 0;
         post(&m);
-    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t const *got = data;
-        char                     text[16];
-        snprintf(text, sizeof(text), IPSTR, IP2STR(&got->ip_info.ip));
-        set_ip(text);
-        ESP_LOGI(TAG, "wifi: got ip:%s", text);
-        m.type = MSG_GOT_IP;
-        post(&m);
+    } else if (base == IP_EVENT) {
+        on_ip_event(id, data);
     }
 }
 
@@ -414,6 +475,21 @@ static void wipe_driver_store_if_ordered(void) {
 typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED, DRV_OFF } drv_result_t;
 static drv_result_t wifi_driver_up(char const **why);
 
+// Stateless DHCPv6 (#497): lwIP asks for the DNS servers only after a router advertisement with the "other config"
+// flag. Needs the lwIP netif, and with TCPIP_CORE_LOCKING the core lock around the call.
+static void enable_dhcp6_stateless(void) {
+    struct netif *n = esp_netif_get_netif_impl(sta_netif);
+    if (!n) {
+        return;
+    }
+    LOCK_TCPIP_CORE();
+    err_t err = dhcp6_enable_stateless(n);
+    UNLOCK_TCPIP_CORE();
+    if (err != ERR_OK) {
+        ESP_LOGW(TAG, "wifi: stateless DHCPv6 not enabled (%d)", (int)err);
+    }
+}
+
 static bool start_wifi(void) {
     boot_progress_begin(BOOT_WIFI);
     esp_err_t err = esp_event_loop_create_default();
@@ -427,7 +503,9 @@ static bool start_wifi(void) {
     }
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL, NULL);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_GOT_IP6, on_event, NULL, NULL);
     sta_netif = esp_netif_create_default_wifi_sta();
+    enable_dhcp6_stateless();
     start_sntp();
     boot_progress_begin_background(BOOT_CLOCK); // SNTP waits for an IP; the clock step ends in on_time_sync() (#39)
     // The boot steps are ended here, not in wifi_driver_up: a re-attach runs it again without them (#14)
@@ -1360,10 +1438,24 @@ static void wifi_status_link(void) {
     }
 }
 
+// The IPv6 line of `fw wifi` (#497): the address to use, or why there is none
+static void wifi_status_ip6(void) {
+    char     text[WIFI_IP6_TEXT_MAX];
+    unsigned n;
+    switch (wifi_ip6_get(text, sizeof(text), &n)) {
+        case WIFI_IP6_GLOBAL: console_reply("wifi: ipv6 %s%s", text, n > 1 ? " (+more)" : ""); break;
+        case WIFI_IP6_LINKLOCAL: console_reply("wifi: ipv6 link-local only (no router advertisement yet)"); break;
+        default: console_reply("wifi: ipv6 none"); break;
+    }
+}
+
 static void cmd_wifi_status(wifi_cmd_t const *c) {
     (void)c;
     char a[140], b[140];
     wifi_status_link();
+    if (wifi_has_ip(NULL, 0)) {
+        wifi_status_ip6();
+    }
     // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
     console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
     char              tried[33], kept[33];

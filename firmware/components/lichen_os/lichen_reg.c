@@ -229,6 +229,12 @@ reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
     return REG_OK;
 }
 
+reg_status_t reg_p4_wifi_ip6_get(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    out->u = (uint32_t)wifi_ip6_get(NULL, 0, NULL);
+    return REG_OK;
+}
+
 reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
     return wifi_set_ps(v->u == 1) ? REG_OK : REG_FAILED;

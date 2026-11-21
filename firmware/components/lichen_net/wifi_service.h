@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "wifi_ip6.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
 #include "wifi_regdom.h"
@@ -36,6 +37,10 @@ void wifi_enable(bool on);
 bool wifi_enabled(void);
 // Copies the station's IPv4 address into ip; false while there is none
 bool wifi_has_ip(char *ip, size_t cap);
+// The station's IPv6 state (#497): none / link-local only / an address beyond the link (SLAAC). text (may be NULL with
+// cap 0) gets the address to show, "" while there is none beyond the link; globals the count of those addresses (may be
+// NULL). Any task, a copy under a spinlock.
+wifi_ip6_level_t wifi_ip6_get(char *text, size_t cap, unsigned *globals);
 // Messages to the c6wifi task dropped for a full queue, since boot (fw soak, #419). Any task, no lock.
 uint32_t wifi_queue_drops(void);
 // Link losses since boot (#415, fw soak): an up link that dropped without being asked to (a join, forget or rollback

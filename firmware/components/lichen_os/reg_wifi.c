@@ -3,7 +3,8 @@
 #include <string.h>
 
 bool reg_wifi_is_key(reg_entry_t const *e) {
-    return e && REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY);
+    // wifi.ip6 is the P4's own netif (reg_p4_wifi_ip6_get), not a C6 driver read-back
+    return e && REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY) && e->id != REG_ID_WIFI_IP6;
 }
 
 static bool applied_of(uint16_t id, wifi_readback_t const *r, reg_value_t *out) {

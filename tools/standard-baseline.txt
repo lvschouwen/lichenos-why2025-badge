@@ -14,14 +14,14 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	299357
+size	<merged-strings>	299977
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	18259
 size	libbootloader_support.a	5942
 size	libc.a	47702
-size	libc6link.a	33324
+size	libc6link.a	33356
 size	libcrash.a	6245
 size	libcxx.a	872
 size	libefuse.a	2173
@@ -76,7 +76,7 @@ size	libesp_lcd.a	8125
 size	libesp_lcd_st7703.a	2935
 size	libesp_libc.a	7910
 size	libesp_mm.a	6067
-size	libesp_netif.a	9130
+size	libesp_netif.a	9248
 size	libesp_partition.a	3466
 size	libesp_psram.a	8414
 size	libesp_ringbuf.a	6409
@@ -91,7 +91,7 @@ size	libesp_wifi_remote_glue.a	621
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	39141
+size	libespressif__mdns.a	39157
 size	libfatfs.a	30649
 size	libfreertos.a	33118
 size	libfw_console.a	16455
@@ -106,20 +106,20 @@ size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2793
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
-size	liblichen_net.a	25439
+size	liblichen_net.a	27052
 size	liblichen_notify.a	13378
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	74299
+size	liblichen_os.a	74423
 size	liblichen_random.a	63
-size	liblichen_shell.a	192530
+size	liblichen_shell.a	192620
 size	liblog.a	2726
-size	liblora.a	36281
+size	liblora.a	36293
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
-size	liblwip.a	109820
+size	liblwip.a	111996
 size	libmain.a	13579
 size	libmbedtls.a	22
-size	libmesh.a	427748
+size	libmesh.a	427764
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2

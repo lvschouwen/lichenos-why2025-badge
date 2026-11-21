@@ -129,6 +129,15 @@ static reg_entry_t const ps         = {.id = REG_ID_WIFI_PS, .type = REG_T_ENUM,
 static reg_entry_t const bw         = {.id = REG_ID_WIFI_BW, .type = REG_T_U8, .flags = REG_F_RO | REG_F_TX,
                                        .name = "wifi.bw", .unit = "MHz"};
 
+static reg_entry_t const ip6 = {.id = REG_ID_WIFI_IP6, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.ip6",
+                                .min = 0, .max = 2};
+
+// wifi.ip6 (#497) is the P4's own netif: it must not go through the C6 read-back and its "no link" note
+static void test_ip6_key(void) {
+    CHECK(reg_wifi_is_key(&country) && reg_wifi_is_key(&ps));
+    CHECK(!reg_wifi_is_key(&ip6));
+}
+
 static void test_views(void) {
     wifi_readback_t r = nl();
     reg_view_t      v;
@@ -166,6 +175,7 @@ int main(void) {
     test_bw();
     test_alias_replies();
     test_views();
+    test_ip6_key();
     if (failures) {
         printf("wifi_reg_test: %d failure(s)\n", failures);
         return 1;

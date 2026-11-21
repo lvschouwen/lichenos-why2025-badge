@@ -8,6 +8,8 @@ static char const *const bl_override_names[] = {"none", "thermal", "flashlight",
 static char const *const bt_state_names[] = {"idle", "inited", "enabled"};
 // wifi_ps_type_t none / min: the two `fw wifi ps` allows (max modem sleep is never set, so it reads "failed")
 static char const *const wifi_ps_names[] = {"none", "min"};
+// wifi_ip6_level_t (lichen_net/wifi_ip6.h)
+static char const *const wifi_ip6_names[] = {"none", "linklocal", "global"};
 // lora_state_t (shared/lora/lora_proto.h)
 static char const *const lora_state_names[] = {"unconfigured", "idle", "rx", "error", "tx"};
 
@@ -50,6 +52,8 @@ reg_entry_t const reg_p4_table[] = {
     WIFI_RO(REG_ID_WIFI_BW, REG_T_U8, "wifi.bw", "MHz", REG_F_TX, 0, 0),
     {.id = REG_ID_WIFI_PS, .type = REG_T_ENUM, .name = "wifi.ps", .min = 0, .max = 1, .enum_names = wifi_ps_names,
      .get_applied = reg_p4_wifi_get, .set = reg_p4_wifi_ps_set},
+    {.id = REG_ID_WIFI_IP6, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "wifi.ip6", .min = 0, .max = 2,
+     .enum_names = wifi_ip6_names, .get_applied = reg_p4_wifi_ip6_get},
 };
 
 size_t const reg_p4_count = sizeof(reg_p4_table) / sizeof(reg_p4_table[0]);

@@ -425,6 +425,7 @@ lichen_sys_wifi_cred_valid	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_forget	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_has_credentials	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_ip	SYSTEM	any	lichen_sys_net.h
+lichen_sys_wifi_ip6	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_join	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_join_of	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_join_state	SYSTEM	any	lichen_sys_net.h

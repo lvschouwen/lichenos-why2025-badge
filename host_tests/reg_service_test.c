@@ -63,6 +63,12 @@ reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
     return REG_OK;
 }
 
+reg_status_t reg_p4_wifi_ip6_get(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    out->u = 2; // global
+    return REG_OK;
+}
+
 reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
     wifi_ps_value = v->u;
@@ -188,6 +194,7 @@ static void test_wifi_keys(void) {
     CHECK(strstr(reply, "applied 52 qdBm") != NULL);
     CHECK(set("wifi.bw 40", reply, sizeof(reply)) == RC_GUARDED);
     CHECK(set("wifi.protocol 7", reply, sizeof(reply)) == RC_RO);
+    CHECK(set("wifi.ip6 global", reply, sizeof(reply)) == RC_RO); // the netif's state (#497), never set
     CHECK(set("wifi.ps max", reply, sizeof(reply)) == RC_BAD_VALUE); // only none | min, as fw wifi ps
     CHECK(set("wifi.ps 2", reply, sizeof(reply)) == RC_RANGE);
     CHECK(wifi_ps_sets == 0);
