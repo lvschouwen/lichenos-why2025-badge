@@ -206,18 +206,6 @@ void wifi_link_counts(uint32_t *disconnects, uint32_t *reconnects, uint32_t *las
 static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is connected to (#15)
 
 // Called from the event loop task, so a short wait is fine; a dropped GOT_IP would roll a good trial back
-static bool post(msg_t const *m);
-
-// esp_wifi_start returned. STA_START may have read the choices before a setter that saw wifi_started still false stored
-// its value (apply_now), so the task looks again (MSG_REAPPLY)
-static void started_up(bool up) {
-    atomic_store(&wifi_started, up);
-    msg_t m = {.type = MSG_REAPPLY};
-    if (up) {
-        post(&m);
-    }
-}
-
 static bool post(msg_t const *m) {
     bool ok = queue && xQueueSend(queue, m, pdMS_TO_TICKS(50)) == pdTRUE;
     if (!ok && queue) {
@@ -225,6 +213,16 @@ static bool post(msg_t const *m) {
         ESP_LOGW(TAG, "wifi: queue full, message %d dropped", (int)m->type);
     }
     return ok;
+}
+
+// esp_wifi_start returned. STA_START may have read the choices before a setter that saw wifi_started still false stored
+// its value (apply_now), so the task looks again (MSG_REAPPLY)
+static void started_up(bool up) {
+    atomic_store(&wifi_started, up);
+    msg_t m = {.type = MSG_REAPPLY};
+    if (up && !post(&m) && !post(&m)) {
+        ESP_LOGW(TAG, "wifi: the re-apply after start was dropped: a power save, TX power, protocol or bandwidth chosen just now may wait for the next start");
+    }
 }
 
 // The driver's applied values for the registry (#311), under rb_lock: the last read that got anything, and a counter
@@ -731,13 +729,10 @@ static _Atomic int *choice_slot(msg_type_t type) {
 static bool apply_now(msg_type_t type, int value, wifi_req_why_t *why) {
     wifi_req_why_t w  = WIFI_REQ_OK;
     bool           ok = true;
-    bool direct = !atomic_load(&wifi_started);
-    if (direct) {
+    if (!atomic_load(&wifi_started)) { // MSG_REAPPLY covers a start that raced this store
         atomic_store(choice_slot(type), value);
         readback_invalidate();
-        direct = !atomic_load(&wifi_started); // started meanwhile: STA_START may have missed it, so ask the task too
-    }
-    if (!direct) {
+    } else {
         ok = false;
         w  = WIFI_REQ_BUSY;
         if (req_lock && xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) == pdTRUE) {
