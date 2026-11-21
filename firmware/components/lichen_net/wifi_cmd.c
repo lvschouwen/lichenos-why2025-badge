@@ -4,8 +4,6 @@
 
 #include <string.h>
 
-#define TX_RAW_MIN 8
-#define TX_RAW_MAX 80
 
 static bool is(char const *args, char const *word) {
     return strcmp(args, word) == 0;
@@ -34,8 +32,8 @@ static void parse_tx(char const *args, wifi_cmd_t *out) {
         return;
     }
     long raw    = strtol(args + 3, NULL, 10); // like atoi: "abc" is 0 (the default), "12ab" is 12
-    out->tx_raw = raw > TX_RAW_MAX + 1 ? TX_RAW_MAX + 1 : raw < -2 ? -2 : (int)raw; // only the range matters
-    if (out->tx_raw != -1 && out->tx_raw != 0 && (out->tx_raw < TX_RAW_MIN || out->tx_raw > TX_RAW_MAX)) {
+    out->tx_raw = raw > WIFI_TX_RAW_MAX + 1 ? WIFI_TX_RAW_MAX + 1 : raw < -2 ? -2 : (int)raw; // only the range matters
+    if (out->tx_raw != -1 && out->tx_raw != 0 && (out->tx_raw < WIFI_TX_RAW_MIN || out->tx_raw > WIFI_TX_RAW_MAX)) {
         out->kind = WIFI_CMD_TX_USAGE;
     }
 }

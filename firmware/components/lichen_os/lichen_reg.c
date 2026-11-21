@@ -269,7 +269,12 @@ reg_status_t reg_p4_wifi_proto_set(reg_entry_t const *e, reg_value_t const *v) {
         reg_cmd_set_why("7 (b/g/n) or 71 (b/g/n/ax)");
         return REG_FAILED;
     }
-    return wifi_set_proto(choice == 'n') ? REG_OK : REG_FAILED;
+    wifi_req_why_t why = WIFI_REQ_OK;
+    if (!wifi_set_proto(choice == 'n', &why)) {
+        reg_cmd_set_why(wifi_req_why_text(why));
+        return REG_FAILED;
+    }
+    return REG_OK;
 }
 
 // disp.engine (#468): the gate and the switch are reg_disp_engine.c (host-tested); here the log line

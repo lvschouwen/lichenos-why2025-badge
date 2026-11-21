@@ -67,7 +67,52 @@ static void test_scan_gate(void) {
     CHECK(wifi_req_why_text(WIFI_REQ_JOINING)[0] != '\0');
 }
 
+// The task's side, as handle_scan and handle_apply run it: plan, work, answer
+static bool task_step(wifi_req_t *r, uint32_t seq, wifi_req_why_t gate, int *ran) {
+    wifi_req_plan_t p = wifi_req_plan(r, seq, gate);
+    if (p.run) {
+        (*ran)++;
+    }
+    if (p.answer) {
+        wifi_req_finish(r, seq, p.run, p.run ? WIFI_REQ_OK : p.why);
+    }
+    return p.answer;
+}
+
+static void test_plan(void) {
+    wifi_req_t     r;
+    bool           ok;
+    wifi_req_why_t why;
+    int            ran = 0;
+    wifi_req_init(&r);
+    // refused during a join: not run, answered with the reason
+    uint32_t a = wifi_req_begin(&r);
+    CHECK(task_step(&r, a, wifi_scan_gate(true, false, true, true, WIFI_JOIN_TRYING, false), &ran));
+    CHECK(ran == 0 && wifi_req_result(&r, a, &ok, &why) && !ok && why == WIFI_REQ_JOINING);
+    uint32_t b = wifi_req_begin(&r);
+    CHECK(task_step(&r, b, wifi_link_gate(WIFI_JOIN_PENDING, false), &ran) && ran == 0);
+    CHECK(wifi_req_result(&r, b, &ok, &why) && why == WIFI_REQ_JOINING);
+    uint32_t c = wifi_req_begin(&r);
+    CHECK(task_step(&r, c, wifi_link_gate(WIFI_JOIN_NONE, true), &ran) && ran == 0);
+    CHECK(wifi_req_result(&r, c, &ok, &why) && why == WIFI_REQ_ROAMING);
+    // runs when clear
+    uint32_t d = wifi_req_begin(&r);
+    CHECK(task_step(&r, d, wifi_link_gate(WIFI_JOIN_JOINED, false), &ran) && ran == 1);
+    CHECK(wifi_req_result(&r, d, &ok, &why) && ok);
+    // a timeout followed by a retry: the first message is still queued, the second owns the slot. The task skips the
+    // first (no work, no answer) and runs the second once
+    uint32_t e = wifi_req_begin(&r);
+    uint32_t f = wifi_req_begin(&r);
+    CHECK(!task_step(&r, e, WIFI_REQ_OK, &ran) && ran == 1);
+    CHECK(task_step(&r, f, WIFI_REQ_OK, &ran) && ran == 2);
+    CHECK(wifi_req_result(&r, f, &ok, &why) && ok);
+    // a request is answered once: a repeated message of the same number is skipped
+    CHECK(!task_step(&r, f, WIFI_REQ_OK, &ran) && ran == 2);
+    CHECK(wifi_link_gate(WIFI_JOIN_FAILED_KEPT_OLD, false) == WIFI_REQ_OK);
+}
+
 int main(void) {
+    test_plan();
     test_slot();
     test_stale_answer();
     test_wrap();

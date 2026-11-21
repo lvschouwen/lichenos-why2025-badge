@@ -71,7 +71,6 @@ static SemaphoreHandle_t req_done;
 static wifi_req_t        req;
 static portMUX_TYPE      req_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t      wifi_task_handle;
-static _Atomic int       scan_why_last; // wifi_req_why_t of the last scan that did not run, for the console
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
 static wifi_count_t counts; // #415: written by the c6wifi task, read by wifi_link_counts, both under state_lock
@@ -262,7 +261,9 @@ static void apply_wifi_tx(void) {
 // 802.11ax on or off for the station (#146): 0 = driver default (b/g/n/ax), 'n' = b/g/n only, no HE (no TWT)
 static _Atomic int wifi_proto;
 
-static void apply_wifi_bw(void) {
+// False when the driver refused the protocol or the bandwidth
+static bool apply_wifi_bw(void) {
+    bool      ok = true;
     int       bw = atomic_load(&wifi_bw_mhz);
     int       proto = atomic_load(&wifi_proto);
     esp_err_t err;
@@ -271,11 +272,14 @@ static void apply_wifi_bw(void) {
         uint8_t mask = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | (proto == 'n' ? 0 : WIFI_PROTOCOL_11AX);
         if ((err = esp_wifi_set_protocol(WIFI_IF_STA, mask)) != ESP_OK) {
             ESP_LOGW(TAG, "wifi: protocol not set: %s", esp_err_to_name(err));
+            ok = false;
         }
     }
     if (bw && (err = esp_wifi_set_bandwidth(WIFI_IF_STA, bw == 20 ? WIFI_BW20 : WIFI_BW40)) != ESP_OK) {
         ESP_LOGW(TAG, "wifi: bandwidth not set: %s", esp_err_to_name(err));
+        ok = false;
     }
+    return ok;
 }
 
 static void apply_wifi_ps(void) {
@@ -558,38 +562,39 @@ static wifi_req_why_t request_locked(msg_type_t type, uint32_t answer_ms, bool *
 
 // The caller's side of a scan: refused early when the link is plainly not there, else the c6wifi task decides (it knows
 // about a join or a roam in flight) and scans. The wait is bounded; a caller that gives up is not answered later.
-static bool scan_ask(wifi_ap_t *out, size_t max, size_t *n, bool clean_list) {
+static bool scan_ask(wifi_ap_t *out, size_t max, size_t *n, bool clean_list, wifi_req_why_t *why_out) {
     *n = 0;
     wifi_req_why_t why = WIFI_REQ_BUSY;
     bool           ok  = false;
-    if (!out || max == 0 || !req_lock) {
-        return false;
-    }
-    if (c6link_updating() || !c6link_up() || !atomic_load(&wifi_on)) {
-        why = c6link_updating() ? WIFI_REQ_UPDATING : !c6link_up() ? WIFI_REQ_NO_LINK : WIFI_REQ_OFF;
-    } else if (xSemaphoreTake(req_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE) {
-        scan_clean = clean_list;
-        why        = request_locked(MSG_SCAN, SCAN_WAIT_MS + 3000, &ok);
-        if (ok) {
-            *n = scan_n < max ? scan_n : max;
-            memcpy(out, scan_res, *n * sizeof(*out));
+    if (out && max && req_lock) {
+        if (c6link_updating() || !c6link_up() || !atomic_load(&wifi_on)) {
+            why = c6link_updating() ? WIFI_REQ_UPDATING : !c6link_up() ? WIFI_REQ_NO_LINK : WIFI_REQ_OFF;
+        } else if (xSemaphoreTake(req_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE) {
+            scan_clean = clean_list;
+            why        = request_locked(MSG_SCAN, SCAN_WAIT_MS + 3000, &ok);
+            if (ok) {
+                *n = scan_n < max ? scan_n : max;
+                memcpy(out, scan_res, *n * sizeof(*out));
+            }
+            xSemaphoreGive(req_lock);
         }
-        xSemaphoreGive(req_lock);
     }
-    atomic_store(&scan_why_last, (int)(ok ? WIFI_REQ_OK : why));
+    if (why_out) {
+        *why_out = ok ? WIFI_REQ_OK : why;
+    }
     return ok;
 }
 
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n) {
-    return scan_ask(out, max, n, true);
+    return scan_ask(out, max, n, true, NULL);
 }
 
 bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n) {
-    return scan_ask(out, max, n, false);
+    return scan_ask(out, max, n, false, NULL);
 }
 
-char const *wifi_scan_refusal(void) {
-    return wifi_req_why_text((wifi_req_why_t)atomic_load(&scan_why_last));
+bool wifi_scan_why(wifi_ap_t *out, size_t max, size_t *n, wifi_req_why_t *why) {
+    return scan_ask(out, max, n, true, why);
 }
 
 // ---- the c6wifi task: joining with a trial, reconnecting, forgetting ---------------------------------------------
@@ -689,47 +694,54 @@ bool wifi_readback(wifi_readback_t *out, bool live) {
 #define REQ_LOCK_MS   2000
 #define REQ_ANSWER_MS 4000
 
-static bool apply_now(msg_type_t type) {
-    if (!atomic_load(&wifi_started)) {
-        return true;
+static bool apply_now(msg_type_t type, wifi_req_why_t *why) {
+    wifi_req_why_t w  = WIFI_REQ_OK;
+    bool           ok = true;
+    if (atomic_load(&wifi_started)) {
+        ok = false;
+        w  = WIFI_REQ_BUSY;
+        if (req_lock && xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) == pdTRUE) {
+            w = request_locked(type, REQ_ANSWER_MS, &ok);
+            xSemaphoreGive(req_lock);
+        }
     }
-    if (!req_lock || xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) != pdTRUE) {
-        return false;
+    if (why) {
+        *why = ok ? WIFI_REQ_OK : w;
     }
-    bool ok = false;
-    request_locked(type, REQ_ANSWER_MS, &ok);
-    xSemaphoreGive(req_lock);
     return ok;
 }
 
 bool wifi_set_ps(bool min) {
     atomic_store(&wifi_ps_mode, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
     readback_invalidate();
-    return apply_now(MSG_SET_PS);
+    return apply_now(MSG_SET_PS, NULL);
 }
 
 bool wifi_set_tx(int raw) {
-    if (raw < 0 || raw > 127) {
+    if (raw != 0 && (raw < WIFI_TX_RAW_MIN || raw > WIFI_TX_RAW_MAX)) {
         return false;
     }
     atomic_store(&wifi_tx_raw, raw);
     readback_invalidate();
-    return apply_now(MSG_SET_TX);
+    return apply_now(MSG_SET_TX, NULL);
 }
 
-bool wifi_set_bw(unsigned mhz) {
+bool wifi_set_bw(unsigned mhz, wifi_req_why_t *why) {
     if (mhz != 20 && mhz != 40) {
+        if (why) {
+            *why = WIFI_REQ_FAILED;
+        }
         return false;
     }
     atomic_store(&wifi_bw_mhz, (int)mhz);
     readback_invalidate();
-    return apply_now(MSG_SET_LINK);
+    return apply_now(MSG_SET_LINK, why);
 }
 
-bool wifi_set_proto(bool n_only) {
+bool wifi_set_proto(bool n_only, wifi_req_why_t *why) {
     atomic_store(&wifi_proto, n_only ? 'n' : 'x');
     readback_invalidate();
-    return apply_now(MSG_SET_LINK);
+    return apply_now(MSG_SET_LINK, why);
 }
 
 // Log-safe copy of an SSID (they come from the air)
@@ -1301,63 +1313,84 @@ static void answer(msg_t const *m, bool ok, wifi_req_why_t why) {
     }
 }
 
-static void handle_scan(msg_t const *m) {
-    portENTER_CRITICAL(&req_mux);
-    bool wanted = wifi_req_wanted(&req, (uint32_t)m->reason);
-    portEXIT_CRITICAL(&req_mux);
-    if (!wanted) { // its caller gave up while the task was busy: do not spend seconds on the air for nobody
-        return;
-    }
+// The refusal that applies to a request of this kind right now (the plan, wifi_req.c, decides what to do with it)
+static wifi_req_why_t gate_now(msg_type_t type) {
     portENTER_CRITICAL(&state_lock);
     wifi_join_state_t js = join.state;
     portEXIT_CRITICAL(&state_lock);
-    bool           roaming = retry_pending && retry_roam;
-    wifi_req_why_t why     = wifi_scan_gate(c6link_up(), c6link_updating(), atomic_load(&wifi_on), atomic_load(&wifi_started), js, roaming);
-    size_t         n       = 0;
-    bool           ok      = false;
-    if (why == WIFI_REQ_OK) {
-        ok = wifi_scan_drv(scan_done, scan_res, SCAN_RECORDS, &n, scan_clean);
-        if (!ok) {
-            why = WIFI_REQ_FAILED;
-        }
+    bool roaming = retry_pending && retry_roam;
+    if (type == MSG_SCAN) {
+        return wifi_scan_gate(c6link_up(), c6link_updating(), atomic_load(&wifi_on), atomic_load(&wifi_started), js, roaming);
     }
-    scan_n = n;
-    answer(m, ok, why);
+    return type == MSG_SET_LINK && atomic_load(&wifi_started) ? wifi_link_gate(js, roaming) : WIFI_REQ_OK;
 }
 
-// The protocol and the bandwidth are agreed at association: a station with credentials reconnects to take them (as
-// `fw wifi proto|bw` always did); one without, or one mid-trial, keeps them for its next association
+static wifi_req_plan_t plan_for(msg_t const *m) {
+    portENTER_CRITICAL(&req_mux);
+    wifi_req_plan_t plan = wifi_req_plan(&req, (uint32_t)m->reason, WIFI_REQ_OK);
+    portEXIT_CRITICAL(&req_mux);
+    if (plan.run) { // the gate reads other locks: not under req_mux; the slot is only ours to answer
+        plan.why = gate_now(m->type);
+        plan.run = plan.why == WIFI_REQ_OK;
+    }
+    return plan;
+}
+
+static void handle_scan(msg_t const *m) {
+    wifi_req_plan_t plan = plan_for(m); // a caller that gave up: do not spend seconds on the air for nobody
+    size_t          n    = 0;
+    bool            ok   = false;
+    if (plan.run) {
+        ok = wifi_scan_drv(scan_done, scan_res, SCAN_RECORDS, &n, scan_clean);
+        plan.why = ok ? WIFI_REQ_OK : WIFI_REQ_FAILED;
+    }
+    if (plan.answer) {
+        scan_n = n;
+        answer(m, ok, plan.why);
+    }
+}
+
+// The protocol and the bandwidth are agreed at association (the gate keeps a join or a roam out): set them in the
+// driver first, then a station with credentials reconnects to take them. True only when the driver took them.
 static bool apply_link(void) {
+    bool ok = apply_wifi_bw();
     portENTER_CRITICAL(&state_lock);
-    bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
-    bool have   = have_credentials;
+    bool have = have_credentials;
     portEXIT_CRITICAL(&state_lock);
-    if (have && !trying && atomic_load(&wifi_on)) {
+    if (have && atomic_load(&wifi_on)) {
         handle_reconnect(false);
-    } else if (!trying) {
-        apply_wifi_bw();
     }
     readback_invalidate();
-    return true;
+    return ok;
+}
+
+static bool apply_one(msg_type_t type) {
+    bool ok = true;
+    switch (type) {
+        case MSG_SET_PS:
+            ok = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode)) == ESP_OK;
+            readback_invalidate();
+            break;
+        case MSG_SET_TX: {
+            int raw = atomic_load(&wifi_tx_raw);
+            ok      = set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
+            break;
+        }
+        default: ok = apply_link(); break;
+    }
+    return ok;
 }
 
 static void handle_apply(msg_t const *m) {
-    bool ok = true;
-    if (atomic_load(&wifi_started)) {
-        switch (m->type) {
-            case MSG_SET_PS:
-                ok = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode)) == ESP_OK;
-                readback_invalidate();
-                break;
-            case MSG_SET_TX: {
-                int raw = atomic_load(&wifi_tx_raw);
-                ok      = set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
-                break;
-            }
-            default: ok = apply_link(); break;
-        }
+    wifi_req_plan_t plan = plan_for(m);
+    bool            ok   = false;
+    if (plan.run) { // before the first start there is nothing to apply: STA_START does it
+        ok       = !atomic_load(&wifi_started) || apply_one(m->type);
+        plan.why = ok ? WIFI_REQ_OK : WIFI_REQ_FAILED;
     }
-    answer(m, ok, ok ? WIFI_REQ_OK : WIFI_REQ_FAILED);
+    if (plan.answer) {
+        answer(m, ok, plan.why);
+    }
 }
 
 // STA_START, on the c6wifi task: the country once more if its set before this start failed (#311), the power save,

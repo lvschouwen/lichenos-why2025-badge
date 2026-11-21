@@ -214,7 +214,7 @@ static void on_scan_done(void *data) {
         set_status("Scans every 10 s");
     } else {
         // Not at the user's expense: the next try waits the same 10 s
-        set_status("Can't scan now: Wi-Fi is off or a firmware update is running. Trying again.");
+        set_status("Can't scan now: Wi-Fi is off, joining or updating. Trying again.");
     }
     lichen_free(lichen_sys_ctx_os(), res);
 }

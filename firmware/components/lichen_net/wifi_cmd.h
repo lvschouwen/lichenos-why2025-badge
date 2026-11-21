@@ -31,6 +31,10 @@ typedef enum {
 
 #define WIFI_CMD_SSID_MAX 32 // an SSID is at most 32 bytes
 
+// 0.25 dBm units the driver accepts for `fw wifi tx` (0 = its own default)
+#define WIFI_TX_RAW_MIN 8
+#define WIFI_TX_RAW_MAX 80
+
 typedef struct {
     wifi_cmd_kind_t kind;
     bool            on;                          // SWITCH

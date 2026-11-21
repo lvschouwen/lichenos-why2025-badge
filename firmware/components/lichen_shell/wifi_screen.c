@@ -470,7 +470,7 @@ static void on_scan_done(void *data) {
     settings_get_str("wifi_ssid", joined, sizeof(joined), "");
     bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && lichen_sys_wifi_ip(ip, sizeof(ip));
     if (!res->ok) {
-        set_status("The scan failed. Try again.");
+        set_status("Can't scan now: Wi-Fi is busy or off. Try again.");
     } else if (shown_n == 0) {
         set_status("No networks found.");
     } else if (!poll) { // a join in progress keeps its own status

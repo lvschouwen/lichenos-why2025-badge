@@ -205,8 +205,9 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   the console (a read under 250 ms old is reused unless a setter ran since: `wifi_readback_reusable`), the cache with its
   age on the LVGL task; the c6wifi task reads only while the link and the driver are up, and stops after a failed first
   RPC. `fw wifi ps|proto` are aliases of the settable keys; `fw wifi tx|bw` are the guarded path of the RO + TX keys (not
-  thin aliases). All of them echo the applied read-back. Since #502 the scan, power save, TX power, protocol and
-  bandwidth reach the driver as `c6wifi` messages (`MSG_SCAN`, `MSG_SET_PS|TX|LINK`): the caller posts, then waits a bounded
+  thin aliases). All of them echo the applied read-back. Since #502 the scan and the setters (power save, TX power, protocol and
+  bandwidth) reach the driver as `c6wifi` messages; the read-only getters (`wifi_readback`, `fw wifi stats`) still call
+  `esp_wifi_get_*` on the caller's task (follow-up). The messages are (`MSG_SCAN`, `MSG_SET_PS|TX|LINK`): the caller posts, then waits a bounded
   time on a numbered answer slot (`wifi_req.c`), and a scan is refused while a join or a roam is in flight. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
   Bluetooth switch. `bt.enable` (#503) is a C6 proxy key too: main's radio listener hands the OS's effective Bluetooth
   state (switch, airplane mode, holds) to `lichen_reg_bt_request`, which posts REG_SET once `c6.reg_caps` has the

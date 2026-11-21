@@ -20,8 +20,9 @@ void wifi_console_scan(wifi_cmd_t const *c) {
     EXT_RAM_BSS_ATTR static wifi_ap_t aps[20];
     char                              a[140];
     size_t                            n = 0;
-    if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
-        console_reply("wifi: scan not done: %s", wifi_scan_refusal());
+    wifi_req_why_t why = WIFI_REQ_OK;
+    if (!wifi_scan_why(aps, sizeof(aps) / sizeof(aps[0]), &n, &why)) {
+        console_reply("wifi: scan not done: %s", wifi_req_why_text(why));
         return;
     }
     console_reply("wifi: %u networks", (unsigned)n);
@@ -93,7 +94,7 @@ void wifi_console_tx_usage(wifi_cmd_t const *c) {
 }
 
 void wifi_console_tx(wifi_cmd_t const *c) {
-    if (c->tx_raw >= 0 && !wifi_set_tx(c->tx_raw)) { // bare "tx" (-1) reads back only
+    if (c->tx_raw >= 0 && !wifi_set_tx(c->tx_raw)) { // bare "tx" (-1) reads back only; the range is wifi_set_tx's
         console_reply("wifi: TX power not applied (busy or refused)");
     }
     tuning_echo('t', 0, false);
@@ -106,8 +107,9 @@ void wifi_console_proto_usage(wifi_cmd_t const *c) {
 
 // An alias of the registry's wifi.protocol (settable): the same set, then the applied read-back
 void wifi_console_proto(wifi_cmd_t const *c) {
-    if (!wifi_set_proto(c->proto_n)) {
-        console_reply("wifi: protocol not applied (busy or refused)");
+    wifi_req_why_t why = WIFI_REQ_OK;
+    if (!wifi_set_proto(c->proto_n, &why)) {
+        console_reply("wifi: protocol not applied: %s", wifi_req_why_text(why));
     }
     wifi_readback_t r;
     char            line[120];
@@ -119,7 +121,12 @@ void wifi_console_proto(wifi_cmd_t const *c) {
 void wifi_console_bw(wifi_cmd_t const *c) {
     bool reconnecting = false;
     if (c->bw_mhz) {
-        reconnecting = wifi_set_bw(c->bw_mhz);
+        wifi_req_why_t why = WIFI_REQ_OK;
+        if (!wifi_set_bw(c->bw_mhz, &why)) {
+            console_reply("wifi: bandwidth not applied: %s", wifi_req_why_text(why));
+        } else {
+            reconnecting = wifi_has_credentials() && wifi_enabled(); // only then the task issues a reconnect
+        }
     }
     tuning_echo('b', c->bw_mhz, reconnecting);
 }

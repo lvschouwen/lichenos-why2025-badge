@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wifi_req.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -99,14 +101,15 @@ bool wifi_readback(wifi_readback_t *out, bool live);
 // Power save none (false) or min (true), not saved (#146): applied now when Wi-Fi runs, else at the next start. False
 // when the driver refused it.
 bool wifi_set_ps(bool min);
-// TX power in 0.25 dBm units (0 = the driver's default), not saved (#146, #502): applied on the c6wifi task. False when it
-// is out of range, busy or the driver refused it.
+// TX power in 0.25 dBm units (0 = the driver's default, else WIFI_TX_RAW_MIN..MAX), not saved (#146, #502): applied on
+// the c6wifi task. False when it is out of range, busy or the driver refused it.
 bool wifi_set_tx(int raw);
-// STA bandwidth 20 or 40 MHz, not saved: a station with credentials reconnects to take it. False when not 20/40, busy
-// or refused.
-bool wifi_set_bw(unsigned mhz);
+// STA bandwidth 20 or 40 MHz, not saved: a station with credentials reconnects to take it. False when not 20/40, busy,
+// a join or a roam is in flight, or refused.
+// why (may be NULL): WIFI_REQ_OK, or the reason it was not applied.
+bool wifi_set_bw(unsigned mhz, wifi_req_why_t *why);
 // Protocol b/g/n (n_only) or b/g/n/ax, not saved (#502): a station with credentials reconnects to take it, so the
-// read-back follows within a moment. False when busy or refused. The registry's wifi.protocol is this setter.
-bool wifi_set_proto(bool n_only);
-// Why the last wifi_scan or wifi_scan_raw did not run or failed ("a join is in progress", "no C6 link", ...)
-char const *wifi_scan_refusal(void);
+// read-back follows within a moment. False when busy, a join or a roam is in flight, or refused. The registry's wifi.protocol is this setter.
+bool wifi_set_proto(bool n_only, wifi_req_why_t *why);
+// wifi_scan with the reason of this very call (WIFI_REQ_OK when it ran): "a join is in progress", "no C6 link", ...
+bool wifi_scan_why(wifi_ap_t *out, size_t max, size_t *n, wifi_req_why_t *why);

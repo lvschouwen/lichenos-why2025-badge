@@ -41,4 +41,16 @@ bool wifi_req_wanted(wifi_req_t const *r, uint32_t seq);
 
 // Whether a scan may start. roaming: the C6 left an AP for a better one and has not arrived yet (#495).
 wifi_req_why_t wifi_scan_gate(bool link_up, bool updating, bool radio_on, bool driver_up, wifi_join_state_t join, bool roaming);
+// A protocol or bandwidth change needs the association to be left alone, like a scan: refused during a join or a roam
+wifi_req_why_t wifi_link_gate(wifi_join_state_t join, bool roaming);
+
+// What the task does with request seq once it reaches it (#502 review): run = do the work; answer = tell the caller.
+// A request whose caller has gone (timed out, or a newer request owns the slot) is skipped silently, so a timeout plus a
+// retry never runs the same reconnect twice. gate: the refusal that applies now (WIFI_REQ_OK = none).
+typedef struct {
+    bool           run;
+    bool           answer;
+    wifi_req_why_t why; // the refusal, when answer && !run
+} wifi_req_plan_t;
+wifi_req_plan_t wifi_req_plan(wifi_req_t const *r, uint32_t seq, wifi_req_why_t gate);
 char const    *wifi_req_why_text(wifi_req_why_t why);

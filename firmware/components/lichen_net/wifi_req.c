@@ -57,6 +57,20 @@ wifi_req_why_t wifi_scan_gate(bool link_up, bool updating, bool radio_on, bool d
     return roaming ? WIFI_REQ_ROAMING : WIFI_REQ_OK;
 }
 
+wifi_req_why_t wifi_link_gate(wifi_join_state_t join, bool roaming) {
+    if (join == WIFI_JOIN_PENDING || join == WIFI_JOIN_TRYING) {
+        return WIFI_REQ_JOINING;
+    }
+    return roaming ? WIFI_REQ_ROAMING : WIFI_REQ_OK;
+}
+
+wifi_req_plan_t wifi_req_plan(wifi_req_t const *r, uint32_t seq, wifi_req_why_t gate) {
+    if (!wifi_req_wanted(r, seq)) {
+        return (wifi_req_plan_t){0};
+    }
+    return (wifi_req_plan_t){.run = gate == WIFI_REQ_OK, .answer = true, .why = gate};
+}
+
 char const *wifi_req_why_text(wifi_req_why_t why) {
     switch (why) {
         case WIFI_REQ_OK: return "ok";
