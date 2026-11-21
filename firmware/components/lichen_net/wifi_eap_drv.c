@@ -74,8 +74,11 @@ static wifi_eap_fail_t name_drop(wifi_eap_t const *e, bool *touched) {
     if (wifi_eap_name_plan(e->server[0] != '\0', atomic_load(&name_on_c6)) != WIFI_NAME_DISABLE_FIRST) {
         return WIFI_EAP_FAIL_NONE;
     }
-    atomic_store(&name_on_c6, false);
-    return rpc(esp_wifi_sta_enterprise_disable(), WIFI_EAP_STEP_OTHER, touched);
+    wifi_eap_fail_t why = rpc(esp_wifi_sta_enterprise_disable(), WIFI_EAP_STEP_OTHER, touched);
+    if (why == WIFI_EAP_FAIL_NONE) {
+        atomic_store(&name_on_c6, false); // only once it is gone: a failed disable leaves the name to be dropped next time
+    }
+    return why;
 }
 
 // The server name, after the CA: a name replaces the old one, no name sends nothing (name_drop saw to a stale one)

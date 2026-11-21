@@ -51,7 +51,7 @@ static lv_timer_t *radio_timer; // refreshes it once a second
 static char        radio_shown[96];
 static uint32_t    gen;
 static lv_obj_t *
-    rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
+    rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 5]; // the placeholder or the networks, "Scan again", then the saved ones
 static size_t      row_count;
 static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
 EXT_RAM_BSS_ATTR static lichen_sys_wifi_ap_t shown[MAX_APS];
@@ -225,6 +225,8 @@ static void run_done(void *fn) {
     ((void (*)(void))fn)();
 }
 
+static bool force_eap;   // "Sign-in: Enterprise login": a locked network asks for the login, whatever the scan said (#496)
+static lv_obj_t *signin_row;
 static bool joining_eap; // the trial being watched is an Enterprise login: its failure says login, not password
 
 static void on_poll(lv_timer_t *timer) {
@@ -321,7 +323,7 @@ static void on_pick(void *arg) {
         begin_join("");
         return;
     }
-    if (shown[i].eap) { // an 802.1X network takes a login, not a password
+    if (shown[i].eap || force_eap) { // an 802.1X network takes a login, not a password; the row below forces it
         wifi_eap_screen_open(target, eap_started);
         return;
     }
@@ -445,6 +447,14 @@ static void open_analyser(void *arg) {
     wifi_analyser_open();
 }
 
+// "Locked networks: Password / Login": which sign-in a locked network gets. A scanned 802.1X network always asks for the
+// login; this row sends any other locked network to the same form (a hidden, mixed or mis-flagged one).
+static void toggle_signin(void *arg) {
+    (void)arg;
+    force_eap = !force_eap;
+    menu_set_value(signin_row, force_eap ? "Login" : "Password");
+}
+
 // lichen_ui_with_group's builder for fill_rows: the scan list, "Scan again" and the analyser, in the screen's group
 static void build_scan_rows(void *arg) {
     (void)arg;
@@ -461,6 +471,11 @@ static void build_scan_rows(void *arg) {
         }
     }
     rows[row_count++] = menu_add(menu, "Scan again", "", again, NULL);
+    signin_row = menu_add(menu, "Locked networks", force_eap ? "Login" : "Password", toggle_signin, NULL);
+    if (signin_row) {
+        menu_set_kind(signin_row, MENU_CYCLE);
+        rows[row_count++] = signin_row;
+    }
     lv_obj_t *an = menu_add(menu, "Wi-Fi analyser", "", open_analyser, NULL);
     if (an) {
         menu_set_kind(an, MENU_OPEN);
@@ -583,7 +598,10 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(busy_timer);
         busy_timer = NULL;
     }
-    radio_row = NULL;
+    radio_row  = NULL;
+    signin_row = NULL;
+    force_eap  = false;
+    joining_eap = false;
     gen++; // a scan still running is dropped when it reports
     setup_done = NULL;
     screen = menu = status = NULL;
