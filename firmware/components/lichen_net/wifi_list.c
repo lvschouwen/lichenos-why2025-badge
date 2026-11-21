@@ -206,10 +206,11 @@ static bool saved_store(wifi_saved_t const *l) {
         slot_key(kk, 'k', i);
         bool done;
         if ((size_t)i < l->n) {
-            // Power-loss order: the kind goes first and comes back last. In between the slot reads as PSK, and what it
-            // holds is either a valid PSK of its own SSID or the Enterprise marker, which is no valid PSK and drops the
-            // slot. A record index never pairs with another network's SSID, and nothing reads as open.
+            // Power-loss order: the kind and the password go first, the kind comes back last. Without a password a PSK
+            // slot is dropped on load, so the SSID is never read with another network's password, and a record index
+            // never pairs with another network's SSID; nothing reads as open. (wifi_cred_test replays every cut.)
             done = store->erase(kk);
+            done = store->erase(kp) && done;
             done = store->set_str(ks, l->e[i].ssid) && done;
             done = store->secret_set(kp, entry_pass(&l->e[i])) && done;
             done = store_kind(kk, &l->e[i]) && done;

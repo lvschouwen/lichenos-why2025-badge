@@ -221,6 +221,10 @@ wifi_plan_t wifi_apply_plan(bool is_eap_entry, bool record_ok, bool pass_is_mark
     return enterprise_on ? WIFI_PLAN_PSK_CLEAR : WIFI_PLAN_PSK;
 }
 
+unsigned wifi_apply_unwind(bool touched, bool have_prev, bool cfg_set) {
+    return (touched ? WIFI_UNWIND_CLEAR : 0u) | (have_prev && cfg_set ? WIFI_UNWIND_RESTORE : 0u);
+}
+
 bool wifi_enterprise_after(bool was_on, bool touched) {
     return was_on || touched;
 }

@@ -309,6 +309,100 @@ static void eap_damage(void) {
     CHECK(wifi_cred_clear());
 }
 
+// ---- power loss (#496): every cut of a list rewrite leaves only consistent pairs ---------------------------------------
+
+static int budget = -1; // writes and erases still allowed; 0 = the power is gone (they fail without effect), -1 = no limit
+static bool spend(void) {
+    if (budget < 0) {
+        return true;
+    }
+    if (budget == 0) {
+        return false;
+    }
+    budget--;
+    return true;
+}
+static bool cut_set_str(char const *k, char const *v) { return spend() && plain_set_str(k, v); }
+static bool cut_erase(char const *k) { return spend() && plain_erase(k); }
+static bool cut_set_u8(char const *k, uint8_t v) { return spend() && plain_set_u8(k, v); }
+static bool cut_secret_set(char const *k, char const *v) { return spend() && settings_secret_set(k, v); }
+static wifi_store_t const cut_store = {
+    .get_str = plain_get_str, .set_str = cut_set_str, .erase = cut_erase, .get_u8 = plain_get_u8,
+    .set_u8 = cut_set_u8, .secret_get = settings_secret_get, .secret_set = cut_secret_set,
+};
+
+// What a network may legitimately hold at any cut: its own PSK, or its own Enterprise record (or nothing)
+static char const *want_pass(char const *ssid) {
+    static char const *const names[] = {"p1", "p2", "p3", "p4", "oldeap"};
+    static char const *const pass[]  = {"passwordp1", "passwordp2", "passwordp3", "passwordp4", "passwordold"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strcmp(ssid, names[i]) == 0) {
+            return pass[i];
+        }
+    }
+    return NULL;
+}
+static char const *want_rec(char const *ssid) {
+    return strcmp(ssid, "oldeap") == 0 ? "E1-old" : strcmp(ssid, "newe") == 0 ? "E1-new" : NULL;
+}
+
+static int cut_checks;
+static void cut_verify(char const *what, int n) {
+    wifi_saved_t l;
+    char         rec[WIFI_EAP_BLOB_MAX];
+    CHECK(wifi_saved_load(&l));
+    for (size_t i = 0; i < l.n; i++) {
+        bool bad;
+        if (l.e[i].kind == WIFI_SAVED_EAP) {
+            wifi_eap_rec_t r = wifi_cred_eap_record(l.e[i].ssid, rec, sizeof(rec));
+            // a missing record fails closed; another network's record is the leak
+            bad = r == WIFI_EAP_REC_OK && (!want_rec(l.e[i].ssid) || strcmp(rec, want_rec(l.e[i].ssid)) != 0);
+        } else {
+            bad = !want_pass(l.e[i].ssid) || strcmp(l.e[i].pass, want_pass(l.e[i].ssid)) != 0;
+        }
+        if (bad) {
+            printf("mixed pair after %s cut at %d: slot %zu\n", what, n, i);
+        }
+        CHECK(!bad);
+    }
+    cut_checks++;
+}
+
+static void cut_setup(void) {
+    budget = -1;
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_cred_save_eap("oldeap", "E1-old")); // the oldest: evicted by a sixth network, its record slot reused
+    CHECK(wifi_cred_save("p1", "passwordp1") && wifi_cred_save("p2", "passwordp2"));
+    CHECK(wifi_cred_save("p3", "passwordp3") && wifi_cred_save("p4", "passwordp4"));
+}
+
+static void cut_run(int which, int n) {
+    bool a, b;
+    cut_setup();
+    budget = n;
+    switch (which) {
+        case 0: wifi_cred_save_eap("newe", "E1-new"); break; // evicts oldeap, reuses its record slot
+        case 1: wifi_cred_save("oldeap", "passwordold"); break; // a PSK replaces the Enterprise entry
+        case 2: wifi_cred_forget("p4", &a, &b); break; // every slot behind it shifts
+        default: wifi_cred_activate("oldeap"); break; // the oldest, an Enterprise entry, to the front
+    }
+    budget = -1;
+}
+
+static void power_loss(void) {
+    static char const *const what[] = {"save_eap", "psk over eap", "forget", "activate"};
+    wifi_list_bind_store(&cut_store);
+    for (int which = 0; which < 4; which++) {
+        for (int n = 0; n <= 60; n++) {
+            cut_run(which, n);
+            cut_verify(what[which], n);
+        }
+    }
+    wifi_list_bind_store(&test_store);
+    CHECK(cut_checks == 4 * 61);
+    CHECK(wifi_cred_clear());
+}
+
 // #240: the Wi-Fi screen gets the SSIDs only, read under the list lock; no password byte reaches its buffer
 static void names_only(void) {
     char out[WIFI_SAVED_MAX][33];
@@ -458,6 +552,7 @@ int main(void) {
     saved_networks();
     eap_networks();
     eap_damage();
+    power_loss();
     names_only();
     names_busy();
     apply_outside_lock();

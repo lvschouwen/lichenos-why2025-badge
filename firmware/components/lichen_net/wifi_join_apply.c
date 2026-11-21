@@ -115,14 +115,15 @@ static bool apply_eap(char const *s, wifi_eap_t const *eap, wifi_lock_t const *l
         why = err == ESP_OK ? wifi_eap_drv_enable() : WIFI_EAP_FAIL_C6_OLD;
     }
     if (why != WIFI_EAP_FAIL_NONE) {
-        if (have_prev && err == ESP_OK) {
-            esp_wifi_set_config(WIFI_IF_STA, prev);
-        }
-        if (touched) {
-            wifi_eap_drv_clear(); // only what was set: an untouched (old) C6 gets no clear RPCs
+        unsigned undo = wifi_apply_unwind(touched, have_prev, err == ESP_OK);
+        if (undo & WIFI_UNWIND_CLEAR) {
+            wifi_eap_drv_clear(); // first: Enterprise off, and only what was set (an untouched old C6 gets no RPCs)
             atomic_store(&enterprise_on, false);
         }
-        failed(why);
+        if (undo & WIFI_UNWIND_RESTORE) {
+            esp_wifi_set_config(WIFI_IF_STA, prev); // then the previous config, while config_bad is not set yet
+        }
+        failed(why); // last: from here nothing connects until another pair applies
     }
     if (prev) {
         memset(prev, 0, sizeof(*prev)); // a previous PSK config holds its password

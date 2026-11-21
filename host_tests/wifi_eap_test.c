@@ -287,6 +287,10 @@ static void apply_plan(void) {
     on = wifi_enterprise_after(false, true);
     CHECK(on && wifi_apply_plan(false, false, false, on) == WIFI_PLAN_PSK_CLEAR);
     CHECK(wifi_enterprise_after(true, false) && !wifi_enterprise_after(false, false));
+    // What a refused Enterprise apply undoes: an old C6 (nothing touched) gets no clear; restore only after a set_config
+    CHECK(wifi_apply_unwind(false, true, false) == 0 && wifi_apply_unwind(false, true, true) == WIFI_UNWIND_RESTORE);
+    CHECK(wifi_apply_unwind(true, true, false) == WIFI_UNWIND_CLEAR);
+    CHECK(wifi_apply_unwind(true, true, true) == (WIFI_UNWIND_CLEAR | WIFI_UNWIND_RESTORE) && wifi_apply_unwind(true, false, true) == WIFI_UNWIND_CLEAR);
 }
 
 // `fw wifi eap ...`

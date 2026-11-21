@@ -97,6 +97,12 @@ wifi_plan_t wifi_apply_plan(bool is_eap_entry, bool record_ok, bool pass_is_mark
 // Whether the C6 holds Enterprise state after an Enterprise apply: it did already, or at least one EAP call got through.
 // An old C6 fails the first call, so it stays false and a PSK network never sends it the clear RPCs.
 bool wifi_enterprise_after(bool was_on, bool touched);
+// What a refused Enterprise apply undoes, in this order: CLEAR (Enterprise off and its credentials, only when an EAP call
+// got through) before RESTORE (the previous station config, only when it was read and the new one had been set). The
+// caller marks the pair blocked after both, never before: a restore never runs while the pair is blocked.
+#define WIFI_UNWIND_CLEAR   1u
+#define WIFI_UNWIND_RESTORE 2u
+unsigned wifi_apply_unwind(bool touched, bool have_prev, bool cfg_set);
 
 // `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password...>` (the text after
 // "eap "): "-" is an empty identity or no CA; the password is the rest of the line and may hold spaces. ssid gets 33 bytes.
