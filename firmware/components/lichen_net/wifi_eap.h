@@ -34,6 +34,9 @@ bool wifi_eap_text_valid(char const *s, size_t min, size_t max);
 // Empty (no CA) or an absolute path under /storage/ ending in .pem or .crt, no empty, "." or ".." segment, no control
 // bytes, at most WIFI_EAP_CA_MAX bytes. Whether the file exists is the join's business.
 bool wifi_eap_ca_path_valid(char const *path);
+// TTLS with the PAP inner method and no CA: PAP puts the cleartext password in the tunnel, so an unverified server (an evil
+// twin) would receive it. wifi_eap_valid refuses it; the UI and console say "PAP needs a CA certificate".
+bool wifi_eap_pap_without_ca(wifi_eap_t const *e);
 // Method and inner method known and allowed together, username 1-63, identity 0-63, password 1-127, CA path valid
 bool wifi_eap_valid(wifi_eap_t const *e);
 // True when the join would not check the server: no CA set (the UI shows "unverified server")
@@ -87,5 +90,5 @@ wifi_auth_class_t wifi_auth_class(int authmode, bool known);
 
 // `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password...>` (the text after
 // "eap "): "-" is an empty identity or no CA; the password is the rest of the line and may hold spaces. ssid gets 33 bytes.
-typedef enum { WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID } wifi_eap_parse_t;
+typedef enum { WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID, WIFI_EAP_PARSE_PAP_NO_CA } wifi_eap_parse_t;
 wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t *e);

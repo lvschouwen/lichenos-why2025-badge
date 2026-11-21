@@ -150,6 +150,8 @@ void wifi_apply_console_eap(char const *args, wifi_lock_t const *lock) {
     wifi_eap_parse_t r = wifi_eap_parse_line(args, ssid, e);
     if (r == WIFI_EAP_PARSE_USAGE) {
         console_reply("wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password> (peap takes mschapv2; - = none; the password is the rest of the line)");
+    } else if (r == WIFI_EAP_PARSE_PAP_NO_CA) {
+        console_reply("wifi: PAP needs a CA certificate (give a CA path, or use mschapv2)");
     } else if (r == WIFI_EAP_PARSE_INVALID) {
         console_reply("wifi: invalid field (SSID 1-32, identity 0-63, username 1-63, password 1-127 bytes, CA path /storage/<file>.pem or .crt)");
     } else {

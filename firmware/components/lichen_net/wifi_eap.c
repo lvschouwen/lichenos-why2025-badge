@@ -48,12 +48,19 @@ bool wifi_eap_ca_path_valid(char const *path) {
     return true;
 }
 
+bool wifi_eap_pap_without_ca(wifi_eap_t const *e) {
+    return e && e->method == WIFI_EAP_TTLS && e->phase2 == WIFI_EAP_P2_PAP && e->ca_path[0] == '\0';
+}
+
 bool wifi_eap_valid(wifi_eap_t const *e) {
     if (!e || e->method > WIFI_EAP_TTLS || e->phase2 > WIFI_EAP_P2_PAP) {
         return false;
     }
     if (e->method == WIFI_EAP_PEAP && e->phase2 != WIFI_EAP_P2_MSCHAPV2) {
         return false; // PEAP-MSCHAPv2 only
+    }
+    if (wifi_eap_pap_without_ca(e)) {
+        return false; // PAP sends the password in the clear inside the tunnel: only to a server that was checked
     }
     return wifi_eap_text_valid(e->identity, 0, WIFI_EAP_IDENTITY_MAX) &&
            wifi_eap_text_valid(e->username, 1, WIFI_EAP_USER_MAX) &&
@@ -259,6 +266,10 @@ wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t
               strlen(p) < sizeof(e->password);
     if (ok) {
         strcpy(e->password, p);
+    }
+    if (ok && wifi_eap_pap_without_ca(e)) {
+        wifi_eap_wipe(e);
+        return WIFI_EAP_PARSE_PAP_NO_CA;
     }
     if (!ok || ssid[0] == '\0' || !wifi_eap_valid(e)) {
         wifi_eap_wipe(e);

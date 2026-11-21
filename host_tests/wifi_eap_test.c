@@ -63,9 +63,12 @@ static void validation(void) {
     b.phase2 = WIFI_EAP_P2_PAP; // PEAP-MSCHAPv2 only
     CHECK(!wifi_eap_valid(&b));
     b.method = WIFI_EAP_TTLS;
-    CHECK(wifi_eap_valid(&b)); // TTLS-PAP
+    CHECK(!wifi_eap_valid(&b) && wifi_eap_pap_without_ca(&b)); // TTLS-PAP without a CA: refused
+    strcpy(b.ca_path, "/storage/ca.pem");
+    CHECK(wifi_eap_valid(&b) && !wifi_eap_pap_without_ca(&b)); // TTLS-PAP with a CA
+    b.ca_path[0] = '\0';
     b.phase2 = WIFI_EAP_P2_MSCHAPV2;
-    CHECK(wifi_eap_valid(&b));
+    CHECK(wifi_eap_valid(&b)); // TTLS-MSCHAPv2 without a CA stays allowed (unverified warning)
     b.method = 2;
     CHECK(!wifi_eap_valid(&b));
     CHECK(!wifi_eap_valid(NULL));
@@ -279,6 +282,14 @@ static void console_line(void) {
           strcmp(e.ca_path, "/storage/ca.pem") == 0 && strcmp(e.password, "pass word  x") == 0); // the rest, spaces and all
     CHECK(wifi_eap_parse_line("camp  peap  mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_OK && e.identity[0] == '\0' &&
           e.ca_path[0] == '\0' && wifi_eap_unverified(&e) && strcmp(e.password, "secret") == 0);
+    CHECK(wifi_eap_parse_line("camp ttls pap - user - secret", ssid, &e) == WIFI_EAP_PARSE_PAP_NO_CA && e.password[0] == '\0');
+    CHECK(wifi_eap_parse_line("camp ttls mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_OK);
+    // A record that breaks the rule (hand-made: the encoder refuses it) does not decode, so the join fails cleanly
+    char const bad[] = "E1\x1f" "1\x1f" "1\x1f" "\x1f" "user\x1fsecret\x1f";
+    CHECK(!wifi_eap_decode(bad, &e));
+    char withca[sizeof(bad) + 20];
+    snprintf(withca, sizeof(withca), "%s/storage/ca.pem", bad);
+    CHECK(wifi_eap_decode(withca, &e)); // the same record with a CA is fine: only the rule rejected it
     CHECK(wifi_eap_parse_line("camp peap pap - user - secret", ssid, &e) == WIFI_EAP_PARSE_INVALID); // PEAP is MSCHAPv2
     CHECK(wifi_eap_parse_line("camp peap mschapv2 - user - ", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no password
     CHECK(wifi_eap_parse_line("camp peap mschapv2 - user", ssid, &e) == WIFI_EAP_PARSE_USAGE);
