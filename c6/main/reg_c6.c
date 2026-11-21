@@ -71,6 +71,18 @@ static reg_status_t bt_state_get(reg_entry_t const *e, reg_value_t *out) {
     return REG_OK;
 }
 
+// The controller is enabled, as esp_bt_controller_get_status says; the setter runs on the LoRa task between commands
+static reg_status_t bt_enable_get(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    out->u = c6_bt_status() == 2; // ESP_BT_CONTROLLER_STATUS_ENABLED
+    return REG_OK;
+}
+
+static reg_status_t bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    return c6_bt_set(v->u != 0) ? REG_OK : REG_FAILED;
+}
+
 static reg_status_t caps_get(reg_entry_t const *e, reg_value_t *out) {
     (void)e;
     out->u = REG_CAP_BL | REG_CAP_LORA | REG_CAP_BT | REG_CAP_C6;
@@ -99,6 +111,7 @@ reg_entry_t const reg_c6_table[] = {
     {REG_ID_LORA_POWER, REG_T_I16, RO_TX, "lora.power", "dBm", -9, 22, NULL, lora_get, NULL, NULL},
     {REG_ID_LORA_STATE, REG_T_ENUM, REG_F_RO, "lora.state", NULL, 0, 4, lora_state_names, lora_state_get, NULL, NULL},
     {REG_ID_BT_STATE, REG_T_ENUM, REG_F_RO, "bt.state", NULL, 0, 2, bt_state_names, bt_state_get, NULL, NULL},
+    {REG_ID_BT_ENABLE, REG_T_BOOL, 0, "bt.enable", NULL, 0, 0, NULL, bt_enable_get, bt_enable_set, NULL},
     {REG_ID_C6_REG_CAPS, REG_T_U32, REG_F_RO, "c6.reg_caps", NULL, 0, 0, NULL, caps_get, NULL, NULL},
 };
 

@@ -66,8 +66,21 @@ uint8_t lora_service_state(void) {
     return fake_state;
 }
 
+static uint8_t fake_bt = 0; // esp_bt_controller_status_t: 0 idle, 1 inited, 2 enabled
+static bool    fake_bt_fails;
+static int     bt_sets;
+
 uint8_t c6_bt_status(void) {
-    return 0; // ESP_BT_CONTROLLER_STATUS_IDLE
+    return fake_bt;
+}
+
+bool c6_bt_set(bool on) {
+    bt_sets++;
+    if (fake_bt_fails) {
+        return false;
+    }
+    fake_bt = on ? 2 : 0;
+    return true;
 }
 
 static reg_status_t serve(uint16_t id, uint32_t const *set, reg_reply_t *r) {
@@ -81,7 +94,7 @@ static void test_table(void) {
     static uint16_t const c6_ids[] = {
         REG_ID_BL_DISPLAY,  REG_ID_BL_KEYBOARD, REG_ID_BL_FREQ,      REG_ID_BL_BOOT,       REG_ID_LORA_FREQ,
         REG_ID_LORA_BW,     REG_ID_LORA_SF,     REG_ID_LORA_CR,      REG_ID_LORA_SYNC,     REG_ID_LORA_PREAMBLE,
-        REG_ID_LORA_POWER,  REG_ID_LORA_STATE,  REG_ID_BT_STATE,     REG_ID_C6_REG_CAPS,
+        REG_ID_LORA_POWER,  REG_ID_LORA_STATE,  REG_ID_BT_STATE,     REG_ID_BT_ENABLE,    REG_ID_C6_REG_CAPS,
     };
     CHECK(reg_c6_count == sizeof(c6_ids) / sizeof(c6_ids[0]));
     for (size_t i = 0; i < sizeof(c6_ids) / sizeof(c6_ids[0]); i++) {
@@ -95,7 +108,8 @@ static void test_table(void) {
         CHECK(r.value & REG_CAP(REG_ID_DOMAIN(reg_c6_table[i].id)));
         // Radio keys are read-only TX keys without a setter (#307); only the two backlights take a set
         bool const lora     = REG_ID_DOMAIN(reg_c6_table[i].id) == 0x02 && reg_c6_table[i].id != REG_ID_LORA_STATE;
-        bool const settable = reg_c6_table[i].id == REG_ID_BL_DISPLAY || reg_c6_table[i].id == REG_ID_BL_KEYBOARD;
+        bool const settable = reg_c6_table[i].id == REG_ID_BL_DISPLAY || reg_c6_table[i].id == REG_ID_BL_KEYBOARD ||
+                              reg_c6_table[i].id == REG_ID_BT_ENABLE;
         CHECK(!lora || ((reg_c6_table[i].flags & (REG_F_RO | REG_F_TX)) == (REG_F_RO | REG_F_TX)));
         CHECK((reg_c6_table[i].set != NULL) == settable);
     }
@@ -172,6 +186,20 @@ static void test_radio_keys(void) {
     CHECK(serve(REG_ID_BT_STATE, NULL, &r) == REG_OK && r.type == REG_T_ENUM && r.value == 0);
     v = 2;
     CHECK(serve(REG_ID_BT_STATE, &v, &r) == REG_RO && r.value == 0);
+
+    // bt.enable (#503): the applied value is the controller's status after the set, not the request
+    CHECK(serve(REG_ID_BT_ENABLE, NULL, &r) == REG_OK && r.type == REG_T_BOOL && r.value == 0);
+    v = 1;
+    CHECK(serve(REG_ID_BT_ENABLE, &v, &r) == REG_OK && r.value == 1 && fake_bt == 2 && bt_sets == 1);
+    CHECK(serve(REG_ID_BT_STATE, NULL, &r) == REG_OK && r.value == 2); // bt.state follows
+    v = 2;
+    CHECK(serve(REG_ID_BT_ENABLE, &v, &r) == REG_RANGE && bt_sets == 1);
+    v = 0;
+    CHECK(serve(REG_ID_BT_ENABLE, &v, &r) == REG_OK && r.value == 0 && fake_bt == 0);
+    fake_bt_fails = true;
+    v             = 1;
+    CHECK(serve(REG_ID_BT_ENABLE, &v, &r) == REG_FAILED && fake_bt == 0); // a refusal: nothing enabled
+    fake_bt_fails = false;
 
     // An unknown id, also one in a C6 domain, is answered UNKNOWN with nothing else
     CHECK(serve(0x01FF, NULL, &r) == REG_UNKNOWN && r.type == 0 && r.value == 0);

@@ -9,12 +9,14 @@
  */
 
 #include "backlight.h"
+#include "bt_sync.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_os.h"
+#include "lichen_radio.h"
 #include "lichen_reg.h"
 #include "lichen_sys_thermal.h"
 #include "lora_os.h"
@@ -176,6 +178,10 @@ static bool requested_of(uint16_t id, reg_value_t *v) {
         v->u = id == REG_ID_BL_DISPLAY ? d : k;
         return true;
     }
+    if (id == REG_ID_BT_ENABLE) {
+        v->u = lichen_radio_get(RADIO_BT); // the OS's effective state: switch, airplane mode, holds
+        return true;
+    }
     return lora_requested(id, v);
 }
 
@@ -326,6 +332,81 @@ static void warn_mismatch(uint16_t id, reg_value_t const *req, uint32_t t) {
     }
 }
 
+// ---- Bluetooth (#503) -----------------------------------------------------------------------------------------------
+
+static bool     bt_asked, bt_want;       // the OS's wish, once main has told it (under lock)
+static uint8_t  bt_tries;                // SETs sent for this wish on this link (under lock)
+static uint32_t bt_sent_ms;
+static bool     bt_said;                 // the one log line per wish and link has been written
+
+static bt_sync_in_t bt_input(uint32_t t) {
+    portENTER_CRITICAL(&lock);
+    reg_proxy_slot_t const *s = reg_proxy_slot(&px, REG_ID_BT_ENABLE);
+    bt_sync_in_t const      in = {.want          = bt_want,
+                                  .support       = reg_proxy_support(&px, REG_ID_BT_ENABLE, t),
+                                  .applied_known = s && s->have && !s->stale && s->status == REG_OK,
+                                  .applied_on    = s && s->value != 0,
+                                  .unknown_id    = s && s->have && s->status == REG_UNKNOWN,
+                                  .tries         = bt_tries,
+                                  .since_sent_ms = t - bt_sent_ms};
+    portEXIT_CRITICAL(&lock);
+    return in;
+}
+
+static void bt_say(bt_sync_act_t act, bool want) {
+    portENTER_CRITICAL(&lock);
+    bool say = !bt_said;
+    bt_said  = true;
+    portEXIT_CRITICAL(&lock);
+    if (say && act == BT_SYNC_UNSUPPORTED) {
+        ESP_LOGW(TAG, "bt.enable: not supported by this C6, the Bluetooth switch has no effect");
+    } else if (say) {
+        ESP_LOGW(TAG, "bt.enable: the C6 did not become %s after %d tries, not asked again", want ? "enabled" : "disabled",
+                 BT_SYNC_TRIES);
+    }
+}
+
+// Brings the C6's controller to the OS's wish: called on a new wish, on the answers that can settle it (c6.reg_caps,
+// bt.enable) and by the poll. The decision is bt_sync_decide's; a wait or a refusal sends nothing.
+static void bt_sync(void) {
+    uint32_t t = now_ms();
+    portENTER_CRITICAL(&lock);
+    bool asked = bt_asked;
+    portEXIT_CRITICAL(&lock);
+    if (!asked || !atomic_load(&started)) {
+        return;
+    }
+    bt_sync_in_t const in  = bt_input(t);
+    bt_sync_act_t const act = bt_sync_decide(&in);
+    if (act == BT_SYNC_SEND && post(REG_ID_BT_ENABLE, true, in.want)) {
+        portENTER_CRITICAL(&lock);
+        bt_tries++;
+        bt_sent_ms = t;
+        portEXIT_CRITICAL(&lock);
+    } else if (act == BT_SYNC_UNSUPPORTED || act == BT_SYNC_GIVE_UP) {
+        bt_say(act, in.want);
+    }
+}
+
+void lichen_reg_bt_request(bool on) {
+    portENTER_CRITICAL(&lock);
+    bool changed = !bt_asked || bt_want != on;
+    bt_asked     = true;
+    bt_want      = on;
+    if (changed) {
+        bt_tries = 0;
+        bt_said  = false;
+    }
+    portEXIT_CRITICAL(&lock);
+    bt_sync();
+}
+
+reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    // The OS switch is the one way in (saved, airplane mode and holds apply); its listener sends it on to the C6
+    return lichen_radio_set(RADIO_BT, v->u != 0) ? REG_OK : REG_FAILED;
+}
+
 static void on_answer(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, uint32_t value) {
     static bool told_type;
     uint32_t    t = now_ms();
@@ -340,12 +421,20 @@ static void on_answer(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, ui
     if (r == RP_ACCEPTED && requested_of(id, &req)) {
         warn_mismatch(id, &req, t);
     }
+    if (r == RP_ACCEPTED && (id == REG_ID_C6_REG_CAPS || id == REG_ID_BT_ENABLE)) {
+        bt_sync();
+        if (id == REG_ID_BT_ENABLE && support(REG_ID_BT_STATE) == RP_OK) {
+            post(REG_ID_BT_STATE, false, 0); // the controller's own status, for Settings and `fw airplane`
+        }
+    }
 }
 
 static void on_link(bool up) {
     uint32_t t = now_ms();
     portENTER_CRITICAL(&lock);
     reg_proxy_link(&px, t);
+    bt_tries = 0; // a C6 that came back starts with the controller idle
+    bt_said  = false;
     portEXIT_CRITICAL(&lock);
     if (up) {
         post(REG_ID_C6_REG_CAPS, false, 0); // the backlight goes back to REG_SET once it is answered
@@ -380,6 +469,7 @@ static void poll(void *arg) {
     if (due) {
         post(REG_ID_C6_REG_CAPS, false, 0);
     }
+    bt_sync(); // the retry after a SET that was not answered or not applied (bounded by BT_SYNC_TRIES)
     for (size_t i = 0; known && i < reg_p4_total(); i++) {
         reg_entry_t const *e = reg_p4_nth(i);
         if (reg_p4_is_proxy(e) && e->id != REG_ID_C6_REG_CAPS && support(e->id) == RP_OK) {

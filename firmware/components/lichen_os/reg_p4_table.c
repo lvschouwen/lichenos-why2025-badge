@@ -60,6 +60,9 @@ reg_entry_t const reg_p4_table[] = {
      .enum_names = lora_state_names, .get_applied = reg_p4_proxy_get},
     {.id = REG_ID_BT_STATE, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "bt.state", .min = 0, .max = 2,
      .enum_names = bt_state_names, .get_applied = reg_p4_proxy_get},
+    // #503: the Bluetooth controller on the C6. Not TX (BLE advertising stays off); the set goes through the OS switch
+    {.id = REG_ID_BT_ENABLE, .type = REG_T_BOOL, .name = "bt.enable", .get_applied = reg_p4_proxy_get,
+     .set = reg_p4_bt_enable_set},
     PROXY_RO(REG_ID_C6_REG_CAPS, REG_T_U32, "c6.reg_caps", NULL, 0),
     // #311: the regulatory country is fixed in firmware (NL), TX power and bandwidth change what goes on air
     WIFI_RO(REG_ID_WIFI_COUNTRY, REG_T_STR, "wifi.country", NULL, REG_F_TX, 2, 2),

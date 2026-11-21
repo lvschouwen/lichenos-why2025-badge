@@ -504,8 +504,15 @@ static void lora_state_fill(char *out, size_t cap) {
     shell_reg_text("LoRa state", "lora.state", NULL, NULL, out, cap);
 }
 
+// The C6's controller (bt.state), next to the airplane switch. A C6 that has the registry but not bt.enable (#503)
+// cannot follow the switch: its row says so, with the C6's own wording from the cache.
 static void bt_state_fill(char *out, size_t cap) {
-    shell_reg_text("Bluetooth controller", "bt.state", NULL, NULL, out, cap); // the C6's, next to the airplane switch
+    char en[64];
+    char const *key = "bt.state";
+    if (lichen_reg_get("bt.enable", en, sizeof(en)) && strstr(en, "not supported")) {
+        key = "bt.enable";
+    }
+    shell_reg_text("Bluetooth controller", key, NULL, NULL, out, cap);
 }
 
 // What the radios are actually set to (#333): applied values from the cache, read-only (changes stay on the guarded paths)

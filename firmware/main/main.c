@@ -183,7 +183,9 @@ static void radio_changed(radio_id_t id, bool on) {
         wifi_enable(on);
     } else if (id == RADIO_LORA) {
         lora_set_enabled(on);
-    } // RADIO_BT: no Bluetooth service before #73
+    } else if (id == RADIO_BT) {
+        lichen_reg_bt_request(on); // the C6's controller (#503); the BLE companion is #73
+    }
 }
 
 // The OTA task's hooks, in the shell's terms (#76)

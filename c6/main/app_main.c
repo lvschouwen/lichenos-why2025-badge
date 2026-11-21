@@ -24,6 +24,24 @@ uint8_t c6_bt_status(void)
 	return (uint8_t)esp_bt_controller_get_status();
 }
 
+bool c6_bt_set(bool on)
+{
+	if (on) {
+		if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
+			esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+			if (esp_bt_controller_init(&cfg) != ESP_OK) {
+				return false;
+			}
+		}
+		return esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED ||
+		       esp_bt_controller_enable(ESP_BT_MODE_BLE) == ESP_OK;
+	}
+	if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED && esp_bt_controller_disable() != ESP_OK) {
+		return false;
+	}
+	return esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_INITED || esp_bt_controller_deinit() == ESP_OK;
+}
+
 // The P4 sets the brightness with "BL <display%> <keyboard%>" lines on our console UART (its UART1, the line it
 // also flashes us over); everything else arriving there is ignored
 static void backlight_command_task(void *arg)

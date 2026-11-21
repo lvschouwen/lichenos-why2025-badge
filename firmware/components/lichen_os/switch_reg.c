@@ -20,8 +20,8 @@ _Static_assert(OTA_AUTOOFF_MAX_MIN == 240, "ota.autooff row range (reg_p4_switch
 
 // The requested state of each driver after the holds, not link state and not the person's switch (#501): Wi-Fi the
 // service's enabled flag, LoRa the driver's enabled switch (the radio listener sets both synchronously, a thermal hold
-// included). Whether Wi-Fi is joined or LoRa is receiving is wifi.* / lora.state. Bluetooth has no driver yet (#503), so
-// it is the OS switch.
+// included). Whether Wi-Fi is joined or LoRa is receiving is wifi.* / lora.state. Bluetooth is the OS's effective state, which
+// lichen_reg_bt_request sends to the C6 as bt.enable (#503; its answer is bt.enable / bt.state).
 bool sw_radio_get(unsigned radio) {
     switch (radio) {
         case RADIO_WIFI: return wifi_enabled();

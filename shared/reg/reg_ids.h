@@ -56,6 +56,7 @@ typedef enum {
 
     // 0x04 Bluetooth
     REG_ID_BT_STATE = 0x0400, // bt.state  ENUM esp_bt_controller_status_t (idle / inited / enabled)
+    REG_ID_BT_ENABLE = 0x0401, // bt.enable  BOOL (#503): the controller enabled; set = init + enable / disable + deinit, applied = status == enabled. BLE advertising stays off
 
     // 0x0F C6 meta
     REG_ID_C6_REG_CAPS = 0x0F00, // c6.reg_caps  U32, RO: REG_CAP_* bits of the domains this C6 serves

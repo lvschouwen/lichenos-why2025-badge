@@ -58,6 +58,8 @@ reg_status_t reg_p4_get(reg_entry_t const *e, bool live, reg_value_t *out);
 reg_status_t reg_p4_proxy_get(reg_entry_t const *e, reg_value_t *out);
 // bl.display / bl.keyboard: through the backlight driver as a saved level (as "fw bl" always did); the driver sends it
 reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v);
+// bt.enable (#503): the OS Bluetooth switch (lichen_radio_set), which then reaches the C6 through lichen_reg_bt_request
+reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v);
 // wifi.*: the Wi-Fi service's read-back, live on the console, its cache on the LVGL task
 reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out);
 // wifi.ip6: none / linklocal / global from the station's netif (never waits on the C6)

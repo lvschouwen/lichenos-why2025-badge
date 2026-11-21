@@ -149,7 +149,9 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   RadioLib 8.0.0's driver state (private members, read through an explicit-instantiation accessor in
   `lora_service.cpp`), sync from the SX1262 registers 0x0740/0x0741, power as the dBm of the last accepted start; all
   FAILED until a start succeeded (decoded by `lora_rb_decode`). `lora.state` (service state), `bt.state`
-  (`esp_bt_controller_get_status`), `c6.reg_caps`. One lock in `backlight.c` guards the LEDC for both tasks (the UART
+  (`esp_bt_controller_get_status`), `bt.enable` (0x0401, BOOL, settable, #503: set = `esp_bt_controller_init` +
+  `enable` in BLE mode, or `disable` + `deinit` to give the controller's RAM back; applied = status is enabled; no
+  advertising, no host), `c6.reg_caps`. One lock in `backlight.c` guards the LEDC for both tasks (the UART
   pair under one hold). SETs log at INFO (tag `reg`), GETs only count (`reg N` in the heartbeat). Pinned by
   `host_tests/c6_reg_test.c`.
 - **P4 registry service (#310, `lichen_os/lichen_reg.c`):** the P4 table (`reg_p4_table.c`) holds its own keys and a
@@ -204,7 +206,11 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   age on the LVGL task; the c6wifi task reads only while the link and the driver are up, and stops after a failed first
   RPC. `fw wifi tx|bw|ps` keep their
   guards and echo the applied read-back. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
-  Bluetooth switch. Pure parts: `wifi_regdom.c`, `lichen_os/reg_wifi.c` (`host_tests/wifi_reg_test.c`).
+  Bluetooth switch. `bt.enable` (#503) is a C6 proxy key too: main's radio listener hands the OS's effective Bluetooth
+  state (switch, airplane mode, holds) to `lichen_reg_bt_request`, which posts REG_SET once `c6.reg_caps` has the
+  Bluetooth domain and re-checks the answer (`bt_sync.c`, pure, `bt_sync_test.c`): at most 3 SETs per wish and link,
+  5 s apart, then one log line and no more. An old C6 (no registry, no domain, or UNKNOWN for the key) gets nothing and
+  the Settings row says "not supported by this C6". `fw set bt.enable` goes through the OS switch. Pure parts: `wifi_regdom.c`, `lichen_os/reg_wifi.c` (`host_tests/wifi_reg_test.c`).
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,

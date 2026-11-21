@@ -54,6 +54,10 @@ void lichen_ui_service_port_up(void);
 // `fw set` and `fw bl`, and the backlight's REG_SET path. Once, after lora_start (or after it was skipped: the P4's own
 // keys work without a C6); it asks c6.reg_caps at once.
 void lichen_reg_start(void);
+// The OS's effective Bluetooth state (switch, airplane mode and holds, #503) for the C6's controller: main's radio listener
+// calls it for every change and at boot. It posts REG_SET bt.enable once the C6 has said it serves it, checks the
+// answer, and gives up after a few tries; an old C6 gets nothing. Any task, never waits.
+void lichen_reg_bt_request(bool on);
 // The display fingerprint line (#354): `fw disp state` and one log line 65 s after boot. Called by lichen_reg_start.
 void disp_state_start(void);
 // One key's cached applied value as a status line part, never waiting for the C6 (`fw airplane`'s bt.state, #311):

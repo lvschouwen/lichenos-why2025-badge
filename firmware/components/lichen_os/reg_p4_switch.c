@@ -9,7 +9,7 @@
 //
 // Settable rows end in the owner's own setter (the one its console command calls). The radio rows go through
 // lichen_radio_set (sw_radio_put), never around the owners' hooks (#108). radio.wifi and radio.lora read the driver's
-// requested state after the holds (not link state); radio.bt has no driver before #503 and is configured-only until then. The ui.* rows are configured-only (REG_F_CFG):
+// requested state after the holds (not link state); radio.bt is the OS switch (configured-only); the C6's controller follows it as bt.enable (#503). The ui.* rows are configured-only (REG_F_CFG):
 // the saved setting as the shell reads it, so the value is exact and no read-back exists to disagree. The names and
 // ranges of the saved u8 settings are the ones in lichen_api/settings_backup.c (a host test compares them).
 
@@ -76,7 +76,7 @@ static reg_status_t sw_set(reg_entry_t const *e, reg_value_t const *v) {
 static reg_entry_t const rows[] = {
     RADIO_ROW(REG_ID_RADIO_WIFI, "radio.wifi", 0),
     RADIO_ROW(REG_ID_RADIO_LORA, "radio.lora", 0),
-    RADIO_ROW(REG_ID_RADIO_BT, "radio.bt", REG_F_CFG), // no driver before #503: the switch itself,
+    RADIO_ROW(REG_ID_RADIO_BT, "radio.bt", REG_F_CFG), // the switch itself; the C6's side is bt.enable (#503)
     RADIO_ROW(REG_ID_RADIO_AIRPLANE, "radio.airplane", 0),
     {.id = REG_ID_HAPTICS_ON, .type = REG_T_BOOL, .name = "haptics.on", .max = 1, .get_applied = sw_get, .set = sw_set,
      .saved_key = "haptics"},

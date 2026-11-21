@@ -42,6 +42,12 @@ reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v) {
     return REG_OK;
 }
 
+reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    (void)v;
+    return REG_OK;
+}
+
 reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out) {
     (void)e;
     out->u = 1;

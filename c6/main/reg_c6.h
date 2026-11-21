@@ -7,6 +7,7 @@
 #include "reg.h"
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -18,6 +19,9 @@ extern size_t const      reg_c6_count;
 
 // esp_bt_controller_get_status(), as an esp_bt_controller_status_t (app_main.c; a fake in the host test)
 uint8_t c6_bt_status(void);
+// bt.enable (#503): init + enable the controller (BLE mode, no advertising), or disable + deinit it to give its RAM
+// back. True when the controller ended in the asked state (app_main.c; a fake in the host test).
+bool c6_bt_set(bool on);
 
 #ifdef __cplusplus
 }

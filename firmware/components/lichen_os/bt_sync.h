@@ -1,0 +1,38 @@
+#pragma once
+
+#include "reg_proxy.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// Keeping the C6's Bluetooth controller at what the OS radio switch asks for (#503), pure and host-tested
+// (bt_sync_test.c). lichen_reg.c feeds it the registry's state of bt.enable and posts what it answers; the switch and
+// airplane mode have already been folded into one wish by the radio state (radio_state_effective), so the mapping is
+// "the wish is bt.enable".
+//
+// - An old C6 (no registry, or no Bluetooth domain, or one that answers UNKNOWN for bt.enable) is never sent anything:
+//   the answer is UNSUPPORTED, once, and the Settings row says "not supported by this C6".
+// - A SET goes out at most BT_SYNC_TRIES times per wish and per link, BT_SYNC_RETRY_MS apart, then GIVE_UP: a C6 that
+//   keeps refusing is not asked in a loop.
+#define BT_SYNC_TRIES    3
+#define BT_SYNC_RETRY_MS 5000
+
+typedef struct {
+    bool         want;          // the OS's effective Bluetooth state (switch, airplane mode and holds)
+    rp_support_t support;       // reg_proxy_support for bt.enable
+    bool         applied_known; // an answer for bt.enable since the link came up (not stale)
+    bool         applied_on;    // that answer: the controller is enabled
+    bool         unknown_id;    // the C6 answered UNKNOWN for bt.enable
+    uint8_t      tries;         // SETs sent for this wish on this link
+    uint32_t     since_sent_ms; // since the last of them (only read when tries > 0)
+} bt_sync_in_t;
+
+typedef enum {
+    BT_SYNC_IDLE,        // the C6 already is what is wanted
+    BT_SYNC_SEND,        // post REG_SET bt.enable = want
+    BT_SYNC_WAIT,        // caps not known yet, or a SET just went out: look again later
+    BT_SYNC_UNSUPPORTED, // this C6 has no bt.enable
+    BT_SYNC_GIVE_UP,     // BT_SYNC_TRIES sent, the C6 still is not what is wanted
+} bt_sync_act_t;
+
+bt_sync_act_t bt_sync_decide(bt_sync_in_t const *in);

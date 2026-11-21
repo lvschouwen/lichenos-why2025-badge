@@ -1821,6 +1821,15 @@ target_include_directories(radio_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(radio_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME radio_state_test COMMAND radio_state_test)
 
+add_executable(bt_sync_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/bt_sync_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/bt_sync.c
+)
+target_include_directories(bt_sync_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg)
+target_compile_options(bt_sync_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bt_sync_test COMMAND bt_sync_test)
+
 add_executable(shot_blend_test
     ${CMAKE_CURRENT_SOURCE_DIR}/shot_blend_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/shot_blend.c
@@ -2309,6 +2318,7 @@ add_custom_target(run_tests
     files_ops_test
     files_real_path_test
     radio_state_test
+    bt_sync_test
     ui_call_queue_test
     raw_hooks_test
     key_origin_test
