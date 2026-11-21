@@ -63,12 +63,10 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
     if (!status) {
         return;
     }
-    char    text[192]; // a long SSID, the IPv4 and a global IPv6 address
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(text, sizeof(text), fmt, ap);
+    lv_label_set_text_vfmt(status, fmt, ap); // LVGL's own buffer: no 192-byte frame on the LVGL task's stack
     va_end(ap);
-    lv_label_set_text(status, text);
 }
 
 // "Connected to <name>, IP <v4>", and on a second line the global IPv6 address when the network gave one (#497)

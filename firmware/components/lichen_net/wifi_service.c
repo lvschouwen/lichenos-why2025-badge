@@ -22,6 +22,7 @@
 #include "lichen_clock.h"
 #include "lichen_mdns.h"
 #include "lwip/dhcp6.h"
+#include "lwip/dns.h"
 #include "lwip/tcpip.h"
 #include "wifi_cmd.h"
 #include "wifi_ip6.h"
@@ -61,7 +62,6 @@ static SemaphoreHandle_t saved_lock; // the saved-network list (#160): the task 
 static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the console may ask together)
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
-static wifi_ip6_set_t ip6_set; // #497: the netif's addresses, under ip_lock like ip_text
 static wifi_count_t counts; // #415: written by the c6wifi task, read by wifi_link_counts, both under state_lock
 
 bool wifi_has_ip(char *ip, size_t cap) {
@@ -74,25 +74,36 @@ bool wifi_has_ip(char *ip, size_t cap) {
     return have;
 }
 
+// Read from the netif on every call, never cached: only preferred addresses count (a deprecated or withdrawn one is
+// gone at once) and a netif that is down has none, so there is no stale state to clear or race with a disconnect. The
+// read takes no lock (esp_netif_get_all_preferred_ip6 only looks at the lwIP arrays), so any task may call it.
+static void ip6_read(wifi_ip6_set_t *set) {
+    esp_ip6_addr_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
+    wifi_ip6_clear(set);
+    int n = sta_netif ? esp_netif_get_all_preferred_ip6(sta_netif, addrs) : 0;
+    for (int i = 0; i < n && i < CONFIG_LWIP_IPV6_NUM_ADDRESSES; i++) {
+        uint8_t raw[16];
+        memcpy(raw, addrs[i].addr, sizeof(raw)); // lwIP keeps the words in network order
+        wifi_ip6_add(set, raw);
+    }
+}
+
 wifi_ip6_level_t wifi_ip6_get(char *text, size_t cap, unsigned *globals) {
-    uint8_t best[16];
-    portENTER_CRITICAL(&ip_lock);
-    wifi_ip6_level_t level = wifi_ip6_level(&ip6_set);
-    bool             have  = wifi_ip6_best(&ip6_set, best);
-    unsigned         n     = wifi_ip6_global_count(&ip6_set);
-    portEXIT_CRITICAL(&ip_lock);
+    wifi_ip6_set_t set;
+    uint8_t        best[16];
+    ip6_read(&set);
     if (globals) {
-        *globals = n;
+        *globals = wifi_ip6_global_count(&set);
     }
     if (text && cap) {
         text[0] = '\0';
-        if (have) {
+        if (wifi_ip6_best(&set, best)) {
             char tmp[WIFI_IP6_TEXT_MAX];
             wifi_ip6_text(best, tmp, sizeof(tmp));
             wifi_text_copy(text, cap, tmp);
         }
     }
-    return level;
+    return wifi_ip6_level(&set);
 }
 
 bool wifi_has_credentials(void) {
@@ -111,9 +122,6 @@ static bool first_connect_settled;
 static void set_ip(char const *text) {
     portENTER_CRITICAL(&ip_lock);
     wifi_text_copy(ip_text, sizeof(ip_text), text);
-    if (!text[0]) {
-        wifi_ip6_clear(&ip6_set); // the v6 addresses go with the link
-    }
     portEXIT_CRITICAL(&ip_lock);
     if (!text[0]) {
         portENTER_CRITICAL(&state_lock);
@@ -314,35 +322,63 @@ static char const *wifi_ps_name(wifi_ps_type_t ps) {
     return ps == WIFI_PS_NONE ? "off" : ps == WIFI_PS_MIN_MODEM ? "min (modem sleep)" : "max (modem sleep)";
 }
 
-// Rebuilds the address set from the netif (lwIP's own list: it also drops expired and duplicate ones), on every
-// IP_EVENT_GOT_IP6 (link-local ready, SLAAC address preferred)
-static void ip6_refresh(void) {
-    esp_ip6_addr_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
+// The log line for IP_EVENT_GOT_IP6 (link-local ready, SLAAC address preferred). The prefix only: SLAAC puts the
+// MAC in the low 64 bits, and a log line travels (bug reports, the console log). The console and the screen show all.
+static void ip6_log(void) {
     wifi_ip6_set_t set;
-    wifi_ip6_clear(&set);
-    int n = esp_netif_get_all_ip6(sta_netif, addrs);
-    for (int i = 0; i < n && i < CONFIG_LWIP_IPV6_NUM_ADDRESSES; i++) {
-        uint8_t raw[16];
-        memcpy(raw, addrs[i].addr, sizeof(raw)); // lwIP keeps the words in network order
-        wifi_ip6_add(&set, raw);
+    uint8_t        best[16];
+    char           prefix[WIFI_IP6_TEXT_MAX + 4] = "";
+    ip6_read(&set);
+    if (wifi_ip6_best(&set, best)) {
+        wifi_ip6_prefix_text(best, prefix, sizeof(prefix));
     }
-    portENTER_CRITICAL(&ip_lock);
-    ip6_set = set; // the netif is down after a disconnect, so a late event reads an empty list
-    portEXIT_CRITICAL(&ip_lock);
-    char             text[WIFI_IP6_TEXT_MAX];
-    wifi_ip6_level_t level = wifi_ip6_get(text, sizeof(text), NULL);
+    wifi_ip6_level_t level = wifi_ip6_level(&set);
     char const      *name  = level == WIFI_IP6_GLOBAL ? "global" : level == WIFI_IP6_LINKLOCAL ? "link-local" : "none";
-    ESP_LOGI(TAG, "wifi: ipv6 %s %s", name, text);
+    ESP_LOGI(TAG, "wifi: ipv6 %s %s", name, prefix);
+}
+
+// DNS slots (#497). lwIP's RDNSS (every router advertisement) and stateless DHCPv6 write the servers from slot 0 up,
+// as does the IPv4 DHCP client, and lwIP has no offset for either. With CONFIG_LWIP_DNS_MAX_SERVERS=4 the layout is:
+// slots 0-1 whichever of IPv6 (RDNSS, DHCPv6) or IPv4 wrote last, slots 2-3 the IPv4 servers of the lease (copied here
+// at every got-IP, renewals included), so a network whose IPv6 resolvers fail still resolves over IPv4: lwIP's
+// resolver walks all slots on a timeout. Only a DHCPv6 reply with 3 or more servers reaches into slots 2-3.
+static void keep_v4_dns(void) {
+    LOCK_TCPIP_CORE();
+    u8_t out = 2;
+    for (u8_t i = 0; i < 2 && out < DNS_MAX_SERVERS; i++) {
+        ip_addr_t dns = *dns_getserver(i);
+        if (IP_GET_TYPE(&dns) == IPADDR_TYPE_V4 && !ip_addr_isany(&dns)) {
+            dns_setserver(out++, &dns);
+        }
+    }
+    UNLOCK_TCPIP_CORE();
+}
+
+// The STA's link-local (#497): IDF only makes it for NAN (wifi_default.c), and without one there is no router
+// solicitation and no SLAAC. esp_netif_create_ip6_linklocal fails while the netif is down, and IDF brings it up in its
+// own STA_CONNECTED handler. The event loop runs the handlers of the whole event base (ANY_ID, as on_event) before the
+// ones of one id, and the ones of an id in registration order. So this id-specific handler is registered after
+// esp_netif_create_default_wifi_sta, which registers the default one, and runs behind it.
+static void on_sta_connected_ip6(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    esp_err_t err = esp_netif_create_ip6_linklocal(sta_netif);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi: no IPv6 link-local: %s", esp_err_to_name(err));
+    }
 }
 
 static void on_ip_event(int32_t id, void *data) {
     if (id == IP_EVENT_GOT_IP6) {
-        ip6_refresh();
+        ip6_log();
     } else if (id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t const *got = data;
         char                     text[16];
         snprintf(text, sizeof(text), IPSTR, IP2STR(&got->ip_info.ip));
         set_ip(text);
+        keep_v4_dns();
         ESP_LOGI(TAG, "wifi: got ip:%s", text);
         msg_t m = {.type = MSG_GOT_IP};
         post(&m);
@@ -366,9 +402,6 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
             m.type      = MSG_CONNECTED;
             post(&m);
         }
-        // IDF makes the STA's link-local only for NAN (wifi_default.c): without one there is no router solicitation
-        // and so no SLAAC. The default handlers run first (registered earlier), so the netif is up by now
-        esp_netif_create_ip6_linklocal(sta_netif);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t const *gone = data;
         set_ip("");
@@ -505,6 +538,7 @@ static bool start_wifi(void) {
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_GOT_IP6, on_event, NULL, NULL);
     sta_netif = esp_netif_create_default_wifi_sta();
+    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, on_sta_connected_ip6, NULL, NULL);
     enable_dhcp6_stateless();
     start_sntp();
     boot_progress_begin_background(BOOT_CLOCK); // SNTP waits for an IP; the clock step ends in on_time_sync() (#39)

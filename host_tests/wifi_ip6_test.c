@@ -95,6 +95,11 @@ static void test_text(void) {
     text_is(single, "2001:db8:0:1:1:1:1:1"); // one zero group is written out (RFC 5952 4.2.2)
     uint8_t tie[16] = {0x20, 0x01, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 3}; // two runs of 2: the first
     text_is(tie, "2001::1:0:0:2:3");
+    char pre[WIFI_IP6_TEXT_MAX + 3];
+    uint8_t eui[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 2, 0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55};
+    size_t  pn      = wifi_ip6_prefix_text(eui, pre, sizeof(pre)); // a log line must not carry the MAC in the low half
+    CHECK(strcmp(pre, "2001:db8:1:2::/64") == 0 && pn == strlen(pre) && strstr(pre, "4455") == NULL);
+    CHECK(wifi_ip6_prefix_text(eui, pre, 20) == 0);
     char small[8];
     CHECK(wifi_ip6_text(GUA, small, sizeof(small)) == 0);
 }

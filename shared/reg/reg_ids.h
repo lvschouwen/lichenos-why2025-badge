@@ -47,7 +47,7 @@ typedef enum {
     REG_ID_WIFI_TXPWR    = 0x0302, // wifi.txpwr     I16 0.25 dBm (esp_wifi_get_max_tx_power), RO + TX: fw wifi tx (#311)
     REG_ID_WIFI_BW       = 0x0303, // wifi.bw        U8 MHz (esp_wifi_get_bandwidth), RO + TX: fw wifi bw
     REG_ID_WIFI_PS       = 0x0304, // wifi.ps        ENUM none / min (wifi_ps_type_t), settable, not saved
-    REG_ID_WIFI_IP6      = 0x0305, // wifi.ip6       ENUM none / linklocal / global (#497), RO, P4-local: the netif, never the C6
+    REG_ID_WIFI_IP6      = 0x0305, // wifi.ip6       ENUM none / linklocal / global (#497), RO, P4-local: the netif, never the C6; a ULA counts as global
 
     // 0x04 Bluetooth
     REG_ID_BT_STATE = 0x0400, // bt.state  ENUM esp_bt_controller_status_t (idle / inited / enabled)

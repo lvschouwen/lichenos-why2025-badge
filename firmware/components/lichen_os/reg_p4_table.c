@@ -8,7 +8,7 @@ static char const *const bl_override_names[] = {"none", "thermal", "flashlight",
 static char const *const bt_state_names[] = {"idle", "inited", "enabled"};
 // wifi_ps_type_t none / min: the two `fw wifi ps` allows (max modem sleep is never set, so it reads "failed")
 static char const *const wifi_ps_names[] = {"none", "min"};
-// wifi_ip6_level_t (lichen_net/wifi_ip6.h)
+// wifi_ip6_level_t (lichen_net/wifi_ip6.h): "global" is any preferred address beyond the link, a ULA (fc00::/7) included
 static char const *const wifi_ip6_names[] = {"none", "linklocal", "global"};
 // lora_state_t (shared/lora/lora_proto.h)
 static char const *const lora_state_names[] = {"unconfigured", "idle", "rx", "error", "tx"};

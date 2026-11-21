@@ -39,7 +39,7 @@ bool wifi_enabled(void);
 bool wifi_has_ip(char *ip, size_t cap);
 // The station's IPv6 state (#497): none / link-local only / an address beyond the link (SLAAC). text (may be NULL with
 // cap 0) gets the address to show, "" while there is none beyond the link; globals the count of those addresses (may be
-// NULL). Any task, a copy under a spinlock.
+// NULL). Read from the netif on every call (preferred addresses only), so never stale. Any task.
 wifi_ip6_level_t wifi_ip6_get(char *text, size_t cap, unsigned *globals);
 // Messages to the c6wifi task dropped for a full queue, since boot (fw soak, #419). Any task, no lock.
 uint32_t wifi_queue_drops(void);

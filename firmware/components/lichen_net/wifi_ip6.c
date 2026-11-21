@@ -105,3 +105,14 @@ size_t wifi_ip6_text(uint8_t const a[16], char *out, size_t cap) {
     out[n] = '\0';
     return n;
 }
+
+size_t wifi_ip6_prefix_text(uint8_t const a[16], char *out, size_t cap) {
+    uint8_t p[16] = {0};
+    memcpy(p, a, 8);
+    if (cap < WIFI_IP6_TEXT_MAX + 3) {
+        return 0;
+    }
+    size_t n = wifi_ip6_text(p, out, cap);
+    memcpy(out + n, "/64", 4);
+    return n + 3;
+}
