@@ -148,6 +148,9 @@ unsigned wifi_apply_unwind(bool touched, bool have_prev, bool cfg_set);
 // on the C6: then Enterprise is switched off first, so the old name cannot make this network fail its check.
 typedef enum { WIFI_NAME_NONE, WIFI_NAME_SET, WIFI_NAME_DISABLE_FIRST } wifi_name_plan_t;
 wifi_name_plan_t wifi_eap_name_plan(bool has_name, bool name_on_c6);
+// Whether a name may be on the C6 after the P4's own state was reset: yes. A P4-only restart or a reattach does not reset the
+// C6, so it can still hold the old name; the next name-less Enterprise join then drops it (DISABLE_FIRST) once.
+bool wifi_eap_name_after_reset(void);
 
 // `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <server-name|-> <password...>` (the text
 // after "eap "): "-" is an empty identity, no CA or no server name; the password is the rest of the line and may hold

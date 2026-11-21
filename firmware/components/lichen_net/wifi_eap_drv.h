@@ -17,5 +17,5 @@ wifi_eap_fail_t wifi_eap_drv_set(wifi_eap_t const *e, wifi_lock_t const *mem, bo
 wifi_eap_fail_t wifi_eap_drv_enable(void);
 // Switches Enterprise off and clears the credentials and CA the C6 holds. The RPCs have no failure to report here.
 void wifi_eap_drv_clear(void);
-// The C6's driver came up new: it holds no server name (and nothing else) from before
+// The P4 side was reset (a new driver start, a reattach): the C6 may still hold a server name, so the next name-less join drops it
 void wifi_eap_drv_reset(void);

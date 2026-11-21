@@ -643,7 +643,8 @@ static lv_obj_t *build(void) {
     }
     lichen_sys_wifi_join_t now = lichen_sys_wifi_join_state(target, sizeof(target), NULL, 0);
     if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {
-        poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
+        poll        = lichen_ui_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
+        joining_eap = lichen_sys_wifi_eap_ca() != LICHEN_SYS_WIFI_EAP_CA_NONE; // an Enterprise config is applied: login wording
     }
     return scr;
 }

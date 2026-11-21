@@ -66,6 +66,9 @@ static void on_text(char const *text, void *arg) {
     if (!screen) {
         return;
     }
+    if (f == EAP_FIELD_CA && strcmp(text, "/storage/") == 0) {
+        text = ""; // the entry started with the directory and was left unchanged: no CA
+    }
     char const *err = eap_form_field_error(f, text);
     if (err) {
         say("Saving", NULL, err, "Open the row and try again");
@@ -88,7 +91,15 @@ static void on_edit(void *arg) {
         case EAP_FIELD_SERVER: initial = form.server; break;
         default: break;
     }
-    text_entry_open(title, initial, f == EAP_FIELD_PASSWORD, eap_form_field_max(f), on_text, (void *)(uintptr_t)f);
+    // Hidden (dots, Tab shows) and out of the key log (fw keys on) for every field but the CA path: the login's names are
+    // private too, and the posture is tight against remote access
+    text_entry_open(title, initial, f != EAP_FIELD_CA, eap_form_field_max(f), on_text, (void *)(uintptr_t)f);
+}
+
+static void run_started(void *cb) {
+    if (cb) {
+        ((void (*)(void))cb)();
+    }
 }
 
 static void on_join(void *arg) {
@@ -105,9 +116,12 @@ static void on_join(void *arg) {
     secure_wipe(&form, sizeof(form)); // the service holds its own copy now
     void (*cb)(void) = started;
     started          = NULL;
-    shell_back(); // later, outside the key handling: the Wi-Fi screen below watches the join
-    if (cb) {
-        cb();
+    // One async step: this screen pops, then the Wi-Fi screen below starts watching the join
+    if (!shell_back_then(run_started, (void *)cb)) {
+        shell_back();
+        if (cb) {
+            cb();
+        }
     }
 }
 

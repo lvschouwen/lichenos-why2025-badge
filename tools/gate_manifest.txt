@@ -426,8 +426,8 @@ lichen_sys_wifi_eap_ca	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_eap_ca_path_valid	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_eap_fail_text	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_eap_problem	SYSTEM	any	lichen_sys_net.h
-lichen_sys_wifi_eap_problem_text	SYSTEM	unspecified	lichen_sys_net.h
-lichen_sys_wifi_eap_server_valid	SYSTEM	unspecified	lichen_sys_net.h
+lichen_sys_wifi_eap_problem_text	SYSTEM	any	lichen_sys_net.h
+lichen_sys_wifi_eap_server_valid	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_forget	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_has_credentials	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_ip	SYSTEM	any	lichen_sys_net.h

@@ -259,6 +259,10 @@ wifi_name_plan_t wifi_eap_name_plan(bool has_name, bool name_on_c6) {
     return has_name ? WIFI_NAME_SET : name_on_c6 ? WIFI_NAME_DISABLE_FIRST : WIFI_NAME_NONE;
 }
 
+bool wifi_eap_name_after_reset(void) {
+    return true;
+}
+
 bool wifi_auth_mode_is_enterprise(int authmode) {
     wifi_auth_class_t c = wifi_auth_class(authmode, true);
     return c == WIFI_AUTH_CLASS_WPA_ENT || c == WIFI_AUTH_CLASS_WPA2_ENT || c == WIFI_AUTH_CLASS_WPA3_ENT;

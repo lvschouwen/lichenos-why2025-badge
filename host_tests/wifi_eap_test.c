@@ -328,6 +328,9 @@ static void join_mapping(void) {
     // The server name on the C6 cannot be cleared alone: a name-less join after a named one switches Enterprise off first
     CHECK(wifi_eap_name_plan(true, false) == WIFI_NAME_SET && wifi_eap_name_plan(true, true) == WIFI_NAME_SET);
     CHECK(wifi_eap_name_plan(false, false) == WIFI_NAME_NONE && wifi_eap_name_plan(false, true) == WIFI_NAME_DISABLE_FIRST);
+    // A P4-only reset leaves the C6's name unknown: it counts as present, so the first name-less join disables Enterprise
+    CHECK(wifi_eap_name_after_reset() && wifi_eap_name_plan(false, wifi_eap_name_after_reset()) == WIFI_NAME_DISABLE_FIRST);
+    CHECK(wifi_eap_name_plan(true, wifi_eap_name_after_reset()) == WIFI_NAME_SET);
     CHECK(wifi_auth_mode_is_enterprise(5) && wifi_auth_mode_is_enterprise(10) && wifi_auth_mode_is_enterprise(14) &&
           wifi_auth_mode_is_enterprise(16) && !wifi_auth_mode_is_enterprise(3) && !wifi_auth_mode_is_enterprise(0) &&
           !wifi_auth_mode_is_enterprise(7) && !wifi_auth_mode_is_enterprise(99));

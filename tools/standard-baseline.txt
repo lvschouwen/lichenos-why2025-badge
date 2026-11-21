@@ -107,12 +107,12 @@ size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2813
 size	liblichen_led.a	1460
 size	liblichen_mdns.a	598
-size	liblichen_net.a	38488
+size	liblichen_net.a	38504
 size	liblichen_notify.a	13382
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	79137
 size	liblichen_random.a	63
-size	liblichen_shell.a	196403
+size	liblichen_shell.a	196551
 size	liblog.a	2726
 size	liblora.a	36337
 size	liblvgl__lvgl.a	541799

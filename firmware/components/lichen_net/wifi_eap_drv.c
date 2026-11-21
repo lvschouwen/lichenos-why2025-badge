@@ -144,7 +144,7 @@ wifi_eap_fail_t wifi_eap_drv_enable(void) {
 }
 
 void wifi_eap_drv_reset(void) {
-    atomic_store(&name_on_c6, false);
+    atomic_store(&name_on_c6, wifi_eap_name_after_reset()); // unknown, not gone: see wifi_eap_name_after_reset
 }
 
 void wifi_eap_drv_clear(void) {

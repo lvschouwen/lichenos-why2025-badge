@@ -132,11 +132,13 @@ int                    lichen_sys_wifi_bars(int8_t rssi);
 int                    lichen_sys_wifi_level_pct(int8_t rssi);
 // SSID 1-32 bytes, password empty (open network) or 8-63 bytes. Pure, any task.
 bool                   lichen_sys_wifi_cred_valid(char const *ssid, char const *pass);
-// The first thing wrong with a login, and the refusal in plain words ("" for OK). Pure, any task.
+// The first thing wrong with a login. Pure, any task.
 lichen_sys_wifi_eap_problem_t lichen_sys_wifi_eap_problem(lichen_sys_wifi_eap_t const *eap);
+// The refusal in plain words ("" for OK). Pure, any task.
 char const                   *lichen_sys_wifi_eap_problem_text(lichen_sys_wifi_eap_problem_t p);
-// A CA file path (empty: none) and a server name (empty: none) as a field accepts them. Pure, any task.
+// A CA file path as a field accepts it (empty: none). Pure, any task.
 bool                   lichen_sys_wifi_eap_ca_path_valid(char const *path);
+// A server name as a field accepts it (empty: none). Pure, any task.
 bool                   lichen_sys_wifi_eap_server_valid(char const *name);
 // Counts every change of the saved credentials, so a cached SSID knows to read again. Any task.
 uint32_t               lichen_sys_wifi_cred_generation(void);
