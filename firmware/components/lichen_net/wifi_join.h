@@ -35,6 +35,21 @@ wifi_join_action_t wifi_join_event(wifi_join_t *j, wifi_join_event_t ev, int rea
 wifi_join_event_t wifi_join_ip_event(char const *trial_ssid, char const *ap_ssid);
 // MIC failure, 4-way handshake timeout, auth failure, handshake timeout: a wrong password (or security mismatch)
 bool wifi_reason_is_auth_failure(int reason);
+// WIFI_REASON_ROAMING (207, #495): the C6 left this AP for a better one of the same network (an 802.11v BSS transition)
+// and reconnects by itself
+bool wifi_reason_is_roam(int reason);
+
+#define WIFI_RETRY_MS 2000         // a lost link: the P4 asks the C6 to connect again after this
+#define WIFI_ROAM_FALLBACK_MS 8000 // a roam: the C6 reconnects itself; the P4 steps in only when nothing came by then
+
+// What a disconnect event asks of the P4's retry loop
+typedef struct {
+    uint32_t delay_ms;          // the retry is due this long after the event
+    bool     counts_as_failure; // towards FAILS_PER_ROUND (the next saved network's turn, #160)
+    bool     cancel_on_connect; // a CONNECTED before the retry is due makes it moot (the roam arrived)
+} wifi_retry_t;
+
+wifi_retry_t wifi_disconnect_retry(int reason);
 
 // The SSID of the connection the C6 reports (WIFI_EVENT_STA_CONNECTED), tracked on the c6wifi task. Messages are ordered
 // on one queue, so a late GOT_IP of the old connection sees an empty or the old SSID, never the trial's (#15).

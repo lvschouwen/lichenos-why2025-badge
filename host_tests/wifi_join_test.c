@@ -44,6 +44,20 @@ int main(void) {
     CHECK(wifi_reason_is_auth_failure(14) && wifi_reason_is_auth_failure(15) && wifi_reason_is_auth_failure(202) &&
           wifi_reason_is_auth_failure(204));
     CHECK(!wifi_reason_is_auth_failure(8) && !wifi_reason_is_auth_failure(201) && !wifi_reason_is_auth_failure(0));
+
+    // A roam (207, #495): the C6 reconnects by itself, so the P4 neither counts a failure nor retries at once; it only
+    // steps in after the fallback. Every other reason keeps the old retry
+    CHECK(wifi_reason_is_roam(207) && !wifi_reason_is_roam(8) && !wifi_reason_is_roam(12) && !wifi_reason_is_roam(0));
+    wifi_retry_t r = wifi_disconnect_retry(207);
+    CHECK(!r.counts_as_failure && r.delay_ms == WIFI_ROAM_FALLBACK_MS && r.cancel_on_connect);
+    r = wifi_disconnect_retry(201);
+    CHECK(r.counts_as_failure && r.delay_ms == WIFI_RETRY_MS && !r.cancel_on_connect);
+    CHECK(WIFI_ROAM_FALLBACK_MS > WIFI_RETRY_MS);
+    // A roam while a trial runs decides nothing
+    wifi_join_t roam;
+    wifi_join_init(&roam);
+    wifi_join_start(&roam, 50000);
+    CHECK(wifi_join_event(&roam, JOIN_EV_DISCONNECTED, 207, 51000) == JOIN_ACT_NONE && roam.state == WIFI_JOIN_TRYING);
     // A failed join after the trial is over changes nothing
     CHECK(wifi_join_event(&j, JOIN_EV_DISCONNECTED, 15, 30) == JOIN_ACT_NONE);
 

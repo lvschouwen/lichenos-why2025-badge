@@ -319,6 +319,14 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     }
 }
 
+// 802.11k (radio measurement: neighbour reports) and 802.11v (BSS transition: the network steers the badge to a better
+// AP of the same name, #495). The C6 is built with CONFIG_ESP_WIFI_11KV_SUPPORT; the join itself already takes the
+// strongest AP (the esp_hosted set-config handler forces an all-channel scan sorted by signal).
+static void sta_roam_flags(wifi_config_t *cfg) {
+    cfg->sta.rm_enabled  = 1;
+    cfg->sta.btm_enabled = 1;
+}
+
 static bool load_credentials(wifi_config_t *cfg) {
     char s[33], p[64];
     if (!wifi_cred_load(s, p)) {
@@ -330,6 +338,7 @@ static bool load_credentials(wifi_config_t *cfg) {
     if (p[0]) {
         cfg->sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // a password was set: never join an open AP of that name
     }
+    sta_roam_flags(cfg);
     memset(p, 0, sizeof(p));
     return true;
 }
@@ -568,10 +577,10 @@ bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n) {
 
 // ---- the c6wifi task: joining with a trial, reconnecting, forgetting ---------------------------------------------
 
-#define RETRY_MS 2000
 
 static char     trial_pass[64];
 static bool     retry_pending;
+static bool     retry_roam; // the pending retry is a roam's fallback: a CONNECTED cancels it (#495)
 static uint32_t retry_at;
 
 static uint32_t now_ms(void) {
@@ -668,6 +677,7 @@ static bool apply_config(char const *s, char const *p) {
     if (p[0]) {
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // see load_credentials
     }
+    sta_roam_flags(&cfg);
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     memset(&cfg, 0, sizeof(cfg));
     if (err != ESP_OK) {
@@ -732,7 +742,7 @@ static wifi_lock_t const saved_ops = {
 // networks that failed in this round (bit = list index); when all of them did, the round starts over. Scans disturb a
 // link (#146), so one at most every SCAN_GAP_MS. One saved network or no scan: the pair in use stays. Task only.
 #define SCAN_GAP_MS 10000
-#define FAILS_PER_ROUND 3 // retries (RETRY_MS apart) before the next saved network gets its turn
+#define FAILS_PER_ROUND 3 // retries (WIFI_RETRY_MS apart) before the next saved network gets its turn
 
 static uint8_t  tried_mask;
 static uint8_t  fail_count;
@@ -940,6 +950,10 @@ static void handle_got_ip(void) {
 
 static void handle_connected(msg_t const *m) {
     wifi_link_connected(&link_ap, m->ssid, strlen(m->ssid));
+    if (retry_roam) {
+        retry_roam    = false;
+        retry_pending = false; // the roam arrived: a connect now would tear the new link down
+    }
     read_back_if_up(); // the bandwidth and protocol are agreed at association: the registry's cache follows (#311)
 }
 
@@ -955,14 +969,17 @@ static void handle_disconnected(int reason, uint32_t now) {
     if (act == JOIN_ACT_ROLLBACK) {
         rollback();
     } else if (have && atomic_load(&wifi_on)) {
+        wifi_retry_t r = wifi_disconnect_retry(reason);
         // Several saved networks: when this one keeps failing, the next known one in range gets its turn (#160)
-        if (!trying && ++fail_count >= FAILS_PER_ROUND) {
+        if (r.counts_as_failure && !trying && ++fail_count >= FAILS_PER_ROUND) {
             fail_count = 0;
             choose_network(true);
         }
-        // Keep trying for as long as the badge runs: the network may come back (out of range, router restart)
+        // Keep trying for as long as the badge runs: the network may come back (out of range, router restart). A roam
+        // reconnects on the C6 by itself; the retry is only its fallback
         retry_pending = true;
-        retry_at      = now + RETRY_MS;
+        retry_roam    = r.cancel_on_connect;
+        retry_at      = now + r.delay_ms;
     }
 }
 
@@ -1417,6 +1434,20 @@ static void cmd_wifi_stats(wifi_cmd_t const *c) {
         (pwr % 4) * 25,
         atomic_load(&wifi_tx_raw) ? "set" : "default",
         wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode))
+    );
+    // The C6's own copy of the STA config: proof the 11k/v flags crossed the link (#495). It holds the password: wiped
+    wifi_config_t cfg    = {0};
+    bool          cfg_ok = esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK;
+    bool          rm = cfg.sta.rm_enabled, btm = cfg.sta.btm_enabled;
+    memset(&cfg, 0, sizeof(cfg));
+    portENTER_CRITICAL(&state_lock);
+    uint32_t roams = counts.roams;
+    portEXIT_CRITICAL(&state_lock);
+    console_reply(
+        "wifi: roaming 11k %s, 11v %s, roams since boot %lu",
+        !cfg_ok ? "?" : rm ? "on" : "off",
+        !cfg_ok ? "?" : btm ? "on" : "off",
+        (unsigned long)roams
     );
 }
 

@@ -10,13 +10,18 @@
 // WIFI_REASON_ASSOC_LEAVE of ESP-IDF: what esp_wifi_disconnect() (a join, a forget, a rollback) reports back. A
 // disconnect the owner or the OS asked for is not a lost link, so it is not counted.
 #define WIFI_COUNT_REASON_LOCAL 8
+// WIFI_REASON_ROAMING: the C6 moves to another AP of the same network (#495). Counted as a roam, not as a loss; a roam
+// that fails turns into a loss at the next disconnect event
+#define WIFI_COUNT_REASON_ROAM 207
 
 typedef struct {
     uint32_t disconnects;  // links that were up (had an IP) and were lost, not asked for, since boot
     uint32_t reconnects;   // got-IPs after such a loss
+    uint32_t roams;        // roams that started from a link that was up (whether or not they arrived)
     uint16_t last_reason;  // IDF reason of the newest disconnect event that was not asked for; 0: none yet
     bool     up;           // an IP since the last disconnect
     bool     lost;         // a counted loss has not got its reconnect yet
+    bool     roaming;      // a roam left an up link and has not got its IP yet
 } wifi_count_t;
 
 void wifi_count_init(wifi_count_t *c);

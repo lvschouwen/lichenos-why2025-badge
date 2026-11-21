@@ -128,7 +128,41 @@ static void switched_off(void) {
     CHECK(c.reconnects == 0);
 }
 
+// A roam (IDF reason 207, #495): the C6 moves to another AP of the same network. Not a lost link, counted as a roam
+static void roam_is_not_a_loss(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_got_ip(&c);
+    wifi_count_disconnected(&c, WIFI_COUNT_REASON_ROAM);
+    wifi_count_got_ip(&c);
+    CHECK(c.disconnects == 0 && c.reconnects == 0 && c.roams == 1 && c.last_reason == 0);
+}
+
+// A roam that never reached the new AP: the next failure is the loss, counted once
+static void failed_roam_is_a_loss(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_got_ip(&c);
+    wifi_count_disconnected(&c, WIFI_COUNT_REASON_ROAM);
+    wifi_count_disconnected(&c, 201);
+    wifi_count_disconnected(&c, 201);
+    CHECK(c.roams == 1 && c.disconnects == 1 && c.last_reason == 201);
+    wifi_count_got_ip(&c);
+    CHECK(c.reconnects == 1);
+}
+
+// A roam reason with nothing up (a late event) is no roam
+static void roam_while_down(void) {
+    wifi_count_t c;
+    wifi_count_init(&c);
+    wifi_count_disconnected(&c, WIFI_COUNT_REASON_ROAM);
+    CHECK(c.roams == 0 && c.disconnects == 0);
+}
+
 int main(void) {
+    roam_is_not_a_loss();
+    failed_roam_is_a_loss();
+    roam_while_down();
     c6_reattach();
     switched_off();
     late_local_after_link_gone();

@@ -5,6 +5,10 @@ CONFIG_ESP_HOSTED_CP_FOR_MCU=y
 CONFIG_ESP_HOSTED_CP_RPC_V2=y
 CONFIG_ESP_HOSTED_CP_FEAT_WIFI=y
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+# 802.11k/v (#495): neighbour reports and BSS transitions, so a multi-AP network can steer the badge to a better AP.
+# The P4 sets rm_enabled/btm_enabled in the STA config; the P4's WIFI_RMT_11KV_SUPPORT stays off (nothing on the P4 calls
+# the esp_rrm/esp_wnm APIs, and it would only build the 11k/v supplicant into the P4 for nothing)
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
 
 # Bluetooth LE for the P4 (#50): controller only, HCI rides the SDIO link (VHCI); NimBLE runs on the P4
 CONFIG_ESP_HOSTED_CP_FEAT_BT=y

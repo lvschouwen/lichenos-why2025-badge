@@ -14,14 +14,14 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	299205
+size	<merged-strings>	299357
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	18259
 size	libbootloader_support.a	5942
 size	libc.a	47702
-size	libc6link.a	33296
+size	libc6link.a	33324
 size	libcrash.a	6245
 size	libcxx.a	872
 size	libefuse.a	2173
@@ -34,7 +34,7 @@ size	libeh_host_feat_peer_data.a	1490
 size	libeh_host_feat_rpc.a	8198
 size	libeh_host_feat_rpc_ext_v2.a	1840
 size	libeh_host_feat_system.a	1192
-size	libeh_host_feat_wifi.a	13182
+size	libeh_host_feat_wifi.a	14170
 size	libeh_host_feat_wifi_ext_itwt.a	994
 size	libeh_host_mcu_transport.a	22667
 size	libeh_host_mcu_vserial.a	1040
@@ -86,12 +86,12 @@ size	libesp_stdio.a	1182
 size	libesp_system.a	19184
 size	libesp_tca8418.a	1993
 size	libesp_timer.a	2854
-size	libesp_wifi.a	2263
-size	libesp_wifi_remote_glue.a	617
+size	libesp_wifi.a	2267
+size	libesp_wifi_remote_glue.a	621
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	39133
+size	libespressif__mdns.a	39141
 size	libfatfs.a	30649
 size	libfreertos.a	33118
 size	libfw_console.a	16455
@@ -106,20 +106,20 @@ size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2793
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
-size	liblichen_net.a	25040
+size	liblichen_net.a	25403
 size	liblichen_notify.a	13378
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	74299
 size	liblichen_random.a	63
 size	liblichen_shell.a	192530
 size	liblog.a	2726
-size	liblora.a	36269
+size	liblora.a	36281
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
-size	libmain.a	13567
+size	libmain.a	13579
 size	libmbedtls.a	22
-size	libmesh.a	427716
+size	libmesh.a	427748
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
