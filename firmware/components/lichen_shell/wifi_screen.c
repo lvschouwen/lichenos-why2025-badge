@@ -182,7 +182,7 @@ static void show_radio_off(void) {
     stop_poll();
     clear_rows();
     add_saved_rows();
-    set_status(off_status());
+    set_status("%s", off_status());
     if (in_rows) {
         focus_first_row();
     }
@@ -586,7 +586,7 @@ static lv_obj_t *build(void) {
         start_scan();
     } else {
         add_saved_rows();
-        set_status(off_status());
+        set_status("%s", off_status());
     }
     lichen_sys_wifi_join_t now = lichen_sys_wifi_join_state(target, sizeof(target), NULL, 0);
     if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {
