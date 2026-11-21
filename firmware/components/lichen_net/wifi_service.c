@@ -174,11 +174,13 @@ typedef enum {
     MSG_SCAN,      // (#502) scan into scan_res; reason = the request number (wifi_req.h)
     MSG_SET_PS,    // apply the chosen power save, TX power, or protocol/bandwidth: the values are the atomics, the
     MSG_SET_TX,    // message only says "now"; reason = the request number, so a repeat is idempotent
-    MSG_SET_LINK,
+    MSG_SET_PROTO, // value: 'n' or 'x' ...
+    MSG_SET_BW,    // ... or the MHz. The task stores a value only once the driver took it (#502)
 } msg_type_t;
 typedef struct {
     msg_type_t type;
     int        reason;
+    int        value; // MSG_SET_*: the value asked for
     char       ssid[33];
     char       pass[64];
     wifi_eap_t *eap; // MSG_JOIN of an Enterprise network: a heap copy the c6wifi task owns from the post on (#496)
@@ -558,7 +560,7 @@ static bool            scan_clean; // the request's flavour: the req_lock holder
 static size_t          scan_n;     // the result: the task writes both before it answers, the holder reads after
 EXT_RAM_BSS_ATTR static wifi_ap_t scan_res[SCAN_RECORDS];
 
-static wifi_req_why_t request_locked(msg_type_t type, uint32_t answer_ms, bool *ok);
+static wifi_req_why_t request_locked(msg_type_t type, int value, uint32_t answer_ms, bool *ok);
 
 // The caller's side of a scan: refused early when the link is plainly not there, else the c6wifi task decides (it knows
 // about a join or a roam in flight) and scans. The wait is bounded; a caller that gives up is not answered later.
@@ -571,7 +573,7 @@ static bool scan_ask(wifi_ap_t *out, size_t max, size_t *n, bool clean_list, wif
             why = c6link_updating() ? WIFI_REQ_UPDATING : !c6link_up() ? WIFI_REQ_NO_LINK : WIFI_REQ_OFF;
         } else if (xSemaphoreTake(req_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE) {
             scan_clean = clean_list;
-            why        = request_locked(MSG_SCAN, SCAN_WAIT_MS + 3000, &ok);
+            why        = request_locked(MSG_SCAN, 0, SCAN_WAIT_MS + 3000, &ok);
             if (ok) {
                 *n = scan_n < max ? scan_n : max;
                 memcpy(out, scan_res, *n * sizeof(*out));
@@ -694,14 +696,24 @@ bool wifi_readback(wifi_readback_t *out, bool live) {
 #define REQ_LOCK_MS   2000
 #define REQ_ANSWER_MS 4000
 
-static bool apply_now(msg_type_t type, wifi_req_why_t *why) {
+static _Atomic int *choice_slot(msg_type_t type) {
+    return type == MSG_SET_PS ? &wifi_ps_mode : type == MSG_SET_TX ? &wifi_tx_raw : type == MSG_SET_PROTO ? &wifi_proto : &wifi_bw_mhz;
+}
+
+// The choice is stored by the c6wifi task, and only once the gate passed and the driver took it (#502): a refused,
+// timed-out or failed set leaves the stored value as it was, so no later apply picks it up. Before the first start there
+// is nothing to refuse and nothing to apply: it is stored here and STA_START applies it.
+static bool apply_now(msg_type_t type, int value, wifi_req_why_t *why) {
     wifi_req_why_t w  = WIFI_REQ_OK;
     bool           ok = true;
-    if (atomic_load(&wifi_started)) {
+    if (!atomic_load(&wifi_started)) {
+        atomic_store(choice_slot(type), value);
+        readback_invalidate();
+    } else {
         ok = false;
         w  = WIFI_REQ_BUSY;
         if (req_lock && xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) == pdTRUE) {
-            w = request_locked(type, REQ_ANSWER_MS, &ok);
+            w = request_locked(type, value, REQ_ANSWER_MS, &ok);
             xSemaphoreGive(req_lock);
         }
     }
@@ -711,37 +723,33 @@ static bool apply_now(msg_type_t type, wifi_req_why_t *why) {
     return ok;
 }
 
-bool wifi_set_ps(bool min) {
-    atomic_store(&wifi_ps_mode, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
-    readback_invalidate();
-    return apply_now(MSG_SET_PS, NULL);
+static bool bad_arg(wifi_req_why_t *why) {
+    if (why) {
+        *why = WIFI_REQ_BAD_ARG;
+    }
+    return false;
 }
 
-bool wifi_set_tx(int raw) {
+bool wifi_set_ps(bool min) {
+    return apply_now(MSG_SET_PS, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE, NULL);
+}
+
+bool wifi_set_tx(int raw, wifi_req_why_t *why) {
     if (raw != 0 && (raw < WIFI_TX_RAW_MIN || raw > WIFI_TX_RAW_MAX)) {
-        return false;
+        return bad_arg(why);
     }
-    atomic_store(&wifi_tx_raw, raw);
-    readback_invalidate();
-    return apply_now(MSG_SET_TX, NULL);
+    return apply_now(MSG_SET_TX, raw, why);
 }
 
 bool wifi_set_bw(unsigned mhz, wifi_req_why_t *why) {
     if (mhz != 20 && mhz != 40) {
-        if (why) {
-            *why = WIFI_REQ_FAILED;
-        }
-        return false;
+        return bad_arg(why);
     }
-    atomic_store(&wifi_bw_mhz, (int)mhz);
-    readback_invalidate();
-    return apply_now(MSG_SET_LINK, why);
+    return apply_now(MSG_SET_BW, (int)mhz, why);
 }
 
 bool wifi_set_proto(bool n_only, wifi_req_why_t *why) {
-    atomic_store(&wifi_proto, n_only ? 'n' : 'x');
-    readback_invalidate();
-    return apply_now(MSG_SET_LINK, why);
+    return apply_now(MSG_SET_PROTO, n_only ? 'n' : 'x', why);
 }
 
 // Log-safe copy of an SSID (they come from the air)
@@ -1241,6 +1249,15 @@ bool wifi_forget_network(char const *name) {
     return ok;
 }
 
+void wifi_tuning_get(wifi_tuning_t *t) {
+    t->started = atomic_load(&wifi_started);
+    t->tx_raw  = atomic_load(&wifi_tx_raw);
+    t->ps_mode = atomic_load(&wifi_ps_mode);
+    portENTER_CRITICAL(&state_lock);
+    t->roams = counts.roams;
+    portEXIT_CRITICAL(&state_lock);
+}
+
 void wifi_enable(bool on) {
     atomic_store(&wifi_on, on);
     msg_t m = {.type = MSG_WIFI_SYNC};
@@ -1279,14 +1296,14 @@ static unsigned wifi_stack_free(void) {
 
 // The caller (req_lock held) posts the request and waits for its answer. The slot's number keeps an answer that comes
 // after the caller gave up from reaching the next caller.
-static wifi_req_why_t request_locked(msg_type_t type, uint32_t answer_ms, bool *ok) {
+static wifi_req_why_t request_locked(msg_type_t type, int value, uint32_t answer_ms, bool *ok) {
     wifi_req_why_t why = WIFI_REQ_BUSY;
     *ok                = false;
     portENTER_CRITICAL(&req_mux);
     uint32_t seq = wifi_req_begin(&req);
     portEXIT_CRITICAL(&req_mux);
     xSemaphoreTake(req_done, 0);
-    msg_t m = {.type = type, .reason = (int)seq};
+    msg_t m = {.type = type, .reason = (int)seq, .value = value};
     if (!post(&m)) {
         return why;
     }
@@ -1322,7 +1339,7 @@ static wifi_req_why_t gate_now(msg_type_t type) {
     if (type == MSG_SCAN) {
         return wifi_scan_gate(c6link_up(), c6link_updating(), atomic_load(&wifi_on), atomic_load(&wifi_started), js, roaming);
     }
-    return type == MSG_SET_LINK && atomic_load(&wifi_started) ? wifi_link_gate(js, roaming) : WIFI_REQ_OK;
+    return (type == MSG_SET_PROTO || type == MSG_SET_BW) && atomic_load(&wifi_started) ? wifi_link_gate(js, roaming) : WIFI_REQ_OK;
 }
 
 static wifi_req_plan_t plan_for(msg_t const *m) {
@@ -1384,12 +1401,25 @@ static bool apply_one(msg_type_t type) {
 static void handle_apply(msg_t const *m) {
     wifi_req_plan_t plan = plan_for(m);
     bool            ok   = false;
-    if (plan.run) { // before the first start there is nothing to apply: STA_START does it
-        ok       = !atomic_load(&wifi_started) || apply_one(m->type);
+    if (plan.run) {
+        _Atomic int *slot = choice_slot(m->type);
+        int          old  = atomic_load(slot);
+        atomic_store(slot, m->value); // the apply functions read the choice from here
+        ok = apply_one(m->type);
+        atomic_store(slot, wifi_req_keep(ok, old, m->value));
+        readback_invalidate();
         plan.why = ok ? WIFI_REQ_OK : WIFI_REQ_FAILED;
     }
     if (plan.answer) {
         answer(m, ok, plan.why);
+    }
+}
+
+static void handle_request(msg_t const *m) {
+    if (m->type == MSG_SCAN) {
+        handle_scan(m);
+    } else {
+        handle_apply(m);
     }
 }
 
@@ -1447,16 +1477,13 @@ static void wifi_task(void *arg) {
                 case MSG_GOT_IP: handle_got_ip(); break;
                 case MSG_WIFI_SYNC: handle_wifi_sync(); break;
                 case MSG_CONNECTED: handle_connected(&m); break;
-                case MSG_SCAN: handle_scan(&m); break;
-                case MSG_SET_PS:
-                case MSG_SET_TX:
-                case MSG_SET_LINK: handle_apply(&m); break;
                 case MSG_C6_DOWN:
                 case MSG_C6_UP:
                     m.type == MSG_C6_UP ? handle_c6_up() : handle_c6_down();
                     atomic_store(&c6_msg_seq, m.reason);
                     xSemaphoreGive(c6_msg_done);
                     break;
+                default: handle_request(&m); break; // scan, ps, tx, protocol, bandwidth (#502)
             }
             memset(&m, 0, sizeof(m));
         }
@@ -1628,57 +1655,6 @@ static void cmd_wifi_on_off(wifi_cmd_t const *c) {
     cmd_wifi_switch(c->on);
 }
 
-static void cmd_wifi_stats(wifi_cmd_t const *c) {
-    (void)c;
-    wifi_ap_record_t ap;
-    if (!atomic_load(&wifi_started) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
-        console_reply("wifi: not connected");
-        return;
-    }
-    wifi_bandwidth_t bw     = 0;
-    int8_t           pwr    = 0;
-    bool             bw_ok  = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
-    bool             pwr_ok = esp_wifi_get_max_tx_power(&pwr) == ESP_OK;
-    console_reply(
-        "wifi: rssi %d dBm, channel %u%s, phy%s%s%s%s",
-        ap.rssi,
-        ap.primary,
-        ap.second == WIFI_SECOND_CHAN_ABOVE   ? "+above"
-        : ap.second == WIFI_SECOND_CHAN_BELOW ? "+below"
-                                              : "",
-        ap.phy_11b ? " b" : "",
-        ap.phy_11g ? " g" : "",
-        ap.phy_11n ? " n" : "",
-        ap.phy_11ax ? " ax" : ""
-    );
-    console_reply(
-        "wifi: bandwidth %s, max TX power %s%d.%02d dBm (%s), power save %s",
-        !bw_ok            ? "?"
-        : bw == WIFI_BW20 ? "HT20"
-        : bw == WIFI_BW40 ? "HT40"
-                          : "other",
-        pwr_ok ? "" : "? ",
-        pwr / 4,
-        (pwr % 4) * 25,
-        atomic_load(&wifi_tx_raw) ? "set" : "default",
-        wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode))
-    );
-    // The C6's own copy of the STA config: proof the 11k/v flags crossed the link (#495). It holds the password: wiped
-    wifi_config_t cfg    = {0};
-    bool          cfg_ok = esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK;
-    bool          rm = cfg.sta.rm_enabled, btm = cfg.sta.btm_enabled;
-    memset(&cfg, 0, sizeof(cfg));
-    portENTER_CRITICAL(&state_lock);
-    uint32_t roams = counts.roams;
-    portEXIT_CRITICAL(&state_lock);
-    console_reply(
-        "wifi: roaming 11k %s, 11v %s, roams since boot %lu",
-        !cfg_ok ? "?" : rm ? "on" : "off",
-        !cfg_ok ? "?" : btm ? "on" : "off",
-        (unsigned long)roams
-    );
-}
-
 static void cmd_wifi_clear(wifi_cmd_t const *c) {
     (void)c;
     msg_t m = {.type = MSG_FORGET};
@@ -1706,7 +1682,7 @@ static void cmd_wifi(char const *args) {
         [WIFI_CMD_SWITCH]      = cmd_wifi_on_off,
         [WIFI_CMD_PS]          = wifi_console_ps,
         [WIFI_CMD_PS_USAGE]    = wifi_console_ps_usage,
-        [WIFI_CMD_STATS]       = cmd_wifi_stats,
+        [WIFI_CMD_STATS]       = wifi_console_stats,
         [WIFI_CMD_TX]          = wifi_console_tx,
         [WIFI_CMD_TX_USAGE]    = wifi_console_tx_usage,
         [WIFI_CMD_PROTO]       = wifi_console_proto,

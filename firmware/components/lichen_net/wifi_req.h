@@ -20,6 +20,7 @@ typedef enum {
     WIFI_REQ_ROAMING,    // a roam is in flight
     WIFI_REQ_BUSY,       // another request holds the task (the wait ran out)
     WIFI_REQ_FAILED,     // the driver said no
+    WIFI_REQ_BAD_ARG,    // the value is not one the setter takes
 } wifi_req_why_t;
 
 typedef struct {
@@ -53,4 +54,6 @@ typedef struct {
     wifi_req_why_t why; // the refusal, when answer && !run
 } wifi_req_plan_t;
 wifi_req_plan_t wifi_req_plan(wifi_req_t const *r, uint32_t seq, wifi_req_why_t gate);
+// The value a choice keeps after the task tried to apply it: the new one only when the driver took it
+int wifi_req_keep(bool applied, int old_value, int new_value);
 char const    *wifi_req_why_text(wifi_req_why_t why);

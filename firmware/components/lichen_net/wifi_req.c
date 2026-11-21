@@ -71,6 +71,10 @@ wifi_req_plan_t wifi_req_plan(wifi_req_t const *r, uint32_t seq, wifi_req_why_t 
     return (wifi_req_plan_t){.run = gate == WIFI_REQ_OK, .answer = true, .why = gate};
 }
 
+int wifi_req_keep(bool applied, int old_value, int new_value) {
+    return applied ? new_value : old_value;
+}
+
 char const *wifi_req_why_text(wifi_req_why_t why) {
     switch (why) {
         case WIFI_REQ_OK: return "ok";
@@ -82,6 +86,7 @@ char const *wifi_req_why_text(wifi_req_why_t why) {
         case WIFI_REQ_ROAMING: return "the link is roaming, try again in a moment";
         case WIFI_REQ_BUSY: return "Wi-Fi is busy, try again";
         case WIFI_REQ_FAILED: return "the driver refused it";
+        case WIFI_REQ_BAD_ARG: return "not a value it takes";
     }
     return "unknown";
 }

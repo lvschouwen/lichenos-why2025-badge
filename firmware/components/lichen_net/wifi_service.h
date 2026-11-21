@@ -102,8 +102,9 @@ bool wifi_readback(wifi_readback_t *out, bool live);
 // when the driver refused it.
 bool wifi_set_ps(bool min);
 // TX power in 0.25 dBm units (0 = the driver's default, else WIFI_TX_RAW_MIN..MAX), not saved (#146, #502): applied on
-// the c6wifi task. False when it is out of range, busy or the driver refused it.
-bool wifi_set_tx(int raw);
+// the c6wifi task. False when it is out of range, busy or the driver refused it; the value is kept only when it was
+// applied (all four setters: a refused, timed-out or failed set changes nothing). why may be NULL.
+bool wifi_set_tx(int raw, wifi_req_why_t *why);
 // STA bandwidth 20 or 40 MHz, not saved: a station with credentials reconnects to take it. False when not 20/40, busy,
 // a join or a roam is in flight, or refused.
 // why (may be NULL): WIFI_REQ_OK, or the reason it was not applied.
@@ -113,3 +114,12 @@ bool wifi_set_bw(unsigned mhz, wifi_req_why_t *why);
 bool wifi_set_proto(bool n_only, wifi_req_why_t *why);
 // wifi_scan with the reason of this very call (WIFI_REQ_OK when it ran): "a join is in progress", "no C6 link", ...
 bool wifi_scan_why(wifi_ap_t *out, size_t max, size_t *n, wifi_req_why_t *why);
+
+// What `fw wifi stats` shows besides the driver's own answers (#502, file size): the chosen TX power (0 = default) and power
+// save (WIFI_RB_PS_*), whether the driver is started, and the roams since boot. No RPC.
+typedef struct {
+    bool     started;
+    int      tx_raw, ps_mode;
+    uint32_t roams;
+} wifi_tuning_t;
+void wifi_tuning_get(wifi_tuning_t *t);

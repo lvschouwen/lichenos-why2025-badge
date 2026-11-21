@@ -1,9 +1,12 @@
 #include "wifi_console.h"
 
 #include "esp_attr.h"
+#include "esp_wifi.h"
 #include "fw_console.h"
 #include "wifi_regdom.h"
 #include "wifi_service.h"
+
+#include <string.h>
 
 void wifi_console_ip6(void) {
     char     text[WIFI_IP6_TEXT_MAX];
@@ -94,8 +97,9 @@ void wifi_console_tx_usage(wifi_cmd_t const *c) {
 }
 
 void wifi_console_tx(wifi_cmd_t const *c) {
-    if (c->tx_raw >= 0 && !wifi_set_tx(c->tx_raw)) { // bare "tx" (-1) reads back only; the range is wifi_set_tx's
-        console_reply("wifi: TX power not applied (busy or refused)");
+    wifi_req_why_t why = WIFI_REQ_OK;
+    if (c->tx_raw >= 0 && !wifi_set_tx(c->tx_raw, &why)) { // bare "tx" (-1) reads back only; the range is wifi_set_tx's
+        console_reply("wifi: TX power not applied: %s", wifi_req_why_text(why));
     }
     tuning_echo('t', 0, false);
 }
@@ -129,4 +133,58 @@ void wifi_console_bw(wifi_cmd_t const *c) {
         }
     }
     tuning_echo('b', c->bw_mhz, reconnecting);
+}
+
+static char const *ps_name(int ps) {
+    return ps == WIFI_RB_PS_NONE ? "off" : ps == WIFI_RB_PS_MIN ? "min (modem sleep)" : "max (modem sleep)";
+}
+
+void wifi_console_stats(wifi_cmd_t const *c) {
+    (void)c;
+    wifi_tuning_t t;
+    wifi_tuning_get(&t);
+    wifi_ap_record_t ap;
+    if (!t.started || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        console_reply("wifi: not connected");
+        return;
+    }
+    wifi_bandwidth_t bw     = 0;
+    int8_t           pwr    = 0;
+    bool             bw_ok  = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
+    bool             pwr_ok = esp_wifi_get_max_tx_power(&pwr) == ESP_OK;
+    console_reply(
+        "wifi: rssi %d dBm, channel %u%s, phy%s%s%s%s",
+        ap.rssi,
+        ap.primary,
+        ap.second == WIFI_SECOND_CHAN_ABOVE   ? "+above"
+        : ap.second == WIFI_SECOND_CHAN_BELOW ? "+below"
+                                              : "",
+        ap.phy_11b ? " b" : "",
+        ap.phy_11g ? " g" : "",
+        ap.phy_11n ? " n" : "",
+        ap.phy_11ax ? " ax" : ""
+    );
+    console_reply(
+        "wifi: bandwidth %s, max TX power %s%d.%02d dBm (%s), power save %s",
+        !bw_ok            ? "?"
+        : bw == WIFI_BW20 ? "HT20"
+        : bw == WIFI_BW40 ? "HT40"
+                          : "other",
+        pwr_ok ? "" : "? ",
+        pwr / 4,
+        (pwr % 4) * 25,
+        t.tx_raw ? "set" : "default",
+        ps_name(t.ps_mode)
+    );
+    // The C6's own copy of the STA config: proof the 11k/v flags crossed the link (#495). It holds the password: wiped
+    wifi_config_t cfg    = {0};
+    bool          cfg_ok = esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK;
+    bool          rm = cfg.sta.rm_enabled, btm = cfg.sta.btm_enabled;
+    memset(&cfg, 0, sizeof(cfg));
+    console_reply(
+        "wifi: roaming 11k %s, 11v %s, roams since boot %lu",
+        !cfg_ok ? "?" : rm ? "on" : "off",
+        !cfg_ok ? "?" : btm ? "on" : "off",
+        (unsigned long)t.roams
+    );
 }

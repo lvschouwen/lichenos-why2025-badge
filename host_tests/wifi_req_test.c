@@ -111,7 +111,32 @@ static void test_plan(void) {
     CHECK(wifi_link_gate(WIFI_JOIN_FAILED_KEPT_OLD, false) == WIFI_REQ_OK);
 }
 
+// A choice changes only when the task ran it and the driver took it (the stored value is what later applies use)
+static void test_keep(void) {
+    wifi_req_t r;
+    wifi_req_init(&r);
+    int      stored = 'x';
+    int      ran    = 0;
+    uint32_t a      = wifi_req_begin(&r);
+    wifi_req_plan_t p = wifi_req_plan(&r, a, wifi_link_gate(WIFI_JOIN_TRYING, false)); // refused by the gate
+    CHECK(!p.run && wifi_req_keep(p.run, stored, 'n') == 'x');
+    uint32_t b = wifi_req_begin(&r);
+    (void)wifi_req_plan(&r, b, WIFI_REQ_OK);
+    uint32_t c = wifi_req_begin(&r); // b's caller gave up
+    p = wifi_req_plan(&r, b, WIFI_REQ_OK);
+    CHECK(!p.run && !p.answer && wifi_req_keep(p.run, stored, 'n') == 'x');
+    p = wifi_req_plan(&r, c, WIFI_REQ_OK);
+    CHECK(p.run);
+    stored = wifi_req_keep(false, stored, 'n'); // the driver said no
+    CHECK(stored == 'x');
+    stored = wifi_req_keep(true, stored, 'n'); // accepted
+    CHECK(stored == 'n');
+    (void)ran;
+    CHECK(wifi_req_why_text(WIFI_REQ_BAD_ARG)[0] != '\0');
+}
+
 int main(void) {
+    test_keep();
     test_plan();
     test_slot();
     test_stale_answer();
