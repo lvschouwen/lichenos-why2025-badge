@@ -272,6 +272,23 @@ static void join_mapping(void) {
     CHECK(wifi_auth_class(16, true) == WIFI_AUTH_CLASS_WPA_ENT && wifi_auth_class(99, true) == WIFI_AUTH_CLASS_OTHER);
 }
 
+// The apply decision (L4): PSK after Enterprise clears, an old C6 is never sent the clears, a blocked pair fails closed
+static void apply_plan(void) {
+    CHECK(wifi_apply_plan(false, false, false, false) == WIFI_PLAN_PSK);
+    CHECK(wifi_apply_plan(false, false, false, true) == WIFI_PLAN_PSK_CLEAR); // PSK after an Enterprise network
+    CHECK(wifi_apply_plan(true, true, false, false) == WIFI_PLAN_EAP && wifi_apply_plan(true, true, false, true) == WIFI_PLAN_EAP);
+    CHECK(wifi_apply_plan(true, false, false, true) == WIFI_PLAN_FAIL); // record missing or damaged: blocked, never PSK
+    CHECK(wifi_apply_plan(true, false, true, false) == WIFI_PLAN_FAIL);
+    CHECK(wifi_apply_plan(false, false, true, true) == WIFI_PLAN_FAIL); // the marker with no Enterprise entry: not a password
+    // An old C6: the first EAP call fails, nothing was touched, so the next PSK apply sends no clear
+    bool on = wifi_enterprise_after(false, false);
+    CHECK(!on && wifi_apply_plan(false, false, false, on) == WIFI_PLAN_PSK);
+    // A new C6 where a later call failed: touched, so the PSK network that follows clears
+    on = wifi_enterprise_after(false, true);
+    CHECK(on && wifi_apply_plan(false, false, false, on) == WIFI_PLAN_PSK_CLEAR);
+    CHECK(wifi_enterprise_after(true, false) && !wifi_enterprise_after(false, false));
+}
+
 // `fw wifi eap ...`
 static void console_line(void) {
     char       ssid[33];
@@ -310,6 +327,7 @@ static void console_line(void) {
 int main(void) {
     kind_persistence();
     join_mapping();
+    apply_plan();
     console_line();
     validation();
     ca_paths();

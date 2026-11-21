@@ -211,6 +211,20 @@ wifi_auth_class_t wifi_auth_class(int authmode, bool known) {
     }
 }
 
+wifi_plan_t wifi_apply_plan(bool is_eap_entry, bool record_ok, bool pass_is_mark, bool enterprise_on) {
+    if (is_eap_entry) {
+        return record_ok ? WIFI_PLAN_EAP : WIFI_PLAN_FAIL;
+    }
+    if (pass_is_mark) {
+        return WIFI_PLAN_FAIL;
+    }
+    return enterprise_on ? WIFI_PLAN_PSK_CLEAR : WIFI_PLAN_PSK;
+}
+
+bool wifi_enterprise_after(bool was_on, bool touched) {
+    return was_on || touched;
+}
+
 // The next space-separated word of *p (runs of spaces between words count as one); false at the end of the line
 static bool next_word(char const **p, char const **w, size_t *n) {
     while (**p == ' ') {

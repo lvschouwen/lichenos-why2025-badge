@@ -206,9 +206,13 @@ static bool saved_store(wifi_saved_t const *l) {
         slot_key(kk, 'k', i);
         bool done;
         if ((size_t)i < l->n) {
-            done = store_kind(kk, &l->e[i]); // first: a slot never reads as PSK for a moment
+            // Power-loss order: the kind goes first and comes back last. In between the slot reads as PSK, and what it
+            // holds is either a valid PSK of its own SSID or the Enterprise marker, which is no valid PSK and drops the
+            // slot. A record index never pairs with another network's SSID, and nothing reads as open.
+            done = store->erase(kk);
             done = store->set_str(ks, l->e[i].ssid) && done;
             done = store->secret_set(kp, entry_pass(&l->e[i])) && done;
+            done = store_kind(kk, &l->e[i]) && done;
         } else {
             done = store->erase(kk);
             done = store->erase(ks) && done;
@@ -401,8 +405,10 @@ bool wifi_cred_save_eap(char const *ssid, char const *rec) {
     wifi_saved_t list;
     wifi_saved_load(&list);
     char ke[10];
-    bool ok = wifi_saved_add_eap(&list, ssid) && store->secret_set(slot_key(ke, 'e', list.e[0].rec), rec) &&
-              saved_store(&list) && set_active(ssid, WIFI_SAVED_EAP_MARK);
+    // Power-loss order, all fail closed: the record slot is emptied (an old entry that still points at a reused slot would
+    // get this network's login), then the list names the new entry, then the record is written, then the pair in use
+    bool ok = wifi_saved_add_eap(&list, ssid) && store->erase(slot_key(ke, 'e', list.e[0].rec)) && saved_store(&list) &&
+              store->secret_set(ke, rec) && set_active(ssid, WIFI_SAVED_EAP_MARK);
     wifi_saved_wipe(&list);
     if (ok) {
         generation++;

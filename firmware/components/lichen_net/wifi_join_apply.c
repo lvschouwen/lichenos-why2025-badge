@@ -12,8 +12,8 @@
 
 static char const TAG[] = "c6link"; // the log tag of the whole Wi-Fi service
 
-// enterprise_on: the C6 holds Enterprise state since its driver came up (a C6 reset loses it), so a PSK network clears it
-// and an old C6 that never had it is never asked to. config_bad: see wifi_apply_blocked. eap_fail: the last reason (fw
+// enterprise_on: at least one EAP call got through since the C6's driver came up (a C6 reset loses it), so a PSK network
+// clears it. An old C6 fails the first call: it stays false and is never sent the clear RPCs. config_bad: see wifi_apply_blocked. eap_fail: the last reason (fw
 // wifi shows it). eap_ca: the registry's wifi.eap_ca.
 static atomic_bool enterprise_on;
 static atomic_bool config_bad;
@@ -53,6 +53,7 @@ typedef struct {
 
 static void failed(wifi_eap_fail_t why) {
     atomic_store(&eap_fail, (int)why);
+    atomic_store(&eap_ca, WIFI_EAP_CA_NONE); // nothing was applied: wifi.eap_ca must not keep the previous network's state
     atomic_store(&config_bad, true);
     ESP_LOGW(TAG, "wifi: Enterprise join not started: %s", wifi_eap_fail_text(why));
 }
@@ -72,22 +73,13 @@ static void sta_roam_flags(wifi_config_t *cfg) {
     cfg->sta.btm_enabled = 1;
 }
 
-// An Enterprise network sets the EAP calls first, so a refused call leaves the SSID untouched
-bool wifi_apply_net(char const *s, char const *p, wifi_eap_t const *eap, wifi_lock_t const *lock) {
+// The station config alone; its own frame, so it is never live while the CA file is read
+static esp_err_t set_sta_config(char const *s, char const *p, bool eap) {
     wifi_config_t cfg = {0};
     memcpy(cfg.sta.ssid, s, strlen(s));
     if (eap) {
-        atomic_store(&enterprise_on, true); // from the first RPC on, a PSK network must clear what it left
-        wifi_eap_fail_t why = wifi_eap_drv_set(eap, lock);
-        if (why != WIFI_EAP_FAIL_NONE) {
-            failed(why);
-            return false;
-        }
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_ENTERPRISE; // an open or PSK AP of that name is a trap
     } else {
-        if (atomic_exchange(&enterprise_on, false)) {
-            wifi_eap_drv_clear();
-        }
         memcpy(cfg.sta.password, p, strlen(p));
         if (p[0]) {
             cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // a password was set: never join an open AP of that name
@@ -96,6 +88,10 @@ bool wifi_apply_net(char const *s, char const *p, wifi_eap_t const *eap, wifi_lo
     sta_roam_flags(&cfg);
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     memset(&cfg, 0, sizeof(cfg));
+    return err;
+}
+
+static bool config_done(esp_err_t err, wifi_eap_t const *eap) {
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi config: %s", esp_err_to_name(err));
         return false;
@@ -103,6 +99,47 @@ bool wifi_apply_net(char const *s, char const *p, wifi_eap_t const *eap, wifi_lo
     atomic_store(&config_bad, false);
     atomic_store(&eap_ca, (int)wifi_eap_ca_state(eap));
     return true;
+}
+
+// An Enterprise network follows esp_eap_client.h: the credentials, then the station config, then enable. A refusal on the
+// way clears what was set and puts the previous config back; config_bad then keeps everything from connecting.
+static bool apply_eap(char const *s, wifi_eap_t const *eap, wifi_lock_t const *lock) {
+    bool            touched;
+    wifi_eap_fail_t why = wifi_eap_drv_set(eap, lock, &touched);
+    atomic_store(&enterprise_on, wifi_enterprise_after(atomic_load(&enterprise_on), touched));
+    wifi_config_t *prev = why == WIFI_EAP_FAIL_NONE ? lock->alloc(sizeof(*prev)) : NULL; // to put back, not on the stack
+    bool           have_prev = prev && esp_wifi_get_config(WIFI_IF_STA, prev) == ESP_OK;
+    esp_err_t      err = ESP_FAIL;
+    if (why == WIFI_EAP_FAIL_NONE) {
+        err = set_sta_config(s, "", true);
+        why = err == ESP_OK ? wifi_eap_drv_enable() : WIFI_EAP_FAIL_C6_OLD;
+    }
+    if (why != WIFI_EAP_FAIL_NONE) {
+        if (have_prev && err == ESP_OK) {
+            esp_wifi_set_config(WIFI_IF_STA, prev);
+        }
+        if (touched) {
+            wifi_eap_drv_clear(); // only what was set: an untouched (old) C6 gets no clear RPCs
+            atomic_store(&enterprise_on, false);
+        }
+        failed(why);
+    }
+    if (prev) {
+        memset(prev, 0, sizeof(*prev)); // a previous PSK config holds its password
+        lock->release(prev);
+    }
+    return why == WIFI_EAP_FAIL_NONE && config_done(ESP_OK, eap);
+}
+
+bool wifi_apply_net(char const *s, char const *p, wifi_eap_t const *eap, wifi_lock_t const *lock) {
+    if (eap) {
+        return apply_eap(s, eap, lock);
+    }
+    if (wifi_apply_plan(false, false, false, atomic_load(&enterprise_on)) == WIFI_PLAN_PSK_CLEAR) {
+        wifi_eap_drv_clear();
+        atomic_store(&enterprise_on, false);
+    }
+    return config_done(set_sta_config(s, p, false), NULL);
 }
 
 bool wifi_apply_saved(char const *s, char const *p, wifi_lock_t const *lock) {
@@ -117,14 +154,13 @@ bool wifi_apply_saved(char const *s, char const *p, wifi_lock_t const *lock) {
     lock->take(UINT32_MAX);
     wifi_eap_rec_t kind = wifi_cred_eap_record(s, sc->rec, sizeof(sc->rec));
     lock->give();
-    bool ok;
-    if (kind == WIFI_EAP_REC_NONE && strcmp(p, WIFI_SAVED_EAP_MARK) != 0) {
-        ok = wifi_apply_net(s, p, NULL, lock);
-    } else if (kind == WIFI_EAP_REC_OK && wifi_eap_decode(sc->rec, &sc->e)) {
-        ok = wifi_apply_net(s, p, &sc->e, lock);
-    } else {
-        failed(WIFI_EAP_FAIL_CRED);
-        ok = false;
+    bool rec_ok = kind == WIFI_EAP_REC_OK && wifi_eap_decode(sc->rec, &sc->e);
+    bool ok     = false;
+    switch (wifi_apply_plan(kind != WIFI_EAP_REC_NONE, rec_ok, strcmp(p, WIFI_SAVED_EAP_MARK) == 0,
+                            atomic_load(&enterprise_on))) {
+        case WIFI_PLAN_EAP: ok = wifi_apply_net(s, p, &sc->e, lock); break;
+        case WIFI_PLAN_FAIL: failed(WIFI_EAP_FAIL_CRED); break;
+        default: ok = wifi_apply_net(s, p, NULL, lock); break; // PSK, clearing what a previous network left
     }
     scratch_free(sc, lock);
     return ok;
@@ -170,9 +206,9 @@ void wifi_apply_console_eap(char const *args, wifi_lock_t const *lock) {
 void wifi_apply_console_status(void) {
     bool ip = wifi_has_ip(NULL, 0);
     if (ip && wifi_eap_ca() == WIFI_EAP_CA_UNVERIFIED) {
-        console_reply("wifi: WARNING unverified server: no CA set, an impostor access point could take the login");
+        console_reply("wifi: WARNING unverified server: no CA set, an impostor access point could take the login; with no identity set the username also goes out in clear");
     } else if (ip && wifi_eap_ca() == WIFI_EAP_CA_VERIFIED) {
-        console_reply("wifi: Enterprise, server certificate checked against the CA");
+        console_reply("wifi: Enterprise, server certificate chain checked against the CA (no server name check)");
     }
     wifi_eap_fail_t why = wifi_eap_last_fail();
     if (why != WIFI_EAP_FAIL_NONE) {

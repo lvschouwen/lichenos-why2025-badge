@@ -53,6 +53,8 @@ def test_outage_line_names_the_gap_and_node() -> None:
 SECRET_LINES = [
     ("fw wifi MyNet hunter22", "fw wifi ***"),
     ("wifi MyNet hunter22", "wifi ***"),
+    ("wifi eap camp peap mschapv2 - user - hunter2", "wifi ***"),  # #496: "eap" is no listed subcommand, so it is a name
+    ("fw wifi eap camp ttls pap - user /storage/ca.pem pw pw", "fw wifi ***"),
     ("fw mesh remote rpt1 login hunter22", "fw mesh remote rpt1 login ***"),
     ("fw mesh remote a1b2c3 cli password hunter22", "fw mesh remote a1b2c3 cli ***"),
     ("fw mesh remote a1b2c3 cli set guest.password x", "fw mesh remote a1b2c3 cli ***"),

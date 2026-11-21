@@ -88,6 +88,16 @@ typedef enum {
 } wifi_auth_class_t;
 wifi_auth_class_t wifi_auth_class(int authmode, bool known);
 
+// What applying a pair to the driver does (pure, so the decision is host-tested). is_eap_entry: the saved list says the
+// network is Enterprise; record_ok: its record was read and decoded; pass_is_mark: the pair's password is the
+// Enterprise marker (the list entry is gone or lost its kind). Fail closed: an Enterprise entry without a usable record,
+// or a marker with no Enterprise entry, never becomes a PSK or open network.
+typedef enum { WIFI_PLAN_PSK, WIFI_PLAN_PSK_CLEAR, WIFI_PLAN_EAP, WIFI_PLAN_FAIL } wifi_plan_t;
+wifi_plan_t wifi_apply_plan(bool is_eap_entry, bool record_ok, bool pass_is_mark, bool enterprise_on);
+// Whether the C6 holds Enterprise state after an Enterprise apply: it did already, or at least one EAP call got through.
+// An old C6 fails the first call, so it stays false and a PSK network never sends it the clear RPCs.
+bool wifi_enterprise_after(bool was_on, bool touched);
+
 // `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password...>` (the text after
 // "eap "): "-" is an empty identity or no CA; the password is the rest of the line and may hold spaces. ssid gets 33 bytes.
 typedef enum { WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID, WIFI_EAP_PARSE_PAP_NO_CA } wifi_eap_parse_t;
