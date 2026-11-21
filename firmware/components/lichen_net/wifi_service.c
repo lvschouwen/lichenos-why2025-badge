@@ -25,11 +25,14 @@
 #include "lwip/dns.h"
 #include "lwip/tcpip.h"
 #include "wifi_cmd.h"
+#include "wifi_inet.h"
+#include "wifi_scan_drv.h"
 #include "wifi_console.h"
 #include "wifi_join_apply.h"
 #include "wifi_ip6.h"
 #include "wifi_count.h"
 #include "wifi_regdom.h"
+#include "wifi_req.h"
 #include "wifi_text.h"
 #include "wifi_saved.h"
 
@@ -61,7 +64,14 @@ static esp_netif_t *sta_netif;
 static char         ssid[33];
 static SemaphoreHandle_t scan_done; // given by the SCAN_DONE event
 static SemaphoreHandle_t saved_lock; // the saved-network list (#160): the task saves, the screen forgets
-static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the console may ask together)
+// Requests to the c6wifi task (#502): scan, power save, TX power, protocol/bandwidth. req_lock: one caller at a time (the
+// screen and the console may ask together); req holds the answer (req_mux), req_done wakes the waiting caller.
+static SemaphoreHandle_t req_lock;
+static SemaphoreHandle_t req_done;
+static wifi_req_t        req;
+static portMUX_TYPE      req_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t      wifi_task_handle;
+static _Atomic int       scan_why_last; // wifi_req_why_t of the last scan that did not run, for the console
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
 static wifi_count_t counts; // #415: written by the c6wifi task, read by wifi_link_counts, both under state_lock
@@ -162,6 +172,10 @@ typedef enum {
     MSG_C6_DOWN, // the supervisor re-attaches (#14): stop and deinit the driver
     MSG_C6_UP,   // and it is back: init and start it again
     MSG_WIFI_SYNC, // the OS Wi-Fi switch changed (#108): start or stop the driver to match
+    MSG_SCAN,      // (#502) scan into scan_res; reason = the request number (wifi_req.h)
+    MSG_SET_PS,    // apply the chosen power save, TX power, or protocol/bandwidth: the values are the atomics, the
+    MSG_SET_TX,    // message only says "now"; reason = the request number, so a repeat is idempotent
+    MSG_SET_LINK,
 } msg_type_t;
 typedef struct {
     msg_type_t type;
@@ -226,14 +240,16 @@ static _Atomic int wifi_bw_mhz;
 // wifi_regdom.h names the driver's numbers without its headers
 _Static_assert(WIFI_RB_POLICY_MANUAL == WIFI_COUNTRY_POLICY_MANUAL, "country policy");
 _Static_assert(WIFI_RB_PS_NONE == WIFI_PS_NONE && WIFI_RB_PS_MIN == WIFI_PS_MIN_MODEM, "power save");
+_Static_assert(WIFI_RB_PROTO_11BGN == (WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N) && WIFI_RB_PROTO_11AX == WIFI_PROTOCOL_11AX, "protocol");
 _Static_assert(WIFI_BW20 == 1 && WIFI_BW40 == 2 && WIFI_BW80 == 3 && WIFI_BW160 == 4 && WIFI_BW80_BW80 == 5, "bandwidth");
 
-static void set_wifi_tx(int raw) {
+static bool set_wifi_tx(int raw) {
     esp_err_t err = esp_wifi_set_max_tx_power((int8_t)raw);
     readback_invalidate();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wifi: TX power not set: %s", esp_err_to_name(err));
     }
+    return err == ESP_OK;
 }
 
 static void apply_wifi_tx(void) {
@@ -340,52 +356,6 @@ static void ip6_log(void) {
     ESP_LOGI(TAG, "wifi: ipv6 %s %s", name, prefix);
 }
 
-// DNS slots (#497). lwIP's RDNSS (every router advertisement) and stateless DHCPv6 write the servers from slot 0 up,
-// as does the IPv4 DHCP client, and lwIP has no offset for either. With CONFIG_LWIP_DNS_MAX_SERVERS=4 the layout is:
-// slots 0-1 whichever of IPv6 (RDNSS, DHCPv6) or IPv4 wrote last, slots 2-3 the IPv4 servers of the lease (copied here
-// at every got-IP, renewals included), so a network whose IPv6 resolvers fail still resolves over IPv4: lwIP's
-// resolver walks all slots on a timeout. Only a DHCPv6 reply with 3 or more servers reaches into slots 2-3.
-// Slots 2-3 are cleared first (and on a disconnect): IDF's dns_clear_servers keeps the last slot, and a lease with no
-// DNS must not leave the previous network's servers behind.
-static void clear_kept_dns(void) {
-    for (u8_t i = 2; i < DNS_MAX_SERVERS; i++) {
-        dns_setserver(i, NULL);
-    }
-}
-
-static void keep_v4_dns(void) {
-    LOCK_TCPIP_CORE();
-    clear_kept_dns();
-    u8_t out = 2;
-    for (u8_t i = 0; i < 2 && out < DNS_MAX_SERVERS; i++) {
-        ip_addr_t dns = *dns_getserver(i);
-        if (IP_GET_TYPE(&dns) == IPADDR_TYPE_V4 && !ip_addr_isany(&dns)) {
-            dns_setserver(out++, &dns);
-        }
-    }
-    UNLOCK_TCPIP_CORE();
-}
-
-// The STA's link-local (#497): IDF only makes it for NAN (wifi_default.c), and without one there is no router
-// solicitation and no SLAAC. esp_netif_create_ip6_linklocal fails while the netif is down, and IDF brings it up in its
-// own STA_CONNECTED handler. The event loop runs the handlers of the whole event base (ANY_ID, as on_event) before the
-// ones of one id, and the ones of an id in registration order. So this id-specific handler is registered after
-// esp_netif_create_default_wifi_sta, which registers the default one, and runs behind it.
-static void on_sta_connected_ip6(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    (void)arg;
-    (void)base;
-    (void)id;
-    (void)data;
-    esp_ip6_addr_t have;
-    if (esp_netif_get_ip6_linklocal(sta_netif, &have) == ESP_OK) {
-        return; // a roam (11k/v) is a CONNECTED too: re-creating it would restart DAD on the working address
-    }
-    esp_err_t err = esp_netif_create_ip6_linklocal(sta_netif);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "wifi: no IPv6 link-local: %s", esp_err_to_name(err));
-    }
-}
-
 static void on_ip_event(int32_t id, void *data) {
     if (id == IP_EVENT_GOT_IP6) {
         ip6_log();
@@ -394,7 +364,7 @@ static void on_ip_event(int32_t id, void *data) {
         char                     text[16];
         snprintf(text, sizeof(text), IPSTR, IP2STR(&got->ip_info.ip));
         set_ip(text);
-        keep_v4_dns();
+        wifi_dns_keep_v4();
         ESP_LOGI(TAG, "wifi: got ip:%s", text);
         msg_t m = {.type = MSG_GOT_IP};
         post(&m);
@@ -423,7 +393,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
         set_ip("");
         if (!gone || !wifi_reason_is_roam(gone->reason)) { // a roam keeps the lease, so keep its servers
             LOCK_TCPIP_CORE();
-            clear_kept_dns();
+            wifi_dns_clear_kept();
             UNLOCK_TCPIP_CORE();
         }
         m.type   = MSG_DISCONNECTED;
@@ -431,51 +401,6 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
         post(&m);
     } else if (base == IP_EVENT) {
         on_ip_event(id, data);
-    }
-}
-
-static void on_time_sync(struct timeval *tv) {
-    ESP_LOGI(TAG, "clock set from SNTP: %lld", (long long)tv->tv_sec);
-    boot_progress_end(BOOT_CLOCK, STEP_DONE, NULL);
-}
-
-// lwIP's own sntp_sync_time() is weak and calls settimeofday() before the sync callback, so a filter in the callback
-// would be too late (#8). This one checks the answer first: an implausible or far-off time is logged and ignored.
-void sntp_sync_time(struct timeval *tv) {
-    clock_answer_t  a;
-    clock_verdict_t v = clock_offer_sntp(tv, &a);
-    if (!clock_accepted(v)) {
-        ESP_LOGW(TAG, "SNTP time %lld ignored: %s", (long long)tv->tv_sec, clock_verdict_text(v));
-        return;
-    }
-    if (a.how == CLOCK_FIX_NONE) {
-        ESP_LOGW(TAG, "SNTP time %lld accepted but not set", (long long)tv->tv_sec);
-        return;
-    }
-    if (v == CLOCK_RECOVERED) {
-        ESP_LOGW(TAG, "SNTP: %s, clock moved", clock_verdict_text(v));
-    }
-    // #326: an offset under a second is slewed (adjtime), so the hourly corrections log "slewed", not a step. From
-    // this answer's own result: a second answer in between cannot relabel it.
-    ESP_LOGI(
-        TAG,
-        "SNTP %s %+lld ms after %lld s uptime",
-        a.how == CLOCK_FIX_SLEW ? "slewed" : "step",
-        (long long)a.step_ms,
-        (long long)(a.mono_ms / 1000)
-    );
-    sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
-    on_time_sync(tv);
-}
-
-// Real time for MeshCore's adverts and messages (#65): other nodes drop adverts that aren't newer than the last they
-// saw. lwIP's SNTP client keeps retrying until the station has an IP, then refreshes hourly.
-static void start_sntp(void) {
-    esp_sntp_config_t cfg  = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    cfg.sync_cb            = on_time_sync;
-    esp_err_t err          = esp_netif_sntp_init(&cfg);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "SNTP: %s", esp_err_to_name(err));
     }
 }
 
@@ -505,21 +430,6 @@ static void wipe_driver_store_if_ordered(void) {
 typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED, DRV_OFF } drv_result_t;
 static drv_result_t wifi_driver_up(char const **why);
 
-// Stateless DHCPv6 (#497): lwIP asks for the DNS servers only after a router advertisement with the "other config"
-// flag. Needs the lwIP netif, and with TCPIP_CORE_LOCKING the core lock around the call.
-static void enable_dhcp6_stateless(void) {
-    struct netif *n = esp_netif_get_netif_impl(sta_netif);
-    if (!n) {
-        return;
-    }
-    LOCK_TCPIP_CORE();
-    err_t err = dhcp6_enable_stateless(n);
-    UNLOCK_TCPIP_CORE();
-    if (err != ERR_OK) {
-        ESP_LOGW(TAG, "wifi: stateless DHCPv6 not enabled (%d)", (int)err);
-    }
-}
-
 static bool start_wifi(void) {
     boot_progress_begin(BOOT_WIFI);
     esp_err_t err = esp_event_loop_create_default();
@@ -535,9 +445,9 @@ static bool start_wifi(void) {
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_GOT_IP6, on_event, NULL, NULL);
     sta_netif = esp_netif_create_default_wifi_sta();
-    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, on_sta_connected_ip6, NULL, NULL);
-    enable_dhcp6_stateless();
-    start_sntp();
+    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, wifi_on_sta_connected_ip6, sta_netif, NULL);
+    wifi_dhcp6_stateless(sta_netif);
+    wifi_sntp_start();
     boot_progress_begin_background(BOOT_CLOCK); // SNTP waits for an IP; the clock step ends in on_time_sync() (#39)
     // The boot steps are ended here, not in wifi_driver_up: a re-attach runs it again without them (#14)
     char const  *why = NULL;
@@ -637,61 +547,49 @@ static drv_result_t wifi_driver_up(char const **why) {
 
 // ---- scan, join, reconnect (#66) ---------------------------------------------------------------------------------
 
-#define SCAN_RECORDS  32
-#define SCAN_WAIT_MS  6000
+#define SCAN_RECORDS  WIFI_SCAN_RECORDS
+#define SCAN_WAIT_MS  WIFI_SCAN_WAIT_MS
 
-static bool scan_impl(wifi_ap_t *out, size_t max, size_t *n, bool clean_list) {
+static bool            scan_clean; // the request's flavour: the req_lock holder writes it before it posts
+static size_t          scan_n;     // the result: the task writes both before it answers, the holder reads after
+EXT_RAM_BSS_ATTR static wifi_ap_t scan_res[SCAN_RECORDS];
+
+static wifi_req_why_t request_locked(msg_type_t type, uint32_t answer_ms, bool *ok);
+
+// The caller's side of a scan: refused early when the link is plainly not there, else the c6wifi task decides (it knows
+// about a join or a roam in flight) and scans. The wait is bounded; a caller that gives up is not answered later.
+static bool scan_ask(wifi_ap_t *out, size_t max, size_t *n, bool clean_list) {
     *n = 0;
-    if (c6link_updating() || !c6link_up() || !atomic_load(&wifi_on) || !out || max == 0 || !scan_lock || xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) != pdTRUE) {
+    wifi_req_why_t why = WIFI_REQ_BUSY;
+    bool           ok  = false;
+    if (!out || max == 0 || !req_lock) {
         return false;
     }
-    bool                 ok = false;
-    wifi_scan_config_t   sc = {.show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE};
-    sc.scan_time.active.min = 100;
-    sc.scan_time.active.max = 200;
-    xSemaphoreTake(scan_done, 0);
-    esp_err_t err = esp_wifi_scan_start(&sc, false);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "scan start: %s", esp_err_to_name(err));
-    } else if (xSemaphoreTake(scan_done, pdMS_TO_TICKS(SCAN_WAIT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "scan did not finish in %d ms", SCAN_WAIT_MS);
-        esp_wifi_scan_stop();
-    } else {
-        uint16_t         count = SCAN_RECORDS;
-        wifi_ap_record_t *recs = calloc(SCAN_RECORDS, sizeof(*recs));
-        wifi_ap_t        *aps  = calloc(SCAN_RECORDS, sizeof(*aps));
-        if (recs && aps) {
-            // Fetching also frees the driver's list, even if we use none of it
-            if (esp_wifi_scan_get_ap_records(&count, recs) == ESP_OK) {
-                for (uint16_t i = 0; i < count; i++) {
-                    size_t len = strnlen((char const *)recs[i].ssid, 32);
-                    memcpy(aps[i].ssid, recs[i].ssid, len);
-                    aps[i].ssid[len] = '\0';
-                    aps[i].rssi      = recs[i].rssi;
-                    aps[i].open      = recs[i].authmode == WIFI_AUTH_OPEN;
-                    aps[i].channel   = recs[i].primary;
-                }
-                size_t clean = clean_list ? wifi_list_clean(aps, count) : count;
-                *n           = clean < max ? clean : max;
-                memcpy(out, aps, *n * sizeof(*out));
-                ok = true;
-            }
-        } else {
-            esp_wifi_clear_ap_list();
+    if (c6link_updating() || !c6link_up() || !atomic_load(&wifi_on)) {
+        why = c6link_updating() ? WIFI_REQ_UPDATING : !c6link_up() ? WIFI_REQ_NO_LINK : WIFI_REQ_OFF;
+    } else if (xSemaphoreTake(req_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE) {
+        scan_clean = clean_list;
+        why        = request_locked(MSG_SCAN, SCAN_WAIT_MS + 3000, &ok);
+        if (ok) {
+            *n = scan_n < max ? scan_n : max;
+            memcpy(out, scan_res, *n * sizeof(*out));
         }
-        free(recs);
-        free(aps);
+        xSemaphoreGive(req_lock);
     }
-    xSemaphoreGive(scan_lock);
+    atomic_store(&scan_why_last, (int)(ok ? WIFI_REQ_OK : why));
     return ok;
 }
 
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n) {
-    return scan_impl(out, max, n, true);
+    return scan_ask(out, max, n, true);
 }
 
 bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n) {
-    return scan_impl(out, max, n, false);
+    return scan_ask(out, max, n, false);
+}
+
+char const *wifi_scan_refusal(void) {
+    return wifi_req_why_text((wifi_req_why_t)atomic_load(&scan_why_last));
 }
 
 // ---- the c6wifi task: joining with a trial, reconnecting, forgetting ---------------------------------------------
@@ -786,15 +684,52 @@ bool wifi_readback(wifi_readback_t *out, bool live) {
     return fresh;
 }
 
+// The caller's side of ps, tx and link: store the choice (the task applies what the atomics say), ask, wait a bounded
+// time. Before the first start there is nothing to apply: STA_START does it.
+#define REQ_LOCK_MS   2000
+#define REQ_ANSWER_MS 4000
+
+static bool apply_now(msg_type_t type) {
+    if (!atomic_load(&wifi_started)) {
+        return true;
+    }
+    if (!req_lock || xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) != pdTRUE) {
+        return false;
+    }
+    bool ok = false;
+    request_locked(type, REQ_ANSWER_MS, &ok);
+    xSemaphoreGive(req_lock);
+    return ok;
+}
+
 bool wifi_set_ps(bool min) {
     atomic_store(&wifi_ps_mode, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
     readback_invalidate();
-    if (!atomic_load(&wifi_started)) {
-        return true; // applied at the next start (STA_START)
+    return apply_now(MSG_SET_PS);
+}
+
+bool wifi_set_tx(int raw) {
+    if (raw < 0 || raw > 127) {
+        return false;
     }
-    bool ok = esp_wifi_set_ps(min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE) == ESP_OK;
-    readback_invalidate(); // a read that ran during the RPC predates it
-    return ok;
+    atomic_store(&wifi_tx_raw, raw);
+    readback_invalidate();
+    return apply_now(MSG_SET_TX);
+}
+
+bool wifi_set_bw(unsigned mhz) {
+    if (mhz != 20 && mhz != 40) {
+        return false;
+    }
+    atomic_store(&wifi_bw_mhz, (int)mhz);
+    readback_invalidate();
+    return apply_now(MSG_SET_LINK);
+}
+
+bool wifi_set_proto(bool n_only) {
+    atomic_store(&wifi_proto, n_only ? 'n' : 'x');
+    readback_invalidate();
+    return apply_now(MSG_SET_LINK);
 }
 
 // Log-safe copy of an SSID (they come from the air)
@@ -943,7 +878,7 @@ static void choose_network(bool current_failed) {
         tried_mask |= (uint8_t)(1u << at);
     }
     next_scan_at = now + SCAN_GAP_MS;
-    if (wifi_scan_raw(pick_aps, SCAN_RECORDS, &n)) {
+    if (wifi_scan_drv(scan_done, pick_aps, SCAN_RECORDS, &n, false)) {
         join_strongest(&list, n);
     }
     wifi_saved_wipe(&list);
@@ -1183,8 +1118,6 @@ static void abort_trial(void) {
 // may be gone) and ignored; each RPC gives up after its own timeout, or at once when ESP-Hosted knows the transport
 // is down (#90).
 static void handle_c6_down(void) {
-    // A scan from the screen or the console may be inside the driver: let it end first (it gives up after 6 s)
-    bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
     atomic_store(&driver_up, false);
     atomic_store(&wifi_started, false);
     atomic_store(&driver_ready, false);
@@ -1204,9 +1137,6 @@ static void handle_c6_down(void) {
     esp_netif_action_stop(sta_netif, NULL, 0, NULL);
     esp_err_t gone = esp_wifi_deinit();
     ESP_LOGI(TAG, "wifi: down for the C6 re-attach (stop %s, deinit %s)", esp_err_to_name(stop), esp_err_to_name(gone));
-    if (scan_held) {
-        xSemaphoreGive(scan_lock); // wifi_scan refuses on its own while link_up is false
-    }
 }
 
 // The C6 is attached again: the driver comes up as at boot; STA_START then connects with the saved pair
@@ -1258,7 +1188,6 @@ static void handle_wifi_sync(void) {
         );
         return;
     }
-    bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
     atomic_store(&driver_up, false);
     retry_pending = false;
     set_ip("");
@@ -1270,9 +1199,6 @@ static void handle_wifi_sync(void) {
     esp_err_t stop = esp_wifi_stop();
     atomic_store(&wifi_started, false);
     ESP_LOGI(TAG, "wifi: switched off (%s)", esp_err_to_name(stop));
-    if (scan_held) {
-        xSemaphoreGive(scan_lock);
-    }
 }
 
 size_t wifi_saved_names(char (*out)[33], size_t max) {
@@ -1333,10 +1259,105 @@ static bool driver_request(bool up, uint32_t wait_ms) {
     return true;
 }
 
-static TaskHandle_t wifi_task_handle;
-
 static unsigned wifi_stack_free(void) {
     return wifi_task_handle ? (unsigned)uxTaskGetStackHighWaterMark(wifi_task_handle) : 0;
+}
+
+// ---- requests answered on the c6wifi task (#502) ------------------------------------------------------------------
+
+// The caller (req_lock held) posts the request and waits for its answer. The slot's number keeps an answer that comes
+// after the caller gave up from reaching the next caller.
+static wifi_req_why_t request_locked(msg_type_t type, uint32_t answer_ms, bool *ok) {
+    wifi_req_why_t why = WIFI_REQ_BUSY;
+    *ok                = false;
+    portENTER_CRITICAL(&req_mux);
+    uint32_t seq = wifi_req_begin(&req);
+    portEXIT_CRITICAL(&req_mux);
+    xSemaphoreTake(req_done, 0);
+    msg_t m = {.type = type, .reason = (int)seq};
+    if (!post(&m)) {
+        return why;
+    }
+    TickType_t end = xTaskGetTickCount() + pdMS_TO_TICKS(answer_ms);
+    for (;;) {
+        portENTER_CRITICAL(&req_mux);
+        bool done = wifi_req_result(&req, seq, ok, &why);
+        portEXIT_CRITICAL(&req_mux);
+        TickType_t left = end - xTaskGetTickCount();
+        if (done || (int32_t)left <= 0) {
+            break;
+        }
+        xSemaphoreTake(req_done, left);
+    }
+    return why;
+}
+
+static void answer(msg_t const *m, bool ok, wifi_req_why_t why) {
+    portENTER_CRITICAL(&req_mux);
+    bool mine = wifi_req_finish(&req, (uint32_t)m->reason, ok, why);
+    portEXIT_CRITICAL(&req_mux);
+    if (mine) {
+        xSemaphoreGive(req_done);
+    }
+}
+
+static void handle_scan(msg_t const *m) {
+    portENTER_CRITICAL(&req_mux);
+    bool wanted = wifi_req_wanted(&req, (uint32_t)m->reason);
+    portEXIT_CRITICAL(&req_mux);
+    if (!wanted) { // its caller gave up while the task was busy: do not spend seconds on the air for nobody
+        return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    wifi_join_state_t js = join.state;
+    portEXIT_CRITICAL(&state_lock);
+    bool           roaming = retry_pending && retry_roam;
+    wifi_req_why_t why     = wifi_scan_gate(c6link_up(), c6link_updating(), atomic_load(&wifi_on), atomic_load(&wifi_started), js, roaming);
+    size_t         n       = 0;
+    bool           ok      = false;
+    if (why == WIFI_REQ_OK) {
+        ok = wifi_scan_drv(scan_done, scan_res, SCAN_RECORDS, &n, scan_clean);
+        if (!ok) {
+            why = WIFI_REQ_FAILED;
+        }
+    }
+    scan_n = n;
+    answer(m, ok, why);
+}
+
+// The protocol and the bandwidth are agreed at association: a station with credentials reconnects to take them (as
+// `fw wifi proto|bw` always did); one without, or one mid-trial, keeps them for its next association
+static bool apply_link(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
+    bool have   = have_credentials;
+    portEXIT_CRITICAL(&state_lock);
+    if (have && !trying && atomic_load(&wifi_on)) {
+        handle_reconnect(false);
+    } else if (!trying) {
+        apply_wifi_bw();
+    }
+    readback_invalidate();
+    return true;
+}
+
+static void handle_apply(msg_t const *m) {
+    bool ok = true;
+    if (atomic_load(&wifi_started)) {
+        switch (m->type) {
+            case MSG_SET_PS:
+                ok = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode)) == ESP_OK;
+                readback_invalidate();
+                break;
+            case MSG_SET_TX: {
+                int raw = atomic_load(&wifi_tx_raw);
+                ok      = set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
+                break;
+            }
+            default: ok = apply_link(); break;
+        }
+    }
+    answer(m, ok, ok ? WIFI_REQ_OK : WIFI_REQ_FAILED);
 }
 
 // STA_START, on the c6wifi task: the country once more if its set before this start failed (#311), the power save,
@@ -1393,6 +1414,10 @@ static void wifi_task(void *arg) {
                 case MSG_GOT_IP: handle_got_ip(); break;
                 case MSG_WIFI_SYNC: handle_wifi_sync(); break;
                 case MSG_CONNECTED: handle_connected(&m); break;
+                case MSG_SCAN: handle_scan(&m); break;
+                case MSG_SET_PS:
+                case MSG_SET_TX:
+                case MSG_SET_LINK: handle_apply(&m); break;
                 case MSG_C6_DOWN:
                 case MSG_C6_UP:
                     m.type == MSG_C6_UP ? handle_c6_up() : handle_c6_down();
@@ -1506,22 +1531,6 @@ static void cmd_wifi_switch(bool on) {
     console_reply("wifi: radio %s", (radio.get ? radio.get() : wifi_enabled()) ? "on" : "off");
 }
 
-// `fw wifi tx|bw|ps` (#311): thin aliases over the registry's wifi.txpwr / wifi.bw / wifi.ps, so each echoes the value
-// the driver applies (read back now, the same read `fw get wifi.` shows), never the request alone
-static void cmd_wifi_echo(char kind, unsigned asked_mhz, bool reconnecting) {
-    wifi_readback_t r;
-    char            line[120];
-    wifi_readback(&r, true);
-    if (kind == 't') {
-        wifi_tx_reply(&r, line, sizeof(line));
-    } else if (kind == 'b') {
-        wifi_bw_reply(&r, asked_mhz, reconnecting, line, sizeof(line));
-    } else {
-        wifi_ps_reply(&r, line, sizeof(line));
-    }
-    console_reply("%s", line);
-}
-
 // The connection line(s) of `fw wifi`: radio, credentials, link
 static void wifi_status_link(void) {
     char a[140], ip[16], cur[33];
@@ -1586,18 +1595,6 @@ static void cmd_wifi_on_off(wifi_cmd_t const *c) {
     cmd_wifi_switch(c->on);
 }
 
-static void cmd_wifi_ps_usage(wifi_cmd_t const *c) {
-    (void)c;
-    console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
-}
-
-static void cmd_wifi_ps(wifi_cmd_t const *c) {
-    if (c->set && !wifi_set_ps(c->ps_min)) {
-        console_reply("wifi: power save not set (no C6 link?)");
-    }
-    cmd_wifi_echo('p', 0, false);
-}
-
 static void cmd_wifi_stats(wifi_cmd_t const *c) {
     (void)c;
     wifi_ap_record_t ap;
@@ -1649,46 +1646,6 @@ static void cmd_wifi_stats(wifi_cmd_t const *c) {
     );
 }
 
-static void cmd_wifi_tx_usage(wifi_cmd_t const *c) {
-    (void)c;
-    console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
-}
-
-static void cmd_wifi_tx(wifi_cmd_t const *c) {
-    if (c->tx_raw >= 0) { // bare "tx" (-1) reads back only
-        atomic_store(&wifi_tx_raw, c->tx_raw);
-        if (atomic_load(&wifi_started)) {
-            set_wifi_tx(c->tx_raw ? c->tx_raw : WIFI_TX_DEFAULT_RAW);
-        }
-    }
-    cmd_wifi_echo('t', 0, false);
-}
-
-static void cmd_wifi_proto_usage(wifi_cmd_t const *c) {
-    (void)c;
-    console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
-}
-
-static void cmd_wifi_proto(wifi_cmd_t const *c) {
-    atomic_store(&wifi_proto, c->proto_n ? 'n' : 'x');
-    msg_t m = {.type = MSG_RECONNECT}; // the protocol is agreed at association
-    console_reply(
-        post(&m) ? "wifi: protocol %s, reconnecting (a few seconds)" : "wifi: busy, try again",
-        c->proto_n ? "b/g/n" : "b/g/n/ax"
-    );
-}
-
-static void cmd_wifi_bw(wifi_cmd_t const *c) {
-    bool reconnecting = false;
-    if (c->bw_mhz) {
-        atomic_store(&wifi_bw_mhz, (int)c->bw_mhz);
-        readback_invalidate();
-        msg_t m      = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
-        reconnecting = post(&m);
-    }
-    cmd_wifi_echo('b', c->bw_mhz, reconnecting);
-}
-
 static void cmd_wifi_clear(wifi_cmd_t const *c) {
     (void)c;
     msg_t m = {.type = MSG_FORGET};
@@ -1714,14 +1671,14 @@ static void cmd_wifi(char const *args) {
     static void (*const handler[WIFI_CMD_COUNT])(wifi_cmd_t const *) = {
         [WIFI_CMD_STATUS]      = cmd_wifi_status,
         [WIFI_CMD_SWITCH]      = cmd_wifi_on_off,
-        [WIFI_CMD_PS]          = cmd_wifi_ps,
-        [WIFI_CMD_PS_USAGE]    = cmd_wifi_ps_usage,
+        [WIFI_CMD_PS]          = wifi_console_ps,
+        [WIFI_CMD_PS_USAGE]    = wifi_console_ps_usage,
         [WIFI_CMD_STATS]       = cmd_wifi_stats,
-        [WIFI_CMD_TX]          = cmd_wifi_tx,
-        [WIFI_CMD_TX_USAGE]    = cmd_wifi_tx_usage,
-        [WIFI_CMD_PROTO]       = cmd_wifi_proto,
-        [WIFI_CMD_PROTO_USAGE] = cmd_wifi_proto_usage,
-        [WIFI_CMD_BW]          = cmd_wifi_bw,
+        [WIFI_CMD_TX]          = wifi_console_tx,
+        [WIFI_CMD_TX_USAGE]    = wifi_console_tx_usage,
+        [WIFI_CMD_PROTO]       = wifi_console_proto,
+        [WIFI_CMD_PROTO_USAGE] = wifi_console_proto_usage,
+        [WIFI_CMD_BW]          = wifi_console_bw,
         [WIFI_CMD_CLEAR]       = cmd_wifi_clear,
         [WIFI_CMD_RECONNECT]   = cmd_wifi_reconnect,
         [WIFI_CMD_SCAN]        = wifi_console_scan,
@@ -1766,12 +1723,13 @@ void wifi_service_init(wifi_radio_hooks_t const *radio_hooks) {
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
     console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password> | --clear]", cmd_wifi);
     scan_done   = xSemaphoreCreateBinary();
-    scan_lock   = xSemaphoreCreateMutex();
+    req_lock    = xSemaphoreCreateMutex();
+    req_done    = xSemaphoreCreateBinary();
     saved_lock  = xSemaphoreCreateMutex();
     c6_msg_done = xSemaphoreCreateBinary();
     queue       = xQueueCreate(16, sizeof(msg_t));
     wifi_join_init(&join);
-    if (!scan_done || !scan_lock || !saved_lock || !c6_msg_done || !queue ||
+    if (!scan_done || !req_lock || !req_done || !saved_lock || !c6_msg_done || !queue ||
         // 5 KB: since #14 it also runs wifi_driver_up (esp_wifi_init, a wifi_config_t, RPCs) after a re-attach
         xTaskCreatePinnedToCore(wifi_task, "c6wifi", 5120, NULL, 5, &wifi_task_handle, 0) != pdPASS) {
         ESP_LOGE(TAG, "Wi-Fi task did not start");

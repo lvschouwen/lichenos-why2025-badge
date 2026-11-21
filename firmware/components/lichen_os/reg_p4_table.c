@@ -66,7 +66,9 @@ reg_entry_t const reg_p4_table[] = {
     PROXY_RO(REG_ID_C6_REG_CAPS, REG_T_U32, "c6.reg_caps", NULL, 0),
     // #311: the regulatory country is fixed in firmware (NL), TX power and bandwidth change what goes on air
     WIFI_RO(REG_ID_WIFI_COUNTRY, REG_T_STR, "wifi.country", NULL, REG_F_TX, 2, 2),
-    WIFI_RO(REG_ID_WIFI_PROTOCOL, REG_T_U8, "wifi.protocol", NULL, 0, 0, 0),
+    // settable (#502): 7 = b/g/n, 71 = b/g/n/ax (the driver's own bitmask); the setter refuses other masks
+    {.id = REG_ID_WIFI_PROTOCOL, .type = REG_T_U8, .name = "wifi.protocol", .get_applied = reg_p4_wifi_get,
+     .set = reg_p4_wifi_proto_set},
     WIFI_RO(REG_ID_WIFI_TXPWR, REG_T_I16, "wifi.txpwr", "qdBm", REG_F_TX, -128, 127),
     WIFI_RO(REG_ID_WIFI_BW, REG_T_U8, "wifi.bw", "MHz", REG_F_TX, 0, 0),
     {.id = REG_ID_WIFI_PS, .type = REG_T_ENUM, .name = "wifi.ps", .min = 0, .max = 1, .enum_names = wifi_ps_names,

@@ -57,6 +57,8 @@ reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out) {
 // wifi.* (#311): the stub driver reads back NL / 13 dBm; wifi.ps sets are counted
 static int      wifi_ps_sets;
 static uint32_t wifi_ps_value;
+static uint32_t wifi_proto_value = 0x47;
+static int      wifi_proto_sets;
 
 reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
     switch (e->id) {
@@ -64,7 +66,7 @@ reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
         case REG_ID_WIFI_TXPWR: out->i = 52; break;
         case REG_ID_WIFI_BW: out->u = 20; break;
         case REG_ID_WIFI_PS: out->u = wifi_ps_value; break;
-        default: out->u = 0x47; break;
+        default: out->u = wifi_proto_value; break;
     }
     return REG_OK;
 }
@@ -91,6 +93,17 @@ reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
     wifi_ps_value = v->u;
     wifi_ps_sets++;
+    return REG_OK;
+}
+
+// wifi.protocol (#502): the real setter refuses every mask but 7 and 71 (wifi_proto_choice); the stub counts the calls
+reg_status_t reg_p4_wifi_proto_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    if (v->u != 7 && v->u != 71) {
+        return REG_FAILED;
+    }
+    wifi_proto_value = v->u;
+    wifi_proto_sets++;
     return REG_OK;
 }
 
@@ -243,7 +256,10 @@ static void test_wifi_keys(void) {
     CHECK(set("wifi.txpwr 80", reply, sizeof(reply)) == RC_GUARDED);
     CHECK(strstr(reply, "applied 52 qdBm") != NULL);
     CHECK(set("wifi.bw 40", reply, sizeof(reply)) == RC_GUARDED);
-    CHECK(set("wifi.protocol 7", reply, sizeof(reply)) == RC_RO);
+    CHECK(set("wifi.protocol 7", reply, sizeof(reply)) == RC_OK); // settable since #502 (was RO)
+    CHECK(wifi_proto_sets == 1 && wifi_proto_value == 7);
+    CHECK(set("wifi.protocol 15", reply, sizeof(reply)) != RC_OK && wifi_proto_sets == 1);
+    CHECK(set("wifi.protocol 71", reply, sizeof(reply)) == RC_OK && wifi_proto_value == 71);
     CHECK(set("wifi.ip6 global", reply, sizeof(reply)) == RC_RO); // the netif's state (#497), never set
     CHECK(reg_p4_find_name("wifi.auth") != NULL && reg_p4_find_name("wifi.eap_ca") != NULL); // #496
     CHECK(set("wifi.auth wpa2", reply, sizeof(reply)) == RC_RO && set("wifi.eap_ca verified", reply, sizeof(reply)) == RC_RO);

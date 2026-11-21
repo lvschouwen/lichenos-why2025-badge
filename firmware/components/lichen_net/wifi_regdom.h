@@ -67,3 +67,12 @@ size_t wifi_tx_reply(wifi_readback_t const *r, char *buf, size_t cap);
 size_t wifi_bw_reply(wifi_readback_t const *r, unsigned asked_mhz, bool reconnecting, char *buf, size_t cap);
 // "wifi: power save min applied (fw wifi ps none | min, not saved)"
 size_t wifi_ps_reply(wifi_readback_t const *r, char *buf, size_t cap);
+// "wifi: protocol b/g/n/ax applied (fw wifi proto n | ax, reconnects, not saved)" (#502, the alias of settable wifi.protocol)
+// The two protocol masks `wifi.protocol` accepts (#502): b/g/n (no Wi-Fi 6, no TWT) and b/g/n/ax. Any other value is
+// refused, so what the driver reports is what was asked.
+#define WIFI_RB_PROTO_11BGN 0x07
+#define WIFI_RB_PROTO_11AX  0x40
+#define WIFI_RB_PROTO_11BGNAX (WIFI_RB_PROTO_11BGN | WIFI_RB_PROTO_11AX)
+// 'n' for b/g/n, 'x' for b/g/n/ax, 0 for a mask that is neither
+int wifi_proto_choice(uint32_t mask);
+size_t wifi_proto_reply(wifi_readback_t const *r, char *buf, size_t cap);

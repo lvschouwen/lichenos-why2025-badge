@@ -2,6 +2,7 @@
 
 #include "esp_attr.h"
 #include "fw_console.h"
+#include "wifi_regdom.h"
 #include "wifi_service.h"
 
 void wifi_console_ip6(void) {
@@ -20,7 +21,7 @@ void wifi_console_scan(wifi_cmd_t const *c) {
     char                              a[140];
     size_t                            n = 0;
     if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
-        console_reply("wifi: scan failed");
+        console_reply("wifi: scan not done: %s", wifi_scan_refusal());
         return;
     }
     console_reply("wifi: %u networks", (unsigned)n);
@@ -55,4 +56,70 @@ void wifi_console_join(wifi_cmd_t const *c) {
             WIFI_JOIN_TRIAL_MS / 1000
         );
     }
+}
+
+// `fw wifi ps|tx|bw` (#311, #502): ps is an alias of the registry's settable wifi.ps. tx and bw are not thin aliases:
+// wifi.txpwr and wifi.bw are RO|TX in the registry and these commands are their guarded path. Each echoes the value the
+// driver applies (read back now, the same read `fw get wifi.` shows), never the request alone
+static void tuning_echo(char kind, unsigned asked_mhz, bool reconnecting) {
+    wifi_readback_t r;
+    char            line[120];
+    wifi_readback(&r, true);
+    if (kind == 't') {
+        wifi_tx_reply(&r, line, sizeof(line));
+    } else if (kind == 'b') {
+        wifi_bw_reply(&r, asked_mhz, reconnecting, line, sizeof(line));
+    } else {
+        wifi_ps_reply(&r, line, sizeof(line));
+    }
+    console_reply("%s", line);
+}
+
+void wifi_console_ps_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
+}
+
+void wifi_console_ps(wifi_cmd_t const *c) {
+    if (c->set && !wifi_set_ps(c->ps_min)) {
+        console_reply("wifi: power save not set (no C6 link?)");
+    }
+    tuning_echo('p', 0, false);
+}
+
+void wifi_console_tx_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
+}
+
+void wifi_console_tx(wifi_cmd_t const *c) {
+    if (c->tx_raw >= 0 && !wifi_set_tx(c->tx_raw)) { // bare "tx" (-1) reads back only
+        console_reply("wifi: TX power not applied (busy or refused)");
+    }
+    tuning_echo('t', 0, false);
+}
+
+void wifi_console_proto_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
+}
+
+// An alias of the registry's wifi.protocol (settable): the same set, then the applied read-back
+void wifi_console_proto(wifi_cmd_t const *c) {
+    if (!wifi_set_proto(c->proto_n)) {
+        console_reply("wifi: protocol not applied (busy or refused)");
+    }
+    wifi_readback_t r;
+    char            line[120];
+    wifi_readback(&r, true);
+    wifi_proto_reply(&r, line, sizeof(line));
+    console_reply("%s", line);
+}
+
+void wifi_console_bw(wifi_cmd_t const *c) {
+    bool reconnecting = false;
+    if (c->bw_mhz) {
+        reconnecting = wifi_set_bw(c->bw_mhz);
+    }
+    tuning_echo('b', c->bw_mhz, reconnecting);
 }

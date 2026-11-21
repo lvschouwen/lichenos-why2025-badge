@@ -261,6 +261,17 @@ reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
     return wifi_set_ps(v->u == 1) ? REG_OK : REG_FAILED;
 }
 
+// wifi.protocol (#502): b/g/n (7) or b/g/n/ax (71), as the driver reports it; the c6wifi task applies it
+reg_status_t reg_p4_wifi_proto_set(reg_entry_t const *e, reg_value_t const *v) {
+    int choice = wifi_proto_choice(v->u);
+    if (!choice) {
+        ESP_LOGW(TAG, "%s: %u is not 7 (b/g/n) or 71 (b/g/n/ax)", e->name, (unsigned)v->u);
+        reg_cmd_set_why("7 (b/g/n) or 71 (b/g/n/ax)");
+        return REG_FAILED;
+    }
+    return wifi_set_proto(choice == 'n') ? REG_OK : REG_FAILED;
+}
+
 // disp.engine (#468): the gate and the switch are reg_disp_engine.c (host-tested); here the log line
 reg_status_t reg_p4_disp_engine_set(reg_entry_t const *e, reg_value_t const *v) {
 #if CONFIG_LICHEN_DEV_COMMANDS

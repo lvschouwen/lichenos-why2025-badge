@@ -199,13 +199,15 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   policy manual` (W when the driver reports anything else). The driver stores the country in the C6's flash, so it is
   only set when `esp_wifi_get_country` does not already report NL as set (an I line `wifi: country set to NL (the driver
   had ...)` when it was); a failed set leaves the driver's narrower "01" default (1-11) and is retried once at STA_START. `wifi.country` (STR, RO + TX), `wifi.protocol`
-  (RO), `wifi.txpwr` (0.25 dBm, RO + TX: `fw wifi tx`), `wifi.bw` (MHz, RO + TX: `fw wifi bw`) and `wifi.ps`
-  (none/min, settable, not saved) come from `wifi_readback` (`esp_wifi_get_country` / `_protocol` / `_bandwidth` /
+  (7 = b/g/n, 71 = b/g/n/ax, settable, not saved: `fw wifi proto` is its alias), `wifi.txpwr` (0.25 dBm, RO + TX: `fw wifi tx`),
+  `wifi.bw` (MHz, RO + TX: `fw wifi bw`) and `wifi.ps` (none/min, settable, not saved) come from `wifi_readback` (`esp_wifi_get_country` / `_protocol` / `_bandwidth` /
   `_max_tx_power` / `_ps` over the RPCs): read after every Wi-Fi start and association into a spinlocked cache, live on
   the console (a read under 250 ms old is reused unless a setter ran since: `wifi_readback_reusable`), the cache with its
   age on the LVGL task; the c6wifi task reads only while the link and the driver are up, and stops after a failed first
-  RPC. `fw wifi tx|bw|ps` keep their
-  guards and echo the applied read-back. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
+  RPC. `fw wifi ps|proto` are aliases of the settable keys; `fw wifi tx|bw` are the guarded path of the RO + TX keys (not
+  thin aliases). All of them echo the applied read-back. Since #502 the scan, power save, TX power, protocol and
+  bandwidth reach the driver as `c6wifi` messages (`MSG_SCAN`, `MSG_SET_PS|TX|LINK`): the caller posts, then waits a bounded
+  time on a numbered answer slot (`wifi_req.c`), and a scan is refused while a join or a roam is in flight. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
   Bluetooth switch. `bt.enable` (#503) is a C6 proxy key too: main's radio listener hands the OS's effective Bluetooth
   state (switch, airplane mode, holds) to `lichen_reg_bt_request`, which posts REG_SET once `c6.reg_caps` has the
   Bluetooth domain and re-checks the answer (`bt_sync.c`, pure, `bt_sync_test.c`): at most 3 SETs per wish and link,

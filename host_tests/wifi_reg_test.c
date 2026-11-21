@@ -117,6 +117,19 @@ static void test_alias_replies(void) {
     r.ps_ok = false;
     wifi_ps_reply(&r, line, sizeof(line));
     CHECK(strcmp(line, "wifi: power save not readable (no C6 link?)") == 0);
+
+    // wifi.protocol is settable (#502): only the two masks, and the reply names what the driver applies
+    CHECK(wifi_proto_choice(0x07) == 'n' && wifi_proto_choice(0x47) == 'x');
+    CHECK(wifi_proto_choice(0) == 0 && wifi_proto_choice(0x4F) == 0 && wifi_proto_choice(0x40) == 0 && wifi_proto_choice(0x147) == 0);
+    r.proto = 0x07;
+    wifi_proto_reply(&r, line, sizeof(line));
+    CHECK(strcmp(line, "wifi: protocol b/g/n applied (fw wifi proto n | ax, reconnects, not saved)") == 0);
+    r.proto = 0x47;
+    wifi_proto_reply(&r, line, sizeof(line));
+    CHECK(strcmp(line, "wifi: protocol b/g/n/ax applied (fw wifi proto n | ax, reconnects, not saved)") == 0);
+    r.proto_ok = false;
+    wifi_proto_reply(&r, line, sizeof(line));
+    CHECK(strcmp(line, "wifi: protocol not readable (no C6 link?)") == 0);
 }
 
 static char const *const ps_names[] = {"none", "min"};

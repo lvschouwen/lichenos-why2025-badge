@@ -102,3 +102,15 @@ size_t wifi_ps_reply(wifi_readback_t const *r, char *buf, size_t cap) {
     char const *name = r->ps == WIFI_RB_PS_NONE ? "none" : r->ps == WIFI_RB_PS_MIN ? "min" : "max";
     return done(snprintf(buf, cap, "wifi: power save %s applied (fw wifi ps none | min, not saved)", name), cap);
 }
+
+size_t wifi_proto_reply(wifi_readback_t const *r, char *buf, size_t cap) {
+    if (!r->proto_ok) {
+        return done(snprintf(buf, cap, "wifi: protocol not readable (no C6 link?)"), cap);
+    }
+    bool ax = (r->proto & WIFI_RB_PROTO_11AX) != 0;
+    return done(snprintf(buf, cap, "wifi: protocol %s applied (fw wifi proto n | ax, reconnects, not saved)", ax ? "b/g/n/ax" : "b/g/n"), cap);
+}
+
+int wifi_proto_choice(uint32_t mask) {
+    return mask == WIFI_RB_PROTO_11BGN ? 'n' : mask == WIFI_RB_PROTO_11BGNAX ? 'x' : 0;
+}

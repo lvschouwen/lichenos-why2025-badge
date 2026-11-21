@@ -57,6 +57,7 @@ bool wifi_joining(void);
 bool wifi_has_credentials(void);
 // Blocking Wi-Fi scan, at most about 6 s: never call it on the LVGL task. Fills out with up to max cleaned entries
 // (wifi_list_clean: no empty names, one per SSID, strongest first). False if the scan could not run.
+// Runs on the c6wifi task (#502) and waits for it, at most about 9 s; refused while a join or a roam is in flight.
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n);
 // The same scan without wifi_list_clean: every AP the driver reports (up to 32), with its channel, duplicates and hidden
 // names included. For the Wi-Fi analyser (#159), which counts APs per channel.
@@ -98,3 +99,14 @@ bool wifi_readback(wifi_readback_t *out, bool live);
 // Power save none (false) or min (true), not saved (#146): applied now when Wi-Fi runs, else at the next start. False
 // when the driver refused it.
 bool wifi_set_ps(bool min);
+// TX power in 0.25 dBm units (0 = the driver's default), not saved (#146, #502): applied on the c6wifi task. False when it
+// is out of range, busy or the driver refused it.
+bool wifi_set_tx(int raw);
+// STA bandwidth 20 or 40 MHz, not saved: a station with credentials reconnects to take it. False when not 20/40, busy
+// or refused.
+bool wifi_set_bw(unsigned mhz);
+// Protocol b/g/n (n_only) or b/g/n/ax, not saved (#502): a station with credentials reconnects to take it, so the
+// read-back follows within a moment. False when busy or refused. The registry's wifi.protocol is this setter.
+bool wifi_set_proto(bool n_only);
+// Why the last wifi_scan or wifi_scan_raw did not run or failed ("a join is in progress", "no C6 link", ...)
+char const *wifi_scan_refusal(void);
