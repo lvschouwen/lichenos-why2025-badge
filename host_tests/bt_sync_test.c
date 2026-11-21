@@ -116,6 +116,18 @@ static void bookkeeping(void) {
     CHECK(bt_sync_step(&s, reg_proxy_slot(&p, REG_ID_BT_ENABLE), RP_OK, 95001) == BT_SYNC_SEND);
     // the input of a missing slot is "nothing known"
     CHECK(bt_sync_step(&s, NULL, RP_OK, 95001) == BT_SYNC_SEND);
+    // an explicit set after a give-up tries again, one still in flight is left alone
+    bt_sync_wish(&s, true);
+    for (int i = 0; i < BT_SYNC_TRIES; i++) {
+        bt_sync_sent(&s, 100000 + i * BT_SYNC_RETRY_MS);
+    }
+    uint32_t const later = 100000 + 10 * BT_SYNC_RETRY_MS;
+    CHECK(bt_sync_step(&s, NULL, RP_OK, later) == BT_SYNC_GIVE_UP);
+    bt_sync_retry(&s, later);
+    CHECK(s.tries == 0 && bt_sync_step(&s, NULL, RP_OK, later) == BT_SYNC_SEND);
+    bt_sync_sent(&s, later);
+    bt_sync_retry(&s, later + 1);
+    CHECK(s.tries == 1); // in flight: no second SET piled on it
 }
 
 int main(void) {

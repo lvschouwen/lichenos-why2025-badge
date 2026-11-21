@@ -65,3 +65,10 @@ bool bt_sync_say(bt_sync_t *s) {
 bool bt_sync_in_flight(bt_sync_t const *s, uint32_t now_ms) {
     return s->tries > 0 && now_ms - s->sent_ms < BT_SYNC_RETRY_MS;
 }
+
+void bt_sync_retry(bt_sync_t *s, uint32_t now_ms) {
+    if (!bt_sync_in_flight(s, now_ms)) {
+        s->tries = 0;
+        s->said  = false;
+    }
+}

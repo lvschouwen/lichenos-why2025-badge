@@ -381,21 +381,40 @@ void lichen_reg_bt_request(bool on) {
 // value, instead of letting the read-back show the old applied value.
 reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
     (void)e;
-    if (!lichen_radio_set(RADIO_BT, v->u != 0)) {
+    bool const want = v->u != 0;
+    if (!lichen_radio_set(RADIO_BT, want)) {
         return REG_FAILED;
     }
     uint16_t const id = REG_ID_BT_ENABLE;
-    if (!may_wait() || !atomic_load(&started) || support(id) != RP_OK) {
+    if (want && !lichen_radio_get(RADIO_BT)) { // the switch is on, but the radios are held off: nothing goes to the C6
+        reg_cmd_set_why(lichen_airplane_get() ? "held off: airplane mode is on" : "held off by the system (hot)");
+        return REG_FAILED;
+    }
+    if (!atomic_load(&started)) {
+        return REG_OK;
+    }
+    rp_support_t const sup = support(id);
+    if (sup != RP_OK) {
+        reg_cmd_set_why(sup == RP_WAIT_CAPS ? "waiting for the C6" : "not supported by this C6");
+        return REG_FAILED;
+    }
+    // An explicit set always tries: a switch that did not change runs no listener, so a give-up would stay given up
+    portENTER_CRITICAL(&lock);
+    bt_sync_retry(&bt, now_ms());
+    portEXIT_CRITICAL(&lock);
+    bt_sync();
+    if (!may_wait()) {
         return REG_OK;
     }
     bool asked = pending(id);
     wait_answers(&id, &asked, 1, BT_SET_WAIT_MS);
     portENTER_CRITICAL(&lock);
     reg_proxy_slot_t const *s    = reg_proxy_slot(&px, id);
-    bool                    done = s && s->have && !s->stale && !s->pending && s->status == REG_OK && (s->value != 0) == (v->u != 0);
+    bool                    done = s && s->have && !s->stale && !s->pending && s->status == REG_OK && (s->value != 0) == want;
+    bool                    none = s && s->have && !s->stale && s->status == REG_UNKNOWN;
     portEXIT_CRITICAL(&lock);
     if (!done) {
-        reg_cmd_set_why("the C6 has not applied it yet; fw get bt.enable shows the result");
+        reg_cmd_set_why(none ? "not supported by this C6" : "the C6 has not applied it yet; fw get bt.enable shows the result");
         return REG_FAILED;
     }
     return REG_OK;

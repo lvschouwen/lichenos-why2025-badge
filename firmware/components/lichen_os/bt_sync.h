@@ -57,6 +57,9 @@ void bt_sync_link(bt_sync_t *s);
 bt_sync_in_t bt_sync_input(bt_sync_t const *s, reg_proxy_slot_t const *slot, rp_support_t support, uint32_t now_ms);
 // bt_sync_decide on that input; IDLE until a wish has been told
 bt_sync_act_t bt_sync_step(bt_sync_t const *s, reg_proxy_slot_t const *slot, rp_support_t support, uint32_t now_ms);
+// An explicit set (the console's fw set bt.enable) after a give-up: the count starts again so it is tried, unless a SET
+// is still in flight
+void bt_sync_retry(bt_sync_t *s, uint32_t now_ms);
 // A SET went out
 void bt_sync_sent(bt_sync_t *s, uint32_t now_ms);
 // True once per wish and link: the caller writes its log line now
