@@ -40,6 +40,8 @@ static reg_status_t sw_get(reg_entry_t const *e, reg_value_t *out) {
         case REG_ID_OTA_AUTOOFF: v = sw_ota_autooff_get(); break;
         case REG_ID_SENS_BOOT: v = sw_sensors_boot_get(); break;
         case REG_ID_BL_R16: v = sw_r16_get(); break;
+        case REG_ID_APP_BG_OFF: v = sw_bg_off_count(); break;
+        case REG_ID_LED_ON: v = sw_led_get(); break;
         case REG_ID_SENS_IMU_PERIOD:
         case REG_ID_SENS_ENV_PERIOD: {
             uint32_t imu, env;
@@ -67,6 +69,7 @@ static reg_status_t sw_set(reg_entry_t const *e, reg_value_t const *v) {
         case REG_ID_HAPTICS_ON: ok = sw_haptics_put(v->u != 0); break;
         case REG_ID_HAPTICS_STR: ok = sw_haptics_strength_put((uint8_t)v->u); break;
         case REG_ID_LED_MODE: sw_led_mode_put((uint8_t)v->u); break;
+        case REG_ID_LED_ON: sw_led_put(v->u != 0); break;
         case REG_ID_OTA_SERVER: sw_ota_put(v->u != 0); break;
         case REG_ID_OTA_AUTOOFF: sw_ota_autooff_put((uint8_t)v->u); break;
         default: ok = e->saved_key && sw_cfg_put(e->saved_key, v->u); break;
@@ -89,6 +92,8 @@ static reg_entry_t const rows[] = {
      .get_applied = sw_get, .set = sw_set, .saved_key = "haptic_str"},
     {.id = REG_ID_LED_MODE, .type = REG_T_ENUM, .name = "led.mode", .max = 3, .enum_names = led_names,
      .get_applied = sw_get, .set = sw_set},
+    {.id = REG_ID_LED_ON, .type = REG_T_BOOL, .name = "led.on", .max = 1, .get_applied = sw_get, .set = sw_set,
+     .saved_key = "status_led"},
     {.id = REG_ID_OTA_SERVER, .type = REG_T_BOOL, .name = "ota.server", .get_applied = sw_get, .set = sw_set,
      .saved_key = "ota_wifi"},
     {.id = REG_ID_OTA_AUTOOFF, .type = REG_T_U8, .name = "ota.autooff", .unit = "min", .max = 240,
@@ -104,6 +109,8 @@ static reg_entry_t const rows[] = {
      .saved_key = "sens_boot"},
     RO_ROW(REG_ID_SENS_IMU_PERIOD, REG_T_U32, "sens.imu_period", "ms", NULL, 0),
     RO_ROW(REG_ID_SENS_ENV_PERIOD, REG_T_U32, "sens.env_period", "ms", NULL, 0),
+    {.id = REG_ID_APP_BG_OFF, .type = REG_T_U8, .flags = REG_F_RO | REG_F_CFG, .name = "app.bg_off",
+     .get_applied = sw_get}, // the list is a string in the settings, only its size is a number
     RO_ROW(REG_ID_BL_R16, REG_T_ENUM, "bl.r16", NULL, r16_names, 2),
 };
 

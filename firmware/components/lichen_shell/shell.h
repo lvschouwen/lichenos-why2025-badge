@@ -48,7 +48,7 @@ void factory_combo_start(void);
 // The boot screen is up (the OTA valid gate: a new image must show it before it counts as working)
 bool shell_up(void);
 // The registry saved a UI policy setting (ui.saver, ui.lock, ui.idle_*, ui.saver_style, #501): re-read them. Console task.
-void shell_ui_policy_changed(void);
+void shell_ui_policy_changed(char const *key);
 // Home is on screen and its fade-in is over (screens may open; the OS watch services' notices wait for it, #281)
 bool shell_home_shown(void);
 // The thermal watchdog's hooks (#281, main hands them to lichen_watch_start). battery_open_alert: Settings > Battery

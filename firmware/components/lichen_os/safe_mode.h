@@ -24,6 +24,8 @@ void safe_mode_boot_step(bool crashed);
 // The app this boot's crash is blamed on is switched off here (and saved) when it reached the limit and may be
 // (may_switch_off: it has a background part and is not safe_mode_exempt). The settings are written only when the
 // list changes. Main task, at boot.
+// The apps whose background part is off, as the saved list says (registry app.bg_off, #501)
+size_t safe_mode_background_off_count(void);
 bool safe_mode_background_off(char const *id, bool may_switch_off);
 // Settings > Apps (#233). Whether id is on the list of apps whose background part stays off (a crash put it there, or a
 // person did); the switch itself: allowed false adds id to the list, true takes it off and forgets its crashes (the

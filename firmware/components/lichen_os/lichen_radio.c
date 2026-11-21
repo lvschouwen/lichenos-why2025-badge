@@ -212,7 +212,7 @@ static char const *state_word(radio_id_t id) {
 
 static void cmd_airplane(char const *args) {
     if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
-        lichen_airplane_set(args[1] == 'n');
+        lichen_reg_set_u32("radio.airplane", args[1] == 'n'); // the registry's setter is lichen_airplane_set (#501)
     } else if (*args) {
         console_reply("usage: airplane [on|off]");
         return;

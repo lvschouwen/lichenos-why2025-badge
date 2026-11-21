@@ -7,6 +7,9 @@ typedef struct {
     bool     radio[3], airplane, haptics, ota;
     uint8_t  strength, led, autooff;
     int      radio_puts[3], airplane_puts, haptics_puts, strength_puts, led_puts, ota_puts, autooff_puts, cfg_puts;
+    bool     led_on;
+    uint8_t  bg_off;
+    int      led_on_puts;
     bool     radio_fails;       // sw_radio_put reports "not saved"
     char     cfg_key[16];       // the last sw_cfg_put
     uint32_t cfg_val;

@@ -229,6 +229,7 @@ static void list_rules(void) {
     CHECK(safe_mode_list_add(l, sizeof(l), "weather") && strcmp(l, "timer,weather") == 0);
     CHECK(safe_mode_list_add(l, sizeof(l), "timer") && strcmp(l, "weather,timer") == 0); // once only
     CHECK(safe_mode_list_has(l, "timer") && safe_mode_list_has(l, "weather") && !safe_mode_list_has(l, "time"));
+    CHECK(safe_mode_list_count(l) == 2 && safe_mode_list_count("") == 0 && safe_mode_list_count(NULL) == 0);
     CHECK(safe_mode_list_remove(l, sizeof(l), "weather") && strcmp(l, "timer") == 0);
     CHECK(!safe_mode_list_remove(l, sizeof(l), "weather"));
     CHECK(safe_mode_list_remove(l, sizeof(l), "timer") && l[0] == '\0');

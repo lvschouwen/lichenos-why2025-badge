@@ -360,16 +360,18 @@ class HardAndConf(unittest.TestCase):
         """#348: lichen_radio_set on lifts a thermal hold. Only the console's paths may call it (`fw lora on|off` and
         `fw wifi on|off` in main.c, the Wi-Fi service through main's hook; since #501 both reach it through the registry's
         radio.* rows, so switch_reg.c, the console's `fw set`, is the one call); the shell's rows flip the person's switch
-        with lichen_radio_switch_set, so a hot badge never transmits on a row press."""
+        with lichen_radio_switch_set, so a hot badge never transmits on a row press. lichen_reg_set_u32 (the registry's set,
+        which ends in lichen_radio_set for the radio.* keys) is scanned the same way."""
         root = os.path.join(os.path.dirname(cl.__file__), "..")
         allowed = {"firmware/main/main.c", "firmware/components/lichen_os/lichen_radio.c",
-                   "firmware/components/lichen_os/switch_reg.c"}
+                   "firmware/components/lichen_os/switch_reg.c", "firmware/components/lichen_os/lichen_reg.c",
+                   "firmware/components/lichen_os/lichen_os.h"}
         callers = set()
         for base in ("firmware/components", "firmware/main"):
             for path in cl.source_files(os.path.join(root, base)):
                 with open(path, encoding="utf-8", errors="replace") as f:
                     code = cl.re.sub(r"//[^\n]*|/\*.*?\*/", "", f.read(), flags=cl.re.S)
-                if cl.re.search(r"\blichen_radio_set\s*\(", code):
+                if cl.re.search(r"\b(lichen_radio_set|lichen_reg_set_u32)\s*\(", code):
                     callers.add(os.path.relpath(path, root).replace(os.sep, "/"))
         self.assertTrue(callers, "the scan found no caller at all: it is broken")
         self.assertEqual(callers - allowed - {"firmware/components/lichen_api/lichen_radio.h"}, set())

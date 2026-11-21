@@ -125,6 +125,8 @@ typedef enum {
     REG_ID_SENS_IMU_PERIOD = 0x1611, // sens.imu_period  U32 ms, RO: IMU sampling period
     REG_ID_SENS_ENV_PERIOD = 0x1612, // sens.env_period  U32 ms, RO: environment sampling period
     REG_ID_BL_R16          = 0x1613, // bl.r16           ENUM, RO: R16 bridge detection saved (unknown / fitted / absent)
+    REG_ID_APP_BG_OFF      = 0x1614, // app.bg_off       U8, RO, CFG: how many apps have their background part off (#232, #233; the list is `fw app background`)
+    REG_ID_LED_ON          = 0x1615, // led.on           BOOL: the status LED setting (Settings, saved; led.mode is the console override)
 
     // 0x13 sens: what the BMI270 and BME690 are configured to, read back from the chips (#318). All RO; the value of an
     // ENUM is the chip's own register code (names in reg_p4_sensors.c); the low byte is sensors_cfg_key_t

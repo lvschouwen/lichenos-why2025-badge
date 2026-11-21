@@ -52,9 +52,9 @@ static void test_table(void) {
 }
 
 static void test_cfg_flags(void) {
-    static char const *const cfg[] = {"ui.saver", "ui.saver_style", "ui.lock", "ui.idle_dim", "ui.idle_off", "ui.kbd_pulse", "ui.layout"};
+    static char const *const cfg[] = {"ui.saver", "ui.saver_style", "ui.lock", "ui.idle_dim", "ui.idle_off", "ui.kbd_pulse", "ui.layout", "app.bg_off"};
     static char const *const live[] = {"radio.wifi", "radio.lora", "radio.bt", "radio.airplane", "haptics.on", "haptics.strength",
-                                       "led.mode", "ota.server", "ota.autooff", "sens.boot", "sens.imu_period",
+                                       "led.mode", "led.on", "ota.server", "ota.autooff", "sens.boot", "sens.imu_period",
                                        "sens.env_period", "bl.r16"};
     for (size_t i = 0; i < sizeof(cfg) / sizeof(cfg[0]); i++) {
         CHECK(find(cfg[i]) && (find(cfg[i])->flags & REG_F_CFG));
@@ -73,7 +73,8 @@ static void test_ranges_follow_settings_table(void) {
             CHECK(k->type == SB_U8 && e->min == k->min && e->max == k->max);
         }
         if (e->flags & REG_F_CFG) {
-            CHECK(k != NULL); // a cfg row is a saved setting the table knows, with its default
+            // a cfg row is a saved setting the table knows, with its default; app.bg_off counts a string list
+            CHECK(k != NULL || e->id == REG_ID_APP_BG_OFF);
         }
     }
 }
@@ -88,6 +89,7 @@ static void test_set_reaches_owner(void) {
     CHECK(fw_set("haptics.on on") == RC_OK && sw_stub.haptics && sw_stub.haptics_puts == 1);
     CHECK(fw_set("haptics.strength medium") == RC_OK && sw_stub.strength == 1);
     CHECK(fw_set("led.mode blink") == RC_OK && sw_stub.led == 3);
+    CHECK(fw_set("led.on off") == RC_OK && !sw_stub.led_on && sw_stub.led_on_puts == 1);
     CHECK(fw_set("ota.server on") == RC_OK && sw_stub.ota && sw_stub.ota_puts == 1);
     CHECK(fw_set("ota.autooff 30") == RC_OK && sw_stub.autooff == 30);
     sw_stub.radio_fails = true; // the owner could not save: the registry says failed, not applied
@@ -107,8 +109,14 @@ static void test_refused(void) {
     CHECK(fw_set("sens.imu_period 50") == RC_RO && fw_set("sens.boot off") == RC_RO && fw_set("bl.r16 fitted") == RC_RO);
 }
 
+static char last_hook_key[16];
+static void hook(char const *key) {
+    strncpy(last_hook_key, key, sizeof(last_hook_key) - 1);
+}
+
 static void test_ui_policy(void) {
     sw_stub_reset();
+    switch_reg_bind_ui(hook);
     reg_value_t v;
     CHECK(reg_get(find("ui.saver"), &v) == REG_OK && v.u == 1); // the default the shell uses
     CHECK(reg_get(find("ui.idle_dim"), &v) == REG_OK && v.u == 6);
@@ -118,6 +126,9 @@ static void test_ui_policy(void) {
     CHECK(fw_set("ui.saver_style digital") == RC_OK && strcmp(sw_stub.cfg_key, "saver_style") == 0 && sw_stub.cfg_val == 1);
     CHECK(fw_set("ui.idle_off 0") == RC_OK && strcmp(sw_stub.cfg_key, "idle_off") == 0 && sw_stub.cfg_val == 0);
     CHECK(fw_set("ui.kbd_pulse all") == RC_OK && sw_stub.cfg_val == 2);
+    // The shell is told which setting changed: only the lock's own off lifts a showing lock (shell_ui_policy_changed)
+    CHECK(fw_set("ui.idle_dim 12") == RC_OK && strcmp(last_hook_key, "idle_dim") == 0);
+    CHECK(fw_set("ui.lock off") == RC_OK && strcmp(last_hook_key, "lock") == 0);
 }
 
 static void test_new_ro_keys(void) {
@@ -126,6 +137,9 @@ static void test_new_ro_keys(void) {
     CHECK(reg_get(find("sens.env_period"), &v) == REG_OK && v.u == 1000);
     CHECK(reg_get(find("bl.r16"), &v) == REG_OK && v.u == 2);
     CHECK(reg_get(find("sens.boot"), &v) == REG_OK && v.u == 1);
+    sw_stub.bg_off = 2;
+    CHECK(reg_get(find("app.bg_off"), &v) == REG_OK && v.u == 2);
+    CHECK(fw_set("app.bg_off 0") == RC_RO && sw_stub.bg_off == 2); // `fw app background` owns the list
 }
 
 int main(void) {

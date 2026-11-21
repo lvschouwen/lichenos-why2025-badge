@@ -33,9 +33,12 @@ bool sw_cfg_put(char const *key, uint32_t value);
 // The saved column of `fw get` for a row of this domain: a radio's person switch, airplane, or the saved key's stored
 // value; false when nothing is stored (or the row has nothing saved)
 bool sw_saved(uint16_t id, char const *saved_key, uint32_t *out);
-// main.c, once: what the shell does after one of its policy settings changed (shell_ui_policy_changed)
-void switch_reg_bind_ui(void (*changed)(void));
+// main.c, once: what the shell does after one of its policy settings changed (shell_ui_policy_changed), told the key
+void switch_reg_bind_ui(void (*changed)(char const *key));
 
 bool sw_sensors_boot_get(void);
 void sw_sensors_periods(uint32_t *imu_ms, uint32_t *env_ms);
-uint8_t sw_r16_get(void); // r16_fit_t: 0 unknown, 1 fitted, 2 absent
+uint8_t sw_r16_get(void);
+uint8_t sw_bg_off_count(void); // apps with their background off
+bool    sw_led_get(void);       // the saved status LED setting
+void    sw_led_put(bool on); // r16_fit_t: 0 unknown, 1 fitted, 2 absent

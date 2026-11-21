@@ -10,14 +10,14 @@ sw_stub_t sw_stub;
 static char const *const ui_keys[] = {"saver", "saver_style", "lock", "idle_dim", "idle_off", "kbd_pulse", "home_layout"};
 static uint8_t const     ui_defs[] = {1, 0, 0, 6, 30, 1, 0};
 static uint8_t           ui_vals[7];
-static void            (*hook)(void);
+static void            (*hook)(char const *);
 
 void sw_stub_reset(void) {
     memset(&sw_stub, 0, sizeof(sw_stub));
     memcpy(ui_vals, ui_defs, sizeof(ui_vals));
 }
 
-void switch_reg_bind_ui(void (*changed)(void)) {
+void switch_reg_bind_ui(void (*changed)(char const *key)) {
     hook = changed;
 }
 
@@ -119,7 +119,7 @@ bool sw_cfg_put(char const *key, uint32_t value) {
     strncpy(sw_stub.cfg_key, key, sizeof(sw_stub.cfg_key) - 1);
     sw_stub.cfg_val = value;
     if (hook) {
-        hook();
+        hook(key);
         sw_stub.ui_changed++;
     }
     return true;
@@ -143,4 +143,17 @@ void sw_sensors_periods(uint32_t *imu, uint32_t *env) {
 
 uint8_t sw_r16_get(void) {
     return 2;
+}
+
+uint8_t sw_bg_off_count(void) {
+    return sw_stub.bg_off;
+}
+
+bool sw_led_get(void) {
+    return sw_stub.led_on;
+}
+
+void sw_led_put(bool on) {
+    sw_stub.led_on_puts++;
+    sw_stub.led_on = on;
 }

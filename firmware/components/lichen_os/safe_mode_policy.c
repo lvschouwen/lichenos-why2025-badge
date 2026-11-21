@@ -147,6 +147,15 @@ static bool next_entry(char const *list, size_t cap, size_t *pos, char id[SAFE_M
     return true;
 }
 
+size_t safe_mode_list_count(char const *list) {
+    char   entry[SAFE_MODE_LIST_MAX];
+    size_t pos = 0, n = 0;
+    while (list && next_entry(list, SAFE_MODE_LIST_MAX, &pos, entry)) {
+        n++;
+    }
+    return n;
+}
+
 bool safe_mode_list_has(char const *list, char const *id) {
     char   entry[SAFE_MODE_LIST_MAX];
     size_t pos = 0;

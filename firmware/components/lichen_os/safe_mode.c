@@ -104,6 +104,13 @@ bool safe_mode_background_off(char const *id, bool may_switch_off) {
     return off;
 }
 
+size_t safe_mode_background_off_count(void) {
+    portENTER_CRITICAL(&s_mux);
+    size_t n = safe_mode_list_count(s_off);
+    portEXIT_CRITICAL(&s_mux);
+    return n;
+}
+
 bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off, bool *in_callback) {
     if (!atomic_load(&s_boot_done) || !s_boot.app[0] || cap < sizeof(s_boot.app)) {
         return false;

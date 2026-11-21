@@ -106,6 +106,8 @@ bool safe_mode_id_ok(char const *id);
 // a malformed entry matches nothing and is dropped by the next add or remove. cap is at most SAFE_MODE_LIST_MAX.
 #define SAFE_MODE_LIST_MAX 160 // 11 ids of the longest kind; an add that does not fit is refused
 bool safe_mode_list_has(char const *list, char const *id);
+// How many ids the list holds (the registry's app.bg_off, #501)
+size_t safe_mode_list_count(char const *list);
 // id added to list (cap bytes with the NUL); true when it is in afterwards. False for a bad id or no room.
 bool safe_mode_list_add(char *list, size_t cap, char const *id);
 // The list changed so that id is on it (listed) or off it, saved by save(next, arg) before list takes the change: false
