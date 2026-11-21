@@ -78,7 +78,7 @@ bool wifi_set_credentials(char const *ssid, char const *pass);
 // wifi_eap_last_fail), it never retries. False if the credential or SSID is invalid, there is no C6 link or memory, or
 // the request could not be queued.
 bool wifi_set_eap_credentials(char const *ssid, wifi_eap_t const *eap);
-// Why the last Enterprise join did not start (WIFI_EAP_FAIL_NONE after a join that got an IP, a Forget, or a new request)
+// Why the last Enterprise join did not start (WIFI_EAP_FAIL_NONE after a trial that got an IP and was saved, a Forget, or a new request)
 wifi_eap_fail_t wifi_eap_last_fail(void);
 // What the applied configuration does about the server certificate (registry wifi.eap_ca): none when the driver is not
 // set for an Enterprise network. Any task, no RPC.

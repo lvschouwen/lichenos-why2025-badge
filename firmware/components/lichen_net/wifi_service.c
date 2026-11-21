@@ -1368,7 +1368,11 @@ static void handle_connect(void) {
         tried_mask = fail_count = 0;
         choose_network(false);
     }
-    if (!wifi_apply_blocked()) {
+    if (wifi_apply_blocked()) {
+        portENTER_CRITICAL(&state_lock);
+        first_connect_settled = true; // no connect, so no event will settle it: the status bar must not stay "joining"
+        portEXIT_CRITICAL(&state_lock);
+    } else {
         esp_wifi_connect();
     }
 }

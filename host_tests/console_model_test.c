@@ -32,6 +32,8 @@ static void test_public(void) {
     CHECK(console_line_is_public("stress 5")); // #278
     CHECK(console_line_is_public("fw stress status"));
     CHECK(!console_line_is_public("wifi MyNet hunter2")); // an ssid + password
+    CHECK(!console_line_is_public("wifi eap camp peap mschapv2 - user - hunter2") && // #496: Enterprise login, never recalled
+          !console_line_is_public("fw wifi eap")); // the allow list is exact strings, so no eap line is public
     CHECK(!console_line_is_public("wifi --clear"));
     CHECK(!console_line_is_public("wifi on hunter2pass")); // cmd_wifi reads this as ssid "on" + a password
     CHECK(!console_line_is_public("wifi scan secret"));
