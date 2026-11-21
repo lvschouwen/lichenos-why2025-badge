@@ -179,8 +179,9 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   idle_dim|idle_off|kbd_pulse|layout`. Owner decision (2026-11-21): these switches are settable through `fw set`, with
   the open `fw set` rules. The TX guard (`REG_GUARDED`) covers radio parameters only (`lora.*`, `wifi.country|txpwr|bw`),
   not the on/off switches or `ota.server`; `fw lora on` keeps its `CON_F_TX` allow-list entry in `lora_rules.h`.
-  Getters read what the owner does now where it has a driver (`radio.wifi`: the Wi-Fi service flag, `radio.lora`: the
-  LoRa driver's switch) and never wait. The row flag `REG_F_CFG` (shown as `cfg` in the last column of `fw get`) marks
+  `radio.wifi` and `radio.lora` read the driver's requested state after the holds (the Wi-Fi service's enabled flag, the
+  LoRa driver's enabled switch), not link state (`wifi.*`, `lora.state` say that), and never wait. A set that took effect
+  but could not be saved answers `ERR failed: <key> set, applied, not saved`. The row flag `REG_F_CFG` (shown as `cfg` in the last column of `fw get`) marks
   a configured-only key: the value is the setting or the request and no hardware read-back exists, so applied cannot
   disagree with it. It is on the `ui.*` rows, `app.bg_off` (how many apps have their background off, #232/#233),
   `radio.bt` (no driver before #503), `sens.boot`, `bl.r16`, `bl.idle`, `bl.override`, `psram.want`, `tz.zone` and

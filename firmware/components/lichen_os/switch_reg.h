@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 // Radio switches by index: 0 Wi-Fi, 1 LoRa, 2 Bluetooth (radio_id_t, asserted in switch_reg.c)
-bool sw_radio_get(unsigned radio);   // what the driver does now (Wi-Fi: the service flag, LoRa: the driver switch, BT: the OS switch)
+bool sw_radio_get(unsigned radio);   // the driver's requested state after holds (Wi-Fi: the service flag, LoRa: the driver switch, BT: the OS switch)
 bool sw_radio_saved(unsigned radio); // the person's switch (lichen_radio_switch_get)
 bool sw_radio_put(unsigned radio, bool on); // lichen_radio_set: saves, tells the owners; true when saved
 bool sw_airplane_get(void);

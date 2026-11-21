@@ -1,5 +1,6 @@
 #include "reg_p4.h"
 
+#include "reg_cmd.h"
 #include "switch_reg.h"
 
 // The P4's registry keys of domain 0x16 (#501): the OS switches (radio, haptics, status LED, update server), the
@@ -7,8 +8,8 @@
 // through switch_reg.h, so the host test links this file with recording stubs. Keep ESP calls out of it.
 //
 // Settable rows end in the owner's own setter (the one its console command calls). The radio rows go through
-// lichen_radio_set (sw_radio_put), never around the owners' hooks (#108). radio.wifi and radio.lora read what the driver
-// does now; radio.bt has no driver before #503 and is configured-only until then. The ui.* rows are configured-only (REG_F_CFG):
+// lichen_radio_set (sw_radio_put), never around the owners' hooks (#108). radio.wifi and radio.lora read the driver's
+// requested state after the holds (not link state); radio.bt has no driver before #503 and is configured-only until then. The ui.* rows are configured-only (REG_F_CFG):
 // the saved setting as the shell reads it, so the value is exact and no read-back exists to disagree. The names and
 // ranges of the saved u8 settings are the ones in lichen_api/settings_backup.c (a host test compares them).
 
@@ -64,6 +65,10 @@ static reg_status_t sw_set(reg_entry_t const *e, reg_value_t const *v) {
         case REG_ID_OTA_SERVER: ok = sw_ota_put(v->u != 0); break;
         case REG_ID_OTA_AUTOOFF: ok = sw_ota_autooff_put((uint8_t)v->u); break;
         default: ok = e->saved_key && sw_cfg_put(e->saved_key, v->u); break;
+    }
+    if (!ok) { // the owner's change is live (the ui.* store refuses before it changes anything), only the save failed
+        reg_cmd_set_why(REG_ID_DOMAIN(e->id) == 0x16 && e->saved_key && (e->flags & REG_F_CFG) ? "not saved"
+                                                                                                : "applied, not saved");
     }
     return ok ? REG_OK : REG_FAILED;
 }

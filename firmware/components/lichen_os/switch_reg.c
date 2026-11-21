@@ -18,8 +18,10 @@ _Static_assert(RADIO_WIFI == 0 && RADIO_LORA == 1 && RADIO_BT == 2, "the rows' r
 
 _Static_assert(OTA_AUTOOFF_MAX_MIN == 240, "ota.autooff row range (reg_p4_switch.c)");
 
-// What each driver does now, not the OS switch (#501 review): Wi-Fi the service's own enabled flag, LoRa the driver's
-// switch (both set synchronously by the radio listener), Bluetooth has no driver yet (#503) so it is the switch
+// The requested state of each driver after the holds, not link state and not the person's switch (#501): Wi-Fi the
+// service's enabled flag, LoRa the driver's enabled switch (the radio listener sets both synchronously, a thermal hold
+// included). Whether Wi-Fi is joined or LoRa is receiving is wifi.* / lora.state. Bluetooth has no driver yet (#503), so
+// it is the OS switch.
 bool sw_radio_get(unsigned radio) {
     switch (radio) {
         case RADIO_WIFI: return wifi_enabled();

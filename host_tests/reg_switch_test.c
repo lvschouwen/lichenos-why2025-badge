@@ -154,6 +154,14 @@ static void test_save_failures(void) {
     sw_stub.save_fails = true;
     CHECK(fw_set("ota.server on") == RC_FAILED && fw_set("ota.autooff 5") == RC_FAILED && fw_set("led.on on") == RC_FAILED);
     CHECK(fw_set("haptics.on off") == RC_FAILED);
+    // The reply says the switch took effect, only the save failed
+    reg_entry_t const *e;
+    reg_value_t        applied;
+    bool               have;
+    char               reply[160];
+    reg_cmd_result_t   r = reg_cmd_set(find, "haptics.on on", NULL, &e, &applied, &have);
+    reg_cmd_set_reply(r, e, &applied, have, "haptics.on on", reply, sizeof(reply));
+    CHECK(r == RC_FAILED && strstr(reply, "failed: haptics.on set, applied, not saved") != NULL);
     sw_stub.save_fails  = false;
     sw_stub.store_fails = true; // the settings store itself
     CHECK(fw_set("ui.lock on") == RC_FAILED && sw_stub.cfg_puts == 0);

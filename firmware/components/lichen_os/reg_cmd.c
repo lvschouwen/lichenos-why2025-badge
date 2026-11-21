@@ -235,7 +235,8 @@ size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t c
     char const *const why = set_why;
     set_why               = NULL;
     if (r == RC_FAILED && why) {
-        return done(snprintf(buf, cap, "ERR refused: %s set, %s", e->name, why), cap);
+        bool applied = strncmp(why, "applied", 7) == 0; // a switch that took effect but could not be saved (#501)
+        return done(snprintf(buf, cap, "ERR %s: %s set, %s", applied ? "failed" : "refused", e->name, why), cap);
     }
     return done(snprintf(buf, cap, "ERR failed: %s set, applied not read back", e->name), cap);
 }
