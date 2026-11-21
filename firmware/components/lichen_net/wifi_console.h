@@ -18,3 +18,4 @@ void wifi_console_proto(wifi_cmd_t const *c);
 void wifi_console_proto_usage(wifi_cmd_t const *c);
 void wifi_console_bw(wifi_cmd_t const *c);
 void wifi_console_stats(wifi_cmd_t const *c); // `fw wifi stats`
+void wifi_console_status(wifi_cmd_t const *c); // `fw wifi`

@@ -112,31 +112,70 @@ static void test_plan(void) {
 }
 
 // A choice changes only when the task ran it and the driver took it (the stored value is what later applies use)
+// The task's store/apply/restore for one choice, with the driver's verdict given
+static int task_apply(wifi_req_t *r, uint32_t seq, wifi_req_why_t gate, bool driver_ok, int stored, int asked, wifi_req_why_t *why, int *seen) {
+    wifi_req_plan_t p      = wifi_req_plan(r, seq, gate);
+    int             during = wifi_apply_during(p.run, stored, asked);
+    *seen                  = during; // what the driver's apply reads
+    *why                   = wifi_apply_why(p.run, driver_ok, p.why);
+    return wifi_apply_after(p.run, driver_ok, stored, asked);
+}
+
+static void test_apply_sequence(void) {
+    wifi_req_t     r;
+    wifi_req_why_t why;
+    int            seen;
+    wifi_req_init(&r);
+    uint32_t a = wifi_req_begin(&r);
+    // refused by a join: stored value untouched, the driver never sees the new one
+    CHECK(task_apply(&r, a, wifi_apply_gate(true, WIFI_JOIN_TRYING, false, true), true, 'x', 'n', &why, &seen) == 'x');
+    CHECK(seen == 'x' && why == WIFI_REQ_JOINING);
+    // driver not running (after a re-attach or a switch-off): refused for every kind, link or not
+    uint32_t b = wifi_req_begin(&r);
+    CHECK(task_apply(&r, b, wifi_apply_gate(false, WIFI_JOIN_NONE, false, false), true, 20, 40, &why, &seen) == 20);
+    CHECK(why == WIFI_REQ_DRIVER && seen == 20);
+    CHECK(wifi_apply_gate(false, WIFI_JOIN_NONE, false, true) == WIFI_REQ_DRIVER);
+    // the driver says no: restored
+    uint32_t c = wifi_req_begin(&r);
+    CHECK(task_apply(&r, c, wifi_apply_gate(true, WIFI_JOIN_NONE, false, true), false, 'x', 'n', &why, &seen) == 'x');
+    CHECK(seen == 'n' && why == WIFI_REQ_FAILED);
+    // accepted: stored
+    uint32_t d = wifi_req_begin(&r);
+    CHECK(task_apply(&r, d, wifi_apply_gate(true, WIFI_JOIN_JOINED, false, true), true, 'x', 'n', &why, &seen) == 'n');
+    CHECK(seen == 'n' && why == WIFI_REQ_OK);
+    // power save needs no join gate: only the driver
+    uint32_t e = wifi_req_begin(&r);
+    CHECK(task_apply(&r, e, wifi_apply_gate(true, WIFI_JOIN_TRYING, false, false), true, 0, 1, &why, &seen) == 1);
+    // a caller that has gone: skipped, nothing stored
+    uint32_t f = wifi_req_begin(&r);
+    (void)wifi_req_begin(&r);
+    CHECK(task_apply(&r, f, WIFI_REQ_OK, true, 'x', 'n', &why, &seen) == 'x' && seen == 'x');
+}
+
 static void test_keep(void) {
     wifi_req_t r;
     wifi_req_init(&r);
     int      stored = 'x';
-    int      ran    = 0;
     uint32_t a      = wifi_req_begin(&r);
     wifi_req_plan_t p = wifi_req_plan(&r, a, wifi_link_gate(WIFI_JOIN_TRYING, false)); // refused by the gate
-    CHECK(!p.run && wifi_req_keep(p.run, stored, 'n') == 'x');
+    CHECK(!p.run && wifi_apply_after(p.run, true, stored, 'n') == 'x');
     uint32_t b = wifi_req_begin(&r);
     (void)wifi_req_plan(&r, b, WIFI_REQ_OK);
     uint32_t c = wifi_req_begin(&r); // b's caller gave up
     p = wifi_req_plan(&r, b, WIFI_REQ_OK);
-    CHECK(!p.run && !p.answer && wifi_req_keep(p.run, stored, 'n') == 'x');
+    CHECK(!p.run && !p.answer && wifi_apply_after(p.run, true, stored, 'n') == 'x');
     p = wifi_req_plan(&r, c, WIFI_REQ_OK);
     CHECK(p.run);
-    stored = wifi_req_keep(false, stored, 'n'); // the driver said no
+    stored = wifi_apply_after(true, false, stored, 'n'); // the driver said no
     CHECK(stored == 'x');
-    stored = wifi_req_keep(true, stored, 'n'); // accepted
+    stored = wifi_apply_after(true, true, stored, 'n'); // accepted
     CHECK(stored == 'n');
-    (void)ran;
     CHECK(wifi_req_why_text(WIFI_REQ_BAD_ARG)[0] != '\0');
 }
 
 int main(void) {
     test_keep();
+    test_apply_sequence();
     test_plan();
     test_slot();
     test_stale_answer();

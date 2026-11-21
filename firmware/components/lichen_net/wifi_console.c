@@ -3,6 +3,8 @@
 #include "esp_attr.h"
 #include "esp_wifi.h"
 #include "fw_console.h"
+#include "lichen_mdns.h"
+#include "wifi_join_apply.h"
 #include "wifi_regdom.h"
 #include "wifi_service.h"
 
@@ -135,10 +137,6 @@ void wifi_console_bw(wifi_cmd_t const *c) {
     tuning_echo('b', c->bw_mhz, reconnecting);
 }
 
-static char const *ps_name(int ps) {
-    return ps == WIFI_RB_PS_NONE ? "off" : ps == WIFI_RB_PS_MIN ? "min (modem sleep)" : "max (modem sleep)";
-}
-
 void wifi_console_stats(wifi_cmd_t const *c) {
     (void)c;
     wifi_tuning_t t;
@@ -174,7 +172,7 @@ void wifi_console_stats(wifi_cmd_t const *c) {
         pwr / 4,
         (pwr % 4) * 25,
         t.tx_raw ? "set" : "default",
-        ps_name(t.ps_mode)
+        wifi_ps_name(t.ps_mode)
     );
     // The C6's own copy of the STA config: proof the 11k/v flags crossed the link (#495). It holds the password: wiped
     wifi_config_t cfg    = {0};
@@ -187,4 +185,63 @@ void wifi_console_stats(wifi_cmd_t const *c) {
         !cfg_ok ? "?" : btm ? "on" : "off",
         (unsigned long)t.roams
     );
+}
+
+// The connection line(s) of `fw wifi`: radio, credentials, link
+static void status_link(wifi_tuning_t const *t) {
+    char a[140], ip[16];
+    bool have = t->have_credentials;
+    wifi_ssid_sanitize(t->ssid, a, sizeof(a));
+    if (!wifi_enabled()) {
+        console_reply("wifi: radio switched off%s (fw wifi on)", t->airplane ? ", airplane mode" : "");
+    } else if (!have) {
+        console_reply("wifi: no credentials (fw wifi scan | <ssid> <password> | reconnect | --clear)");
+    } else if (wifi_has_ip(ip, sizeof(ip))) {
+        int8_t rssi;
+        if (wifi_rssi(&rssi)) {
+            console_reply(
+                "wifi: \"%s\" connected, ip %s (%s.local), rssi %d dBm, %d/4 bars",
+                a,
+                ip,
+                lichen_mdns_name(),
+                rssi,
+                wifi_bars(rssi)
+            );
+        } else {
+            console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi not read yet", a, ip, lichen_mdns_name());
+        }
+    } else {
+        console_reply("wifi: \"%s\" not connected", a);
+    }
+}
+
+void wifi_console_status(wifi_cmd_t const *c) {
+    (void)c;
+    char            a[140], b[140];
+    wifi_tuning_t   t;
+    wifi_tuning_get(&t);
+    status_link(&t);
+    wifi_apply_console_status();
+    if (wifi_has_ip(NULL, 0)) {
+        wifi_console_ip6();
+    }
+    // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
+    console_reply("wifi: power save %s", wifi_ps_name(t.ps_mode));
+    char              tried[33], kept[33];
+    wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
+    wifi_ssid_sanitize(tried, a, sizeof(a));
+    wifi_ssid_sanitize(kept, b, sizeof(b));
+    if (st == WIFI_JOIN_TRYING || st == WIFI_JOIN_PENDING) {
+        console_reply(
+            "wifi: trying \"%s\" (saved only once it gets an IP, gives up after %d s)",
+            a,
+            WIFI_JOIN_TRIAL_MS / 1000
+        );
+    } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
+        console_reply(
+            kept[0] ? "wifi: couldn't join \"%s\": kept \"%s\"" : "wifi: couldn't join \"%s\": no network saved",
+            a,
+            b
+        );
+    }
 }

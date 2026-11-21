@@ -174,6 +174,7 @@ typedef enum {
     MSG_SCAN,      // (#502) scan into scan_res; reason = the request number (wifi_req.h)
     MSG_SET_PS,    // apply the chosen power save, TX power, or protocol/bandwidth: the values are the atomics, the
     MSG_SET_TX,    // message only says "now"; reason = the request number, so a repeat is idempotent
+    MSG_REAPPLY,   // the driver just started: apply a choice made in the window before (apply_now)
     MSG_SET_PROTO, // value: 'n' or 'x' ...
     MSG_SET_BW,    // ... or the MHz. The task stores a value only once the driver took it (#502)
 } msg_type_t;
@@ -205,6 +206,18 @@ void wifi_link_counts(uint32_t *disconnects, uint32_t *reconnects, uint32_t *las
 static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is connected to (#15)
 
 // Called from the event loop task, so a short wait is fine; a dropped GOT_IP would roll a good trial back
+static bool post(msg_t const *m);
+
+// esp_wifi_start returned. STA_START may have read the choices before a setter that saw wifi_started still false stored
+// its value (apply_now), so the task looks again (MSG_REAPPLY)
+static void started_up(bool up) {
+    atomic_store(&wifi_started, up);
+    msg_t m = {.type = MSG_REAPPLY};
+    if (up) {
+        post(&m);
+    }
+}
+
 static bool post(msg_t const *m) {
     bool ok = queue && xQueueSend(queue, m, pdMS_TO_TICKS(50)) == pdTRUE;
     if (!ok && queue) {
@@ -284,7 +297,17 @@ static bool apply_wifi_bw(void) {
     return ok;
 }
 
+static int applied_snap[4]; // c6wifi task only: the choices on_sta_start applied (ps, tx, protocol, bandwidth)
+
+static void snap_choices(int *out) {
+    out[0] = atomic_load(&wifi_ps_mode);
+    out[1] = atomic_load(&wifi_tx_raw);
+    out[2] = atomic_load(&wifi_proto);
+    out[3] = atomic_load(&wifi_bw_mhz);
+}
+
 static void apply_wifi_ps(void) {
+    snap_choices(applied_snap);
     esp_err_t err = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode));
     readback_invalidate();
     if (err != ESP_OK) {
@@ -341,10 +364,6 @@ static void set_country(void) {
     } else {
         ESP_LOG_LEVEL(wifi_regdom_expected(&r) ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "wifi: regulatory %s", text);
     }
-}
-
-static char const *wifi_ps_name(wifi_ps_type_t ps) {
-    return ps == WIFI_PS_NONE ? "off" : ps == WIFI_PS_MIN_MODEM ? "min (modem sleep)" : "max (modem sleep)";
 }
 
 // The log line for IP_EVENT_GOT_IP6 (link-local ready, SLAAC address preferred). The prefix only: SLAAC puts the
@@ -528,7 +547,7 @@ static drv_result_t wifi_driver_up(char const **why) {
             ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
             atomic_store(&driver_up, false);
         } else {
-            atomic_store(&wifi_started, true);
+            started_up(true);
         }
         return DRV_NO_CREDENTIALS;
     }
@@ -547,7 +566,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         *why = "Wi-Fi start";
         return DRV_FAILED;
     }
-    atomic_store(&wifi_started, true);
+    started_up(true);
     return DRV_STARTED;
 }
 
@@ -697,7 +716,13 @@ bool wifi_readback(wifi_readback_t *out, bool live) {
 #define REQ_ANSWER_MS 4000
 
 static _Atomic int *choice_slot(msg_type_t type) {
-    return type == MSG_SET_PS ? &wifi_ps_mode : type == MSG_SET_TX ? &wifi_tx_raw : type == MSG_SET_PROTO ? &wifi_proto : &wifi_bw_mhz;
+    switch (type) {
+        case MSG_SET_PS: return &wifi_ps_mode;
+        case MSG_SET_TX: return &wifi_tx_raw;
+        case MSG_SET_PROTO: return &wifi_proto;
+        case MSG_SET_BW: return &wifi_bw_mhz;
+        default: return NULL;
+    }
 }
 
 // The choice is stored by the c6wifi task, and only once the gate passed and the driver took it (#502): a refused,
@@ -706,10 +731,13 @@ static _Atomic int *choice_slot(msg_type_t type) {
 static bool apply_now(msg_type_t type, int value, wifi_req_why_t *why) {
     wifi_req_why_t w  = WIFI_REQ_OK;
     bool           ok = true;
-    if (!atomic_load(&wifi_started)) {
+    bool direct = !atomic_load(&wifi_started);
+    if (direct) {
         atomic_store(choice_slot(type), value);
         readback_invalidate();
-    } else {
+        direct = !atomic_load(&wifi_started); // started meanwhile: STA_START may have missed it, so ask the task too
+    }
+    if (!direct) {
         ok = false;
         w  = WIFI_REQ_BUSY;
         if (req_lock && xSemaphoreTake(req_lock, pdMS_TO_TICKS(REQ_LOCK_MS)) == pdTRUE) {
@@ -1198,7 +1226,7 @@ static void handle_wifi_sync(void) {
         atomic_store(&driver_up, true); // before the start, as in wifi_driver_up
         set_country();
         esp_err_t err = esp_wifi_start();
-        atomic_store(&wifi_started, err == ESP_OK);
+        started_up(err == ESP_OK);
         atomic_store(&driver_up, err == ESP_OK);
         ESP_LOG_LEVEL(
             err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_ERROR,
@@ -1253,8 +1281,11 @@ void wifi_tuning_get(wifi_tuning_t *t) {
     t->started = atomic_load(&wifi_started);
     t->tx_raw  = atomic_load(&wifi_tx_raw);
     t->ps_mode = atomic_load(&wifi_ps_mode);
+    t->airplane = radio.airplane && radio.airplane();
     portENTER_CRITICAL(&state_lock);
-    t->roams = counts.roams;
+    t->roams            = counts.roams;
+    t->have_credentials = have_credentials;
+    wifi_text_copy(t->ssid, sizeof(t->ssid), ssid);
     portEXIT_CRITICAL(&state_lock);
 }
 
@@ -1339,7 +1370,7 @@ static wifi_req_why_t gate_now(msg_type_t type) {
     if (type == MSG_SCAN) {
         return wifi_scan_gate(c6link_up(), c6link_updating(), atomic_load(&wifi_on), atomic_load(&wifi_started), js, roaming);
     }
-    return (type == MSG_SET_PROTO || type == MSG_SET_BW) && atomic_load(&wifi_started) ? wifi_link_gate(js, roaming) : WIFI_REQ_OK;
+    return wifi_apply_gate(atomic_load(&wifi_started), js, roaming, type == MSG_SET_PROTO || type == MSG_SET_BW);
 }
 
 static wifi_req_plan_t plan_for(msg_t const *m) {
@@ -1374,7 +1405,7 @@ static bool apply_link(void) {
     portENTER_CRITICAL(&state_lock);
     bool have = have_credentials;
     portEXIT_CRITICAL(&state_lock);
-    if (have && atomic_load(&wifi_on)) {
+    if (ok && have && atomic_load(&wifi_on)) { // not on a driver that refused the protocol or the bandwidth
         handle_reconnect(false);
     }
     readback_invalidate();
@@ -1400,26 +1431,38 @@ static bool apply_one(msg_type_t type) {
 
 static void handle_apply(msg_t const *m) {
     wifi_req_plan_t plan = plan_for(m);
+    _Atomic int    *slot = choice_slot(m->type);
     bool            ok   = false;
-    if (plan.run) {
-        _Atomic int *slot = choice_slot(m->type);
-        int          old  = atomic_load(slot);
-        atomic_store(slot, m->value); // the apply functions read the choice from here
+    if (plan.run && slot) {
+        int old = atomic_load(slot);
+        atomic_store(slot, wifi_apply_during(true, old, m->value)); // the apply functions read the choice from here
         ok = apply_one(m->type);
-        atomic_store(slot, wifi_req_keep(ok, old, m->value));
+        atomic_store(slot, wifi_apply_after(true, ok, old, m->value));
         readback_invalidate();
-        plan.why = ok ? WIFI_REQ_OK : WIFI_REQ_FAILED;
     }
     if (plan.answer) {
-        answer(m, ok, plan.why);
+        answer(m, ok, wifi_apply_why(plan.run, ok, plan.why));
+    }
+}
+
+// A setter's value that arrived in the window around esp_wifi_start (started_up): apply what STA_START did not see
+static void handle_reapply(void) {
+    int now[4];
+    snap_choices(now);
+    if (atomic_load(&wifi_started) && memcmp(now, applied_snap, sizeof(now)) != 0) {
+        apply_wifi_ps();
     }
 }
 
 static void handle_request(msg_t const *m) {
-    if (m->type == MSG_SCAN) {
-        handle_scan(m);
-    } else {
-        handle_apply(m);
+    switch (m->type) {
+        case MSG_SCAN: handle_scan(m); break;
+        case MSG_SET_PS:
+        case MSG_SET_TX:
+        case MSG_SET_PROTO:
+        case MSG_SET_BW: handle_apply(m); break;
+        case MSG_REAPPLY: handle_reapply(); break;
+        default: ESP_LOGW(TAG, "wifi: request %d not handled", (int)m->type); break;
     }
 }
 
@@ -1461,6 +1504,23 @@ static void handle_connect(void) {
     }
 }
 
+static void retry_tick(uint32_t now) {
+    if (retry_pending && (int32_t)(now - retry_at) >= 0) {
+        retry_pending = false;
+        if (atomic_load(&driver_up) && !wifi_apply_blocked()) {
+            esp_wifi_connect();
+        }
+    }
+}
+
+static void sync_tick(uint32_t now, bool got) {
+    static uint32_t next_sync;
+    if (!got && (int32_t)(now - next_sync) >= 0) {
+        next_sync = now + 5000;
+        handle_wifi_sync(); // idempotent: catches a MSG_WIFI_SYNC that was dropped on a full queue
+    }
+}
+
 static void wifi_task(void *arg) {
     (void)arg;
     msg_t m;
@@ -1483,21 +1543,17 @@ static void wifi_task(void *arg) {
                     atomic_store(&c6_msg_seq, m.reason);
                     xSemaphoreGive(c6_msg_done);
                     break;
-                default: handle_request(&m); break; // scan, ps, tx, protocol, bandwidth (#502)
+                case MSG_SCAN:
+                case MSG_SET_PS:
+                case MSG_SET_TX:
+                case MSG_SET_PROTO:
+                case MSG_SET_BW:
+                case MSG_REAPPLY: handle_request(&m); break; // #502
             }
             memset(&m, 0, sizeof(m));
         }
-        if (retry_pending && (int32_t)(now - retry_at) >= 0) {
-            retry_pending = false;
-            if (atomic_load(&driver_up) && !wifi_apply_blocked()) {
-                esp_wifi_connect();
-            }
-        }
-        static uint32_t next_sync;
-        if (!got && (int32_t)(now - next_sync) >= 0) {
-            next_sync = now + 5000;
-            handle_wifi_sync(); // idempotent: catches a MSG_WIFI_SYNC that was dropped on a full queue
-        }
+        retry_tick(now);
+        sync_tick(now, got);
         poll_rssi(now);
         portENTER_CRITICAL(&state_lock);
         wifi_join_action_t act = wifi_join_event(&join, JOIN_EV_TICK, 0, now);
@@ -1577,10 +1633,6 @@ wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, siz
 }
 
 // The radio switch hooks from main.c (wifi_radio_hooks_t), each with its default when it was not given
-static bool airplane_on(void) {
-    return radio.airplane && radio.airplane();
-}
-
 // `fw wifi on|off`: the OS switch is saved and its listener calls wifi_enable
 static void cmd_wifi_switch(bool on) {
     if (!radio.set) {
@@ -1589,66 +1641,6 @@ static void cmd_wifi_switch(bool on) {
     }
     radio.set(on);
     console_reply("wifi: radio %s", (radio.get ? radio.get() : wifi_enabled()) ? "on" : "off");
-}
-
-// The connection line(s) of `fw wifi`: radio, credentials, link
-static void wifi_status_link(void) {
-    char a[140], ip[16], cur[33];
-    portENTER_CRITICAL(&state_lock);
-    bool have = have_credentials;
-    wifi_text_copy(cur, sizeof(cur), ssid);
-    portEXIT_CRITICAL(&state_lock);
-    clean(cur, a, sizeof(a));
-    if (!wifi_enabled()) {
-        console_reply("wifi: radio switched off%s (fw wifi on)", airplane_on() ? ", airplane mode" : "");
-    } else if (!have) {
-        console_reply("wifi: no credentials (fw wifi scan | <ssid> <password> | reconnect | --clear)");
-    } else if (wifi_has_ip(ip, sizeof(ip))) {
-        int8_t rssi;
-        if (wifi_rssi(&rssi)) {
-            console_reply(
-                "wifi: \"%s\" connected, ip %s (%s.local), rssi %d dBm, %d/4 bars",
-                a,
-                ip,
-                lichen_mdns_name(),
-                rssi,
-                wifi_bars(rssi)
-            );
-        } else {
-            console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi not read yet", a, ip, lichen_mdns_name());
-        }
-    } else {
-        console_reply("wifi: \"%s\" not connected", a);
-    }
-}
-
-static void cmd_wifi_status(wifi_cmd_t const *c) {
-    (void)c;
-    char a[140], b[140];
-    wifi_status_link();
-    wifi_apply_console_status();
-    if (wifi_has_ip(NULL, 0)) {
-        wifi_console_ip6();
-    }
-    // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
-    console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
-    char              tried[33], kept[33];
-    wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
-    clean(tried, a, sizeof(a));
-    clean(kept, b, sizeof(b));
-    if (st == WIFI_JOIN_TRYING || st == WIFI_JOIN_PENDING) {
-        console_reply(
-            "wifi: trying \"%s\" (saved only once it gets an IP, gives up after %d s)",
-            a,
-            WIFI_JOIN_TRIAL_MS / 1000
-        );
-    } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
-        console_reply(
-            kept[0] ? "wifi: couldn't join \"%s\": kept \"%s\"" : "wifi: couldn't join \"%s\": no network saved",
-            a,
-            b
-        );
-    }
 }
 
 static void cmd_wifi_on_off(wifi_cmd_t const *c) {
@@ -1678,7 +1670,7 @@ static void cmd_wifi_eap(wifi_cmd_t const *c) {
 
 static void cmd_wifi(char const *args) {
     static void (*const handler[WIFI_CMD_COUNT])(wifi_cmd_t const *) = {
-        [WIFI_CMD_STATUS]      = cmd_wifi_status,
+        [WIFI_CMD_STATUS]      = wifi_console_status,
         [WIFI_CMD_SWITCH]      = cmd_wifi_on_off,
         [WIFI_CMD_PS]          = wifi_console_ps,
         [WIFI_CMD_PS_USAGE]    = wifi_console_ps_usage,

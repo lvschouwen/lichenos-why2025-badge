@@ -114,3 +114,7 @@ size_t wifi_proto_reply(wifi_readback_t const *r, char *buf, size_t cap) {
 int wifi_proto_choice(uint32_t mask) {
     return mask == WIFI_RB_PROTO_11BGN ? 'n' : mask == WIFI_RB_PROTO_11BGNAX ? 'x' : 0;
 }
+
+char const *wifi_ps_name(int ps) {
+    return ps == WIFI_RB_PS_NONE ? "off" : ps == WIFI_RB_PS_MIN ? "min (modem sleep)" : "max (modem sleep)";
+}

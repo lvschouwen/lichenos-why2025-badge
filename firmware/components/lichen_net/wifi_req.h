@@ -54,6 +54,12 @@ typedef struct {
     wifi_req_why_t why; // the refusal, when answer && !run
 } wifi_req_plan_t;
 wifi_req_plan_t wifi_req_plan(wifi_req_t const *r, uint32_t seq, wifi_req_why_t gate);
-// The value a choice keeps after the task tried to apply it: the new one only when the driver took it
-int wifi_req_keep(bool applied, int old_value, int new_value);
+// Every request but a scan needs the driver running: a message handled after a re-attach or a switch-off must not call
+// into a stopped driver. link: a protocol or bandwidth change, which also waits out a join or a roam.
+wifi_req_why_t wifi_apply_gate(bool started, wifi_join_state_t join, bool roaming, bool link);
+// The store/apply/restore of a choice (ps, tx, protocol, bandwidth) as the task runs it: `during` is what the slot holds
+// while the driver applies it, `after` what it keeps. The choice changes only when the plan ran and the driver took it.
+int            wifi_apply_during(bool run, int old_value, int new_value);
+int            wifi_apply_after(bool run, bool ok, int old_value, int new_value);
+wifi_req_why_t wifi_apply_why(bool run, bool ok, wifi_req_why_t refused);
 char const    *wifi_req_why_text(wifi_req_why_t why);

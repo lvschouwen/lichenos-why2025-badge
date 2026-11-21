@@ -75,4 +75,6 @@ size_t wifi_ps_reply(wifi_readback_t const *r, char *buf, size_t cap);
 #define WIFI_RB_PROTO_11BGNAX (WIFI_RB_PROTO_11BGN | WIFI_RB_PROTO_11AX)
 // 'n' for b/g/n, 'x' for b/g/n/ax, 0 for a mask that is neither
 int wifi_proto_choice(uint32_t mask);
+// "off", "min (modem sleep)" or "max (modem sleep)" for the driver's power save number (WIFI_RB_PS_*)
+char const *wifi_ps_name(int ps);
 size_t wifi_proto_reply(wifi_readback_t const *r, char *buf, size_t cap);

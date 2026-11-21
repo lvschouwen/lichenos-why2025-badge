@@ -115,11 +115,12 @@ bool wifi_set_proto(bool n_only, wifi_req_why_t *why);
 // wifi_scan with the reason of this very call (WIFI_REQ_OK when it ran): "a join is in progress", "no C6 link", ...
 bool wifi_scan_why(wifi_ap_t *out, size_t max, size_t *n, wifi_req_why_t *why);
 
-// What `fw wifi stats` shows besides the driver's own answers (#502, file size): the chosen TX power (0 = default) and power
+// What `fw wifi` and `fw wifi stats` show besides the driver's own answers (#502, file size): the chosen TX power (0 = default) and power
 // save (WIFI_RB_PS_*), whether the driver is started, and the roams since boot. No RPC.
 typedef struct {
-    bool     started;
+    bool     started, have_credentials, airplane;
     int      tx_raw, ps_mode;
     uint32_t roams;
+    char     ssid[33]; // the pair in use ("" if none)
 } wifi_tuning_t;
 void wifi_tuning_get(wifi_tuning_t *t);
