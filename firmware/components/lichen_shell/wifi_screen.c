@@ -69,13 +69,23 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
     va_end(ap);
 }
 
-// "Connected to <name>, IP <v4>", and on a second line the global IPv6 address when the network gave one (#497)
+// What an Enterprise login leaves unchecked on the applied network, in words (R8); "" for a PSK network or a checked one
+static char const *eap_trust_note(void) {
+    switch (lichen_sys_wifi_eap_ca()) {
+        case LICHEN_SYS_WIFI_EAP_CA_UNVERIFIED: return "\nUnverified server: no CA file set";
+        case LICHEN_SYS_WIFI_EAP_CA_ONLY: return "\nServer name not checked: any certificate of the CA passes";
+        default: return "";
+    }
+}
+
+// "Connected to <name>, IP <v4>", and on a second line the global IPv6 address when the network gave one (#497); an
+// Enterprise network that is not fully checked says so on a line of its own (#496)
 static void set_connected_status(char const *name, char const *ip) {
     char ip6[40];
     if (lichen_sys_wifi_ip6(ip6, sizeof(ip6))) {
-        set_status("Connected to %s, IP %s\nIPv6 %s", name, ip, ip6);
+        set_status("Connected to %s, IP %s\nIPv6 %s%s", name, ip, ip6, eap_trust_note());
     } else {
-        set_status("Connected to %s, IP %s", name, ip);
+        set_status("Connected to %s, IP %s%s", name, ip, eap_trust_note());
     }
 }
 
@@ -215,6 +225,8 @@ static void run_done(void *fn) {
     ((void (*)(void))fn)();
 }
 
+static bool joining_eap; // the trial being watched is an Enterprise login: its failure says login, not password
+
 static void on_poll(lv_timer_t *timer) {
     (void)timer;
     char tried[33], kept[33], a[140], b[140], ip[16] = "";
@@ -236,6 +248,15 @@ static void on_poll(lv_timer_t *timer) {
             lichen_sys_ui_call(run_done, setup_done, 0); // the screen goes: not from inside its timer
             setup_done = NULL;
         }
+    } else if (st == LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD && joining_eap) {
+        // An Enterprise join: the C6 may not have started it at all (its reason, in words), else the login or the server
+        // certificate was refused, or the network was out of range
+        char const *why = lichen_sys_wifi_eap_fail_text();
+        if (why[0]) {
+            set_status("Couldn't start %s: %s. Pick the network again to retry.", a, why);
+        } else {
+            set_status("Couldn't join %s: wrong login, server not trusted or out of range. Pick the network again to retry.", a);
+        }
     } else if (st == LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD) {
         // Why (it did not accept us: usually the password) and what to do (pick it again), and what is still in use
         set_status(kept[0] ? "Couldn't join %s: wrong password or out of range. Still using %s. Pick the network "
@@ -245,16 +266,26 @@ static void on_poll(lv_timer_t *timer) {
     }
 }
 
+// The request only queues the trial for c6link's own task; the outcome is c6link's, not this screen's
+static void watch_join(bool eap) {
+    joining_eap = eap;
+    set_status("Connecting to %s...", target);
+    if (!poll) {
+        poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
+    }
+}
+
 static void begin_join(char const *pass) {
     if (!lichen_sys_wifi_join(target, pass)) {
         set_status("Could not save the network. Try again.");
         return;
     }
-    // The request only queues the trial for c6link's own task; the outcome is c6link's, not this screen's
-    set_status("Connecting to %s...", target);
-    if (!poll) {
-        poll = lichen_ui_timer_create(on_poll, POLL_MS, NULL);
-    }
+    watch_join(false);
+}
+
+// The Enterprise form handed its login to the Wi-Fi service (wifi_eap_screen.c)
+static void eap_started(void) {
+    watch_join(true);
 }
 
 static void ask_password(char const *initial, bool too_short);
@@ -290,6 +321,10 @@ static void on_pick(void *arg) {
         begin_join("");
         return;
     }
+    if (shown[i].eap) { // an 802.1X network takes a login, not a password
+        wifi_eap_screen_open(target, eap_started);
+        return;
+    }
     ask_password("", false);
 }
 
@@ -320,7 +355,7 @@ static void decorate(lv_obj_t *row, lichen_sys_wifi_ap_t const *ap, bool connect
     lv_obj_t *lock = lv_label_create(box);
     lv_obj_set_style_text_color(lock, lv_color_hex(THEME_DIM), 0);
     lv_obj_set_style_pad_right(lock, 12, 0);
-    lv_label_set_text(lock, ap->open ? "open" : "locked");
+    lv_label_set_text(lock, ap->open ? "open" : ap->eap ? "enterprise" : "locked");
     int bars = lichen_sys_wifi_bars(ap->rssi);
     for (int b = 0; b < 4; b++) {
         lv_obj_t *bar = lv_obj_create(box);

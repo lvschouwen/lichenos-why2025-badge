@@ -11,6 +11,7 @@ typedef struct {
     int8_t rssi;
     bool   open; // no password needed
     uint8_t channel; // 1-13 on 2.4 GHz, 0 when unknown (#159)
+    bool   eap;      // WPA/WPA2/WPA3-Enterprise (#496): the Wi-Fi screen asks for a login, not a password
 } wifi_ap_t;
 
 // Drops empty SSIDs, keeps the strongest entry per SSID, sorts by RSSI (strongest first); returns the new count

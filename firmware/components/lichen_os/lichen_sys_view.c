@@ -190,6 +190,18 @@ bool lichen_sys_wifi_join(char const *ssid, char const *pass) {
     return wifi_set_credentials(ssid, pass);
 }
 
+bool lichen_sys_wifi_join_eap(char const *ssid, lichen_sys_wifi_eap_t const *eap) {
+    return wifi_set_eap_credentials(ssid, (wifi_eap_t const *)eap);
+}
+
+char const *lichen_sys_wifi_eap_fail_text(void) {
+    return wifi_eap_fail_text(wifi_eap_last_fail());
+}
+
+lichen_sys_wifi_eap_ca_t lichen_sys_wifi_eap_ca(void) {
+    return (lichen_sys_wifi_eap_ca_t)wifi_eap_ca();
+}
+
 bool lichen_sys_wifi_forget(char const *ssid) {
     return wifi_forget_network(ssid);
 }

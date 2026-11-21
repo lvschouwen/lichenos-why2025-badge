@@ -47,6 +47,16 @@ int main(void) {
     wifi_ap_t twin2[] = {ap("twin", -70, false), ap("twin", -40, true)};
     CHECK(wifi_list_clean(twin2, 2) == 1 && !twin2[0].open && twin2[0].rssi == -40);
 
+    // #496: an Enterprise network asks for a login; a name shared with a PSK or open AP falls back to the password flow
+    wifi_ap_t ent[] = {ap("camp", -60, false), ap("camp", -40, false), ap("mixed", -50, false), ap("mixed", -70, false),
+                       ap("open", -80, true)};
+    ent[0].eap = ent[1].eap = true;
+    ent[2].eap = true;
+    CHECK(wifi_list_clean(ent, 5) == 3);
+    CHECK(strcmp(ent[0].ssid, "camp") == 0 && ent[0].eap && !ent[0].open);
+    CHECK(strcmp(ent[1].ssid, "mixed") == 0 && !ent[1].eap && !ent[1].open);
+    CHECK(strcmp(ent[2].ssid, "open") == 0 && !ent[2].eap && ent[2].open);
+
     // SSIDs come from the air: control bytes and broken UTF-8 are escaped, valid UTF-8 stays
     char out[64];
     CHECK(wifi_ssid_sanitize("home", out, sizeof(out)) == 4 && strcmp(out, "home") == 0);

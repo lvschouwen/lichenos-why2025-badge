@@ -3,6 +3,7 @@
 #include "esp_eap_client.h"
 #include "esp_wifi.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -64,6 +65,31 @@ static wifi_eap_fail_t rpc(esp_err_t err, wifi_eap_step_t which, bool *touched) 
     return why;
 }
 
+// A server name is on the C6 (an earlier join set one): see wifi_eap_name_plan. A C6 reset loses it (wifi_eap_drv_reset).
+static atomic_bool name_on_c6;
+
+// First thing of a join whose credential has no server name while an earlier one left a name on the C6: Enterprise is
+// switched off, the only call that drops the name (RPC 382 cannot send an empty one), before anything is set again.
+static wifi_eap_fail_t name_drop(wifi_eap_t const *e, bool *touched) {
+    if (wifi_eap_name_plan(e->server[0] != '\0', atomic_load(&name_on_c6)) != WIFI_NAME_DISABLE_FIRST) {
+        return WIFI_EAP_FAIL_NONE;
+    }
+    atomic_store(&name_on_c6, false);
+    return rpc(esp_wifi_sta_enterprise_disable(), WIFI_EAP_STEP_OTHER, touched);
+}
+
+// The server name, after the CA: a name replaces the old one, no name sends nothing (name_drop saw to a stale one)
+static wifi_eap_fail_t name_set(wifi_eap_t const *e, bool *touched) {
+    if (wifi_eap_name_plan(e->server[0] != '\0', atomic_load(&name_on_c6)) != WIFI_NAME_SET) {
+        return WIFI_EAP_FAIL_NONE;
+    }
+    wifi_eap_fail_t why = rpc(esp_eap_client_set_domain_name(e->server), WIFI_EAP_STEP_OTHER, touched);
+    if (why == WIFI_EAP_FAIL_NONE) {
+        atomic_store(&name_on_c6, true);
+    }
+    return why;
+}
+
 static wifi_eap_fail_t creds_send(wifi_eap_t const *e, bool *touched) {
     // An empty outer identity sends the username (a real one is usually "anonymous@realm"): in clear, to any AP
     char const *ident = e->identity[0] ? e->identity : e->username;
@@ -90,6 +116,9 @@ wifi_eap_fail_t wifi_eap_drv_set(wifi_eap_t const *e, wifi_lock_t const *mem, bo
     size_t len = 0;
     wifi_eap_fail_t why = e->ca_path[0] ? ca_read(e->ca_path, mem, &pem, &len) : WIFI_EAP_FAIL_NONE;
     if (why == WIFI_EAP_FAIL_NONE) {
+        why = name_drop(e, touched);
+    }
+    if (why == WIFI_EAP_FAIL_NONE) {
         why = creds_send(e, touched);
     }
     if (why == WIFI_EAP_FAIL_NONE) {
@@ -97,6 +126,9 @@ wifi_eap_fail_t wifi_eap_drv_set(wifi_eap_t const *e, wifi_lock_t const *mem, bo
     }
     if (why == WIFI_EAP_FAIL_NONE) {
         why = ca_send(pem, len);
+    }
+    if (why == WIFI_EAP_FAIL_NONE) {
+        why = name_set(e, touched);
     }
     if (pem) {
         mem->release(pem);
@@ -108,8 +140,13 @@ wifi_eap_fail_t wifi_eap_drv_enable(void) {
     return step(esp_wifi_sta_enterprise_enable(), WIFI_EAP_STEP_OTHER);
 }
 
+void wifi_eap_drv_reset(void) {
+    atomic_store(&name_on_c6, false);
+}
+
 void wifi_eap_drv_clear(void) {
-    esp_wifi_sta_enterprise_disable();
+    esp_wifi_sta_enterprise_disable(); // also drops the server name (esp_eap_client.c: eap_globals_reset)
+    atomic_store(&name_on_c6, false);
     esp_eap_client_clear_password();
     esp_eap_client_clear_username();
     esp_eap_client_clear_identity();

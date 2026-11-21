@@ -252,7 +252,7 @@ reg_status_t reg_p4_wifi_auth_get(reg_entry_t const *e, reg_value_t *out) {
 
 reg_status_t reg_p4_wifi_eap_ca_get(reg_entry_t const *e, reg_value_t *out) {
     (void)e;
-    out->u = (uint32_t)wifi_eap_ca();
+    out->u = wifi_eap_ca_reg(wifi_eap_ca()); // none for "no CA" too: that is what the join warns about
     return REG_OK;
 }
 

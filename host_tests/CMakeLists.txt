@@ -1661,6 +1661,7 @@ set(SYS_VIEW_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_saved.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_analyser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_eap.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_text.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_steps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/log_clean.c
@@ -1683,6 +1684,16 @@ target_include_directories(time_fields_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURC
 target_include_directories(time_fields_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${SYS_VIEW_INCS})
 target_compile_options(time_fields_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME time_fields_test COMMAND time_fields_test)
+
+add_executable(wifi_eap_form_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi_eap_form_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/wifi_eap_form.c
+    ${SYS_VIEW_SRCS}
+)
+target_include_directories(wifi_eap_form_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
+target_include_directories(wifi_eap_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${SYS_VIEW_INCS})
+target_compile_options(wifi_eap_form_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME wifi_eap_form_test COMMAND wifi_eap_form_test)
 
 add_executable(wifi_list_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_list_test.c
@@ -2322,7 +2333,7 @@ add_test(NAME app_page_model_test COMMAND app_page_model_test)
 
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
-    DEPENDS attention_policy_test mesh_hist_test assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test ota_inflate_test backlight_cmd_test backlight_level_test uart_lend_test console_cmd_test lora_proto_test reg_test meshcore_hdr_test lora_link_test lora_irq_test lora_tune_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test restart_gate_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test mesh_trace_test mesh_remote_test mesh_rset_test radio_presets_test mesh_cmd_table_test list_filter_test radio_filter_test radio_confirm_test channel_input_test channel_key_test mesh_chat_test mesh_tile_test mesh_notify_test crash_log_test restart_log_test boot_steps_test r16_hold_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test lora_owner_test nav_test screen_ids_test home_layout_test badge_table_test hold_exit_test remote_ctl_test key_matrix_test tz_table_test clock_check_test clock_keep_test clock_apply_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_saved_test wifi_eap_test wifi_analyser_test wifi_join_test wifi_req_test wifi_text_test wifi_cmd_test setup_state_test mc_first_test ui_keys_test wifi_focus_test ui_overflow_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test ui_text_test shot_blend_test ota_bmp_test ota_rle_test log_ring_test console_model_test psram_pattern_test psram_rotation_test psram_tuning_test psram_speed_test psram_heap_test ui_perf_stats_test mem_fmt_test walk_pace_test dma_low_test mem_window_test bench_calc_test stress_calc_test idle_policy_test lock_combo_test dev_tap_test saver_layout_test station_clock_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test app_slot_test app_ctx_test ui_cb_test gate_book_test gate_app_test display_rot_test display_flip_test display_engine_test reg_disp_engine_test shortcut_test psram_dma_test sd_bounce_test flash_chunk_test calc_eval_test calc_units_test timer_calc_test test_card_layout_test disp_state_test
+    DEPENDS attention_policy_test mesh_hist_test assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test ota_inflate_test backlight_cmd_test backlight_level_test uart_lend_test console_cmd_test lora_proto_test reg_test meshcore_hdr_test lora_link_test lora_irq_test lora_tune_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test restart_gate_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test mesh_trace_test mesh_remote_test mesh_rset_test radio_presets_test mesh_cmd_table_test list_filter_test radio_filter_test radio_confirm_test channel_input_test channel_key_test mesh_chat_test mesh_tile_test mesh_notify_test crash_log_test restart_log_test boot_steps_test r16_hold_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test lora_owner_test nav_test screen_ids_test home_layout_test badge_table_test hold_exit_test remote_ctl_test key_matrix_test tz_table_test clock_check_test clock_keep_test clock_apply_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_saved_test wifi_eap_test wifi_eap_form_test wifi_analyser_test wifi_join_test wifi_req_test wifi_text_test wifi_cmd_test setup_state_test mc_first_test ui_keys_test wifi_focus_test ui_overflow_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test ui_text_test shot_blend_test ota_bmp_test ota_rle_test log_ring_test console_model_test psram_pattern_test psram_rotation_test psram_tuning_test psram_speed_test psram_heap_test ui_perf_stats_test mem_fmt_test walk_pace_test dma_low_test mem_window_test bench_calc_test stress_calc_test idle_policy_test lock_combo_test dev_tap_test saver_layout_test station_clock_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test app_slot_test app_ctx_test ui_cb_test gate_book_test gate_app_test display_rot_test display_flip_test display_engine_test reg_disp_engine_test shortcut_test psram_dma_test sd_bounce_test flash_chunk_test calc_eval_test calc_units_test timer_calc_test test_card_layout_test disp_state_test
     sd_settings_model_test about_dev_test mesh_chat_cmd_test
     lichen_sys_pure_test
     lichen_sys_pure_view_test

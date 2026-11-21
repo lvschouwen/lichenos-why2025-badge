@@ -98,7 +98,24 @@ static void test_boot(void) {
     CHECK(n == 3 && strcmp(text, "red") == 0);
 }
 
+// #496: the shell's Enterprise checks answer what lichen_net's do
+static void test_eap(void) {
+    lichen_sys_wifi_eap_t e = {.method = LICHEN_SYS_WIFI_EAP_TTLS, .phase2 = LICHEN_SYS_WIFI_EAP_P2_PAP};
+    strcpy(e.username, "badge");
+    strcpy(e.password, "pw");
+    CHECK(lichen_sys_wifi_eap_problem(&e) == LICHEN_SYS_WIFI_EAP_PAP_NO_CA);
+    strcpy(e.ca_path, "/storage/ca.pem");
+    CHECK(lichen_sys_wifi_eap_problem(&e) == LICHEN_SYS_WIFI_EAP_PAP_NO_NAME);
+    strcpy(e.server, "radius.camp.example");
+    CHECK(lichen_sys_wifi_eap_problem(&e) == LICHEN_SYS_WIFI_EAP_OK && lichen_sys_wifi_eap_problem_text(LICHEN_SYS_WIFI_EAP_OK)[0] == '\0');
+    CHECK(strstr(lichen_sys_wifi_eap_problem_text(LICHEN_SYS_WIFI_EAP_PAP_NO_NAME), "server name") != NULL);
+    CHECK(lichen_sys_wifi_eap_ca_path_valid("") && lichen_sys_wifi_eap_ca_path_valid("/storage/a.pem") &&
+          !lichen_sys_wifi_eap_ca_path_valid("/etc/a.pem"));
+    CHECK(lichen_sys_wifi_eap_server_valid("") && lichen_sys_wifi_eap_server_valid("a.example") && !lichen_sys_wifi_eap_server_valid("a b"));
+}
+
 int main(void) {
+    test_eap();
     test_clock();
     test_net();
     test_join();

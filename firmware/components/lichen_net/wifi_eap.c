@@ -4,7 +4,7 @@
 
 #define US   '\x1f'
 #define VER0 'E'
-#define VER1 '1'
+#define VER1 '2' // E1 (no server name) is still read
 
 bool wifi_eap_text_valid(char const *s, size_t min, size_t max) {
     if (!s) {
@@ -48,23 +48,71 @@ bool wifi_eap_ca_path_valid(char const *path) {
     return true;
 }
 
+bool wifi_eap_server_valid(char const *name) {
+    if (!name) {
+        return false;
+    }
+    size_t n = 0;
+    for (; name[n]; n++) {
+        char c = name[n];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' ||
+                  c == '_';
+        if (n >= WIFI_EAP_SERVER_MAX || !ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool wifi_eap_pap_without_ca(wifi_eap_t const *e) {
     return e && e->method == WIFI_EAP_TTLS && e->phase2 == WIFI_EAP_P2_PAP && e->ca_path[0] == '\0';
 }
 
+bool wifi_eap_pap_without_name(wifi_eap_t const *e) {
+    return e && e->method == WIFI_EAP_TTLS && e->phase2 == WIFI_EAP_P2_PAP && e->ca_path[0] != '\0' &&
+           e->server[0] == '\0';
+}
+
+wifi_eap_problem_t wifi_eap_problem(wifi_eap_t const *e) {
+    if (!e || e->method > WIFI_EAP_TTLS || e->phase2 > WIFI_EAP_P2_PAP ||
+        (e->method == WIFI_EAP_PEAP && e->phase2 != WIFI_EAP_P2_MSCHAPV2)) { // PEAP-MSCHAPv2 only
+        return WIFI_EAP_BAD_METHOD;
+    }
+    if (!wifi_eap_text_valid(e->identity, 0, WIFI_EAP_IDENTITY_MAX)) {
+        return WIFI_EAP_BAD_IDENTITY;
+    }
+    if (!wifi_eap_text_valid(e->username, 1, WIFI_EAP_USER_MAX)) {
+        return WIFI_EAP_BAD_USER;
+    }
+    if (!wifi_eap_text_valid(e->password, 1, WIFI_EAP_PASS_MAX)) {
+        return WIFI_EAP_BAD_PASSWORD;
+    }
+    if (!wifi_eap_ca_path_valid(e->ca_path)) {
+        return WIFI_EAP_BAD_CA;
+    }
+    if (!wifi_eap_server_valid(e->server)) {
+        return WIFI_EAP_BAD_SERVER;
+    }
+    // PAP sends the password in the clear inside the tunnel: only to a server that was checked, by CA and by name
+    return wifi_eap_pap_without_ca(e) ? WIFI_EAP_PAP_NO_CA : wifi_eap_pap_without_name(e) ? WIFI_EAP_PAP_NO_NAME : WIFI_EAP_OK;
+}
+
+char const *wifi_eap_problem_text(wifi_eap_problem_t p) {
+    switch (p) {
+        case WIFI_EAP_BAD_METHOD: return "PEAP takes MSCHAPv2 only";
+        case WIFI_EAP_BAD_IDENTITY: return "Identity: at most 63 characters, no control characters";
+        case WIFI_EAP_BAD_USER: return "Username: 1 to 63 characters, no control characters";
+        case WIFI_EAP_BAD_PASSWORD: return "Password: 1 to 127 characters";
+        case WIFI_EAP_BAD_CA: return "CA file: /storage/<name>.pem or .crt";
+        case WIFI_EAP_BAD_SERVER: return "Server name: letters, digits, dots and dashes only";
+        case WIFI_EAP_PAP_NO_CA: return "PAP needs a CA certificate";
+        case WIFI_EAP_PAP_NO_NAME: return "PAP needs a server name";
+        default: return "";
+    }
+}
+
 bool wifi_eap_valid(wifi_eap_t const *e) {
-    if (!e || e->method > WIFI_EAP_TTLS || e->phase2 > WIFI_EAP_P2_PAP) {
-        return false;
-    }
-    if (e->method == WIFI_EAP_PEAP && e->phase2 != WIFI_EAP_P2_MSCHAPV2) {
-        return false; // PEAP-MSCHAPv2 only
-    }
-    if (wifi_eap_pap_without_ca(e)) {
-        return false; // PAP sends the password in the clear inside the tunnel: only to a server that was checked
-    }
-    return wifi_eap_text_valid(e->identity, 0, WIFI_EAP_IDENTITY_MAX) &&
-           wifi_eap_text_valid(e->username, 1, WIFI_EAP_USER_MAX) &&
-           wifi_eap_text_valid(e->password, 1, WIFI_EAP_PASS_MAX) && wifi_eap_ca_path_valid(e->ca_path);
+    return wifi_eap_problem(e) == WIFI_EAP_OK;
 }
 
 bool wifi_eap_unverified(wifi_eap_t const *e) {
@@ -87,7 +135,7 @@ size_t wifi_eap_encode(wifi_eap_t const *e, char *out, size_t cap) {
         return 0;
     }
     size_t need = 7 + strlen(e->identity) + 1 + strlen(e->username) + 1 + strlen(e->password) + 1 +
-                  strlen(e->ca_path);
+                  strlen(e->ca_path) + 1 + strlen(e->server);
     if (need + 1 > cap) {
         return 0;
     }
@@ -97,8 +145,9 @@ size_t wifi_eap_encode(wifi_eap_t const *e, char *out, size_t cap) {
     at        = put(out, at, e->identity);
     at        = put(out, at, e->username);
     at        = put(out, at, e->password);
-    strcpy(out + at, e->ca_path);
-    return at + strlen(e->ca_path);
+    at        = put(out, at, e->ca_path);
+    strcpy(out + at, e->server);
+    return at + strlen(e->server);
 }
 
 // Copies the next US-terminated field (or the rest, for the last one) into dst; NULL when it does not fit
@@ -118,7 +167,8 @@ bool wifi_eap_decode(char const *rec, wifi_eap_t *e) {
         return false;
     }
     memset(e, 0, sizeof(*e));
-    if (!rec || rec[0] != VER0 || rec[1] != VER1 || rec[2] != US || rec[4] != US || rec[6] != US) {
+    bool v1 = rec && rec[0] == VER0 && rec[1] == '1';
+    if (!rec || rec[0] != VER0 || (rec[1] != VER1 && !v1) || rec[2] != US || rec[4] != US || rec[6] != US) {
         return false;
     }
     if (rec[3] < '0' || rec[3] > '1' || rec[5] < '0' || rec[5] > '1') {
@@ -130,7 +180,8 @@ bool wifi_eap_decode(char const *rec, wifi_eap_t *e) {
     p = take(p, e->identity, sizeof(e->identity), false);
     p = p ? take(p, e->username, sizeof(e->username), false) : NULL;
     p = p ? take(p, e->password, sizeof(e->password), false) : NULL;
-    p = p ? take(p, e->ca_path, sizeof(e->ca_path), true) : NULL;
+    p = p ? take(p, e->ca_path, sizeof(e->ca_path), v1) : NULL; // E1 ends with the CA, E2 goes on with the name
+    p = p && !v1 ? take(p, e->server, sizeof(e->server), true) : p;
     if (!p || !wifi_eap_valid(e)) {
         wifi_eap_wipe(e);
         return false;
@@ -194,7 +245,23 @@ char const *wifi_eap_fail_text(wifi_eap_fail_t why) {
 }
 
 wifi_eap_ca_state_t wifi_eap_ca_state(wifi_eap_t const *e) {
-    return !e ? WIFI_EAP_CA_NONE : wifi_eap_unverified(e) ? WIFI_EAP_CA_UNVERIFIED : WIFI_EAP_CA_VERIFIED;
+    if (!e) {
+        return WIFI_EAP_CA_NONE;
+    }
+    return wifi_eap_unverified(e) ? WIFI_EAP_CA_UNVERIFIED : e->server[0] ? WIFI_EAP_CA_VERIFIED : WIFI_EAP_CA_CA_ONLY;
+}
+
+unsigned wifi_eap_ca_reg(wifi_eap_ca_state_t s) {
+    return s == WIFI_EAP_CA_VERIFIED ? 1u : s == WIFI_EAP_CA_CA_ONLY ? 2u : 0u;
+}
+
+wifi_name_plan_t wifi_eap_name_plan(bool has_name, bool name_on_c6) {
+    return has_name ? WIFI_NAME_SET : name_on_c6 ? WIFI_NAME_DISABLE_FIRST : WIFI_NAME_NONE;
+}
+
+bool wifi_auth_mode_is_enterprise(int authmode) {
+    wifi_auth_class_t c = wifi_auth_class(authmode, true);
+    return c == WIFI_AUTH_CLASS_WPA_ENT || c == WIFI_AUTH_CLASS_WPA2_ENT || c == WIFI_AUTH_CLASS_WPA3_ENT;
 }
 
 wifi_auth_class_t wifi_auth_class(int authmode, bool known) {
@@ -263,18 +330,34 @@ static bool copy_word(char const *w, size_t n, char *out, size_t cap) {
     return true;
 }
 
+// A word or "-" (none) into an optional field
+static bool copy_opt(char const *w, size_t n, char *out, size_t cap) {
+    return word_is(w, n, "-") || copy_word(w, n, out, cap);
+}
+
+// The seven words and the password line into ssid and e; false when one does not fit
+static bool fill_fields(char const *const w[7], size_t const n[7], char const *pass, char ssid[33], wifi_eap_t *e) {
+    bool ok = copy_word(w[0], n[0], ssid, 33) && copy_opt(w[3], n[3], e->identity, sizeof(e->identity)) &&
+              copy_word(w[4], n[4], e->username, sizeof(e->username)) && copy_opt(w[5], n[5], e->ca_path, sizeof(e->ca_path)) &&
+              copy_opt(w[6], n[6], e->server, sizeof(e->server)) && strlen(pass) < sizeof(e->password);
+    if (ok) {
+        strcpy(e->password, pass);
+    }
+    return ok;
+}
+
 wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t *e) {
     memset(e, 0, sizeof(*e));
     ssid[0] = '\0';
-    char const *p = args, *w[6];
-    size_t      n[6];
-    for (int i = 0; i < 6; i++) {
+    char const *p = args, *w[7];
+    size_t      n[7];
+    for (int i = 0; i < 7; i++) {
         if (!next_word(&p, &w[i], &n[i])) {
             return WIFI_EAP_PARSE_USAGE;
         }
     }
     if (*p == ' ') {
-        p++; // one space separates the password from the CA path; the password is the rest, spaces and all
+        p++; // one space separates the password from the last word; the password is the rest, spaces and all
     }
     bool peap = word_is(w[1], n[1], "peap"), ttls = word_is(w[1], n[1], "ttls");
     bool mschap = word_is(w[2], n[2], "mschapv2"), pap = word_is(w[2], n[2], "pap");
@@ -283,20 +366,16 @@ wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t
     }
     e->method = ttls ? WIFI_EAP_TTLS : WIFI_EAP_PEAP;
     e->phase2 = pap ? WIFI_EAP_P2_PAP : WIFI_EAP_P2_MSCHAPV2;
-    bool ok   = copy_word(w[0], n[0], ssid, 33) && (word_is(w[3], n[3], "-") || copy_word(w[3], n[3], e->identity, sizeof(e->identity))) &&
-              copy_word(w[4], n[4], e->username, sizeof(e->username)) &&
-              (word_is(w[5], n[5], "-") || copy_word(w[5], n[5], e->ca_path, sizeof(e->ca_path))) &&
-              strlen(p) < sizeof(e->password);
-    if (ok) {
-        strcpy(e->password, p);
+    bool ok   = fill_fields(w, n, p, ssid, e);
+    wifi_eap_problem_t why = ok ? wifi_eap_problem(e) : WIFI_EAP_BAD_METHOD;
+    wifi_eap_parse_t   r   = why == WIFI_EAP_OK ? WIFI_EAP_PARSE_OK
+                           : why == WIFI_EAP_PAP_NO_CA ? WIFI_EAP_PARSE_PAP_NO_CA
+                           : why == WIFI_EAP_PAP_NO_NAME ? WIFI_EAP_PARSE_PAP_NO_NAME : WIFI_EAP_PARSE_INVALID;
+    if (ssid[0] == '\0') {
+        r = WIFI_EAP_PARSE_INVALID;
     }
-    if (ok && wifi_eap_pap_without_ca(e)) {
+    if (r != WIFI_EAP_PARSE_OK) {
         wifi_eap_wipe(e);
-        return WIFI_EAP_PARSE_PAP_NO_CA;
     }
-    if (!ok || ssid[0] == '\0' || !wifi_eap_valid(e)) {
-        wifi_eap_wipe(e);
-        return WIFI_EAP_PARSE_INVALID;
-    }
-    return WIFI_EAP_PARSE_OK;
+    return r;
 }

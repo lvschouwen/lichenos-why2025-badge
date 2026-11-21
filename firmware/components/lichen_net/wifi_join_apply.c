@@ -21,6 +21,7 @@ static atomic_int  eap_fail;
 static atomic_int  eap_ca = WIFI_EAP_CA_NONE;
 
 void wifi_apply_reset(void) {
+    wifi_eap_drv_reset();
     atomic_store(&enterprise_on, false);
     atomic_store(&config_bad, false);
 }
@@ -186,18 +187,20 @@ void wifi_apply_console_eap(char const *args, wifi_lock_t const *lock) {
     }
     wifi_eap_parse_t r = wifi_eap_parse_line(args, ssid, e);
     if (r == WIFI_EAP_PARSE_USAGE) {
-        console_reply("wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password> (peap takes mschapv2; - = none; the password is the rest of the line)");
+        console_reply("wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <server-name|-> <password> (peap takes mschapv2; - = none; the password is the rest of the line)");
     } else if (r == WIFI_EAP_PARSE_PAP_NO_CA) {
         console_reply("wifi: PAP needs a CA certificate (give a CA path, or use mschapv2)");
+    } else if (r == WIFI_EAP_PARSE_PAP_NO_NAME) {
+        console_reply("wifi: PAP needs a server name (give the name in the certificate, or use mschapv2)");
     } else if (r == WIFI_EAP_PARSE_INVALID) {
-        console_reply("wifi: invalid field (SSID 1-32, identity 0-63, username 1-63, password 1-127 bytes, CA path /storage/<file>.pem or .crt)");
+        console_reply("wifi: invalid field (SSID 1-32, identity 0-63, username 1-63, password 1-127 bytes, CA path /storage/<file>.pem or .crt, server name letters digits . - _ up to 127)");
     } else {
         wifi_ssid_sanitize(ssid, a, sizeof(a));
         if (!wifi_set_eap_credentials(ssid, e)) {
             console_reply("wifi: could not start (no C6 link or busy)");
         } else {
             console_reply("wifi: trying \"%s\" (Enterprise%s), saved only if it gets an IP within %d s; fw wifi shows the result",
-                          a, wifi_eap_unverified(e) ? ", server not verified: no CA" : "", WIFI_JOIN_TRIAL_MS / 1000);
+                          a, wifi_eap_unverified(e) ? ", server not verified: no CA" : e->server[0] ? "" : ", CA only: no server name", WIFI_JOIN_TRIAL_MS / 1000);
         }
     }
     memset(e, 0, sizeof(*e));
@@ -209,7 +212,9 @@ void wifi_apply_console_status(void) {
     if (ip && wifi_eap_ca() == WIFI_EAP_CA_UNVERIFIED) {
         console_reply("wifi: WARNING unverified server: no CA set, an impostor access point could take the login; with no identity set the username also goes out in clear");
     } else if (ip && wifi_eap_ca() == WIFI_EAP_CA_VERIFIED) {
-        console_reply("wifi: Enterprise, server certificate chain checked against the CA (no server name check)");
+        console_reply("wifi: Enterprise, server certificate chain checked against the CA and the server name");
+    } else if (ip && wifi_eap_ca() == WIFI_EAP_CA_CA_ONLY) {
+        console_reply("wifi: WARNING CA only: any certificate that CA signed is accepted, set a server name");
     }
     wifi_eap_fail_t why = wifi_eap_last_fail();
     if (why != WIFI_EAP_FAIL_NONE) {

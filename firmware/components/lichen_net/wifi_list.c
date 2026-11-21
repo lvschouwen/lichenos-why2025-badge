@@ -25,10 +25,13 @@ size_t wifi_list_clean(wifi_ap_t *aps, size_t n) {
         if (j < kept) {
             // Any secured entry makes the network "locked": an open twin must not skip the password
             bool open = aps[j].open && aps[i].open;
+            // Enterprise only when every twin is: a mixed name falls back to the password flow
+            bool eap = aps[j].eap && aps[i].eap;
             if (aps[i].rssi > aps[j].rssi) {
                 aps[j] = aps[i];
             }
             aps[j].open = open;
+            aps[j].eap  = eap;
         } else {
             aps[kept++] = aps[i];
         }

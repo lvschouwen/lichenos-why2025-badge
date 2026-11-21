@@ -23,6 +23,7 @@ typedef struct {
     int8_t  rssi;
     bool    open;    // no password needed
     uint8_t channel; // 1-13 on 2.4 GHz, 0 when unknown
+    bool    eap;     // Enterprise (802.1X): the screen asks for a login instead of a password (#496)
 } lichen_sys_wifi_ap_t;
 
 typedef enum {
@@ -45,6 +46,44 @@ typedef struct {
     uint8_t head;
 } lichen_sys_wifi_meter_t;
 
+// A WPA2/WPA3-Enterprise login (#496), the shell's copy of lichen_net's wifi_eap_t (asserted equal in
+// lichen_sys_pure_view.c). The password is write-only: nothing here prints it, the caller wipes its copy.
+#define LICHEN_SYS_WIFI_EAP_IDENTITY_MAX 63
+#define LICHEN_SYS_WIFI_EAP_USER_MAX     63
+#define LICHEN_SYS_WIFI_EAP_PASS_MAX     127
+#define LICHEN_SYS_WIFI_EAP_CA_MAX       95
+#define LICHEN_SYS_WIFI_EAP_SERVER_MAX   127
+typedef struct {
+    uint8_t method; // LICHEN_SYS_WIFI_EAP_PEAP / TTLS
+    uint8_t phase2; // LICHEN_SYS_WIFI_EAP_P2_MSCHAPV2 / PAP; PEAP is always MSCHAPv2
+    char    identity[LICHEN_SYS_WIFI_EAP_IDENTITY_MAX + 1];
+    char    username[LICHEN_SYS_WIFI_EAP_USER_MAX + 1];
+    char    password[LICHEN_SYS_WIFI_EAP_PASS_MAX + 1];
+    char    ca_path[LICHEN_SYS_WIFI_EAP_CA_MAX + 1];
+    char    server[LICHEN_SYS_WIFI_EAP_SERVER_MAX + 1];
+} lichen_sys_wifi_eap_t;
+enum { LICHEN_SYS_WIFI_EAP_PEAP = 0, LICHEN_SYS_WIFI_EAP_TTLS = 1 };
+enum { LICHEN_SYS_WIFI_EAP_P2_MSCHAPV2 = 0, LICHEN_SYS_WIFI_EAP_P2_PAP = 1 };
+// The first thing wrong with a login, in the order the screen asks for the fields
+typedef enum {
+    LICHEN_SYS_WIFI_EAP_OK,
+    LICHEN_SYS_WIFI_EAP_BAD_METHOD,
+    LICHEN_SYS_WIFI_EAP_BAD_IDENTITY,
+    LICHEN_SYS_WIFI_EAP_BAD_USER,
+    LICHEN_SYS_WIFI_EAP_BAD_PASSWORD,
+    LICHEN_SYS_WIFI_EAP_BAD_CA,
+    LICHEN_SYS_WIFI_EAP_BAD_SERVER,
+    LICHEN_SYS_WIFI_EAP_PAP_NO_CA,
+    LICHEN_SYS_WIFI_EAP_PAP_NO_NAME,
+} lichen_sys_wifi_eap_problem_t;
+// What the applied login does about the server certificate
+typedef enum {
+    LICHEN_SYS_WIFI_EAP_CA_NONE,       // not an Enterprise network
+    LICHEN_SYS_WIFI_EAP_CA_VERIFIED,   // CA and server name
+    LICHEN_SYS_WIFI_EAP_CA_UNVERIFIED, // no CA: an impostor access point could take the login
+    LICHEN_SYS_WIFI_EAP_CA_ONLY,       // a CA alone: any certificate that CA signed passes
+} lichen_sys_wifi_eap_ca_t;
+
 // The Wi-Fi service's state and credentials, for the status bar, About, Settings and the Wi-Fi screens (#284): quick,
 // never waiting on a lock that may be held for long, except where said.
 // The link has an IP. Any task.
@@ -62,6 +101,13 @@ bool                   lichen_sys_wifi_has_credentials(void);
 bool                   lichen_sys_wifi_rssi(int8_t *out);
 // Saves a network and applies it (Settings > Wi-Fi). Any task.
 bool                   lichen_sys_wifi_join(char const *ssid, char const *pass);
+// Saves an Enterprise network and applies it (#496): a trial join, saved only once it gets an IP; the login is copied, so
+// the caller wipes its own. False when the login is invalid, there is no C6 link or the request could not be queued. Any task.
+bool                   lichen_sys_wifi_join_eap(char const *ssid, lichen_sys_wifi_eap_t const *eap);
+// Why the last Enterprise join did not start ("" when none): a reason in words for the screen. Any task.
+char const            *lichen_sys_wifi_eap_fail_text(void);
+// What the applied configuration does about the server certificate. Any task.
+lichen_sys_wifi_eap_ca_t lichen_sys_wifi_eap_ca(void);
 // Forgets one saved network (#160). Any task.
 bool                   lichen_sys_wifi_forget(char const *ssid);
 // The saved SSIDs only, read under the list lock (#240); SIZE_MAX = busy (#249). Any task.
@@ -86,6 +132,12 @@ int                    lichen_sys_wifi_bars(int8_t rssi);
 int                    lichen_sys_wifi_level_pct(int8_t rssi);
 // SSID 1-32 bytes, password empty (open network) or 8-63 bytes. Pure, any task.
 bool                   lichen_sys_wifi_cred_valid(char const *ssid, char const *pass);
+// The first thing wrong with a login, and the refusal in plain words ("" for OK). Pure, any task.
+lichen_sys_wifi_eap_problem_t lichen_sys_wifi_eap_problem(lichen_sys_wifi_eap_t const *eap);
+char const                   *lichen_sys_wifi_eap_problem_text(lichen_sys_wifi_eap_problem_t p);
+// A CA file path (empty: none) and a server name (empty: none) as a field accepts them. Pure, any task.
+bool                   lichen_sys_wifi_eap_ca_path_valid(char const *path);
+bool                   lichen_sys_wifi_eap_server_valid(char const *name);
 // Counts every change of the saved credentials, so a cached SSID knows to read again. Any task.
 uint32_t               lichen_sys_wifi_cred_generation(void);
 // APs per 2.4 GHz channel (hidden ones too). Pure, any task.

@@ -20,10 +20,10 @@ static char const *const bt_state_names[] = {"idle", "inited", "enabled"};
 static char const *const wifi_ps_names[] = {"none", "min"};
 // wifi_ip6_level_t (lichen_net/wifi_ip6.h): "global" is any preferred address beyond the link, a ULA (fc00::/7) included
 static char const *const wifi_ip6_names[] = {"none", "linklocal", "global"};
-// wifi_auth_class_t and wifi_eap_ca_state_t (lichen_net/wifi_eap.h): same order
+// wifi_auth_class_t (lichen_net/wifi_eap.h): same order; wifi.eap_ca is wifi_eap_ca_reg()
 static char const *const wifi_auth_names[] = {"none", "open", "wep", "wpa", "wpa2", "wpa_wpa2", "wpa3", "wpa2_wpa3",
                                               "wpa_ent", "wpa2_ent", "wpa3_ent", "other"};
-static char const *const wifi_eap_ca_names[] = {"none", "verified", "unverified"};
+static char const *const wifi_eap_ca_names[] = {"none", "verified", "ca_only"};
 // lora_state_t (shared/lora/lora_proto.h)
 static char const *const lora_state_names[] = {"unconfigured", "idle", "rx", "error", "tx"};
 

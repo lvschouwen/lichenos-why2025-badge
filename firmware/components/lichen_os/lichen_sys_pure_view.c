@@ -12,6 +12,7 @@
 #include "log_clean.h"
 #include "mdns_name.h"
 #include "wifi_analyser.h"
+#include "wifi_eap.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
 #include "wifi_saved.h"
@@ -63,6 +64,35 @@ MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, ssid);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, rssi);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, open);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, channel);
+MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, eap);
+_Static_assert(sizeof(lichen_sys_wifi_eap_t) == sizeof(wifi_eap_t), "the gate's Enterprise login follows lichen_net's");
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, method);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, phase2);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, identity);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, username);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, password);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, ca_path);
+MIRROR_FIELD(lichen_sys_wifi_eap_t, wifi_eap_t, server);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_PEAP, WIFI_EAP_PEAP);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_TTLS, WIFI_EAP_TTLS);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_P2_MSCHAPV2, WIFI_EAP_P2_MSCHAPV2);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_P2_PAP, WIFI_EAP_P2_PAP);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_OK, WIFI_EAP_OK);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_METHOD, WIFI_EAP_BAD_METHOD);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_IDENTITY, WIFI_EAP_BAD_IDENTITY);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_USER, WIFI_EAP_BAD_USER);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_PASSWORD, WIFI_EAP_BAD_PASSWORD);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_CA, WIFI_EAP_BAD_CA);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_BAD_SERVER, WIFI_EAP_BAD_SERVER);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_PAP_NO_CA, WIFI_EAP_PAP_NO_CA);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_PAP_NO_NAME, WIFI_EAP_PAP_NO_NAME);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_CA_NONE, WIFI_EAP_CA_NONE);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_CA_VERIFIED, WIFI_EAP_CA_VERIFIED);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_CA_UNVERIFIED, WIFI_EAP_CA_UNVERIFIED);
+MIRROR_ENUM(LICHEN_SYS_WIFI_EAP_CA_ONLY, WIFI_EAP_CA_CA_ONLY);
+_Static_assert(LICHEN_SYS_WIFI_EAP_SERVER_MAX == WIFI_EAP_SERVER_MAX && LICHEN_SYS_WIFI_EAP_CA_MAX == WIFI_EAP_CA_MAX &&
+               LICHEN_SYS_WIFI_EAP_PASS_MAX == WIFI_EAP_PASS_MAX && LICHEN_SYS_WIFI_EAP_USER_MAX == WIFI_EAP_USER_MAX &&
+               LICHEN_SYS_WIFI_EAP_IDENTITY_MAX == WIFI_EAP_IDENTITY_MAX, "the gate's field limits follow lichen_net's");
 _Static_assert(
     LICHEN_SYS_WIFI_AN_CHANNELS == WIFI_AN_CHANNELS && LICHEN_SYS_WIFI_METER_LEN == WIFI_METER_LEN &&
         LICHEN_SYS_WIFI_RSSI_NONE == WIFI_RSSI_NONE && LICHEN_SYS_WIFI_AN_SCAN_GAP_MS == WIFI_AN_SCAN_GAP_MS,
@@ -156,6 +186,22 @@ int lichen_sys_wifi_bars(int8_t rssi) {
 
 int lichen_sys_wifi_level_pct(int8_t rssi) {
     return wifi_level_pct(rssi);
+}
+
+lichen_sys_wifi_eap_problem_t lichen_sys_wifi_eap_problem(lichen_sys_wifi_eap_t const *eap) {
+    return (lichen_sys_wifi_eap_problem_t)wifi_eap_problem((wifi_eap_t const *)eap);
+}
+
+char const *lichen_sys_wifi_eap_problem_text(lichen_sys_wifi_eap_problem_t p) {
+    return wifi_eap_problem_text((wifi_eap_problem_t)p);
+}
+
+bool lichen_sys_wifi_eap_ca_path_valid(char const *path) {
+    return wifi_eap_ca_path_valid(path);
+}
+
+bool lichen_sys_wifi_eap_server_valid(char const *name) {
+    return wifi_eap_server_valid(name);
 }
 
 bool lichen_sys_wifi_cred_valid(char const *ssid, char const *pass) {

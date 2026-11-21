@@ -13,9 +13,10 @@
 #define WIFI_EAP_PASS_MAX     127
 #define WIFI_EAP_CA_MAX       95  // a path, not the PEM itself
 #define WIFI_EAP_CA_DIR       "/storage/"
-// 7 header bytes ("E1", method, phase2 and their separators), 3 separators between the four fields, the fields, the NUL
+#define WIFI_EAP_SERVER_MAX   127 // the server name the certificate must carry (a host name)
+// 7 header bytes ("E2", method, phase2 and their separators), 4 separators between the five fields, the fields, the NUL
 #define WIFI_EAP_BLOB_MAX \
-    (7 + 3 + WIFI_EAP_IDENTITY_MAX + WIFI_EAP_USER_MAX + WIFI_EAP_PASS_MAX + WIFI_EAP_CA_MAX + 1)
+    (7 + 4 + WIFI_EAP_IDENTITY_MAX + WIFI_EAP_USER_MAX + WIFI_EAP_PASS_MAX + WIFI_EAP_CA_MAX + WIFI_EAP_SERVER_MAX + 1)
 
 typedef enum { WIFI_EAP_PEAP = 0, WIFI_EAP_TTLS = 1 } wifi_eap_method_t;
 typedef enum { WIFI_EAP_P2_MSCHAPV2 = 0, WIFI_EAP_P2_PAP = 1 } wifi_eap_phase2_t;
@@ -27,6 +28,7 @@ typedef struct {
     char    username[WIFI_EAP_USER_MAX + 1];
     char    password[WIFI_EAP_PASS_MAX + 1];
     char    ca_path[WIFI_EAP_CA_MAX + 1]; // empty = no CA: connect unverified, and the UI says so
+    char    server[WIFI_EAP_SERVER_MAX + 1]; // empty = no name check (record E1 has none); needs a CA to mean anything
 } wifi_eap_t;
 
 // A text field: no control bytes (< 0x20, 0x7F; the record's separator is one), UTF-8 bytes allowed, length in range
@@ -34,17 +36,41 @@ bool wifi_eap_text_valid(char const *s, size_t min, size_t max);
 // Empty (no CA) or an absolute path under /storage/ ending in .pem or .crt, no empty, "." or ".." segment, no control
 // bytes, at most WIFI_EAP_CA_MAX bytes. Whether the file exists is the join's business.
 bool wifi_eap_ca_path_valid(char const *path);
+// Empty (no name check) or 1-127 bytes of letters, digits, '.', '-' and '_': a host name, matched exactly (a wildcard
+// certificate covers its names) by the C6's TLS. No spaces, no '*', no control bytes.
+bool wifi_eap_server_valid(char const *name);
 // TTLS with the PAP inner method and no CA: PAP puts the cleartext password in the tunnel, so an unverified server (an evil
 // twin) would receive it. wifi_eap_valid refuses it; the UI and console say "PAP needs a CA certificate".
 bool wifi_eap_pap_without_ca(wifi_eap_t const *e);
-// Method and inner method known and allowed together, username 1-63, identity 0-63, password 1-127, CA path valid
+// TTLS-PAP with a CA but no server name: any certificate the CA signed would take the password (#496), so PAP needs the
+// name as well. wifi_eap_valid refuses it ("PAP needs a server name").
+bool wifi_eap_pap_without_name(wifi_eap_t const *e);
+// The first thing wrong with a credential, in the order the fields are asked: what the screen and the console tell
+typedef enum {
+    WIFI_EAP_OK,
+    WIFI_EAP_BAD_METHOD,   // an unknown method or inner method, or PEAP with PAP
+    WIFI_EAP_BAD_IDENTITY, // longer than 63 bytes or holds a control byte
+    WIFI_EAP_BAD_USER,     // empty, longer than 63 bytes or holds a control byte
+    WIFI_EAP_BAD_PASSWORD, // empty, longer than 127 bytes or holds a control byte
+    WIFI_EAP_BAD_CA,       // not an absolute /storage/ path ending in .pem or .crt
+    WIFI_EAP_BAD_SERVER,   // not a host name
+    WIFI_EAP_PAP_NO_CA,    // TTLS-PAP without a CA
+    WIFI_EAP_PAP_NO_NAME,  // TTLS-PAP with a CA and no server name
+} wifi_eap_problem_t;
+wifi_eap_problem_t wifi_eap_problem(wifi_eap_t const *e);
+// The refusal in plain words for the screen and the console (what to do is in it); "" for WIFI_EAP_OK
+char const *wifi_eap_problem_text(wifi_eap_problem_t p);
+// Method and inner method known and allowed together, username 1-63, identity 0-63, password 1-127, CA path valid, server
+// name valid, and PAP only with a CA and a server name: wifi_eap_problem() == WIFI_EAP_OK
 bool wifi_eap_valid(wifi_eap_t const *e);
 // True when the join would not check the server: no CA set (the UI shows "unverified server")
 bool wifi_eap_unverified(wifi_eap_t const *e);
 
-// The record kept as one secret string (the password is in it): "E1" US method US phase2 US identity US username US
-// password US ca_path with US = 0x1F and the digits '0'/'1'. Returns the length without the NUL, 0 for an invalid
-// credential or a cap below the record's size. The leading "E1" is the version: a decode of another one fails.
+// The record kept as one secret string (the password is in it): "E2" US method US phase2 US identity US username US
+// password US ca_path US server with US = 0x1F and the digits '0'/'1'. Returns the length without the NUL, 0 for an
+// invalid credential or a cap below the record's size. The leading "E2" is the version. A decode also takes "E1" (no
+// server field, so an empty name, which a PAP credential cannot have: such a record fails closed and is entered again);
+// any other version fails.
 size_t wifi_eap_encode(wifi_eap_t const *e, char *out, size_t cap);
 // Parses and validates a record; on any failure *e is zeroed and false is returned
 bool   wifi_eap_decode(char const *rec, wifi_eap_t *e);
@@ -77,10 +103,16 @@ wifi_eap_fail_t wifi_eap_config_fail(int err);
 // The reason as the console and the screen word it
 char const *wifi_eap_fail_text(wifi_eap_fail_t why);
 
-// wifi.eap_ca: what the applied configuration does about the server certificate
-typedef enum { WIFI_EAP_CA_NONE, WIFI_EAP_CA_VERIFIED, WIFI_EAP_CA_UNVERIFIED } wifi_eap_ca_state_t;
-// none: the driver is not set for an Enterprise network (e is NULL); else verified with a CA, unverified without
+// What the applied configuration does about the server certificate. NONE: the driver is not set for an Enterprise network
+// (e is NULL). VERIFIED: a CA and a server name. CA_ONLY: a CA alone, so any certificate that CA signed passes.
+// UNVERIFIED: no CA at all (the join warns). The registry's wifi.eap_ca shows UNVERIFIED as none: see wifi_eap_ca_reg.
+typedef enum {
+    WIFI_EAP_CA_NONE, WIFI_EAP_CA_VERIFIED, WIFI_EAP_CA_UNVERIFIED, WIFI_EAP_CA_CA_ONLY
+} wifi_eap_ca_state_t;
 wifi_eap_ca_state_t wifi_eap_ca_state(wifi_eap_t const *e);
+// The registry value of wifi.eap_ca (enum none, verified, ca_only): verified with a CA and a name, ca_only with a CA
+// alone, none otherwise
+unsigned wifi_eap_ca_reg(wifi_eap_ca_state_t s);
 
 // wifi.auth: the applied authmode (wifi_auth_mode_t) as a small enum; known false = not connected
 typedef enum {
@@ -90,6 +122,9 @@ typedef enum {
     WIFI_AUTH_CLASS_COUNT
 } wifi_auth_class_t;
 wifi_auth_class_t wifi_auth_class(int authmode, bool known);
+// The scanned authmode is an Enterprise one (WPA, WPA2 or WPA3-Enterprise): the Wi-Fi screen then asks for the login
+// instead of a password
+bool wifi_auth_mode_is_enterprise(int authmode);
 
 // What applying a pair to the driver does (pure, so the decision is host-tested). is_eap_entry: the saved list says the
 // network is Enterprise; record_ok: its record was read and decoded; pass_is_mark: the pair's password is the
@@ -107,7 +142,17 @@ bool wifi_enterprise_after(bool was_on, bool touched);
 #define WIFI_UNWIND_RESTORE 2u
 unsigned wifi_apply_unwind(bool touched, bool have_prev, bool cfg_set);
 
-// `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <password...>` (the text after
-// "eap "): "-" is an empty identity or no CA; the password is the rest of the line and may hold spaces. ssid gets 33 bytes.
-typedef enum { WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID, WIFI_EAP_PARSE_PAP_NO_CA } wifi_eap_parse_t;
+// What to do about the server name on the C6 before an Enterprise join. The driver has no call that clears it alone (the
+// host side of RPC 382 refuses an empty name), only esp_wifi_sta_enterprise_disable drops it with the rest. So a credential
+// with a name just sets it (it replaces the old one), one without a name sends nothing unless an earlier join left a name
+// on the C6: then Enterprise is switched off first, so the old name cannot make this network fail its check.
+typedef enum { WIFI_NAME_NONE, WIFI_NAME_SET, WIFI_NAME_DISABLE_FIRST } wifi_name_plan_t;
+wifi_name_plan_t wifi_eap_name_plan(bool has_name, bool name_on_c6);
+
+// `fw wifi eap <ssid> <peap|ttls> <mschapv2|pap> <identity|-> <username> <ca-path|-> <server-name|-> <password...>` (the text
+// after "eap "): "-" is an empty identity, no CA or no server name; the password is the rest of the line and may hold
+// spaces. ssid gets 33 bytes.
+typedef enum {
+    WIFI_EAP_PARSE_OK, WIFI_EAP_PARSE_USAGE, WIFI_EAP_PARSE_INVALID, WIFI_EAP_PARSE_PAP_NO_CA, WIFI_EAP_PARSE_PAP_NO_NAME
+} wifi_eap_parse_t;
 wifi_eap_parse_t wifi_eap_parse_line(char const *args, char ssid[33], wifi_eap_t *e);

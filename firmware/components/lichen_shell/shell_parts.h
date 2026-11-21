@@ -106,6 +106,9 @@ lv_obj_t *time_set_build(void);
 
 // wifi_screen.c: Settings > Wi-Fi
 void wifi_screen_open(void);
+// wifi_eap_screen.c: the Enterprise login form for the scanned network ssid (#496), opened from the Wi-Fi screen. started
+// runs (LVGL context) once the join was handed to the Wi-Fi service, so the caller can watch it; never when Esc leaves
+void wifi_eap_screen_open(char const *ssid, void (*started)(void));
 // wifi_analyser_screen.c: Settings > Wi-Fi > Wi-Fi analyser (#159)
 void wifi_analyser_open(void);
 // The same screen as the first-run Wi-Fi step: a Skip row on top; done() runs (LVGL task) after a join or a skip

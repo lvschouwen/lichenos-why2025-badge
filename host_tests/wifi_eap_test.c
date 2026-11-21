@@ -65,13 +65,52 @@ static void validation(void) {
     b.method = WIFI_EAP_TTLS;
     CHECK(!wifi_eap_valid(&b) && wifi_eap_pap_without_ca(&b)); // TTLS-PAP without a CA: refused
     strcpy(b.ca_path, "/storage/ca.pem");
-    CHECK(wifi_eap_valid(&b) && !wifi_eap_pap_without_ca(&b)); // TTLS-PAP with a CA
+    CHECK(!wifi_eap_valid(&b) && !wifi_eap_pap_without_ca(&b) && wifi_eap_pap_without_name(&b)); // a CA alone: no name, refused
+    CHECK(wifi_eap_problem(&b) == WIFI_EAP_PAP_NO_NAME);
+    strcpy(b.server, "radius.camp.example");
+    CHECK(wifi_eap_valid(&b) && !wifi_eap_pap_without_name(&b)); // TTLS-PAP with a CA and a name
+    b.ca_path[0] = '\0';
+    CHECK(!wifi_eap_valid(&b) && wifi_eap_problem(&b) == WIFI_EAP_PAP_NO_CA); // a name without a CA does not make PAP safe
+    b.server[0] = '\0';
+    strcpy(b.ca_path, "/storage/ca.pem");
+    b.phase2 = WIFI_EAP_P2_MSCHAPV2;
+    CHECK(wifi_eap_valid(&b) && !wifi_eap_pap_without_name(&b)); // MSCHAPv2 needs no name
+    b.phase2 = WIFI_EAP_P2_PAP;
     b.ca_path[0] = '\0';
     b.phase2 = WIFI_EAP_P2_MSCHAPV2;
     CHECK(wifi_eap_valid(&b)); // TTLS-MSCHAPv2 without a CA stays allowed (unverified warning)
     b.method = 2;
     CHECK(!wifi_eap_valid(&b));
     CHECK(!wifi_eap_valid(NULL));
+}
+
+static void server_names(void) {
+    CHECK(wifi_eap_server_valid("") && wifi_eap_server_valid("radius.camp-2025.example") && wifi_eap_server_valid("a_b.c"));
+    CHECK(!wifi_eap_server_valid(NULL) && !wifi_eap_server_valid("a b") && !wifi_eap_server_valid("*.camp.example"));
+    CHECK(!wifi_eap_server_valid("r\xc3\xa9") && !wifi_eap_server_valid("a\nb") && !wifi_eap_server_valid("a;b"));
+    char name[WIFI_EAP_SERVER_MAX + 2];
+    memset(name, 'n', sizeof(name));
+    name[WIFI_EAP_SERVER_MAX] = '\0';
+    CHECK(wifi_eap_server_valid(name));
+    name[WIFI_EAP_SERVER_MAX] = 'n';
+    name[WIFI_EAP_SERVER_MAX + 1] = '\0';
+    CHECK(!wifi_eap_server_valid(name)); // 128 bytes
+    wifi_eap_t e = good();
+    strcpy(e.server, "bad name");
+    CHECK(!wifi_eap_valid(&e) && wifi_eap_problem(&e) == WIFI_EAP_BAD_SERVER);
+    // The refusal order follows the fields: method, identity, username, password, CA, server, then the PAP rules
+    e = good();
+    e.username[0] = '\0';
+    e.password[0] = '\0';
+    CHECK(wifi_eap_problem(&e) == WIFI_EAP_BAD_USER);
+    e.username[0] = 'u';
+    CHECK(wifi_eap_problem(&e) == WIFI_EAP_BAD_PASSWORD);
+    strcpy(e.password, "x");
+    strcpy(e.ca_path, "/etc/ca.pem");
+    CHECK(wifi_eap_problem(&e) == WIFI_EAP_BAD_CA && strstr(wifi_eap_problem_text(WIFI_EAP_BAD_CA), "/storage/") != NULL);
+    CHECK(wifi_eap_problem(NULL) == WIFI_EAP_BAD_METHOD && wifi_eap_problem_text(WIFI_EAP_OK)[0] == '\0');
+    CHECK(strstr(wifi_eap_problem_text(WIFI_EAP_PAP_NO_NAME), "server name") != NULL &&
+          strstr(wifi_eap_problem_text(WIFI_EAP_PAP_NO_CA), "CA") != NULL);
 }
 
 static void ca_paths(void) {
@@ -95,11 +134,12 @@ static void record(void) {
     char       rec[WIFI_EAP_BLOB_MAX];
     wifi_eap_t e = good();
     strcpy(e.ca_path, "/storage/ca/camp.pem");
+    strcpy(e.server, "radius.camp.example");
     e.method = WIFI_EAP_TTLS;
     e.phase2 = WIFI_EAP_P2_PAP;
     size_t n = wifi_eap_encode(&e, rec, sizeof(rec));
     CHECK(n == strlen(rec) && n > 0);
-    CHECK(strncmp(rec, "E1\x1f" "1\x1f" "1\x1f", 7) == 0); // version, method, phase2
+    CHECK(strncmp(rec, "E2\x1f" "1\x1f" "1\x1f", 7) == 0); // version, method, phase2
     wifi_eap_t d;
     CHECK(wifi_eap_decode(rec, &d) && memcmp(&d, &e, sizeof(e)) == 0);
 
@@ -115,6 +155,7 @@ static void record(void) {
     strcpy(m.ca_path, "/storage/");
     memset(m.ca_path + 9, 'c', WIFI_EAP_CA_MAX - 9 - 4);
     strcpy(m.ca_path + WIFI_EAP_CA_MAX - 4, ".pem");
+    memset(m.server, 's', WIFI_EAP_SERVER_MAX);
     CHECK(wifi_eap_valid(&m));
     CHECK(wifi_eap_encode(&m, rec, sizeof(rec)) == sizeof(rec) - 1);
     CHECK(wifi_eap_decode(rec, &d) && memcmp(&d, &m, sizeof(m)) == 0);
@@ -125,6 +166,19 @@ static void record(void) {
     CHECK(wifi_eap_encode(&e, rec, sizeof(rec)) > 0 && wifi_eap_decode(rec, &d) && d.identity[0] == '\0' &&
           d.ca_path[0] == '\0');
 
+    CHECK(d.server[0] == '\0');
+
+    // An E1 record (written before the server name existed) still loads, with an empty name
+    char const e1[] = "E1\x1f" "0\x1f" "0\x1f" "anon\x1f" "user\x1f" "pw\x1f" "/storage/ca.pem";
+    CHECK(wifi_eap_decode(e1, &d) && strcmp(d.username, "user") == 0 && strcmp(d.ca_path, "/storage/ca.pem") == 0 &&
+          d.server[0] == '\0' && wifi_eap_ca_state(&d) == WIFI_EAP_CA_CA_ONLY);
+    CHECK(wifi_eap_decode("E1\x1f" "0\x1f" "0\x1f" "\x1f" "user\x1f" "pw\x1f", &d) && d.ca_path[0] == '\0');
+    // An E1 TTLS-PAP record has no name: it fails closed, the network is entered again
+    CHECK(!wifi_eap_decode("E1\x1f" "1\x1f" "1\x1f" "\x1f" "user\x1f" "pw\x1f" "/storage/ca.pem", &d));
+    // E2 with a name and without a CA decodes (MSCHAPv2): the name alone is allowed, it is just not "verified"
+    CHECK(wifi_eap_decode("E2\x1f" "0\x1f" "0\x1f" "\x1f" "user\x1f" "pw\x1f" "\x1f" "radius.camp.example", &d) &&
+          strcmp(d.server, "radius.camp.example") == 0 && wifi_eap_ca_state(&d) == WIFI_EAP_CA_UNVERIFIED);
+
     // An invalid credential is never encoded
     e.username[0] = '\0';
     CHECK(wifi_eap_encode(&e, rec, sizeof(rec)) == 0 && rec[0] == '\0');
@@ -134,7 +188,10 @@ static void decode_rejects(void) {
     wifi_eap_t d;
     char const *const bad[] = {
         "",
-        "E2\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f",           // another version
+        "E3\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f" "\x1f",     // another version
+        "E2\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f" "ca",        // E2 without its server field
+        "E2\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f" "\x1f" "bad name", // a server name with a space
+        "E2\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f" "\x1f" "a\x1f",   // one field too many
         "E1\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw",               // a field missing
         "E1\x1f" "0\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f" "\x1f",    // one field too many
         "E1\x1f" "2\x1f" "0\x1f" "id\x1f" "user\x1f" "pw\x1f",           // unknown method
@@ -260,7 +317,20 @@ static void join_mapping(void) {
     wifi_eap_t e = good();
     CHECK(wifi_eap_ca_state(NULL) == WIFI_EAP_CA_NONE && wifi_eap_ca_state(&e) == WIFI_EAP_CA_UNVERIFIED);
     strcpy(e.ca_path, "/storage/ca.pem");
+    CHECK(wifi_eap_ca_state(&e) == WIFI_EAP_CA_CA_ONLY); // a CA alone: any certificate that CA signed passes
+    strcpy(e.server, "radius.camp.example");
     CHECK(wifi_eap_ca_state(&e) == WIFI_EAP_CA_VERIFIED);
+    e.ca_path[0] = '\0';
+    CHECK(wifi_eap_ca_state(&e) == WIFI_EAP_CA_UNVERIFIED); // a name without a CA is never "verified"
+    // wifi.eap_ca: verified with a CA and a name, ca_only with a CA alone, none otherwise (no CA, or not Enterprise)
+    CHECK(wifi_eap_ca_reg(WIFI_EAP_CA_VERIFIED) == 1 && wifi_eap_ca_reg(WIFI_EAP_CA_CA_ONLY) == 2 &&
+          wifi_eap_ca_reg(WIFI_EAP_CA_UNVERIFIED) == 0 && wifi_eap_ca_reg(WIFI_EAP_CA_NONE) == 0);
+    // The server name on the C6 cannot be cleared alone: a name-less join after a named one switches Enterprise off first
+    CHECK(wifi_eap_name_plan(true, false) == WIFI_NAME_SET && wifi_eap_name_plan(true, true) == WIFI_NAME_SET);
+    CHECK(wifi_eap_name_plan(false, false) == WIFI_NAME_NONE && wifi_eap_name_plan(false, true) == WIFI_NAME_DISABLE_FIRST);
+    CHECK(wifi_auth_mode_is_enterprise(5) && wifi_auth_mode_is_enterprise(10) && wifi_auth_mode_is_enterprise(14) &&
+          wifi_auth_mode_is_enterprise(16) && !wifi_auth_mode_is_enterprise(3) && !wifi_auth_mode_is_enterprise(0) &&
+          !wifi_auth_mode_is_enterprise(7) && !wifi_auth_mode_is_enterprise(99));
 
     char const pem[] = "junk\n-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
     CHECK(wifi_eap_pem_ok(pem, sizeof(pem) - 1) && !wifi_eap_pem_ok(pem, 10) && !wifi_eap_pem_ok(NULL, 100));
@@ -302,33 +372,42 @@ static void apply_plan(void) {
 static void console_line(void) {
     char       ssid[33];
     wifi_eap_t e;
-    CHECK(wifi_eap_parse_line("camp ttls pap anon@camp.example badge42 /storage/ca.pem pass word  x", ssid, &e) == WIFI_EAP_PARSE_OK);
+    CHECK(wifi_eap_parse_line("camp ttls pap anon@camp.example badge42 /storage/ca.pem radius.camp.example pass word  x", ssid, &e) == WIFI_EAP_PARSE_OK);
     CHECK(strcmp(ssid, "camp") == 0 && e.method == WIFI_EAP_TTLS && e.phase2 == WIFI_EAP_P2_PAP &&
           strcmp(e.identity, "anon@camp.example") == 0 && strcmp(e.username, "badge42") == 0 &&
-          strcmp(e.ca_path, "/storage/ca.pem") == 0 && strcmp(e.password, "pass word  x") == 0); // the rest, spaces and all
-    CHECK(wifi_eap_parse_line("camp  peap  mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_OK && e.identity[0] == '\0' &&
-          e.ca_path[0] == '\0' && wifi_eap_unverified(&e) && strcmp(e.password, "secret") == 0);
-    CHECK(wifi_eap_parse_line("camp ttls pap - user - secret", ssid, &e) == WIFI_EAP_PARSE_PAP_NO_CA && e.password[0] == '\0');
-    CHECK(wifi_eap_parse_line("camp ttls mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_OK);
+          strcmp(e.ca_path, "/storage/ca.pem") == 0 && strcmp(e.server, "radius.camp.example") == 0 && strcmp(e.password, "pass word  x") == 0); // the rest, spaces and all
+    CHECK(wifi_eap_parse_line("camp  peap  mschapv2 - user - - secret", ssid, &e) == WIFI_EAP_PARSE_OK && e.identity[0] == '\0' &&
+          e.ca_path[0] == '\0' && e.server[0] == '\0' && wifi_eap_unverified(&e) && strcmp(e.password, "secret") == 0);
+    CHECK(wifi_eap_parse_line("camp ttls pap - user - - secret", ssid, &e) == WIFI_EAP_PARSE_PAP_NO_CA && e.password[0] == '\0');
+    CHECK(wifi_eap_parse_line("camp ttls pap - user - radius.camp.example secret", ssid, &e) == WIFI_EAP_PARSE_PAP_NO_CA);
+    CHECK(wifi_eap_parse_line("camp ttls pap - user /storage/ca.pem - secret", ssid, &e) == WIFI_EAP_PARSE_PAP_NO_NAME &&
+          e.password[0] == '\0'); // the CA alone is not enough for PAP
+    CHECK(wifi_eap_parse_line("camp ttls mschapv2 - user - - secret", ssid, &e) == WIFI_EAP_PARSE_OK);
+    CHECK(wifi_eap_parse_line("camp ttls mschapv2 - user /storage/ca.pem - secret", ssid, &e) == WIFI_EAP_PARSE_OK &&
+          wifi_eap_ca_state(&e) == WIFI_EAP_CA_CA_ONLY);
+    CHECK(wifi_eap_parse_line("camp ttls mschapv2 - user /storage/ca.pem bad*name secret", ssid, &e) == WIFI_EAP_PARSE_INVALID);
+    CHECK(wifi_eap_parse_line("camp ttls pap - user /storage/ca.pem radius.camp.example secret", ssid, &e) == WIFI_EAP_PARSE_OK);
     // A record that breaks the rule (hand-made: the encoder refuses it) does not decode, so the join fails cleanly
-    char const bad[] = "E1\x1f" "1\x1f" "1\x1f" "\x1f" "user\x1fsecret\x1f";
+    char const bad[] = "E2\x1f" "1\x1f" "1\x1f" "\x1f" "user\x1fsecret\x1f";
     CHECK(!wifi_eap_decode(bad, &e));
-    char withca[sizeof(bad) + 20];
-    snprintf(withca, sizeof(withca), "%s/storage/ca.pem", bad);
-    CHECK(wifi_eap_decode(withca, &e)); // the same record with a CA is fine: only the rule rejected it
-    CHECK(wifi_eap_parse_line("camp peap pap - user - secret", ssid, &e) == WIFI_EAP_PARSE_INVALID); // PEAP is MSCHAPv2
-    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user - ", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no password
-    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user", ssid, &e) == WIFI_EAP_PARSE_USAGE);
+    char withca[sizeof(bad) + 60];
+    snprintf(withca, sizeof(withca), "%s/storage/ca.pem\x1f" "radius.camp.example", bad);
+    CHECK(wifi_eap_decode(withca, &e)); // the same record with a CA and a name is fine: only the rule rejected it
+    snprintf(withca, sizeof(withca), "%s/storage/ca.pem\x1f", bad);
+    CHECK(!wifi_eap_decode(withca, &e)); // a CA without the name is still PAP without a name
+    CHECK(wifi_eap_parse_line("camp peap pap - user - - secret", ssid, &e) == WIFI_EAP_PARSE_INVALID); // PEAP is MSCHAPv2
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user - - ", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no password
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user - ", ssid, &e) == WIFI_EAP_PARSE_USAGE);
     CHECK(wifi_eap_parse_line("", ssid, &e) == WIFI_EAP_PARSE_USAGE);
-    CHECK(wifi_eap_parse_line("camp tls mschapv2 - user - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no EAP-TLS
-    CHECK(wifi_eap_parse_line("camp peap chap - user - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE);
-    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user /etc/ca.pem secret", ssid, &e) == WIFI_EAP_PARSE_INVALID);
+    CHECK(wifi_eap_parse_line("camp tls mschapv2 - user - - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE); // no EAP-TLS
+    CHECK(wifi_eap_parse_line("camp peap chap - user - - secret", ssid, &e) == WIFI_EAP_PARSE_USAGE);
+    CHECK(wifi_eap_parse_line("camp peap mschapv2 - user /etc/ca.pem - secret", ssid, &e) == WIFI_EAP_PARSE_INVALID);
     CHECK(strlen(e.password) == 0 && e.username[0] == '\0'); // an invalid line leaves nothing behind
     char longssid[80] = "";
     memset(longssid, 'a', 40);
-    strcpy(longssid + 40, " peap mschapv2 - user - secret");
+    strcpy(longssid + 40, " peap mschapv2 - user - - secret");
     CHECK(wifi_eap_parse_line(longssid, ssid, &e) == WIFI_EAP_PARSE_INVALID);
-    char big[400] = "camp peap mschapv2 - user - ";
+    char big[400] = "camp peap mschapv2 - user - - ";
     memset(big + strlen(big), 'p', 200);
     CHECK(wifi_eap_parse_line(big, ssid, &e) == WIFI_EAP_PARSE_INVALID); // password over 127 bytes
 }
@@ -339,6 +418,7 @@ int main(void) {
     apply_plan();
     console_line();
     validation();
+    server_names();
     ca_paths();
     record();
     decode_rejects();

@@ -3,6 +3,7 @@
 
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "wifi_eap.h"
 #include "wifi_list.h"
 
 #include <stdlib.h>
@@ -40,6 +41,7 @@ bool wifi_scan_drv(SemaphoreHandle_t done, wifi_ap_t *out, size_t max, size_t *n
                     aps[i].ssid[len] = '\0';
                     aps[i].rssi      = recs[i].rssi;
                     aps[i].open      = recs[i].authmode == WIFI_AUTH_OPEN;
+                    aps[i].eap       = wifi_auth_mode_is_enterprise((int)recs[i].authmode);
                     aps[i].channel   = recs[i].primary;
                 }
                 size_t clean = clean_list ? wifi_list_clean(aps, count) : count;
