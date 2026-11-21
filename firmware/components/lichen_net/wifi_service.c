@@ -958,6 +958,7 @@ static void handle_connected(msg_t const *m) {
 }
 
 static void handle_disconnected(int reason, uint32_t now) {
+    bool was_connected = wifi_link_ssid(&link_ap) != NULL;
     wifi_link_down(&link_ap);
     portENTER_CRITICAL(&state_lock);
     first_connect_settled = true;
@@ -969,7 +970,7 @@ static void handle_disconnected(int reason, uint32_t now) {
     if (act == JOIN_ACT_ROLLBACK) {
         rollback();
     } else if (have && atomic_load(&wifi_on)) {
-        wifi_retry_t r = wifi_disconnect_retry(reason);
+        wifi_retry_t r = wifi_disconnect_retry(reason, was_connected);
         // Several saved networks: when this one keeps failing, the next known one in range gets its turn (#160)
         if (r.counts_as_failure && !trying && ++fail_count >= FAILS_PER_ROUND) {
             fail_count = 0;

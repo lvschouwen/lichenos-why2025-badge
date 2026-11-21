@@ -49,7 +49,9 @@ typedef struct {
     bool     cancel_on_connect; // a CONNECTED before the retry is due makes it moot (the roam arrived)
 } wifi_retry_t;
 
-wifi_retry_t wifi_disconnect_retry(int reason);
+// was_connected: the C6 had reported CONNECTED since the last disconnect. A roam reason without a link to roam from is
+// an ordinary failure, so a BTM target that keeps failing still hands over to the next saved network (#160)
+wifi_retry_t wifi_disconnect_retry(int reason, bool was_connected);
 
 // The SSID of the connection the C6 reports (WIFI_EVENT_STA_CONNECTED), tracked on the c6wifi task. Messages are ordered
 // on one queue, so a late GOT_IP of the old connection sees an empty or the old SSID, never the trial's (#15).

@@ -48,9 +48,12 @@ int main(void) {
     // A roam (207, #495): the C6 reconnects by itself, so the P4 neither counts a failure nor retries at once; it only
     // steps in after the fallback. Every other reason keeps the old retry
     CHECK(wifi_reason_is_roam(207) && !wifi_reason_is_roam(8) && !wifi_reason_is_roam(12) && !wifi_reason_is_roam(0));
-    wifi_retry_t r = wifi_disconnect_retry(207);
+    wifi_retry_t r = wifi_disconnect_retry(207, true);
     CHECK(!r.counts_as_failure && r.delay_ms == WIFI_ROAM_FALLBACK_MS && r.cancel_on_connect);
-    r = wifi_disconnect_retry(201);
+    // A 207 with no link to roam from (a roam target that keeps failing) is an ordinary failure
+    r = wifi_disconnect_retry(207, false);
+    CHECK(r.counts_as_failure && r.delay_ms == WIFI_RETRY_MS && !r.cancel_on_connect);
+    r = wifi_disconnect_retry(201, true);
     CHECK(r.counts_as_failure && r.delay_ms == WIFI_RETRY_MS && !r.cancel_on_connect);
     CHECK(WIFI_ROAM_FALLBACK_MS > WIFI_RETRY_MS);
     // A roam while a trial runs decides nothing

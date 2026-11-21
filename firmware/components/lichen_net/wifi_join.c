@@ -25,8 +25,8 @@ bool wifi_reason_is_roam(int reason) {
     return reason == 207;
 }
 
-wifi_retry_t wifi_disconnect_retry(int reason) {
-    if (wifi_reason_is_roam(reason)) {
+wifi_retry_t wifi_disconnect_retry(int reason, bool was_connected) {
+    if (was_connected && wifi_reason_is_roam(reason)) {
         return (wifi_retry_t){.delay_ms = WIFI_ROAM_FALLBACK_MS, .counts_as_failure = false, .cancel_on_connect = true};
     }
     return (wifi_retry_t){.delay_ms = WIFI_RETRY_MS, .counts_as_failure = true, .cancel_on_connect = false};
