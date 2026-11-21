@@ -25,6 +25,11 @@ _Static_assert(sizeof(fail_names) / sizeof(fail_names[0]) == PSRAM_FAIL_KINDS, "
     {.id = (id_), .type = (type_), .flags = REG_F_RO, .name = (name_), .unit = (unit_), .max = (max_),                \
      .get_applied = psram_reg_get}
 
+// psram.want (#501): configured-only, the request of the speed switch, not what the controller runs
+#define PSRAM_CFG(id_, type_, name_, unit_, max_)                                                                      \
+    {.id = (id_), .type = (type_), .flags = REG_F_RO | REG_F_CFG, .name = (name_), .unit = (unit_), .max = (max_),     \
+     .get_applied = psram_reg_get}
+
 static reg_entry_t const rows[] = {
     PSRAM_RO(REG_ID_PSRAM_CLK, REG_T_U32, "psram.clk", "Hz", 0),
     {.id = REG_ID_PSRAM_CLK_SRC, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "psram.clk_src", .min = 0, .max = 3,
@@ -32,7 +37,7 @@ static reg_entry_t const rows[] = {
     PSRAM_RO(REG_ID_PSRAM_SRC_CLK, REG_T_U32, "psram.src_clk", "Hz", 0),
     PSRAM_RO(REG_ID_PSRAM_CORE_DIV, REG_T_U32, "psram.core_div", NULL, 0),
     PSRAM_RO(REG_ID_PSRAM_BUS_DIV, REG_T_U32, "psram.bus_div", NULL, 0),
-    PSRAM_RO(REG_ID_PSRAM_WANT, REG_T_U32, "psram.want", "MHz", 0),
+    PSRAM_CFG(REG_ID_PSRAM_WANT, REG_T_U32, "psram.want", "MHz", 0), // the speed asked for (#501), not read back
     PSRAM_RO(REG_ID_PSRAM_DL_IDX, REG_T_U8, "psram.dl_idx", NULL, 30),
     PSRAM_RO(REG_ID_PSRAM_DL_DATA, REG_T_U8, "psram.dl_data", NULL, 0),
     PSRAM_RO(REG_ID_PSRAM_DL_DQS, REG_T_U8, "psram.dl_dqs", NULL, 0),

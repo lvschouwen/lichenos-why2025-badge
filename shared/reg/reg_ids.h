@@ -22,7 +22,8 @@
 //   0x13 sens.*      sensors (#318); reg_p4_sensors.c
 //   0x14 (misc)      haptics.*, led.*, tz, hold.* (GPIO holds) (#319); reg_p4_misc.c
 //   0x15 settings.*  write status of the settings store (#320); reg_p4_settings.c
-//   0x16-0x1F    reserved for further P4-side domains
+//   0x16 (switches)  radio.*, haptics.*, led.mode, ota.*, ui.*, sens.boot/period, bl.r16 (#501); reg_p4_switch.c
+//   0x17-0x1F    reserved for further P4-side domains
 // Each P4-side domain has its own row file under firmware/components/lichen_os/ and appends its ids here in its block.
 typedef enum {
     // 0x01 backlight: the brightness the C6 drives now, in percent (after its 10-80 % clamp; 0 = off)
@@ -101,6 +102,29 @@ typedef enum {
     // 0x15 settings: the settings service's write failures (#320), RO
     REG_ID_SETTINGS_WRITE_FAIL = 0x1500, // settings.write_fail  U32, RO: failed NVS writes since boot, saturating
     REG_ID_SETTINGS_LAST_ERR   = 0x1501, // settings.last_err    STR, RO: last failure "<key> 0x<esp_err>", key cut to fit 15 chars, no namespace
+
+    // 0x16 the OS switches and the settings it keeps (#501). The radio, haptics, led, ota and ui rows are settable; the
+    // ui.* rows are configured-only (REG_F_CFG): the saved setting, as the shell reads it. sens.* and bl.r16 are RO.
+    REG_ID_RADIO_WIFI      = 0x1600, // radio.wifi       BOOL: the Wi-Fi switch as applied (a hold from the thermal watchdog reads off)
+    REG_ID_RADIO_LORA      = 0x1601, // radio.lora       BOOL: the LoRa switch as applied
+    REG_ID_RADIO_BT        = 0x1602, // radio.bt         BOOL: the Bluetooth switch as applied (no effect until #503)
+    REG_ID_RADIO_AIRPLANE  = 0x1603, // radio.airplane   BOOL: airplane mode
+    REG_ID_HAPTICS_ON      = 0x1604, // haptics.on       BOOL: vibration enabled (saved)
+    REG_ID_HAPTICS_STR     = 0x1605, // haptics.strength ENUM low / medium / high (saved)
+    REG_ID_LED_MODE        = 0x1606, // led.mode         ENUM auto / off / on / blink: the console override, not saved
+    REG_ID_OTA_SERVER      = 0x1607, // ota.server       BOOL: the update server over Wi-Fi (saved)
+    REG_ID_OTA_AUTOOFF     = 0x1608, // ota.autooff      U8 min: its auto-off, 0 = never (saved)
+    REG_ID_UI_SAVER        = 0x1609, // ui.saver         BOOL, CFG: clock screensaver
+    REG_ID_UI_SAVER_STYLE  = 0x160A, // ui.saver_style   ENUM station / digital, CFG
+    REG_ID_UI_LOCK         = 0x160B, // ui.lock          BOOL, CFG: pocket lock
+    REG_ID_UI_IDLE_DIM     = 0x160C, // ui.idle_dim      U8 x10 s, CFG: dim after (0 = never)
+    REG_ID_UI_IDLE_OFF     = 0x160D, // ui.idle_off      U8 x10 s, CFG: screen off after (0 = never)
+    REG_ID_UI_KBD_PULSE    = 0x160E, // ui.kbd_pulse     ENUM off / dms / all, CFG, RO: the message light
+    REG_ID_UI_LAYOUT       = 0x160F, // ui.layout        ENUM tiles / grid, CFG, RO: the home layout
+    REG_ID_SENS_BOOT       = 0x1610, // sens.boot        BOOL, RO: the service starts at boot (`fw sensors boot`)
+    REG_ID_SENS_IMU_PERIOD = 0x1611, // sens.imu_period  U32 ms, RO: IMU sampling period
+    REG_ID_SENS_ENV_PERIOD = 0x1612, // sens.env_period  U32 ms, RO: environment sampling period
+    REG_ID_BL_R16          = 0x1613, // bl.r16           ENUM, RO: R16 bridge detection saved (unknown / fitted / absent)
 
     // 0x13 sens: what the BMI270 and BME690 are configured to, read back from the chips (#318). All RO; the value of an
     // ENUM is the chip's own register code (names in reg_p4_sensors.c); the low byte is sensors_cfg_key_t

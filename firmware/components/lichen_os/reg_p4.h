@@ -15,7 +15,7 @@
 // wifi.txpwr and wifi.bw are TX and change only through `fw wifi tx|bw`; wifi.ps is settable. bt.state is a C6 key.
 // At most this many keys over all domains (21 in the core table with #311, room for ~40 more from wave 2, #312):
 // `fw get` collects the matching ones in an array of this size; reg_p4_check() and the host test pin it
-#define REG_P4_KEYS_MAX 72
+#define REG_P4_KEYS_MAX 100
 // The core table: the keys of domains 0x01-0x10 (bl.*, lora.*, wifi.*, bt.*, c6.*). The P4-side domains 0x11-0x15 live
 // in a row file each (#315), so the wave-2 agents of #312 touch only their own: reg_p4_<domain>.c defines its
 // reg_p4_dom_t below (rows + count; NULL and 0 while empty, C has no zero-length arrays). Reach the whole table only
@@ -35,8 +35,9 @@ extern reg_p4_dom_t const reg_p4_display;  // 0x12 disp.*     reg_p4_display.c
 extern reg_p4_dom_t const reg_p4_sensors;  // 0x13 sens.*     reg_p4_sensors.c
 extern reg_p4_dom_t const reg_p4_misc;     // 0x14 haptics.*, led.*, tz, hold.*   reg_p4_misc.c
 extern reg_p4_dom_t const reg_p4_settings; // 0x15 settings.* reg_p4_settings.c
-// The domains in iteration order: [0] the core table, [i] for i = 1..5 holds ids of domain 0x10 + i
-#define REG_P4_DOMS 6
+extern reg_p4_dom_t const reg_p4_switch;   // 0x16 radio.*, haptics.*, led.mode, ota.*, ui.*, ...   reg_p4_switch.c (#501)
+// The domains in iteration order: [0] the core table, [i] for i = 1..6 holds ids of domain 0x10 + i
+#define REG_P4_DOMS 7
 extern reg_p4_dom_t const *const reg_p4_doms[REG_P4_DOMS];
 
 // Every key of every domain, in table order: its count, the i-th, and the lookups reg_find_id / reg_find_name do on one

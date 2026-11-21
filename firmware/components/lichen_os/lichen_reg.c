@@ -24,6 +24,7 @@
 #include "reg_proxy.h"
 #include "reg_wifi.h"
 #include "sdkconfig.h"
+#include "switch_reg.h"
 #include "ui_service.h"
 #include "wifi_service.h"
 
@@ -143,6 +144,9 @@ static void ask_live(reg_entry_t const *const *es, size_t n, bool *no_link) {
 
 static bool saved_of(reg_entry_t const *e, reg_value_t *v) {
     uint8_t d, k;
+    if (REG_ID_DOMAIN(e->id) == 0x16) {
+        return sw_saved(e->id, e->saved_key, &v->u); // the switches (#501)
+    }
     if (e->id != REG_ID_BL_DISPLAY && e->id != REG_ID_BL_KEYBOARD) {
         return false;
     }
@@ -457,6 +461,12 @@ static void cmd_bl(char const *args) {
     if (atomic_load(&started)) {
         print_rows("bl");
     }
+}
+
+bool lichen_reg_set_u32(char const *name, uint32_t value) {
+    reg_entry_t const *e = reg_p4_find_name(name);
+    reg_value_t        v = {.u = value}, applied;
+    return e && reg_set(e, &v, &applied) == REG_OK;
 }
 
 size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {

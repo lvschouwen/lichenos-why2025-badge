@@ -446,6 +446,8 @@ add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_sensors.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_misc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_settings.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_switch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_switch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_psram.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_sensors.c
@@ -2364,6 +2366,7 @@ add_custom_target(run_tests
     mesh_chat_target_test
     nvs_image_test
     reg_service_test
+    reg_switch_test
     lora_regq_test
     COMMENT "Running all host tests"
 )
@@ -2824,3 +2827,16 @@ target_include_directories(mesh_pw_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_options(mesh_pw_sweep_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(mesh_pw_sweep_test PRIVATE m)
 add_test(NAME mesh_pw_sweep_test COMMAND mesh_pw_sweep_test)
+
+# The registry's switches domain 0x16 (#501): rows, cfg flags, set paths into the owners' setters (recording stubs)
+add_executable(reg_switch_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_switch_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_switch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_switch.c)
+target_include_directories(reg_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(reg_switch_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME reg_switch_test COMMAND reg_switch_test)

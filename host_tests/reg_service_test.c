@@ -136,6 +136,32 @@ static void test_domain_split(void) {
     CHECK(reg_p4_find_id(0xFFFF) == NULL);
 }
 
+// Configured-only keys (#501): the rows whose value is a setting or a request, not a hardware read-back, say so
+static void test_cfg_flag(void) {
+    static char const *const cfg[] = {"disp.cfg_lanes", "disp.cfg_lane_rate", "disp.cfg_phy_mv", "bl.override", "bl.idle",
+                                      "psram.want", "tz.zone", "ui.saver", "ui.lock", "ui.idle_dim", "ui.layout"};
+    static char const *const applied[] = {"disp.pclk", "disp.refresh", "psram.clk", "bl.display", "bl.freq", "radio.wifi",
+                                          "haptics.duty", "settings.write_fail", "sens.imu_period", "bl.r16"};
+    for (size_t i = 0; i < sizeof(cfg) / sizeof(cfg[0]); i++) {
+        reg_entry_t const *e = reg_p4_find_name(cfg[i]);
+        CHECK(e && (e->flags & REG_F_CFG));
+    }
+    for (size_t i = 0; i < sizeof(applied) / sizeof(applied[0]); i++) {
+        reg_entry_t const *e = reg_p4_find_name(applied[i]);
+        CHECK(e && !(e->flags & REG_F_CFG));
+    }
+    // The `fw get` row says so in its last column, ahead of any other note
+    reg_view_t v = {.has_applied = true};
+    char       row[160];
+    reg_cmd_row(reg_p4_find_name("tz.zone"), &v, row, sizeof(row));
+    CHECK(strstr(row, "cfg") != NULL);
+    v.note = RV_STALE;
+    reg_cmd_row(reg_p4_find_name("tz.zone"), &v, row, sizeof(row));
+    CHECK(strstr(row, "cfg, stale") != NULL);
+    reg_cmd_row(reg_p4_find_name("psram.clk"), &v, row, sizeof(row));
+    CHECK(strstr(row, "cfg") == NULL);
+}
+
 static void test_set_guarded(void) {
     char reply[160];
     bl_sets = proxy_gets = 0;
@@ -541,6 +567,7 @@ static void test_cached_read_never_asks_live(void) {
 int main(void) {
     test_table();
     test_domain_split();
+    test_cfg_flag();
     test_set_guarded();
     test_set_rules();
     test_wifi_keys();

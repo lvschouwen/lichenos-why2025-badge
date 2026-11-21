@@ -42,6 +42,7 @@ typedef enum {
 #define REG_F_RO     0x01 // no set through the registry
 #define REG_F_TX     0x02 // changes what the badge transmits: a set answers GUARDED (#307 rule, radio keys)
 #define REG_F_REBOOT 0x04 // a set is saved and applies after a restart; until then applied differs from saved
+#define REG_F_CFG    0x08 // configured-only (#501): the value is the setting or the request, no hardware read-back exists
 
 #define REG_STR_MAX  15
 #define REG_NAME_MAX 23 // longest dotted name, so a console column can be fixed

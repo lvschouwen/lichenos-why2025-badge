@@ -85,8 +85,19 @@ static void age_text(reg_view_t const *v, char *out, size_t cap) {
     }
 }
 
+// The last column: the note, led by "cfg" for a configured-only key (#501: no hardware read-back, the value is the setting)
+static void note_text(reg_entry_t const *e, reg_view_t const *v, char *out, size_t cap) {
+    char const *note = reg_note_text((rv_note_t)v->note);
+    if (!(e->flags & REG_F_CFG)) {
+        snprintf(out, cap, "%s", note);
+    } else {
+        snprintf(out, cap, "%s%s%s", "cfg", *note ? ", " : "", note);
+    }
+}
+
 size_t reg_cmd_row(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t cap) {
-    char saved[REG_STR_MAX + 8], req[REG_STR_MAX + 8], raw[REG_STR_MAX + 8], applied[REG_STR_MAX + 12], age[16];
+    char note[40], age[16];
+    char saved[REG_STR_MAX + 8], req[REG_STR_MAX + 8], raw[REG_STR_MAX + 8], applied[REG_STR_MAX + 12];
     if (!cap) {
         return 0;
     }
@@ -101,9 +112,9 @@ size_t reg_cmd_row(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t 
     // "≈": the chip's own step or clamp, not a mismatch
     snprintf(applied, sizeof(applied), near ? "\xe2\x89\x88%s" : "%s", raw);
     age_text(v, age, sizeof(age));
+    note_text(e, v, note, sizeof(note));
     // Trailing blanks of the unit/age columns are kept short: the note is the last column
-    int n = snprintf(buf, cap, ROW_FMT, e->name, saved, req, applied, e->unit ? e->unit : "", age,
-                     reg_note_text((rv_note_t)v->note));
+    int n = snprintf(buf, cap, ROW_FMT, e->name, saved, req, applied, e->unit ? e->unit : "", age, note);
     size_t len = done(n, cap);
     while (len && buf[len - 1] == ' ') {
         buf[--len] = '\0';

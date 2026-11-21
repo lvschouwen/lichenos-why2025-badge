@@ -43,12 +43,17 @@ static char const *const engine_names[DISPLAY_ENGINE_COUNT] = DISPLAY_ENGINE_NAM
 #define DISP_RO(id_, type_, name_, unit_) \
     {.id = (id_), .type = (type_), .flags = REG_F_RO, .name = (name_), .unit = (unit_), .get_applied = disp_get}
 
+// disp.cfg_*: what display_start() configured (#501), the IDF has no read-back: configured-only
+#define DISP_CFG(id_, type_, name_, unit_)                                                                             \
+    {.id = (id_), .type = (type_), .flags = REG_F_RO | REG_F_CFG, .name = (name_), .unit = (unit_),                   \
+     .get_applied = disp_get}
+
 static reg_entry_t const rows[] = {
     DISP_RO(REG_ID_DISP_PCLK, REG_T_U32, "disp.pclk", "Hz"),
     DISP_RO(REG_ID_DISP_REFRESH, REG_T_U32, "disp.refresh", "dHz"), // tenths of a Hz: 625 = 62.5 Hz (rounded)
-    DISP_RO(REG_ID_DISP_LANES, REG_T_U8, "disp.cfg_lanes", NULL),
-    DISP_RO(REG_ID_DISP_LANE_RATE, REG_T_U32, "disp.cfg_lane_rate", "Mbps"),
-    DISP_RO(REG_ID_DISP_PHY_MV, REG_T_U32, "disp.cfg_phy_mv", "mV"),
+    DISP_CFG(REG_ID_DISP_LANES, REG_T_U8, "disp.cfg_lanes", NULL),
+    DISP_CFG(REG_ID_DISP_LANE_RATE, REG_T_U32, "disp.cfg_lane_rate", "Mbps"),
+    DISP_CFG(REG_ID_DISP_PHY_MV, REG_T_U32, "disp.cfg_phy_mv", "mV"),
     {.id = REG_ID_DISP_ENGINE, .type = REG_T_ENUM, .name = "disp.engine", .max = DISPLAY_ENGINE_COUNT - 1,
      .enum_names = engine_names, .get_applied = disp_engine_get, .set = reg_p4_disp_engine_set},
 };

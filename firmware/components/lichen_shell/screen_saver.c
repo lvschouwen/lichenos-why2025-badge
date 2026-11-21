@@ -452,6 +452,17 @@ static void cmd_lock(char const *args) {
                   screen_lock_active() ? "locked" : "unlocked", LOCK_COMBO_TEXT, (unsigned)LOCK_HOLD_MS);
 }
 
+// The registry's ui.* rows (#501) saved a policy setting: the same re-read as the console and Settings (any task but the
+// LVGL one). Lock off also lifts a lock that is showing, as `fw lock off` does.
+void shell_ui_policy_changed(void) {
+    screen_idle_reload();
+    if (shell_up() && !setting(IDLE_LOCK_KEY, false)) {
+        lichen_sys_ui_lock(0);
+        screen_lock_release();
+        lichen_sys_ui_unlock();
+    }
+}
+
 void screen_saver_init(void) {
     screen_saver_reload();
     console_register("screensaver", SAVER_USAGE " (clock screensaver: setting, or show it now)", cmd_saver);

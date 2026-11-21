@@ -63,6 +63,7 @@
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
+#include "switch_reg.h"
 #include "safe_mode.h"
 #include "safe_mode_policy.h"
 #include "settings_store.h"
@@ -711,6 +712,7 @@ static void start_radio_switches(boot_ctx_t *ctx) {
     (void)ctx;
     lichen_radio_listen(radio_changed);
     lichen_radio_apply_all(); // the saved switches, before Wi-Fi and LoRa start
+    switch_reg_bind_ui(shell_ui_policy_changed);      // `fw set ui.*` re-reads the shell's policy (#501)
     lichen_radio_console_register();
 }
 
@@ -743,7 +745,7 @@ static bool wifi_radio_get(void) {
 }
 
 static bool wifi_radio_set(bool on) {
-    return lichen_radio_set(RADIO_WIFI, on);
+    return lichen_reg_set_u32("radio.wifi", on); // the registry's setter is lichen_radio_set (#501)
 }
 
 // The Wi-Fi saved-list copy lives in PSRAM, owner OS (#249)
@@ -835,7 +837,7 @@ static void start_battery(boot_ctx_t *ctx) {
 
 // "fw lora on|off" (#222): the OS switch saves it, and radio_changed hands it back to lora_set_enabled
 static void lora_switch_requested(bool on) {
-    lichen_radio_set(RADIO_LORA, on);
+    lichen_reg_set_u32("radio.lora", on); // the registry's setter is lichen_radio_set (#501)
 }
 
 static void start_lora(boot_ctx_t *ctx) {

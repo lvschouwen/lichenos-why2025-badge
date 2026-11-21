@@ -31,6 +31,7 @@ void led_set_dnd(bool on);
 void led_set_unread(bool any);
 void led_set_updating(bool on);    // main.c's OTA hooks
 void led_set_override(led_override_t o);
+led_override_t led_override(void); // what `fw led` set (registry led.mode)
 led_pattern_t led_current(void);
 
 #ifdef __cplusplus

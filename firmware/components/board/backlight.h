@@ -52,6 +52,8 @@ typedef void (*backlight_reg_close_fn)(void);
 void backlight_bind_reg_send(backlight_reg_send_fn send, backlight_reg_close_fn close);
 // "fw bl r16" (the registry's fw bl alias calls it): detect R16 and save the result, replies on the console
 void backlight_r16_console(void);
+// The saved detection (r16_fit_t: 0 unknown, 1 fitted, 2 absent) for the registry's bl.r16
+uint8_t backlight_r16_saved(void);
 // Sends the saved levels once and closes the UART again, for the boot screen before the C6 check (the C6 flasher
 // needs the UART driver to itself). A restart leaves the backlight off (see backlight_start()); call this after the
 // first frame is drawn.

@@ -112,6 +112,10 @@ void led_set_override(led_override_t o) {
     }
 }
 
+led_override_t led_override(void) {
+    return (led_override_t)atomic_load(&s_override);
+}
+
 led_pattern_t led_current(void) {
     return (led_pattern_t)atomic_load(&s_pattern);
 }

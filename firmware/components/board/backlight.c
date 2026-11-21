@@ -319,6 +319,10 @@ static void r16_sample_pin(r16_samples_t *s, int i) {
     s->total[i] = R16_SAMPLES;
 }
 
+uint8_t backlight_r16_saved(void) {
+    return (uint8_t)r16_stored();
+}
+
 void backlight_r16_console(void) {
     if (atomic_load(&r16_driving) || atomic_load(&r16_flashing)) {
         console_reply("r16: a C6 flash check is running, not now");
