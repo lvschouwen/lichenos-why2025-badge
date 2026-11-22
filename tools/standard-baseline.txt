@@ -20,7 +20,7 @@ size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	18313
 size	libbootloader_support.a	5944
-size	libc.a	47702
+size	libc.a	53890
 size	libc6link.a	33448
 size	libcrash.a	6305
 size	libcxx.a	872
@@ -96,7 +96,7 @@ size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	39181
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	16455
+size	libfw_console.a	16461
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
@@ -111,17 +111,17 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
 size	liblichen_notify.a	13382
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	80620
+size	liblichen_os.a	86260
 size	liblichen_random.a	63
 size	liblichen_shell.a	196539
 size	liblog.a	2726
-size	liblora.a	36373
+size	liblora.a	36481
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	112015
 size	libmain.a	13709
 size	libmbedtls.a	22
-size	libmesh.a	428092
+size	libmesh.a	428108
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
@@ -131,7 +131,7 @@ size	libpthread.a	1229
 size	libriscv.a	1684
 size	libsdcard.a	10592
 size	libsdmmc.a	24355
-size	libsensors.a	29341
+size	libsensors.a	29501
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634

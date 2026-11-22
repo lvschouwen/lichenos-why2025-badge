@@ -27,7 +27,7 @@ class TableTest(unittest.TestCase):
         self.assertIn("extern void __wrap_b(void);", c)
 
     def test_parse_round_trip(self):
-        t = g.table_text(None, [("a", "a", "x.h")], ["esp_restart"], (1, 2))
+        t = g.table_text([("a", "a", "x.h")], ["esp_restart"], (1, 2))
         self.assertEqual(g.parse_table(t), ((1, 2), {"a": "a"}, ["esp_restart"]))
 
 
