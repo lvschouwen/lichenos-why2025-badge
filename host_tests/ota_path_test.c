@@ -72,6 +72,33 @@ static void test_onair_held(void) {
     CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, false, false) == OTA_HOLD_NONE);
 }
 
+// #528: SD0:[dir.sub]name lands under /sd with the same name rules as FLASH0:
+static void test_sd(void) {
+    char out[96];
+    CHECK(ota_path_to_posix("SD0:doom.wad", out, sizeof(out)) && strcmp(out, "/sd/doom.wad") == 0);
+    CHECK(ota_path_to_posix("SD0:[apps.hello]app.elf", out, sizeof(out)) && strcmp(out, "/sd/apps/hello/app.elf") == 0);
+    CHECK(ota_path_is_sd("SD0:x") && ota_path_is_sd("SD0:[a]x") && !ota_path_is_sd("FLASH0:x") && !ota_path_is_sd("SD1:x"));
+    // The temp file sits next to the target, on the same drive
+    CHECK(ota_temp_to_posix("SD0:doom.wad", out, sizeof(out)) && strcmp(out, "/sd/ota_upload.tmp") == 0);
+    CHECK(ota_temp_to_posix("SD0:[apps.hello]app.elf", out, sizeof(out)) && strcmp(out, "/sd/apps/hello/ota_upload.tmp") == 0);
+    // Refused like on FLASH0:
+    char const *const bad[] = {"SD0:[..]x", "SD0:[a..b]x", "SD0:[.a]x", "SD0:[a.]x", "SD0:[]x", "SD0:", "SD0:[a]", "SD0:.hidden",
+                               "SD0:ota_upload.tmp", "SD0:[a]ota_upload.tmp", "SD0:a/b", "SD0:[a/b]x", "sd0:x", "SD0:x y"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        if (ota_path_to_posix(bad[i], out, sizeof(out)) || ota_temp_to_posix(bad[i], out, sizeof(out))) {
+            printf("FAIL accepted: %s\n", bad[i]);
+            failures++;
+        }
+    }
+    char longp[OTA_PATH_MAX + 16] = "SD0:";
+    memset(longp + 4, 'a', OTA_PATH_MAX); // 4 + OTA_PATH_MAX characters: one drive prefix too many
+    longp[4 + OTA_PATH_MAX] = '\0';
+    CHECK(!ota_path_to_posix(longp, out, sizeof(out)));
+    char big[OTA_PATH_MAX + 16];
+    CHECK(!ota_path_to_posix("SD0:[apps.hello]app.elf", big, 10)); // never a truncated path
+    CHECK(!ota_temp_to_posix("SD0:[apps.hello]app.elf", big, 20));
+}
+
 int main(void) {
     char out[96];
 
@@ -80,8 +107,8 @@ int main(void) {
     CHECK(ota_path_to_posix("FLASH0:lora.toml", out, sizeof(out)) && strcmp(out, "/storage/lora.toml") == 0);
     CHECK(ota_path_to_posix("FLASH0:[A.B]c.txt", out, sizeof(out)) && strcmp(out, "/storage/A/B/c.txt") == 0);
 
-    // Only the flash drive, and nothing that could leave it
-    CHECK(!ota_path_to_posix("SD0:x", out, sizeof(out)));
+    // Only FLASH0: and SD0:, and nothing that could leave them
+    CHECK(!ota_path_to_posix("SD1:x", out, sizeof(out)));
     CHECK(!ota_path_to_posix("FLASH0:[..]x", out, sizeof(out)));
     CHECK(!ota_path_to_posix("FLASH0:[a..b]x", out, sizeof(out)));
     CHECK(!ota_path_to_posix("/etc/x", out, sizeof(out)));
@@ -94,9 +121,10 @@ int main(void) {
     CHECK(ota_temp_to_posix("FLASH0:lora.toml", out, sizeof(out)) && strcmp(out, "/storage/ota_upload.tmp") == 0);
     CHECK(ota_temp_to_posix("FLASH0:[c6]firmware.bin", out, sizeof(out)) &&
           strcmp(out, "/storage/c6/ota_upload.tmp") == 0);
-    CHECK(!ota_temp_to_posix("SD0:x", out, sizeof(out)));
+    CHECK(!ota_temp_to_posix("SD1:x", out, sizeof(out)));
     CHECK(!ota_temp_to_posix("FLASH0:lora.toml", out, 12));
 
+    test_sd();
     test_onair_held();
 
     if (failures) {

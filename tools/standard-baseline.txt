@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	304361
+size	<merged-strings>	304505
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -39,7 +39,7 @@ size	libeh_host_feat_wifi_ext_ent.a	2524
 size	libeh_host_feat_wifi_ext_itwt.a	994
 size	libeh_host_mcu_transport.a	22711
 size	libeh_host_mcu_vserial.a	1040
-size	libeh_host_port_idf.a	6115
+size	libeh_host_port_idf.a	6119
 size	libeh_proto_v2.a	80331
 size	libesp_app_format.a	742
 size	libesp_common.a	1816
@@ -124,7 +124,7 @@ size	libmesh.a	428048
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
-size	libota.a	78320
+size	libota.a	78832
 size	libpsram_guard.a	25357
 size	libpthread.a	1229
 size	libriscv.a	1684

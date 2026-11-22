@@ -12,6 +12,7 @@
 #include "ota_pieces.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
+#include "sdcard.h"
 #include "storage.h"
 
 #include <errno.h>
@@ -22,6 +23,10 @@
 #include <unistd.h>
 
 static char const TAG[] = "ota";
+
+#define SD_WAIT_MS    2000
+#define SD_CLUSTER    32768 // FAT32 on a 32 GB card; the room check rounds a file up to whole clusters
+#define NOT_ALLOWED   "path not allowed: use FLASH0: or SD0: with a plain file name"
 
 // The file's name as the screen shows it: what follows the last ':' or '/'
 char const *ota_display_name(char const *vms) {
@@ -57,12 +62,13 @@ static bool memory_sink(void *ctx, uint8_t const *data, size_t len) {
     return true;
 }
 
-// Create every directory leading up to the file at path (a /storage/... path)
+// Create every directory leading up to the file at path (a /storage/... or /sd/... path)
 static void mkdir_parents(char const *path) {
     char dir[OTA_PATH_MAX + 16];
     snprintf(dir, sizeof(dir), "%s", path);
-    // Start below the mount point: mkdir on /storage itself fails with EINVAL
-    for (char *p = dir + strlen(STORAGE_BASE "/"); *p; p++) {
+    // Start below the mount point (its first segment): mkdir on /storage or /sd itself fails
+    char *root = strchr(dir + 1, '/');
+    for (char *p = root ? root + 1 : dir + strlen(dir); *p; p++) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(dir, 0775) != 0 && errno != EEXIST) {
@@ -82,18 +88,52 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
     return fclose(f) == 0 && ok;
 }
 
-// Room for an upload of size bytes on /storage (#299), else a 507 now instead of a failed write after the transfer.
-// A drive whose free space can't be read is let through: the write reports that.
+// Room for an upload of size bytes on the drive vms names (#299), else a 507 now instead of a failed write after the
+// transfer. A drive whose free space can't be read is let through: the write reports that.
 // body: bytes of a request body not read yet (0: none, or the client waits for 100 Continue), dropped before the reply.
-bool ota_storage_room(int fd, uint64_t size, size_t pre_len, long long body) {
-    uint64_t free_b, total_b;
-    if (!storage_free_bytes(&free_b, &total_b) || ota_file_fits(free_b, size, STORAGE_CLUSTER)) {
+bool ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_len, long long body) {
+    uint64_t free_b = 0, total_b;
+    bool     sd     = ota_path_is_sd(vms);
+    sd_info_t info;
+    if (sd) {
+        sd_info(&info);
+        free_b = info.free_bytes;
+    }
+    if (sd ? !info.free_known : !storage_free_bytes(&free_b, &total_b)) {
+        return true;
+    }
+    if (ota_file_fits(free_b, size, sd ? SD_CLUSTER : STORAGE_CLUSTER)) {
         return true;
     }
     ota_drain_body(fd, pre_len, body);
-    ota_respond(fd, 507, "not enough space on the internal storage: need %llu bytes, %llu free, nothing written",
-                (unsigned long long)size, (unsigned long long)free_b);
+    ota_respond(fd, 507, "not enough space on the %s: need %llu bytes, %llu free, nothing written",
+                sd ? "SD card" : "internal storage", (unsigned long long)size, (unsigned long long)free_b);
     return false;
+}
+
+bool ota_drive_ready(int fd, char const *vms) {
+    if (!ota_path_is_sd(vms) || sd_mounted()) {
+        return true;
+    }
+    ota_respond(fd, 409, "no SD card mounted, nothing written");
+    return false;
+}
+
+// The write and the swap of one upload, under the card's batch lock on SD0: (a card pulled mid-write fails the call).
+// 0 = in place; 1 = the temp file couldn't be written; 2 = the rename failed (err says why)
+static int place_file(char const *path, char const *temp, uint8_t const *data, size_t len, int *err) {
+    mkdir_parents(path);
+    int step = write_file(temp, data, len) ? 0 : 1;
+    // FLASH0: is /storage, LittleFS since #300, and SD0: is FAT: the temp file is on the target's drive, so one rename
+    // replaces the old file (LittleFS atomically; FAT as FatFs does it). A target another task has open stays put.
+    if (step == 0 && rename(temp, path) != 0) {
+        step = 2;
+    }
+    *err = errno;
+    if (step != 0) {
+        unlink(temp);
+    }
+    return step;
 }
 
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
@@ -104,25 +144,28 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         ota_respond(fd, 400, "bad path");
         return false;
     }
-    if (!ota_storage_room(fd, len, 0, 0) || !ota_file_change_begin(fd, path)) {
+    if (!ota_drive_ready(fd, vms) || !ota_storage_room(fd, vms, len, 0, 0) || !ota_file_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
     }
-    mkdir_parents(path);
     // The change stays marked in progress until the rename has landed or failed: "fw onair on" in between must see it
     // (#454). A C6 file's change also stays pending through c6link_bundle_changed.
-    if (!write_file(temp, data, len)) {
+    bool sd = ota_path_is_sd(vms);
+    if (sd && !sd_begin(SD_WAIT_MS)) {
         ota_change_end(false);
-        unlink(temp);
+        ota_respond(fd, 409, "SD card busy or not mounted, nothing written");
+        return false;
+    }
+    int err  = 0;
+    int step = place_file(path, temp, data, len, &err);
+    if (sd) {
+        sd_end(step == 0 ? SD_IO_OK : sd_io_from_errno(err));
+    }
+    ota_change_end(false);
+    if (step == 1) {
         ota_respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;
     }
-    // FLASH0: is /storage, LittleFS since #300: one rename replaces the old file atomically (a cut leaves the old file
-    // or the new one). A target another task has open stays put: esp_littlefs refuses the rename with EBUSY.
-    int moved = rename(temp, path);
-    int err   = errno;
-    ota_change_end(false);
-    if (moved != 0) {
-        unlink(temp);
+    if (step == 2) {
         ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;
     }
@@ -302,7 +345,10 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
         return;
     }
     if (!ota_path_to_posix(req->path, path, sizeof(path))) {
-        ota_respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
+        ota_respond(fd, 403, NOT_ALLOWED);
+        return;
+    }
+    if (!ota_drive_ready(fd, req->path)) {
         return;
     }
     if (req->content_length > FILE_MAX) {
@@ -314,7 +360,7 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
         return;
     }
     // A compressed body's size is known once it is in: ota_finish_file checks that one
-    if (!req->deflate && !ota_storage_room(fd, (uint64_t)req->content_length, pre_len, req->expect_continue ? 0 : req->content_length)) {
+    if (!req->deflate && !ota_storage_room(fd, req->path, (uint64_t)req->content_length, pre_len, req->expect_continue ? 0 : req->content_length)) {
         return;
     }
     // A plain body has its exact size; a compressed one starts from a guess and grows (up to FILE_MAX)
@@ -356,16 +402,25 @@ static void handle_delete(int fd, ota_request_t const *req) {
         return;
     }
     if (!ota_path_to_posix(req->path, path, sizeof(path))) {
-        ota_respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
+        ota_respond(fd, 403, NOT_ALLOWED);
         return;
     }
-    if (!ota_file_change_begin(fd, path)) {
+    if (!ota_drive_ready(fd, req->path) || !ota_file_change_begin(fd, path)) {
+        return;
+    }
+    bool sd = ota_path_is_sd(req->path);
+    if (sd && !sd_begin(SD_WAIT_MS)) {
+        ota_change_end(false);
+        ota_respond(fd, 409, "SD card busy or not mounted, nothing deleted");
         return;
     }
     int gone = unlink(path);
+    int err  = errno;
+    if (sd) {
+        sd_end(gone == 0 || err == ENOENT ? SD_IO_OK : sd_io_from_errno(err));
+    }
     ota_change_end(false);
     if (gone != 0) { // EBUSY: open in another task (esp_littlefs, #300); the file stays (a C6 one's bundle is forgotten)
-        int err = errno;
         ota_respond(fd, err == ENOENT ? 404 : 409, "couldn't delete %s: %s", req->path, strerror(err));
         return;
     }

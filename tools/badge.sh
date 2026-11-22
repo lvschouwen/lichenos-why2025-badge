@@ -72,12 +72,12 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) and reboot into it
                                       (--no-reboot: the badge keeps running the old version until you reboot it,
                                       e.g. ota-reboot; after about 3 min without one it restarts into the new one)
-  ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
+  ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin' or 'SD0:[apps.x]app.elf'
   ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or \$BADGE_ASSETS_BIN) into the assets
                                       partition (fonts) and reboot (--no-reboot: as for ota-firmware)
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
-  ota-rm <host> <badge-path>            delete one file on the badge
+  ota-rm <host> <badge-path>            delete one file on the badge (FLASH0: or SD0:)
   ota-reboot <host>
   log <ip> [--follow]                 print the badge's whole log (all pages; what its console prints, kept in RAM, with
                                       sequence numbers and uptimes); --follow keeps polling every second. Lines printed

@@ -206,7 +206,7 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
     bool stream = req->route == OTA_ROUTE_FIRMWARE;
     staged_reset();
     if (req->route == OTA_ROUTE_FILE &&
-        !ota_storage_room(fd, (uint64_t)req->total_size, *pre_len, req->expect_continue ? 0 : req->content_length)) {
+        !ota_storage_room(fd, req->path, (uint64_t)req->total_size, *pre_len, req->expect_continue ? 0 : req->content_length)) {
         return false;
     }
     if (!stream) {
@@ -363,7 +363,10 @@ static bool piece_refused(int fd, ota_request_t const *req, char *posix, size_t 
         return true;
     }
     if (file && (!req->has_path || !ota_path_to_posix(req->path, posix, posix_cap))) {
-        ota_respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
+        ota_respond(fd, 403, "path not allowed: use FLASH0: or SD0: with a plain file name");
+        return true;
+    }
+    if (file && !ota_drive_ready(fd, req->path)) {
         return true;
     }
     if (file && ota_is_directory(posix)) {

@@ -89,7 +89,9 @@ bool ota_receive_body(int fd, body_t b, char sha_hex[OTA_SHA256_HEX + 1]);
 // ota_upload.c
 char const *ota_display_name(char const *vms);
 bool        ota_is_directory(char const *posix_path);
-bool        ota_storage_room(int fd, uint64_t size, size_t pre_len, long long body);
+bool        ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_len, long long body);
+// 409 and false when vms is on SD0: and no card is mounted (#528)
+bool        ota_drive_ready(int fd, char const *vms);
 bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent);
 bool        ota_finish_assets(int fd, uint8_t const *data, size_t len, long long sent);
 bool ota_install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t handle, size_t len, long long sent);

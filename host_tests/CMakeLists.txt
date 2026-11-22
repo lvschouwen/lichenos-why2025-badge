@@ -715,6 +715,7 @@ add_executable(ota_path_test
 
 target_include_directories(ota_path_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh

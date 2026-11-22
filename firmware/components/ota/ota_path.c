@@ -1,6 +1,7 @@
 #include "ota_path.h"
 
 #include "ota_proto.h"
+#include "sdcard.h"
 #include "storage.h"
 
 #include <stdio.h>
@@ -8,20 +9,26 @@
 #include <string.h>
 #include <strings.h>
 
-#define DRIVE  "FLASH0:"
-#define PREFIX STORAGE_BASE "/"
+#define DRIVE    "FLASH0:"
+#define SD_DRIVE "SD0:"
+
+bool ota_path_is_sd(char const *vms) {
+    return strncmp(vms, SD_DRIVE, strlen(SD_DRIVE)) == 0;
+}
 
 bool ota_path_to_posix(char const *vms, char *out, size_t cap) {
     // ota_path_allowed() checks the syntax: name characters only, no empty directory parts (so no "." or "..")
-    if (strncmp(vms, DRIVE, strlen(DRIVE)) != 0 || !ota_path_allowed(vms)) {
+    if (!ota_path_allowed(vms)) {
         return false;
     }
-    char const *p = vms + strlen(DRIVE);
-    size_t      n = strlen(PREFIX);
+    bool         sd     = ota_path_is_sd(vms);
+    char const  *prefix = sd ? SD_BASE "/" : STORAGE_BASE "/";
+    char const  *p      = vms + strlen(sd ? SD_DRIVE : DRIVE);
+    size_t       n      = strlen(prefix);
     if (n >= cap) {
         return false;
     }
-    memcpy(out, PREFIX, n);
+    memcpy(out, prefix, n);
     if (*p == '[') {
         for (p++; *p != ']'; p++) {
             if (n + 1 >= cap) {
@@ -45,7 +52,7 @@ bool ota_path_to_posix(char const *vms, char *out, size_t cap) {
 
 bool ota_temp_to_posix(char const *vms, char *out, size_t cap) {
     // Map the real target (ota_path_allowed() refuses the temp name itself), then swap its file name
-    char target[OTA_PATH_MAX + sizeof(PREFIX)];
+    char target[OTA_PATH_MAX + sizeof(STORAGE_BASE "/")];
     if (!ota_path_to_posix(vms, target, sizeof(target))) {
         return false;
     }
