@@ -88,14 +88,17 @@ static bool open_source(char const *path, file_src_t *s) {
 }
 
 static void run_elf(char const *path) {
-    if (!sd_begin(2000)) {
+    bool on_sd = sd_elf_on_sd(path); // /storage needs no card
+    if (on_sd && !sd_begin(2000)) {
         console_reply("elf run: card not mounted (or busy)");
         return;
     }
     file_src_t file;
     if (!open_source(path, &file)) {
         int err = errno;
-        sd_end(sd_io_from_errno(err));
+        if (on_sd) {
+            sd_end(sd_io_from_errno(err));
+        }
         console_reply("elf run: cannot open %s (errno %d)", path, err);
         return;
     }
@@ -106,7 +109,9 @@ static void run_elf(char const *path) {
     esp_elf_init(&elf);
     int ret = esp_elf_relocate_source(&elf, &src); // closes the file
     int64_t t1 = esp_timer_get_time();
-    sd_end(ret == 0 ? SD_IO_OK : SD_IO_NEUTRAL); // a bad image says nothing about the card
+    if (on_sd) {
+        sd_end(ret == 0 ? SD_IO_OK : SD_IO_NEUTRAL); // a bad image says nothing about the card
+    }
     if (ret != 0) {
         esp_elf_deinit(&elf);
         console_reply("elf run: load failed (%d)", ret);
@@ -138,6 +143,6 @@ static void cmd_elf(char const *args) {
 
 void sd_apps_console_register(void) {
     esp_elf_register_symbol(k_exports);
-    console_register_dev("elf", "elf run <path>  (a native ELF from /sd: load, run once, unload; #517)", cmd_elf);
+    console_register_dev("elf", "elf run <path>  (a native ELF from /sd or /storage: load, run once, unload; #517)", cmd_elf);
 }
 

@@ -21,6 +21,8 @@ typedef enum {
 
 // "run <path>" -> path (cap bytes with the NUL). *why gets sd_path_check's verdict when it matters.
 sd_elf_args_t sd_elf_parse(char const *args, char *path, size_t cap, sd_path_verdict_t *why);
+// True when the path is on the card (it needs the card's batch lock), false for /storage.
+bool sd_elf_on_sd(char const *path);
 // One word for a refusal.
 char const *sd_elf_args_text(sd_elf_args_t v, sd_path_verdict_t why);
 

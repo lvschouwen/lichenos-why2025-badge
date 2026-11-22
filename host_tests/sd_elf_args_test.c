@@ -25,6 +25,9 @@ static void accepted(void) {
     CHECK(strcmp(path, "/sd/lichen/apps/hello/app.elf") == 0);
     CHECK(parse("run   /sd/x.ELF", path, sizeof(path)) == SD_ELF_ARGS_OK); // extra spaces, FAT is case-blind
     CHECK(strcmp(path, "/sd/x.ELF") == 0);
+    CHECK(parse("run /storage/hello.elf", path, sizeof(path)) == SD_ELF_ARGS_OK); // the bench pushes here over Wi-Fi
+    CHECK(strcmp(path, "/storage/hello.elf") == 0);
+    CHECK(sd_elf_on_sd("/sd/a.elf") && !sd_elf_on_sd("/storage/a.elf"));
 }
 
 static void usage(void) {
@@ -38,7 +41,9 @@ static void usage(void) {
 
 static void refused(void) {
     char path[SD_PATH_MAX + 2];
-    CHECK(parse("run /storage/a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED); // internal storage never runs code
+    CHECK(parse("run /storage/../sd/a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
+    CHECK(parse("run /storagex/a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
+    CHECK(parse("run /storage", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
     CHECK(parse("run /sdx/a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
     CHECK(parse("run /sd/../storage/a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
     CHECK(parse("run a.elf", path, sizeof(path)) == SD_ELF_ARGS_REFUSED);
