@@ -164,6 +164,7 @@ lichen_airplane_get	-	unspecified	lichen_radio.h
 lichen_airplane_set	SYSTEM	unspecified	lichen_radio.h
 lichen_alloc	-	any	lichen_mem.h
 lichen_alloc_aligned	-	any	lichen_mem.h
+lichen_api_compatible	-	unspecified	lichen_manifest.h
 lichen_app_at	SYSTEM	any	lichen_sys_app.h
 lichen_app_by_id	SYSTEM	any	lichen_sys_app.h
 lichen_app_by_name	SYSTEM	any	lichen_sys_app.h
@@ -213,6 +214,8 @@ lichen_label_line	-	lvgl	lichen_ui.h
 lichen_label_line_fit	-	lvgl	lichen_ui.h
 lichen_label_set	-	lvgl	lichen_ui.h
 lichen_label_wrap	-	lvgl	lichen_ui.h
+lichen_manifest_err_text	-	unspecified	lichen_manifest.h
+lichen_manifest_parse	-	unspecified	lichen_manifest.h
 lichen_mem_console_register	SYSTEM	unspecified	lichen_mem.h
 lichen_notify	NOTIFY	unspecified	lichen_notify.h
 lichen_notify_clear_all	SYSTEM	unspecified	notify_os.h
@@ -241,6 +244,7 @@ lichen_notify_to	NOTIFY	unspecified	lichen_notify.h
 lichen_notify_unread	SYSTEM	unspecified	notify_os.h
 lichen_notify_unread_top	NOTIFY	unspecified	lichen_notify.h
 lichen_os_name	-	unspecified	os_name.h
+lichen_os_status_line	-	unspecified	os_name.h
 lichen_os_version_line	-	unspecified	os_name.h
 lichen_page_hint_of	-	lvgl	lichen_ui.h
 lichen_radio_apply_all	SYSTEM	unspecified	lichen_radio.h

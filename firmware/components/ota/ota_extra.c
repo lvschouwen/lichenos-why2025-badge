@@ -309,8 +309,9 @@ static void respond_info(int fd) {
     // The hw object makes the line longer than ota_respond's stack buffer: built in the PSRAM body buffer, which no other
     // request uses while this one is answered (#321)
     char *line = (char *)ota_body_buf;
-    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces%s%s; hw ", esp_app_get_description()->version,
-                          ota_hooks.prepare ? " prepare" : "", room);
+    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces%s%s%s%s; hw ", esp_app_get_description()->version,
+                          ota_hooks.prepare ? " prepare" : "", room, ota_hooks.api_version ? "; api " : "",
+                          ota_hooks.api_version ? ota_hooks.api_version : "");
     n          = n < 0 ? 0 : n > 255 ? 255 : n; // snprintf says what it would have written
     n         += (int)ota_hw_json(ota_hooks.hw_text, line + n, 1024);
     strcpy(line + n, "\n");

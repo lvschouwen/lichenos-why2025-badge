@@ -2892,3 +2892,18 @@ target_include_directories(sd_elf_args_test PRIVATE
 )
 target_compile_options(sd_elf_args_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME sd_elf_args_test COMMAND sd_elf_args_test)
+
+# The SD app manifest parser and the API version check (#521)
+add_executable(lichen_manifest_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/lichen_manifest_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_manifest.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_caps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
+)
+target_include_directories(lichen_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(lichen_manifest_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lichen_manifest_test COMMAND lichen_manifest_test)

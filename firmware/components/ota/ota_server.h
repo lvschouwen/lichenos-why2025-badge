@@ -55,5 +55,8 @@ typedef struct {
     // GET /info (#321): one registry key's cached status text (lichen_reg_cached_text), never waiting on the C6 or I2C;
     // the hw object of the reply. NULL = every value in it is null. The OS binds it (ota sits beside lichen_os).
     size_t (*hw_text)(char const *name, char *buf, size_t cap);
+    // GET /info (#521): the app API version ("1.0") shown as "api 1.0" in the reply, so `fw version` tells it. ota sits
+    // below the gate, so main binds the text. NULL = left out.
+    char const *api_version;
 } ota_hooks_t;
 void ota_server_set_hooks(ota_hooks_t const *hooks); // copied; before ota_server_start

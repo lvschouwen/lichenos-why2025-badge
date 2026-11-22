@@ -75,7 +75,7 @@ static bool about_tile(char *l1, size_t c1, char *l2, size_t c2) {
     snprintf(l1, c1, "%s", lichen_os_version_line(esp_app_get_description()->version, name, sizeof(name)));
     char up[24];
     fmt_uptime(up, sizeof(up));
-    snprintf(l2, c2, "Uptime %s", up);
+    lichen_os_status_line(up, l2, c2);
     return true;
 }
 
