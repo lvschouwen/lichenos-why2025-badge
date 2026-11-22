@@ -17,10 +17,13 @@ typedef enum {
     SD_ELF_ARGS_USAGE,    // not "run <path>"
     SD_ELF_ARGS_REFUSED,  // sd_path_check said no (*why), or the path is not below /sd
     SD_ELF_ARGS_NOT_ELF,  // the name does not end in .elf
+    SD_ELF_ARGS_HELD,     // the on-air hold is on: files the update upload can write must not run (#289, #420)
 } sd_elf_args_t;
 
-// "run <path>" -> path (cap bytes with the NUL). *why gets sd_path_check's verdict when it matters.
-sd_elf_args_t sd_elf_parse(char const *args, char *path, size_t cap, sd_path_verdict_t *why);
+// "run <path>" -> path (cap bytes with the NUL). hold_why: what holds now (console_usb_hold_why), NULL when nothing does;
+// any path is refused while it is set, the way the update server refuses firmware. *why gets sd_path_check's verdict
+// when it matters.
+sd_elf_args_t sd_elf_parse(char const *args, char const *hold_why, char *path, size_t cap, sd_path_verdict_t *why);
 // True when the path is on the card (it needs the card's batch lock), false for /storage.
 bool sd_elf_on_sd(char const *path);
 // One word for a refusal.

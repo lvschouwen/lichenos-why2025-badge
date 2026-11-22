@@ -12,10 +12,13 @@ bool sd_elf_on_sd(char const *path) {
     return strncmp(path, "/sd/", 4) == 0;
 }
 
-sd_elf_args_t sd_elf_parse(char const *args, char *path, size_t cap, sd_path_verdict_t *why) {
+sd_elf_args_t sd_elf_parse(char const *args, char const *hold_why, char *path, size_t cap, sd_path_verdict_t *why) {
     *why = SD_PATH_OK;
     if (!args || strncmp(args, "run ", 4) != 0) {
         return SD_ELF_ARGS_USAGE;
+    }
+    if (hold_why) {
+        return SD_ELF_ARGS_HELD;
     }
     char const *p = args + 4;
     while (*p == ' ') {
@@ -50,6 +53,8 @@ char const *sd_elf_args_text(sd_elf_args_t v, sd_path_verdict_t why) {
         return "usage: elf run <path under /sd or /storage, ending in .elf>";
     case SD_ELF_ARGS_REFUSED:
         return why == SD_PATH_OK ? "only files below /sd or /storage" : sd_path_verdict_text(why);
+    case SD_ELF_ARGS_HELD:
+        return "refused while the on-air hold is on";
     case SD_ELF_ARGS_NOT_ELF:
         return "not an .elf file";
     }

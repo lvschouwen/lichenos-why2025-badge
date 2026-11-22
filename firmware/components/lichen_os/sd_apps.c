@@ -133,9 +133,10 @@ static void run_elf(char const *path) {
 static void cmd_elf(char const *args) {
     char              path[SD_PATH_MAX + 2];
     sd_path_verdict_t why;
-    sd_elf_args_t     v = sd_elf_parse(args, path, sizeof(path), &why);
+    sd_elf_args_t     v = sd_elf_parse(args, console_usb_hold_why(), path, sizeof(path), &why);
     if (v != SD_ELF_ARGS_OK) {
-        console_reply("elf: %s", sd_elf_args_text(v, why));
+        char const *hold = v == SD_ELF_ARGS_HELD ? console_usb_hold_why() : NULL; // may have just cleared: then no tail
+        console_reply("elf: %s%s%s", sd_elf_args_text(v, why), hold ? ": " : "", hold ? hold : "");
         return;
     }
     run_elf(path);
