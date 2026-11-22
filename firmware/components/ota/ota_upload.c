@@ -25,7 +25,6 @@
 static char const TAG[] = "ota";
 
 #define SD_WAIT_MS    2000
-#define SD_CLUSTER    32768 // FAT32 on a 32 GB card; the room check rounds a file up to whole clusters
 #define NOT_ALLOWED   "path not allowed: use FLASH0: or SD0: with a plain file name"
 
 // The file's name as the screen shows it: what follows the last ':' or '/'
@@ -66,16 +65,12 @@ static bool memory_sink(void *ctx, uint8_t const *data, size_t len) {
 static void mkdir_parents(char const *path) {
     char dir[OTA_PATH_MAX + 16];
     snprintf(dir, sizeof(dir), "%s", path);
-    // Start below the mount point (its first segment): mkdir on /storage or /sd itself fails
-    char *root = strchr(dir + 1, '/');
-    for (char *p = root ? root + 1 : dir + strlen(dir); *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            if (mkdir(dir, 0775) != 0 && errno != EEXIST) {
-                ESP_LOGW(TAG, "mkdir %s: %s", dir, strerror(errno));
-            }
-            *p = '/';
+    for (size_t n = ota_path_next_dir(path, 0); n; n = ota_path_next_dir(path, n)) {
+        dir[n] = '\0';
+        if (mkdir(dir, 0775) != 0 && errno != EEXIST) {
+            ESP_LOGW(TAG, "mkdir %s: %s", dir, strerror(errno));
         }
+        dir[n] = '/';
     }
 }
 
@@ -102,7 +97,7 @@ bool ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_len, lo
     if (sd ? !info.free_known : !storage_free_bytes(&free_b, &total_b)) {
         return true;
     }
-    if (ota_file_fits(free_b, size, sd ? SD_CLUSTER : STORAGE_CLUSTER)) {
+    if (ota_file_fits(free_b, size, ota_cluster_bytes(vms))) {
         return true;
     }
     ota_drain_body(fd, pre_len, body);
@@ -112,7 +107,7 @@ bool ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_len, lo
 }
 
 bool ota_drive_ready(int fd, char const *vms) {
-    if (!ota_path_is_sd(vms) || sd_mounted()) {
+    if (!ota_sd_missing(vms, sd_mounted())) {
         return true;
     }
     ota_respond(fd, 409, "no SD card mounted, nothing written");
@@ -120,14 +115,22 @@ bool ota_drive_ready(int fd, char const *vms) {
 }
 
 // The write and the swap of one upload, under the card's batch lock on SD0: (a card pulled mid-write fails the call).
-// 0 = in place; 1 = the temp file couldn't be written; 2 = the rename failed (err says why)
-static int place_file(char const *path, char const *temp, uint8_t const *data, size_t len, int *err) {
+// 0 = in place; 1 = the temp file couldn't be written; 2 = the swap failed (err says why); 3 = the target is a directory.
+// FLASH0: is LittleFS (#300): one rename replaces the old file atomically. SD0: is FAT, whose rename refuses an
+// existing target: the old file is removed first, so there a power cut between the two leaves the data in the temp
+// file (the next upload removes it). A target another task has open stays put on either.
+static int place_file(char const *path, char const *temp, bool sd, uint8_t const *data, size_t len, int *err) {
+    if (ota_is_directory(path)) { // the early check in the handler ran outside the card's lock
+        return 3;
+    }
     mkdir_parents(path);
+    unlink(temp); // left by an upload that was cut
     int step = write_file(temp, data, len) ? 0 : 1;
-    // FLASH0: is /storage, LittleFS since #300, and SD0: is FAT: the temp file is on the target's drive, so one rename
-    // replaces the old file (LittleFS atomically; FAT as FatFs does it). A target another task has open stays put.
     if (step == 0 && rename(temp, path) != 0) {
         step = 2;
+        if (ota_rename_retry(sd, errno) && unlink(path) == 0 && rename(temp, path) == 0) {
+            step = 0;
+        }
     }
     *err = errno;
     if (step != 0) {
@@ -156,11 +159,15 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         return false;
     }
     int err  = 0;
-    int step = place_file(path, temp, data, len, &err);
+    int step = place_file(path, temp, sd, data, len, &err);
     if (sd) {
         sd_end(step == 0 ? SD_IO_OK : sd_io_from_errno(err));
     }
     ota_change_end(false);
+    if (step == 3) {
+        ota_respond(fd, 409, "%s is a directory, nothing written", vms);
+        return false;
+    }
     if (step == 1) {
         ota_respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;

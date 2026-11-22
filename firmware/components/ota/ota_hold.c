@@ -5,6 +5,7 @@
 #include "c6link.h"
 #include "fw_console.h"
 #include "ota_path.h"
+#include "sdcard.h"
 
 #include <string.h>
 
@@ -51,7 +52,8 @@ bool ota_file_change_begin(int fd, char const *posix_path) {
     if (!c6 && !ota_path_onair_held(posix_path)) {
         return true;
     }
-    if (ota_hold_refused(fd, c6 ? OTA_HOLD_C6 : OTA_HOLD_FILE, ota_change_begin())) {
+    bool sd = strncmp(posix_path, SD_BASE "/", strlen(SD_BASE "/")) == 0;
+    if (ota_hold_refused(fd, c6 ? OTA_HOLD_C6 : sd ? OTA_HOLD_SD : OTA_HOLD_FILE, ota_change_begin())) {
         return false;
     }
     if (c6) {

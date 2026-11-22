@@ -4,6 +4,7 @@
 #include "meshcore_app_record.h"
 #include "ota_proto.h"
 
+#include <errno.h>
 #include <stdio.h>
 
 #include <string.h>
@@ -97,6 +98,35 @@ static void test_sd(void) {
     char big[OTA_PATH_MAX + 16];
     CHECK(!ota_path_to_posix("SD0:[apps.hello]app.elf", big, 10)); // never a truncated path
     CHECK(!ota_temp_to_posix("SD0:[apps.hello]app.elf", big, 20));
+    // FAT names are case-blind: the temp name in any case is reserved too
+    CHECK(!ota_path_allowed("SD0:OTA_UPLOAD.TMP") && !ota_path_allowed("FLASH0:[a]Ota_Upload.tmp"));
+}
+
+// #528: the decisions of an upload that need no hardware
+static void test_upload_rules(void) {
+    // The directories mkdir_parents creates: everything between the mount point and the file name
+    size_t n = ota_path_next_dir("/sd/a/b/c.bin", 0);
+    CHECK(n == 5);
+    n = ota_path_next_dir("/sd/a/b/c.bin", n);
+    CHECK(n == 7);
+    CHECK(ota_path_next_dir("/sd/a/b/c.bin", n) == 0);
+    CHECK(ota_path_next_dir("/sd/x", 0) == 0);       // the mount point is never made
+    CHECK(ota_path_next_dir("/storage/x", 0) == 0);
+    CHECK(ota_path_next_dir("/storage/a/x", 0) == 10);
+    CHECK(ota_path_next_dir("/sd", 0) == 0 && ota_path_next_dir("", 0) == 0);
+    // FAT refuses to rename over a file: SD0: retries after removing it, FLASH0: never
+    CHECK(ota_rename_retry(true, EEXIST) && !ota_rename_retry(false, EEXIST) && !ota_rename_retry(true, EBUSY));
+    // The card is needed and missing: 409; FLASH0: never asks
+    CHECK(ota_sd_missing("SD0:x", false) && !ota_sd_missing("SD0:x", true) && !ota_sd_missing("FLASH0:x", false));
+    // The room check rounds up to the drive's allocation unit
+    CHECK(ota_cluster_bytes("SD0:x") > ota_cluster_bytes("FLASH0:x"));
+    CHECK(!ota_file_fits(100000, 40000, ota_cluster_bytes("SD0:x")) && ota_file_fits(100000, 40000, ota_cluster_bytes("FLASH0:x")));
+    // SD0: is held as a whole while the list is on, with its own refusal text
+    CHECK(held_kind("SD0:[lichen.apps.x]app.elf") == OTA_HOLD_FILE && held_kind("SD0:doom.wad") == OTA_HOLD_FILE);
+    char text[200];
+    ota_hold_reply(OTA_HOLD_SD, "the list", text, sizeof(text));
+    CHECK(strstr(text, "SD card") && strstr(text, "the list"));
+    CHECK(ota_path_onair_held("/sd") && ota_path_onair_held("/SD/x"));
 }
 
 int main(void) {
@@ -125,6 +155,7 @@ int main(void) {
     CHECK(!ota_temp_to_posix("FLASH0:lora.toml", out, 12));
 
     test_sd();
+    test_upload_rules();
     test_onair_held();
 
     if (failures) {

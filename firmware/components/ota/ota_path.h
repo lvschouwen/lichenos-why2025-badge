@@ -21,3 +21,15 @@ bool ota_temp_to_posix(char const *vms, char *out, size_t cap);
 // Compared by segment, any case, trailing dots and spaces dropped; "." or ".." anywhere, or a path outside /storage,
 // counts as held (fails closed).
 bool ota_path_onair_held(char const *posix);
+
+// The decisions of an upload that don't need hardware, so the host tests pin them (#528)
+// Offset of the next '/' that ends a directory of a /storage or /sd path, after from (0: start), skipping the mount
+// point itself (mkdir on it fails); 0 when no directory is left. Walk: for (n = next_dir(p, 0); n; n = next_dir(p, n)).
+size_t ota_path_next_dir(char const *posix, size_t from);
+// A rename that fails with err: FAT refuses to replace an existing file (EEXIST), so on SD0: the old file is removed
+// and the rename tried again; LittleFS replaces in the one rename
+bool ota_rename_retry(bool sd, int err);
+// The card is needed and not mounted: the upload is a 409
+bool ota_sd_missing(char const *vms, bool mounted);
+// Allocation unit the room check rounds a file up to on the drive vms names
+size_t ota_cluster_bytes(char const *vms);

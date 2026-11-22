@@ -386,7 +386,7 @@ bool ota_path_allowed(char const *path) {
         p++;
     }
 
-    if (*p == '\0' || *p == '.' || strncmp(p, OTA_TEMP_NAME, strlen(OTA_TEMP_NAME)) == 0) {
+    if (*p == '\0' || *p == '.' || strncasecmp(p, OTA_TEMP_NAME, strlen(OTA_TEMP_NAME)) == 0) {
         return false;
     }
     for (; *p; p++) {
@@ -471,8 +471,9 @@ void ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap) {
         [OTA_HOLD_C6]       = "C6 image change refused (the C6 drives the LoRa radio)",
         [OTA_HOLD_BOOT]     = "firmware written but not booted",
         [OTA_HOLD_FILE]     = "file change refused (radio settings, MeshCore identity or update token)",
+        [OTA_HOLD_SD]       = "SD card change refused (the SD card is held as a whole)",
     };
-    snprintf(out, cap, "%s: %s is on; %s", what[kind <= OTA_HOLD_FILE ? kind : OTA_HOLD_NONE], held, HOLD_OFF_FIRST);
+    snprintf(out, cap, "%s: %s is on; %s", what[kind <= OTA_HOLD_SD ? kind : OTA_HOLD_NONE], held, HOLD_OFF_FIRST);
 }
 
 bool ota_route_needs_token(ota_route_t route) {

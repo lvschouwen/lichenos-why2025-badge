@@ -60,7 +60,7 @@ bool ota_route_stops_apps(ota_route_t route);
 // drives the LoRa radio and is flashed from there at boot, and one of lora.toml, MeshCore's files or the token file
 // (onair_file: ota_path_onair_held, #454), since they set what goes on air, who sends it and the next boot's token.
 // BOOT is the last check before the boot slot switch. Assets, other files and reboot are not held.
-typedef enum { OTA_HOLD_NONE, OTA_HOLD_PREPARE, OTA_HOLD_FIRMWARE, OTA_HOLD_C6, OTA_HOLD_BOOT, OTA_HOLD_FILE } ota_hold_t;
+typedef enum { OTA_HOLD_NONE, OTA_HOLD_PREPARE, OTA_HOLD_FIRMWARE, OTA_HOLD_C6, OTA_HOLD_BOOT, OTA_HOLD_FILE, OTA_HOLD_SD } ota_hold_t;
 ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir, bool onair_file);
 // The refusal's body for kind (not NONE): what was refused, why (held: console_usb_hold_why) and what to do
 void       ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap);

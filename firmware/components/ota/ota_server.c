@@ -138,6 +138,9 @@ __attribute__((noinline)) static bool refused_on_hold(int fd, ota_request_t cons
     if (kind == OTA_HOLD_NONE) {
         return false;
     }
+    if (kind == OTA_HOLD_FILE && ota_path_is_sd(req->path)) {
+        kind = OTA_HOLD_SD; // same refusal, worded for the card (#528)
+    }
     ota_piece_expire(ota_piece_staged_is(req, c6 || file, posix));
     ota_drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
     return ota_hold_refused(fd, kind, why);

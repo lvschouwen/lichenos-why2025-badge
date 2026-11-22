@@ -4,6 +4,7 @@
 #include "sdcard.h"
 #include "storage.h"
 
+#include <errno.h>
 #include <stdio.h>
 
 #include <string.h>
@@ -50,6 +51,37 @@ bool ota_path_to_posix(char const *vms, char *out, size_t cap) {
     return true;
 }
 
+size_t ota_path_next_dir(char const *posix, size_t from) {
+    size_t i;
+    if (from == 0) {
+        char const *root = posix[0] ? strchr(posix + 1, '/') : NULL;
+        if (!root) {
+            return 0;
+        }
+        i = (size_t)(root - posix) + 1;
+    } else {
+        i = from + 1;
+    }
+    for (; posix[i]; i++) {
+        if (posix[i] == '/') {
+            return i;
+        }
+    }
+    return 0;
+}
+
+bool ota_rename_retry(bool sd, int err) {
+    return sd && err == EEXIST;
+}
+
+bool ota_sd_missing(char const *vms, bool mounted) {
+    return ota_path_is_sd(vms) && !mounted;
+}
+
+size_t ota_cluster_bytes(char const *vms) {
+    return ota_path_is_sd(vms) ? 32768 : STORAGE_CLUSTER; // FAT32 on a 32 GB card: the card's real value isn't exported
+}
+
 bool ota_temp_to_posix(char const *vms, char *out, size_t cap) {
     // Map the real target (ota_path_allowed() refuses the temp name itself), then swap its file name
     char target[OTA_PATH_MAX + sizeof(STORAGE_BASE "/")];
@@ -61,6 +93,9 @@ bool ota_temp_to_posix(char const *vms, char *out, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
+// The SD card is held as a whole while the on-air list is on (#528): the card is the user's, a push there is not one
+// of the radio files the list protects, but the USB hold refuses every change the list's owner didn't make. "sd" is
+// named here (ota_path_onair_held) instead of relying on "not /storage" failing closed.
 // The /storage root names the on-air hold covers besides the C6 folder (#454). lora* and ota_* are whole families, the
 // same the Files app protects at the root (files_model.c): lora.toml sets what the radio sends, ota_token.txt the next
 // boot's update token. meshcore is MeshCore's app root (MESHCORE_STORAGE_ROOT, its identity and keys; ota_path_test
@@ -96,6 +131,9 @@ bool ota_path_onair_held(char const *posix) {
         size_t len = strcspn(p, "/");
         if (p[0] == '.' && (len == 1 || (len == 2 && p[1] == '.'))) {
             return true; // "." or "..": where it ends up is not read off the text
+        }
+        if (k == 0 && len == strlen("sd") && strncasecmp(p, "sd", len) == 0) {
+            return true;
         }
         if (k == 0 && !(len == strlen("storage") && strncasecmp(p, "storage", len) == 0)) {
             return true; // ota_path_to_posix only makes /storage paths: anything else is not understood
