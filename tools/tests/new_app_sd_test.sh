@@ -54,6 +54,7 @@ grep -q '^id=demo$' "$t/sdapps/demo/manifest" || bad "manifest id"
 grep -q '^name=Demo app$' "$t/sdapps/demo/manifest" || bad "manifest name"
 grep -Eq '^api=[0-9]+\.[0-9]+$' "$t/sdapps/demo/manifest" || bad "manifest api"
 for k in entry caps internal_ram_kib psram_kib stack_kib; do grep -q "^$k=" "$t/sdapps/demo/manifest" || bad "manifest key $k"; done
+! grep -q '^caps=.*CAP_' "$t/sdapps/demo/manifest" "$t/sdapps/hello/manifest" || bad "caps use the CAP_ prefix (#521 takes bare names: NOTIFY,SD)"
 grep -q 'project(demo)' "$t/sdapps/demo/CMakeLists.txt" || bad "CMake does not name the project"
 grep -rq '@[A-Z_]*@' "$t/sdapps/demo" && bad "an unfilled template slot"
 # Nothing shared was edited: the only new path is sdapps/demo
