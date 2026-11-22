@@ -2879,3 +2879,16 @@ target_include_directories(reg_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(reg_switch_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_switch_test COMMAND reg_switch_test)
+
+# "fw elf run" (#517): which paths the SD ELF loader's developer command accepts
+add_executable(sd_elf_args_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sd_elf_args_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/sd_elf_args.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard/sd_path_policy.c
+)
+target_include_directories(sd_elf_args_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard
+)
+target_compile_options(sd_elf_args_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sd_elf_args_test COMMAND sd_elf_args_test)

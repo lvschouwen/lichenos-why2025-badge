@@ -204,6 +204,12 @@ CONFIG_LV_USE_SNAPSHOT=y
 # Run code and read-only data from PSRAM: flash writes (settings, file pushes, updates) then no longer suspend the
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+
+# Native apps from the SD card (#516): the ELF loader runs them from PSRAM. Its built-in libc and IDF symbol tables stay
+# off: an app resolves only against the table the OS registers (sd_apps.c, #517; the generated one is #519), so what an
+# app can call is the OS's decision and not the loader's 100-odd defaults
+CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
+CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 # IRAM back for code that needs it (#265): the ring buffer's ISR functions (3.4 KB; used only by the UART and USB-serial-
 # JTAG drivers, whose interrupts are not IRAM: flags 0, UART_ISR_IN_IRAM off) and the I2C master ISR (0.9 KB; its
 # interrupt is not IRAM either, I2C_ISR_IRAM_SAFE off) run from flash/PSRAM like the rest of those drivers

@@ -44,7 +44,13 @@
 # app_manage.c (#233): Settings > Apps' data size, Clear data, background switch and crash count for one app, over
 # lichen_api's lichen_sys_data_fs.c (pure, app_data_fs_test.c).
 # stop(reason) (#231, app_stop.c): every app's stop hook with its lifecycle record (lichen_sys_life.h), cooperative.
-idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c" "update_mode.c"
+# Apps from the SD card (#516): the spike's "fw elf run" (#517) is a developer-mode command, so a release build (LICHEN_DEV_COMMANDS
+# off) leaves the glue out, and with it sd_path_policy.c's only user and the loader's code.
+set(dev_srcs)
+if(CONFIG_LICHEN_DEV_COMMANDS)
+    list(APPEND dev_srcs "sd_apps.c" "sd_elf_args.c")
+endif()
+idf_component_register(SRCS ${dev_srcs} "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c" "update_mode.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
@@ -56,7 +62,7 @@ idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_bac
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        LDFRAGMENTS "linker.lf"
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora espressif__elf_loader sdcard)
 
 # Crash attribution (#232, safe_mode.c): every panic passes safe_mode.c on its way to the IDF's handler
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")

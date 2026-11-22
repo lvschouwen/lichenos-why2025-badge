@@ -191,6 +191,20 @@ release_checks() {
     "$repo/tools/check_release_image.sh" release "$bdir/badge_fw.bin"
 }
 
+# The SD-card apps (#516, #517): each sdapps/<name> is a standalone ELF project built with the ELF loader's helper
+# (flags: sdapps/hello/CMakeLists.txt). Output firmware/build/sdapps/<name>/<name>.app.elf. After the P4 build, which
+# fetches the loader component whose CMake helper they use. Only the `elf` target: the project's own firmware link
+# cannot succeed, an app has unresolved OS symbols by design.
+build_sdapps() {
+    local app out
+    for app in "$repo"/sdapps/*/; do
+        app=${app%/}
+        out="$here/build/sdapps/${app##*/}"
+        IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" reconfigure
+        cmake --build "$out" --target elf
+    done
+}
+
 if [ "$building" = 1 ] && [ "$release" = 1 ]; then
     idf.py -C "$here" "${idf_args[@]}" "$@"
     for arg in "$@"; do
@@ -210,6 +224,9 @@ elif [ "$building" = 1 ] && [ "$fp" = 1 ]; then
     exit 3
 elif [ "$building" = 1 ]; then
     idf.py -C "$here" "$@"
+    for arg in "$@"; do
+        case $arg in build|all|app) build_sdapps; break ;; esac
+    done
     # Layers: requires, includes and undefined symbols of every component against tools/layers.conf, ratcheted by
     # tools/layers-baseline.txt (#218; the app boundary of #178 is its L6 profile)
     # The symbol rule needs freshly compiled objects: only commands that compile the app get it

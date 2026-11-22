@@ -18,6 +18,7 @@
 #include "display.h"
 #include "factory_reset.h"
 #include "fw_console.h"
+#include "sd_apps.h"
 #include "fw_slot.h"
 #include "esp_app_desc.h"
 #include "lichen_sys_mem.h"
@@ -708,6 +709,7 @@ static void start_watch(boot_ctx_t *ctx) {
 static void start_sd(boot_ctx_t *ctx) {
     (void)ctx;
     sd_start();
+    sd_apps_console_register(); // "fw elf run" (#517), developer mode only
 }
 
 static void start_radio_switches(boot_ctx_t *ctx) {
