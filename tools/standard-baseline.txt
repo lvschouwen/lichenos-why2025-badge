@@ -14,14 +14,14 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	304617
+size	<merged-strings>	306141
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
 size	libboard.a	18313
-size	libbootloader_support.a	5942
+size	libbootloader_support.a	5944
 size	libc.a	47702
-size	libc6link.a	33356
+size	libc6link.a	33448
 size	libcrash.a	6305
 size	libcxx.a	872
 size	libefuse.a	2173
@@ -37,7 +37,7 @@ size	libeh_host_feat_system.a	1192
 size	libeh_host_feat_wifi.a	14178
 size	libeh_host_feat_wifi_ext_ent.a	2524
 size	libeh_host_feat_wifi_ext_itwt.a	994
-size	libeh_host_mcu_transport.a	22711
+size	libeh_host_mcu_transport.a	22719
 size	libeh_host_mcu_vserial.a	1040
 size	libeh_host_port_idf.a	6119
 size	libeh_proto_v2.a	80331
@@ -72,14 +72,14 @@ size	libesp_hal_touch_sens.a	918
 size	libesp_hal_uart.a	1508
 size	libesp_hal_wdt.a	300
 size	libesp_hosted_compat.a	12
-size	libesp_hw_support.a	60035
+size	libesp_hw_support.a	59949
 size	libesp_lcd.a	8125
 size	libesp_lcd_st7703.a	2935
 size	libesp_libc.a	7910
 size	libesp_mm.a	6067
 size	libesp_netif.a	9456
 size	libesp_partition.a	3466
-size	libesp_psram.a	8414
+size	libesp_psram.a	7806
 size	libesp_ringbuf.a	6409
 size	libesp_rom.a	596
 size	libesp_security.a	2364
@@ -90,9 +90,10 @@ size	libesp_timer.a	2854
 size	libesp_wifi.a	2319
 size	libesp_wifi_remote_glue.a	674
 size	libespcoredump.a	13200
-size	libespressif__esp-serial-flasher.a	123667
+size	libespressif__elf_loader.a	6700
+size	libespressif__esp-serial-flasher.a	123671
 size	libespressif__i2c_bus.a	3208
-size	libespressif__mdns.a	39157
+size	libespressif__mdns.a	39181
 size	libfatfs.a	30649
 size	libfreertos.a	33118
 size	libfw_console.a	16455
@@ -102,7 +103,7 @@ size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34398
 size	liblichen_api.a	42484
 size	liblichen_apps.a	51552
-size	liblichen_boot.a	13404
+size	liblichen_boot.a	13412
 size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2813
 size	liblichen_led.a	1460
@@ -110,17 +111,17 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
 size	liblichen_notify.a	13382
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	79137
+size	liblichen_os.a	80620
 size	liblichen_random.a	63
 size	liblichen_shell.a	196551
 size	liblog.a	2726
-size	liblora.a	36337
+size	liblora.a	36373
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	112015
-size	libmain.a	13667
+size	libmain.a	13695
 size	libmbedtls.a	22
-size	libmesh.a	428060
+size	libmesh.a	428092
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
