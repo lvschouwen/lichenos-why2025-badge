@@ -14,6 +14,7 @@
 #include "lichen_notify.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -77,8 +78,15 @@ static bool open_source(char const *path, file_src_t *s) {
         return false;
     }
     struct stat st;
-    if (fstat(s->fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
-        int err = st.st_size > 0 ? EISDIR : ENOENT;
+    int         err = 0;
+    if (fstat(s->fd, &st) != 0) {
+        err = errno;
+    } else if (!S_ISREG(st.st_mode)) {
+        err = EISDIR;
+    } else if (st.st_size <= 0) {
+        err = ENOENT; // an empty file is no image
+    }
+    if (err) {
         src_close(s);
         errno = err;
         return false;
@@ -87,6 +95,9 @@ static bool open_source(char const *path, file_src_t *s) {
     return true;
 }
 
+// The entry runs on the calling task's stack, which is the console's (the update server's task over Wi-Fi): about 4 KB
+// of it is free, shared with everything the app calls through the OS. Until every app has its own task (#523) an app
+// must stay small: no big locals, no deep call chains. The spike's hello needs next to nothing.
 static void run_elf(char const *path) {
     bool on_sd = sd_elf_on_sd(path); // /storage needs no card
     if (on_sd && !sd_begin(2000)) {
@@ -143,7 +154,15 @@ static void cmd_elf(char const *args) {
 }
 
 void sd_apps_console_register(void) {
+    static bool registered; // main calls this once; a second esp_elf_register_symbol would only answer -EEXIST
+    if (registered) {
+        return;
+    }
+    registered = true;
     esp_elf_register_symbol(k_exports);
-    console_register_dev("elf", "elf run <path>  (a native ELF from /sd or /storage: load, run once, unload; #517)", cmd_elf);
+    console_register_dev("elf",
+                         "elf run <path>  (a native ELF from /sd or /storage: load, run once, unload; the app runs on "
+                         "this task's small stack, so keep it small until #523; #517)",
+                         cmd_elf);
 }
 

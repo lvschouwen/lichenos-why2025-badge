@@ -68,6 +68,27 @@ static void held(void) {
     CHECK(sd_elf_parse("run", "on air", path, sizeof(path), &why) == SD_ELF_ARGS_USAGE); // usage stays usage
 }
 
+// The policy's length limit with the buffer the console uses (SD_PATH_MAX + 2): the longest path passes, one byte more is
+// refused by sd_path_check and says so
+static void policy_length(void) {
+    char              path[SD_PATH_MAX + 2];
+    char              args[SD_PATH_MAX + 64];
+    sd_path_verdict_t why;
+    size_t            n = SD_PATH_MAX; // the whole path, "/sd/" and ".elf" included
+    char              name[SD_PATH_MAX + 8];
+    memset(name, 'a', sizeof(name));
+    memcpy(name, "/sd/", 4);
+    memcpy(name + n - 4, ".elf", 4);
+    name[n] = '\0';
+    snprintf(args, sizeof(args), "run %s", name);
+    CHECK(sd_elf_parse(args, NULL, path, sizeof(path), &why) == SD_ELF_ARGS_OK);
+    CHECK(strlen(path) == SD_PATH_MAX);
+    memcpy(name + n - 4, "a.elf", 6); // one byte longer
+    snprintf(args, sizeof(args), "run %s", name);
+    CHECK(sd_elf_parse(args, NULL, path, sizeof(path), &why) == SD_ELF_ARGS_REFUSED);
+    CHECK(why == SD_PATH_TOO_LONG);
+}
+
 static void small_buffer(void) {
     char              path[8];
     sd_path_verdict_t why;
@@ -81,6 +102,7 @@ int main(void) {
     refused();
     not_elf();
     held();
+    policy_length();
     small_buffer();
     if (failures) {
         printf("%d failures\n", failures);

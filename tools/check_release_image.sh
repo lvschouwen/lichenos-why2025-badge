@@ -13,7 +13,11 @@ MARKER="LICHEN-DEBUG-BUILD-MARKER" # keep in step with lichen_debug_build_marker
 BENCH_MARKER="LICHEN-BENCH-OPEN-MARKER"
 # Canaries beside the marker: console wordings that only exist with the debug commands (fw dev, the hidden-commands
 # note), and the mesh identity test arm (#455: "mesh ident simulate", which blocks TX). Not UI text; "developer mode" itself is, and is left out on purpose.
-CANARIES=("fw dev on" "debug ones hidden" "ident simulate" "test twdt")
+# "elf run <path>" is the SD-app loader command (#517): its help line exists only with the dev commands.
+CANARIES=("fw dev on" "debug ones hidden" "ident simulate" "test twdt" "elf run <path>")
+# What a developer image must hold, so the canaries above are known to be findable (the release check passes on anything
+# otherwise): the two markers and the loader command
+DEV_WORDS=("$MARKER" "$BENCH_MARKER" "elf run <path>")
 # Every Kconfig symbol that compiles a debug or test command (grep "config LICHEN_" firmware/components/*/Kconfig*):
 # LICHEN_NVS_ENCRYPT_BURN_CMD (irreversible eFuse burn) and LICHEN_NVS_DEBUG_FORCE_DOWN (fw nvs-down) are commands;
 # LICHEN_UI_LOCK_CHECK_COUNT and _ASSERT are the LVGL lock-owner debug checks (release carries _OFF).
@@ -37,13 +41,13 @@ check_image() {
         done
         echo "release image: no developer commands ($image)"
     else
-        for word in "$MARKER" "$BENCH_MARKER"; do
+        for word in "${DEV_WORDS[@]}"; do
             if ! grep -aqF "$word" "$image"; then
                 echo "developer image $image lacks \"$word\": the release check would pass on anything" >&2
                 return 1
             fi
         done
-        echo "developer image: debug-build and bench-open markers present ($image)"
+        echo "developer image: debug-build and bench-open markers and the elf command present ($image)"
     fi
 }
 
@@ -77,7 +81,8 @@ selftest() {
     tmp=$(mktemp -d); trap 'rm -r "$tmp"' EXIT
     # Ordinary UI text that is always built must not trip the release check (the #401 false positive)
     printf 'junk\0Switch developer mode off? dev [on|off|status]\0more' > "$tmp/clean.bin"
-    printf 'junk\0%s\0%s\0more' "$MARKER" "$BENCH_MARKER" > "$tmp/marked.bin"
+    printf 'junk\0%s\0%s\0elf run <path>\0more' "$MARKER" "$BENCH_MARKER" > "$tmp/marked.bin"
+    printf 'junk\0%s\0%s\0more' "$MARKER" "$BENCH_MARKER" > "$tmp/no_elf.bin" # the loader command went missing
     printf 'junk\0%s\0more' "$MARKER" > "$tmp/debug_only.bin" # a developer image whose bench-open marker went missing
     printf 'junk\0%s\0more' "$BENCH_MARKER" > "$tmp/bench_only.bin"
     printf 'junk\0debug ones hidden: fw dev\0more' > "$tmp/canary.bin"
@@ -86,6 +91,7 @@ selftest() {
     run release "$tmp/clean.bin" >/dev/null || { echo "selftest: clean release image rejected" >&2; exit 1; }
     ! run release "$tmp/marked.bin" 2>/dev/null || { echo "selftest: marked release image accepted" >&2; exit 1; }
     ! run release "$tmp/bench_only.bin" 2>/dev/null || { echo "selftest: bench-open release image accepted" >&2; exit 1; }
+    ! run dev "$tmp/no_elf.bin" 2>/dev/null || { echo "selftest: dev image without the elf command accepted" >&2; exit 1; }
     ! run dev "$tmp/debug_only.bin" 2>/dev/null || { echo "selftest: dev image without the bench-open marker accepted" >&2; exit 1; }
     ! run release "$tmp/canary.bin" 2>/dev/null || { echo "selftest: canary release image accepted" >&2; exit 1; }
     run dev "$tmp/marked.bin" >/dev/null || { echo "selftest: marked dev image rejected" >&2; exit 1; }

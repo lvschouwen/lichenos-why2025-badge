@@ -1,7 +1,8 @@
 #pragma once
 // "fw elf run <path>" (#517): the argument rules, without ESP headers. Host-tested in host_tests/sd_elf_args_test.c.
 // sd_apps.c is the glue. A path is taken exactly as typed (sd_path_check decides, never a rewrite): only files below
-// /sd that end in .elf run, so an app can never come from internal storage (/storage) or a name the card hides.
+// /sd or /storage that end in .elf run (/storage because the bench can only push there over Wi-Fi), and none while the
+// on-air hold is on.
 
 #include "sd_path_policy.h"
 
@@ -15,7 +16,7 @@ extern "C" {
 typedef enum {
     SD_ELF_ARGS_OK,
     SD_ELF_ARGS_USAGE,    // not "run <path>"
-    SD_ELF_ARGS_REFUSED,  // sd_path_check said no (*why), or the path is not below /sd
+    SD_ELF_ARGS_REFUSED,  // sd_path_check said no (*why), or the path is not below /sd or /storage
     SD_ELF_ARGS_NOT_ELF,  // the name does not end in .elf
     SD_ELF_ARGS_HELD,     // the on-air hold is on: files the update upload can write must not run (#289, #420)
 } sd_elf_args_t;

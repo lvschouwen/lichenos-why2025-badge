@@ -10,7 +10,7 @@ expect() { local want=$1 got; shift; got=$(rc "$@"); case $want in
 
 bash "$tool" --selftest >/dev/null
 printf 'a\0Switch developer mode off?\0' > "$tmp/clean.bin"
-printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0LICHEN-BENCH-OPEN-MARKER\0' > "$tmp/marked.bin"
+printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0LICHEN-BENCH-OPEN-MARKER\0elf run <path>\0' > "$tmp/marked.bin"
 printf 'a\0LICHEN-DEBUG-BUILD-MARKER\0' > "$tmp/debug_only.bin"
 printf 'a\0LICHEN-BENCH-OPEN-MARKER\0' > "$tmp/bench_only.bin"
 printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_LICHEN_BENCH_OPEN=y\n' > "$tmp/bench.cfg"

@@ -62,7 +62,8 @@ idf_component_register(SRCS ${dev_srcs} "settings_store.c" "lichen_settings.c" "
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        LDFRAGMENTS "linker.lf"
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora espressif__elf_loader sdcard)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora
+                                     espressif__elf_loader) # not conditional: CONFIG_* is unknown while IDF collects requirements; a release image links nothing of it (sd_apps.c is out)
 
 # Crash attribution (#232, safe_mode.c): every panic passes safe_mode.c on its way to the IDF's handler
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
