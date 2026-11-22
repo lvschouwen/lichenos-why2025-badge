@@ -2,12 +2,10 @@
 // value. Built as an ELF (see ../CMakeLists.txt), so main() is the entry (-Dmain=app_main).
 #include "lichen_notify.h"
 
-int  esp_rom_printf(char const *fmt, ...);
 
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     bool dnd = lichen_notify_dnd();
-    esp_rom_printf("hello from an SD app: do-not-disturb is %s\n", dnd ? "on" : "off");
     return 0x4c00 | (dnd ? 1 : 0); // 'L' in the high byte, so a wrong value is easy to tell from a stray 0
 }

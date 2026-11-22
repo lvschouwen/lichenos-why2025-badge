@@ -1,17 +1,16 @@
 // Apps from the SD card, the spike (#517): "fw elf run <path>" loads a native ELF from /sd into PSRAM, resolves its
-// symbols against a small export table, runs the entry once, prints what it cost and unloads it again. Developer
+// symbols against the generated export table (lichen_exports.c, #519), runs the entry once, prints what it cost and unloads it again. Developer
 // mode only: console_register_dev leaves the command, and with it this file's code, out of a release image.
 #include "sd_apps.h"
 
+#include "lichen_exports.h"
 #include "sd_elf_args.h"
 #include "sdcard.h"
 
 #include "esp_elf.h"
 #include "esp_heap_caps.h"
-#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "fw_console.h"
-#include "lichen_notify.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -21,13 +20,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-// The spike's export table: just what sdapps/hello needs. The full, generated table is #519.
-static struct esp_elfsym const k_exports[] = {
-    ESP_ELFSYM_EXPORT(lichen_notify_dnd),
-    ESP_ELFSYM_EXPORT(esp_rom_printf),
-    {NULL, NULL},
-};
 
 typedef struct {
     int    fd;
@@ -159,7 +151,7 @@ void sd_apps_console_register(void) {
         return;
     }
     registered = true;
-    esp_elf_register_symbol(k_exports);
+    esp_elf_register_symbol(lichen_exports);
     console_register_dev("elf",
                          "elf run <path>  (a native ELF from /sd or /storage: load, run once, unload; the app runs on "
                          "this task's small stack, so keep it small until #523; #517)",
