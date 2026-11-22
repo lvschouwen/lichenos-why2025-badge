@@ -1,0 +1,9 @@
+# Manifest of the @NAME_C@ SD app (format: lichen_api/lichen_manifest.h). Unknown keys are refused.
+id=@ID@
+name=@NAME_C@
+api=@API@
+entry=app.elf
+caps=
+internal_ram_kib=8
+psram_kib=0
+stack_kib=4

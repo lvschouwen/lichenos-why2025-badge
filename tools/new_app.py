@@ -10,6 +10,8 @@ already there is not added again):
                                                   last tile on home)
   tools/layers.conf                               component, app and app-objects lines (layer L6, rule D)
   host_tests/CMakeLists.txt                       the <id>_model_test target and its add_test
+`--sd` scaffolds an SD-card app instead (#522): sdapps/<id>/ (CMakeLists.txt, manifest, main/app.c, main/CMakeLists.txt)
+from tools/app_template/sd/, and no shared file is edited: firmware/build.sh builds every sdapps/* by itself.
 Everything is validated before the first file is touched, and the new files are written before the shared ones, so a
 refusal leaves the tree as it was. --root points at another tree (the gate scaffolds a throwaway app into a temp copy
 with it: tools/tests/new_app_test.sh)."""
@@ -99,7 +101,7 @@ def find_traces(root, app_id):
 
 def render(text, subst):
     """One pass, so a value is never itself substituted again."""
-    return re.sub(r"@(ID|UP|NAME_C)@", lambda m: subst[m.group(1)], text)
+    return re.sub(r"@(ID|UP|NAME_C|API)@", lambda m: subst[m.group(1)], text)
 
 
 def template_files(app_id):
@@ -255,22 +257,73 @@ def rollback(root, app_id, created, done):
     return left
 
 
+SD_FILES = (("CMakeLists.txt", "CMakeLists.txt"), ("manifest", "manifest"), ("main/CMakeLists.txt", "main/CMakeLists.txt"),
+            ("main/app.c", "main/app.c"))
+
+
+def api_version(root):
+    """MAJOR.MINOR from lichen_api_version.h (#521); 1.0 while that header is not there."""
+    path = os.path.join(root, "firmware/components/lichen_api/lichen_api_version.h")
+    if not os.path.exists(path):
+        return "1.0"
+    text = read(path)
+    major, minor = (re.search(r"#define\s+LICHEN_API_VERSION_%s\s+(\d+)" % k, text) for k in ("MAJOR", "MINOR"))
+    if not (major and minor):
+        raise Refused("lichen_api_version.h has no LICHEN_API_VERSION_MAJOR/_MINOR")
+    return "%s.%s" % (major.group(1), minor.group(1))
+
+
+def scaffold_sd(root, app_id, name):
+    check_id(app_id)
+    check_name(name)
+    traces = find_traces(root, app_id)
+    if os.path.exists(os.path.join(root, "sdapps", app_id)):
+        traces.append("sdapps/%s exists" % app_id)
+    if traces:
+        raise Refused("id '%s' is taken: %s" % (app_id, "; ".join(traces)))
+    subst = {"ID": app_id, "UP": app_id.upper(), "NAME_C": name, "API": api_version(root)}
+    files = [("sdapps/%s/%s" % (app_id, dest), render(read(os.path.join(TEMPLATE_DIR, "sd", src)), subst))
+             for dest, src in SD_FILES]
+    created = []
+    try:
+        for dest, text in files:
+            created.append(os.path.join(root, dest))
+            write_atomic(created[-1], text)
+    except OSError as e:
+        for path in reversed(created):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        for d in ("main", ""):
+            try:
+                os.rmdir(os.path.join(root, "sdapps", app_id, d))
+            except OSError:
+                pass
+        raise Refused("writing failed (%s); every file this run wrote was removed" % e)
+    return [d for d, _ in files]
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    ap.add_argument("--sd", action="store_true", help="scaffold an SD-card app (sdapps/<id>/) instead of a built-in one")
     ap.add_argument("id")
     ap.add_argument("name")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     try:
-        changed = scaffold(root, args.id, args.name)
+        changed = (scaffold_sd if args.sd else scaffold)(root, args.id, args.name)
     except Refused as e:
         print("new-app: " + str(e), file=sys.stderr)
         return 1
     print("new-app: %s ('%s') created; %d files written or changed:" % (args.id, args.name, len(changed)))
     for rel in changed:
         print("  " + rel)
-    print("next: build (./firmware/build.sh build); the tile 'on home' shows once the app has counted something.")
+    if args.sd:
+        print("next: build (./firmware/build.sh build), then tools/badge.sh sdapp-push <host> %s" % args.id)
+    else:
+        print("next: build (./firmware/build.sh build); the tile 'on home' shows once the app has counted something.")
     return 0
 
 

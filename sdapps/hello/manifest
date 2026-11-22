@@ -1,0 +1,9 @@
+# Manifest of the hello SD app (format: #521). Unknown keys are refused.
+id=hello
+name=Hello
+api=1.0
+entry=app.elf
+caps=CAP_NOTIFY
+internal_ram_kib=8
+psram_kib=0
+stack_kib=4

@@ -77,6 +77,8 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
                                       partition (fonts) and reboot (--no-reboot: as for ota-firmware)
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
+  sdapp-push <host> <id>                push the built SD app (firmware/build/sdapps/<id>/app.elf and manifest) to
+                                        SD0:[lichen.apps.<id>] over the update server (#522); build first
   ota-rm <host> <badge-path>            delete one file on the badge (FLASH0: or SD0:)
   ota-reboot <host>
   log <ip> [--follow]                 print the badge's whole log (all pages; what its console prints, kept in RAM, with
@@ -94,6 +96,9 @@ Host only (touches no badge, no ssh):
   new-app <id> "<Name>"     scaffold a new app: firmware/components/lichen_<id>/ (model, screens, CMake), its host test
                             and the register, layer and test lines; refuses an id in use or a name with quotes (#385,
                             docs/app-api.md "An app in 10 minutes")
+
+  new-app --sd <id> "<Name>" scaffold an SD-card app: sdapps/<id>/ (CMake, main/app.c, manifest); nothing shared is edited,
+                            ./firmware/build.sh build builds it (#522)
 
 <port> is a /dev/serial/by-id/... path or /dev/ttyACMn as shown by 'ports'.
 EOF
@@ -905,6 +910,17 @@ cmd_ota_c6() {
     exit 1
 }
 
+# The SD apps (#522): the build's app.elf and manifest to SD0:[lichen.apps.<id>] with ota-file. The id is checked here
+# too, because it becomes a path on the badge.
+cmd_sdapp_push() {
+    local host=$1 id=$2 dir
+    [[ $id =~ ^[a-z][a-z0-9_]{0,12}$ ]] || { echo "sdapp-push: bad id '$id' (1-13 of a-z, 0-9, _, a letter first)" >&2; exit 1; }
+    dir=${BADGE_SDAPPS_DIR:-$REPO/firmware/build/sdapps}/$id
+    [ -f "$dir/app.elf" ] && [ -f "$dir/manifest" ] || { echo "sdapp-push: no $dir/app.elf and manifest, build first (./firmware/build.sh build)" >&2; exit 1; }
+    cmd_ota_file "$host" "$dir/app.elf" "SD0:[lichen.apps.$id]app.elf" || exit 1
+    cmd_ota_file "$host" "$dir/manifest" "SD0:[lichen.apps.$id]manifest"
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -933,7 +949,10 @@ case "${1:-}" in
     log)          { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = --follow ]; }; } || usage; cmd_log "$2" "${3:-}" ;;
     crashes)      [ $# -eq 2 ] || usage; cmd_crashes "$2" ;;
     fw)           [ $# -ge 3 ] || usage; ip=$2; shift 2; cmd_fw "$ip" "$@" ;;
-    new-app)      [ $# -eq 3 ] || usage; exec python3 -I "$REPO/tools/new_app.py" "$2" "$3" ;; # host only: never reaches the badge (#385)
+    sdapp-push)   [ $# -eq 3 ] || usage; cmd_sdapp_push "$2" "$3" ;;
+    new-app)      # host only: never reaches the badge (#385); --sd scaffolds an SD-card app (#522)
+        if [ "${2:-}" = --sd ]; then [ $# -eq 4 ] || usage; exec python3 -I "$REPO/tools/new_app.py" --sd "$3" "$4"; fi
+        [ $# -eq 3 ] || usage; exec python3 -I "$REPO/tools/new_app.py" "$2" "$3" ;;
     screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
     *)        usage ;;
 esac

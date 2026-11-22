@@ -191,17 +191,22 @@ release_checks() {
     "$repo/tools/check_release_image.sh" release "$bdir/badge_fw.bin"
 }
 
-# The SD-card apps (#516, #517): each sdapps/<name> is a standalone ELF project built with the ELF loader's helper
-# (flags: sdapps/hello/CMakeLists.txt). Output firmware/build/sdapps/<name>/<name>.app.elf. After the P4 build, which
-# fetches the loader component whose CMake helper they use. Only the `elf` target: the project's own firmware link
-# cannot succeed, an app has unresolved OS symbols by design.
+# The SD-card apps (#516, #517, #522): each sdapps/<id> is a standalone ELF project (sdapps/sdapp.cmake holds the shared
+# flags). Output firmware/build/sdapps/<id>/app.elf next to its manifest, the two files tools/badge.sh sdapp-push puts on
+# the card. After the P4 build, which fetches the loader component whose CMake helper they use and writes the config the
+# apps' LVGL headers take. Only the `elf` target: the project's own firmware link cannot succeed, an app has unresolved
+# OS symbols by design. A failing app fails the build; a manifest whose id is not its directory name does too.
 build_sdapps() {
-    local app out
+    local app id out
     for app in "$repo"/sdapps/*/; do
         app=${app%/}
-        out="$here/build/sdapps/${app##*/}"
+        id=${app##*/}
+        out="$here/build/sdapps/$id"
+        [ -f "$app/manifest" ] && grep -qx "id=$id" "$app/manifest" || { echo "sdapps/$id: manifest missing or its id is not '$id'" >&2; return 1; }
         IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" reconfigure
         cmake --build "$out" --target elf
+        cp "$out/$id.app.elf" "$out/app.elf"
+        cp "$app/manifest" "$out/manifest"
     done
 }
 

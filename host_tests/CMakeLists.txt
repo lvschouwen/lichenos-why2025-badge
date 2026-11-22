@@ -2907,3 +2907,4 @@ add_executable(lichen_manifest_test
 target_include_directories(lichen_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(lichen_manifest_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_manifest_test COMMAND lichen_manifest_test)
+add_test(NAME new_app_sd_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/new_app_sd_test.sh)
