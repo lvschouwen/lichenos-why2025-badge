@@ -204,6 +204,12 @@ CONFIG_LV_USE_SNAPSHOT=y
 # Run code and read-only data from PSRAM: flash writes (settings, file pushes, updates) then no longer suspend the
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# PSRAM executable for native apps from the SD card (#516, #517): with y, the rev < 3 PMP path locks entry 10 as RW over the
+# PSRAM heap, so a loaded ELF takes an instruction access fault at its first instruction (bench-confirmed). With n the
+# PSRAM past the XIP code window has no PMP entry and is RWX. The price is W^X on PSRAM data (heap, framebuffers, assets),
+# in the dev and the release image alike. Decided by the owner as the step now; a reserved executable tail with the rest
+# of PSRAM still RW (an IDF patch) is #530
+CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=n
 
 # Native apps from the SD card (#516): the ELF loader runs them from PSRAM. Its built-in libc and IDF symbol tables stay
 # off: an app resolves only against the table the OS registers (sd_apps.c, #517; the generated one is #519), so what an
