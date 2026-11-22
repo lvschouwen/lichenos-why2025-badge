@@ -116,6 +116,9 @@ static void test_upload_rules(void) {
     CHECK(ota_path_next_dir("/sd", 0) == 0 && ota_path_next_dir("", 0) == 0);
     // FAT refuses to rename over a file: SD0: retries after removing it, FLASH0: never
     CHECK(ota_rename_retry(true, EEXIST) && !ota_rename_retry(false, EEXIST) && !ota_rename_retry(true, EBUSY));
+    // After the old file is gone the temp file is the only copy of the new data: it stays
+    CHECK(!ota_place_drops_temp(OTA_PLACE_OK) && !ota_place_drops_temp(OTA_PLACE_LOST));
+    CHECK(ota_place_drops_temp(OTA_PLACE_WRITE) && ota_place_drops_temp(OTA_PLACE_SWAP) && ota_place_drops_temp(OTA_PLACE_DIR));
     // The card is needed and missing: 409; FLASH0: never asks
     CHECK(ota_sd_missing("SD0:x", false) && !ota_sd_missing("SD0:x", true) && !ota_sd_missing("FLASH0:x", false));
     // The room check rounds up to the drive's allocation unit

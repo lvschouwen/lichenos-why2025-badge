@@ -74,6 +74,10 @@ bool ota_rename_retry(bool sd, int err) {
     return sd && err == EEXIST;
 }
 
+bool ota_place_drops_temp(ota_place_t step) {
+    return step != OTA_PLACE_OK && step != OTA_PLACE_LOST;
+}
+
 bool ota_sd_missing(char const *vms, bool mounted) {
     return ota_path_is_sd(vms) && !mounted;
 }

@@ -33,3 +33,8 @@ bool ota_rename_retry(bool sd, int err);
 bool ota_sd_missing(char const *vms, bool mounted);
 // Allocation unit the room check rounds a file up to on the drive vms names
 size_t ota_cluster_bytes(char const *vms);
+// How an upload ended (place_file). OTA_PLACE_LOST: on SD0: the old file was removed and the second rename failed, so
+// the new data exists only as the temp file and must stay there
+typedef enum { OTA_PLACE_OK, OTA_PLACE_WRITE, OTA_PLACE_SWAP, OTA_PLACE_DIR, OTA_PLACE_LOST } ota_place_t;
+// Whether the temp file is removed after an upload ended this way
+bool ota_place_drops_temp(ota_place_t step);

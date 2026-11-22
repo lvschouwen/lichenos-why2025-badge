@@ -115,25 +115,24 @@ bool ota_drive_ready(int fd, char const *vms) {
 }
 
 // The write and the swap of one upload, under the card's batch lock on SD0: (a card pulled mid-write fails the call).
-// 0 = in place; 1 = the temp file couldn't be written; 2 = the swap failed (err says why); 3 = the target is a directory.
 // FLASH0: is LittleFS (#300): one rename replaces the old file atomically. SD0: is FAT, whose rename refuses an
 // existing target: the old file is removed first, so there a power cut between the two leaves the data in the temp
-// file (the next upload removes it). A target another task has open stays put on either.
-static int place_file(char const *path, char const *temp, bool sd, uint8_t const *data, size_t len, int *err) {
+// file (OTA_PLACE_LOST when the second rename fails: the temp stays). A target another task has open stays put on either.
+static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8_t const *data, size_t len, int *err) {
     if (ota_is_directory(path)) { // the early check in the handler ran outside the card's lock
-        return 3;
+        return OTA_PLACE_DIR;
     }
     mkdir_parents(path);
-    unlink(temp); // left by an upload that was cut
-    int step = write_file(temp, data, len) ? 0 : 1;
-    if (step == 0 && rename(temp, path) != 0) {
-        step = 2;
-        if (ota_rename_retry(sd, errno) && unlink(path) == 0 && rename(temp, path) == 0) {
-            step = 0;
+    unlink(temp); // left by an upload that was cut; only the target's own directory is cleaned
+    ota_place_t step = write_file(temp, data, len) ? OTA_PLACE_OK : OTA_PLACE_WRITE;
+    if (step == OTA_PLACE_OK && rename(temp, path) != 0) {
+        step = OTA_PLACE_SWAP;
+        if (ota_rename_retry(sd, errno) && unlink(path) == 0) {
+            step = rename(temp, path) == 0 ? OTA_PLACE_OK : OTA_PLACE_LOST;
         }
     }
     *err = errno;
-    if (step != 0) {
+    if (ota_place_drops_temp(step)) {
         unlink(temp);
     }
     return step;
@@ -159,20 +158,24 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         return false;
     }
     int err  = 0;
-    int step = place_file(path, temp, sd, data, len, &err);
+    ota_place_t step = place_file(path, temp, sd, data, len, &err);
     if (sd) {
-        sd_end(step == 0 ? SD_IO_OK : sd_io_from_errno(err));
+        sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
     }
     ota_change_end(false);
-    if (step == 3) {
+    if (step == OTA_PLACE_DIR) {
         ota_respond(fd, 409, "%s is a directory, nothing written", vms);
         return false;
     }
-    if (step == 1) {
+    if (step == OTA_PLACE_WRITE) {
         ota_respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;
     }
-    if (step == 2) {
+    if (step == OTA_PLACE_LOST) {
+        ota_respond(fd, 500, "old file removed, new data kept as ota_upload.tmp (%s)", strerror(err));
+        return false;
+    }
+    if (step == OTA_PLACE_SWAP) {
         ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;
     }
