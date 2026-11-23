@@ -31,11 +31,25 @@ static bool piece(ota_sd_stream_t *s, uint8_t const *data, size_t off, size_t le
 
 int main(void) {
     // The cap is the free space, not the 4 MB the PSRAM stage allows
-    CHECK(ota_sd_cap(true, 28ULL * 1024 * 1024 + 5, 0) == 28LL * 1024 * 1024 + 5);
-    CHECK(ota_sd_cap(true, 0, 0) == 0);
+    CHECK(ota_sd_cap(true, 28ULL * 1024 * 1024 + 5, 0) == 28LL * 1024 * 1024 + 5 + OTA_SD_CAP_SLACK);
+    CHECK(ota_sd_cap(true, 0, 0) == OTA_SD_CAP_SLACK); // one cluster of slack, never a cap of 0 from a stale figure
     CHECK(ota_sd_cap(false, 123, 0) == OTA_SD_TOTAL_MAX);
     CHECK(ota_sd_cap(true, UINT64_MAX, 0) == OTA_SD_TOTAL_MAX);
     CHECK(ota_sd_cap(true, 0x7ffffff0ULL, 0x100) == OTA_SD_TOTAL_MAX);
+    CHECK(ota_sd_cap(true, 1, UINT64_MAX) == OTA_SD_TOTAL_MAX);
+
+    // While an SD0: stream is active only its own file's pieces get through; nothing refused when none is
+    CHECK(!ota_sd_stream_refuses(false, OTA_ROUTE_FILE, false, false));
+    CHECK(!ota_sd_stream_refuses(false, OTA_ROUTE_DELETE, false, false));
+    CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_FILE, true, true));  // the stream's next (or resent) piece
+    CHECK(ota_sd_stream_refuses(true, OTA_ROUTE_FILE, true, false));  // a piece of another file
+    CHECK(ota_sd_stream_refuses(true, OTA_ROUTE_FILE, false, true));  // a whole push of the same file
+    CHECK(ota_sd_stream_refuses(true, OTA_ROUTE_DELETE, false, true));
+    CHECK(ota_sd_stream_refuses(true, OTA_ROUTE_FIRMWARE, true, false));
+    CHECK(ota_sd_stream_refuses(true, OTA_ROUTE_ASSETS, true, false));
+    CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_INFO, false, false));
+    CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_LOG, false, false));
+    CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_REBOOT, false, false));
     CHECK(ota_sd_cap(true, 29ULL * 1024 * 1024 * 1024, 0) > 4LL * 1024 * 1024);
     // Every accepted piece lowers the card's free space: a 28 MB file on a card with 30 MB free, 20 MB in, still passes
     // (free is 10 MB then), where the free space alone would refuse it as too large

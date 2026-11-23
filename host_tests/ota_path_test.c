@@ -82,6 +82,11 @@ static void test_sd(void) {
     // The temp file sits next to the target, on the same drive
     CHECK(ota_temp_to_posix("SD0:doom.wad", out, sizeof(out)) && strcmp(out, "/sd/ota_upload.tmp") == 0);
     CHECK(ota_temp_to_posix("SD0:[apps.hello]app.elf", out, sizeof(out)) && strcmp(out, "/sd/apps/hello/ota_upload.tmp") == 0);
+    // A streamed SD0: upload has its own temp name, next to the target, and reserved like the other (#529)
+    CHECK(ota_stream_temp_to_posix("SD0:doom.wad", out, sizeof(out)) && strcmp(out, "/sd/ota_upload.tmp.sd") == 0);
+    CHECK(ota_stream_temp_to_posix("SD0:[a.b]x.wad", out, sizeof(out)) && strcmp(out, "/sd/a/b/ota_upload.tmp.sd") == 0);
+    CHECK(!ota_stream_temp_to_posix("SD1:x", out, sizeof(out)) && !ota_stream_temp_to_posix("SD0:x", out, 10));
+    CHECK(!ota_path_allowed("SD0:ota_upload.tmp.sd") && !ota_path_allowed("SD0:[a]OTA_UPLOAD.TMP.SD"));
     // Refused like on FLASH0:
     char const *const bad[] = {"SD0:[..]x", "SD0:[a..b]x", "SD0:[.a]x", "SD0:[a.]x", "SD0:[]x", "SD0:", "SD0:[a]", "SD0:.hidden",
                                "SD0:ota_upload.tmp", "SD0:[a]ota_upload.tmp", "SD0:a/b", "SD0:[a/b]x", "sd0:x", "SD0:x y"};

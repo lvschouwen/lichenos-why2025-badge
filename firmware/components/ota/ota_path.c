@@ -86,15 +86,23 @@ size_t ota_cluster_bytes(char const *vms) {
     return ota_path_is_sd(vms) ? 32768 : STORAGE_CLUSTER; // FAT32 on a 32 GB card: the card's real value isn't exported
 }
 
-bool ota_temp_to_posix(char const *vms, char *out, size_t cap) {
+static bool temp_named(char const *vms, char const *name, char *out, size_t cap) {
     // Map the real target (ota_path_allowed() refuses the temp name itself), then swap its file name
     char target[OTA_PATH_MAX + sizeof(STORAGE_BASE "/")];
     if (!ota_path_to_posix(vms, target, sizeof(target))) {
         return false;
     }
     char const *slash = strrchr(target, '/');
-    int         n     = snprintf(out, cap, "%.*s%s", (int)(slash - target + 1), target, OTA_TEMP_NAME);
+    int         n     = snprintf(out, cap, "%.*s%s", (int)(slash - target + 1), target, name);
     return n > 0 && (size_t)n < cap;
+}
+
+bool ota_temp_to_posix(char const *vms, char *out, size_t cap) {
+    return temp_named(vms, OTA_TEMP_NAME, out, cap);
+}
+
+bool ota_stream_temp_to_posix(char const *vms, char *out, size_t cap) {
+    return temp_named(vms, OTA_STREAM_TEMP_NAME, out, cap);
 }
 
 // The SD card is held as a whole while the on-air list is on (#528): the card is the user's, a push there is not one

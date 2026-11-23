@@ -33,6 +33,9 @@
 #define OTA_PATH_MAX     192
 #define OTA_SHA256_HEX   64
 #define OTA_TEMP_NAME    "ota_upload.tmp"
+// The temp file of an SD0: upload streamed to the card (#529): its own name, so it never meets the one a whole push may
+// leave on purpose (OTA_PLACE_LOST); it starts with OTA_TEMP_NAME, so it is reserved the same way
+#define OTA_STREAM_TEMP_NAME OTA_TEMP_NAME ".sd"
 #define OTA_FIRMWARE_MAX (4 * 1024 * 1024) // one app slot (firmware/partitions.csv)
 
 typedef enum {

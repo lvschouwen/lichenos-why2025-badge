@@ -218,7 +218,8 @@ static bool handle_connection(int fd) {
     }
     ota_conn_t const conn = {
         .fd = fd, .req = &req, .pre = (uint8_t const *)head_buf + head_len, .pre_len = len - head_len};
-    if (!handler || (verdict.up_front && refused_up_front(fd, &req, conn.pre_len))) {
+    if (!handler || (verdict.up_front && refused_up_front(fd, &req, conn.pre_len)) ||
+        ota_piece_sd_refused(fd, &req, conn.pre_len)) {
         return false;
     }
     return handler(&conn);

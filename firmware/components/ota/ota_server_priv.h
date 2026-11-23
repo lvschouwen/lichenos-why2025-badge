@@ -109,5 +109,6 @@ void ota_respond_begin_failed(int fd, esp_err_t err);
 
 // ota_piece_http.c
 bool ota_piece_active(void); // an upload in pieces is under way
+bool ota_piece_sd_refused(int fd, ota_request_t const *req, size_t pre_len);
 void ota_piece_expire(bool now);
 bool ota_piece_staged_is(ota_request_t const *req, bool held_file, char const *posix);

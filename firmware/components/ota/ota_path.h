@@ -15,6 +15,8 @@ bool ota_path_is_sd(char const *vms);
 
 // Where a push to vms is written before it is swapped in: OTA_TEMP_NAME in the same directory (so the same drive)
 bool ota_temp_to_posix(char const *vms, char *out, size_t cap);
+// Where a file streamed to the card in pieces is written first (#529): OTA_STREAM_TEMP_NAME in the same directory
+bool ota_stream_temp_to_posix(char const *vms, char *out, size_t cap);
 
 // Whether a /storage path (ota_path_to_posix's result) is one the on-air list's USB hold refuses to change besides the
 // C6 folder (#454): the root's lora* and ota_* names (lora.toml, ota_token.txt) and MeshCore's directory, at any depth.

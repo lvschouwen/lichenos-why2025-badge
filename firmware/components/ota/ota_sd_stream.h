@@ -3,6 +3,7 @@
 // size cap from the card's free space. Pure, host-tested in host_tests/ota_sd_stream_test.c.
 #pragma once
 
+#include "ota_proto.h"
 #include "sha256.h"
 
 #include <stdbool.h>
@@ -26,6 +27,14 @@ typedef struct {
 // file counts against the free space, which every piece lowers; the cap must not shrink under the upload). Unknown free
 // space lets the upload go ahead (the room check and the write report it), like the other drive.
 long long ota_sd_cap(bool free_known, uint64_t free_bytes, uint64_t written);
+// One FAT cluster of slack on top: the free space is a cached figure, rounded to clusters; ota_storage_room's exact
+// check at the first piece is the one that refuses a file that does not fit
+#define OTA_SD_CAP_SLACK 32768
+
+// An SD0: stream is under way (sd_active): which requests wait until it is done or dropped (409 "an upload is in
+// progress"). A whole upload, a delete, firmware and assets would all end by touching the card or the running update;
+// only the stream's own file may send pieces (same_file: the piece's X-Path is the stream's).
+bool ota_sd_stream_refuses(bool sd_active, ota_route_t route, bool has_offset, bool same_file);
 
 // A plain or decoded piece of len bytes may go to the card (0 < len <= OTA_SD_PIECE_MAX)
 bool ota_sd_piece_ok(long long len);
