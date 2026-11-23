@@ -139,6 +139,14 @@ void lichen_sys_app_console_register(void);
 struct console_sub; // fw_console's console_sub_t
 void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage, struct console_sub const *rules);
 
+// What the OS takes back from an app that leaves (#533, #534): the SD apps' loader asks before it frees an image and when a
+// card goes. The shell (L5) sets the function once at start (lichen_shell/raw_keys.h's raw_keys_release_ctx: the raw keys the
+// app still holds); lichen_os (L3) may not include the shell, so the call goes through here. True: nothing of ctx is held
+// any more (also with no function set); false: something may still call into the app, so do not free its image. Any task,
+// never while holding lichen_sys_app_lock (the function takes the LVGL lock: the order is LVGL, then the app lock).
+void lichen_sys_app_set_leave(bool (*fn)(lichen_ctx_t ctx));
+bool lichen_sys_app_leave(lichen_ctx_t ctx);
+
 // For the panic handler (#232): the id of the app the task running on this core runs for (its entered context, as
 // lichen_ctx_self would answer), NULL for the OS, an ISR, a context that is not valid, an app without an id, or before
 // lichen_sys_panic_probe said yes. In internal RAM and reading internal RAM only (copies of the ids, the table, the

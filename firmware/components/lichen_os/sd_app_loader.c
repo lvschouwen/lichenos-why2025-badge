@@ -344,16 +344,20 @@ static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
     }
 }
 
-// What a leaving app may still hold in the OS, given back by the loader: its open files (#533). Before the image goes
-// (an open file's descriptor outlives main()) and when the card goes. The context may already be stale: the book is keyed by
-// the number only.
-static void release_app_holdings(sd_app_rec_t *rec) {
+// What a leaving app may still hold in the OS, given back by the loader: its open files (#533) and the raw keys (#534, through
+// the shell's function, lichen_sys_app_leave). Before the image goes (an open file's descriptor outlives main(); a raw-key
+// listener calls into the image) and when the card goes. The context may already be stale: both are keyed by the number only.
+// False: something may still call into the app, so its image is not freed (the app counts as one that did not stop).
+static bool release_app_holdings(sd_app_rec_t *rec) {
     export_file_close_all(rec->ctx);
-    // #534: raw_keys_release_ctx(rec->ctx) joins here (OS-only, not exported): the raw keys a dying app still holds
+    bool ok = lichen_sys_app_leave(rec->ctx); // takes the LVGL lock: never under sd_app_lock or the app lock
+    if (!ok) {
+        ESP_LOGE(TAG, "%s: its raw keys could not be released: image kept", rec->m.id);
+    }
+    return ok;
 }
 
 static void free_image(sd_app_rec_t *rec) {
-    release_app_holdings(rec);
     sd_app_lock();
     bool enter = sd_app_free_enters(rec->gone);
     sd_app_unlock();
@@ -384,6 +388,12 @@ static bool unload(sd_app_rec_t *rec, bool free_now) {
         step = sd_unload_next(step, ok);
     }
     if (step == SD_UNLOAD_FAULT) {
+        sd_app_lock();
+        sd_app_unload_done(&rec->sda, false);
+        sd_app_unlock();
+        return false;
+    }
+    if (free_now && !release_app_holdings(rec)) {
         sd_app_lock();
         sd_app_unload_done(&rec->sda, false);
         sd_app_unlock();
@@ -663,7 +673,7 @@ static void remove_one(sd_app_rec_t *rec) {
     if (begin) {
         bad = !unload(rec, false); // the image is freed after the screens are closed (do_free)
     }
-    release_app_holdings(rec); // the card is gone or changed: its files are dropped while the context is still valid, faulted or not
+    bad = !release_app_holdings(rec) || bad; // the card is gone or changed: files and raw keys go while the context is still valid
     sd_app_lock();
     bool may = sd_app_may_unregister(&rec->sda, 0);
     sd_app_unlock();
@@ -708,6 +718,9 @@ static void do_free(sd_app_rec_t *rec) {
     }
     ui_barrier(LICHEN_CTX_NONE); // the deletions are complete, and whatever LVGL still had queued for the app has run
     // A faulted app is never unregistered (remove_one), so this one stopped cleanly
+    if (!release_app_holdings(rec)) {
+        return; // image and record stay: nothing is freed under what may still be called
+    }
     if (rec->image) {
         free_image(rec);
     }

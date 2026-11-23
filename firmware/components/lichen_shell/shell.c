@@ -761,6 +761,7 @@ void shell_show_restarting(void) {
 }
 
 void shell_start(lv_display_t *display) {
+    lichen_sys_app_set_leave(raw_keys_release_ctx); // an SD app that leaves gives its raw keys back (#534, #533)
     shell_ui_ops_register(); // the gate's navigation calls reach this shell from now on (#221); again if the boot screen did
     // The boot screen is already up (shell_boot_screen), so the LVGL task renders while this runs: every LVGL call
     // below (display events, timers, objects) needs the lock, or a realloc races the LVGL task's walk (#118)

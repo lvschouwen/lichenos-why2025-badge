@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	315493
+size	<merged-strings>	316225
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -22,12 +22,12 @@ size	libboard.a	18317
 size	libbootloader_support.a	5944
 size	libc.a	53890
 size	libc6link.a	33448
-size	libcrash.a	6305
+size	libcrash.a	6313
 size	libcxx.a	872
 size	libefuse.a	2173
 size	libeh_common.a	148
 size	libeh_frame.a	488
-size	libeh_host_autoinit.a	1202
+size	libeh_host_autoinit.a	1230
 size	libeh_host_core.a	1232
 size	libeh_host_feat_heartbeat.a	385
 size	libeh_host_feat_peer_data.a	1490
@@ -39,7 +39,7 @@ size	libeh_host_feat_wifi_ext_ent.a	2524
 size	libeh_host_feat_wifi_ext_itwt.a	994
 size	libeh_host_mcu_transport.a	22719
 size	libeh_host_mcu_vserial.a	1040
-size	libeh_host_port_idf.a	6159
+size	libeh_host_port_idf.a	6251
 size	libeh_proto_v2.a	80331
 size	libesp_app_format.a	742
 size	libesp_common.a	1816
@@ -91,7 +91,7 @@ size	libesp_wifi.a	2319
 size	libesp_wifi_remote_glue.a	674
 size	libespcoredump.a	13200
 size	libespressif__elf_loader.a	6700
-size	libespressif__esp-serial-flasher.a	123683
+size	libespressif__esp-serial-flasher.a	123695
 size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	39181
 size	libfatfs.a	30649
@@ -101,7 +101,7 @@ size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34398
-size	liblichen_api.a	49708
+size	liblichen_api.a	50196
 size	liblichen_apps.a	51552
 size	liblichen_boot.a	13428
 size	liblichen_clock.a	11176
@@ -109,19 +109,19 @@ size	liblichen_haptics.a	2813
 size	liblichen_led.a	1460
 size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
-size	liblichen_notify.a	13410
+size	liblichen_notify.a	13414
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	90321
+size	liblichen_os.a	94297
 size	liblichen_random.a	63
-size	liblichen_shell.a	198062
+size	liblichen_shell.a	198276
 size	liblog.a	2726
 size	liblora.a	36481
-size	liblvgl__lvgl.a	541799
+size	liblvgl__lvgl.a	541845
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	112015
 size	libmain.a	13765
 size	libmbedtls.a	22
-size	libmesh.a	428292
+size	libmesh.a	428300
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
@@ -135,7 +135,7 @@ size	libsensors.a	29341
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
-size	libstorage.a	2374
+size	libstorage.a	2378
 size	libtfpsacrypto.a	80464
 size	libvfs.a	5051
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872

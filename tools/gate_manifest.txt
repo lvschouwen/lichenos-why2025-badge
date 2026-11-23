@@ -291,8 +291,10 @@ lichen_sys_app_crashes	SYSTEM	any	lichen_sys_app_data.h
 lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_data_clear	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_data_measure	SYSTEM	not-lvgl	lichen_sys_app_data.h
+lichen_sys_app_leave	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_app_lock	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_of	SYSTEM	any	lichen_sys_app.h
+lichen_sys_app_set_leave	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_settings_entries	SYSTEM	unspecified	lichen_sys_app_data.h
 lichen_sys_app_state	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_unlock	SYSTEM	unspecified	lichen_sys_app.h

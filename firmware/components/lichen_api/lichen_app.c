@@ -834,3 +834,15 @@ void lichen_sys_app_console_register(void) {
                                                  "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life",
                            cmd_app, s_more_rules);
 }
+
+// The shell's release function (lichen_sys_app.h): written once at boot, read by the SD loader
+static bool (*volatile s_leave_fn)(lichen_ctx_t);
+
+void lichen_sys_app_set_leave(bool (*fn)(lichen_ctx_t ctx)) {
+    s_leave_fn = fn;
+}
+
+bool lichen_sys_app_leave(lichen_ctx_t ctx) {
+    bool (*fn)(lichen_ctx_t) = s_leave_fn;
+    return !fn || fn(ctx);
+}
