@@ -49,7 +49,8 @@ lichen_ctx_t lichen_sys_app_ctx_at(size_t index);
 // LVGL task, then done(done_arg) (when not NULL), exactly once: the lichen_app_t and everything the observers may still
 // point into are freed there, never before. A caller that is no LVGL task and holds no LVGL lock waits up to 2 s for
 // that and gets LICHEN_UNREG_OK with done run. The LVGL task, a holder of the LVGL lock, or a wait that ran out: gets
-// LICHEN_UNREG_PENDING at once and done runs later on the LVGL task. Not from an interrupt; takes the LVGL lock and then the
+// LICHEN_UNREG_PENDING at once and done runs later on the LVGL task. Where nobody observes (before lichen_app_list_live,
+// or no screen), done runs on the caller's own thread before this returns. Not from an interrupt; takes the LVGL lock and then the
 // app lock, so the caller holds neither (nor any lock the LVGL task waits for).
 typedef enum {
     LICHEN_UNREG_OK,
@@ -57,6 +58,8 @@ typedef enum {
     LICHEN_UNREG_RUNNING, // the app runs: stop it first
     LICHEN_UNREG_BUSY,    // the LVGL lock was not free in 5 s: nothing changed, try again
     LICHEN_UNREG_PENDING, // the app is gone, but the observers and done have not run yet (see done below)
+    LICHEN_UNREG_UNNOTIFIED, // the app is gone, but the observers could not be queued (no memory, LVGL busy): done will
+                             // NOT run, the caller keeps the lichen_app_t, and asks again with lichen_app_list_renotify
 } lichen_unreg_t;
 // leaked, when not NULL, gets the lichen_alloc blocks the app still held when it left (0: none): the book counts them but
 // cannot free them, so a loader frees everything the app allocated first (lichen_task_leftovers and the memory row tell
@@ -73,6 +76,9 @@ bool lichen_app_list_observe(void (*cb)(void *arg, bool removed), void *arg);
 // tells the observers. Before it they are not told (the shell and its Home exist while the apps still register, and Home
 // is built when boot ends). Any task.
 void lichen_app_list_live(void);
+// Queues the observers again after LICHEN_UNREG_UNNOTIFIED, with the same done semantics as lichen_unregister_app (OK,
+// PENDING or UNNOTIFIED again). Any task but an interrupt.
+lichen_unreg_t lichen_app_list_renotify(void (*done)(void *arg), void *done_arg);
 void lichen_app_list_unobserve(void (*cb)(void *arg, bool removed), void *arg);
 // The one lock of what the OS keeps per app (#520): the app list, and the lifecycle, badge and memory-book parts of the
 // apps' blocks. A recursive mutex taken after the LVGL lock (a holder never waits for the LVGL lock) and held only for a

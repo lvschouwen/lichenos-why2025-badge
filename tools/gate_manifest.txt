@@ -176,6 +176,7 @@ lichen_app_by_name	SYSTEM	any	lichen_sys_app.h
 lichen_app_count	SYSTEM	any	lichen_sys_app.h
 lichen_app_list_live	SYSTEM	any	lichen_sys_app.h
 lichen_app_list_observe	SYSTEM	any	lichen_sys_app.h
+lichen_app_list_renotify	SYSTEM	any	lichen_sys_app.h
 lichen_app_list_unobserve	SYSTEM	unspecified	lichen_sys_app.h
 lichen_badge_generation	-	unspecified	lichen_badge.h
 lichen_badge_get	-	unspecified	lichen_badge.h

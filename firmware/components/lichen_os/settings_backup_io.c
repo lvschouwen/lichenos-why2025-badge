@@ -37,6 +37,16 @@ static void io_take(void) {
     xSemaphoreTakeRecursive(s_io, portMAX_DELAY);
 }
 
+// The short wait for a caller that must not stall (sb_find, on the LVGL task): the backup holds it for seconds
+static bool io_try(void) {
+    portENTER_CRITICAL(&s_io_make);
+    if (!s_io) {
+        s_io = xSemaphoreCreateRecursiveMutexStatic(&s_io_buf);
+    }
+    portEXIT_CRITICAL(&s_io_make);
+    return xSemaphoreTakeRecursive(s_io, pdMS_TO_TICKS(50)) == pdTRUE;
+}
+
 static void io_give(void) {
     xSemaphoreGiveRecursive(s_io);
 }
@@ -46,7 +56,7 @@ static void io_removed(void) {
     held_release();
 }
 
-static sb_guard_t const s_guard = {.lock = io_take, .unlock = io_give, .removed = io_removed};
+static sb_guard_t const s_guard = {.lock = io_take, .try_lock = io_try, .unlock = io_give, .removed = io_removed};
 
 void settings_backup_io_boot(void) {
     sb_guard_set(&s_guard);

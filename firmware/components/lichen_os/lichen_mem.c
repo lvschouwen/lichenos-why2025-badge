@@ -151,8 +151,7 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
     if (!ptr) {
         return;
     }
-    if (!book_locking()) { // as the allocation: unbooked blocks come back here, and are one fewer outstanding
-        mem_unbooked_freed(&s_unbooked);
+    if (!book_locking()) { // as the allocation: straight to the heap, the book untouched
         heap_caps_free(ptr);
         return;
     }

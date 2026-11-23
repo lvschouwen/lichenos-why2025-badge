@@ -41,21 +41,44 @@ static struct {
 } s_groups[APP_GROUPS];
 static size_t s_group_count, s_app_keys;
 
-bool sb_add_app_keys(sb_key_t const *app_keys, size_t n) {
-    if (!app_keys || n == 0 || s_group_count >= APP_GROUPS || OWN_COUNT + s_app_keys + n > SB_KEYS_MAX) {
-        return false;
-    }
-    s_groups[s_group_count].keys = app_keys;
-    s_groups[s_group_count].n    = n;
-    s_group_count++;
-    s_app_keys += n;
-    return true;
-}
-
 static sb_guard_t const *s_guard;
 
 void sb_guard_set(sb_guard_t const *guard) {
     s_guard = guard;
+}
+
+static void guard_lock(void) {
+    if (s_guard && s_guard->lock) {
+        s_guard->lock();
+    }
+}
+
+static void guard_unlock(void) {
+    if (s_guard && s_guard->unlock) {
+        s_guard->unlock();
+    }
+}
+
+// The short wait: false when a backup holds the guard
+static bool guard_try(void) {
+    if (s_guard && s_guard->try_lock) {
+        return s_guard->try_lock();
+    }
+    guard_lock();
+    return true;
+}
+
+bool sb_add_app_keys(sb_key_t const *app_keys, size_t n) {
+    guard_lock();
+    bool ok = app_keys && n != 0 && s_group_count < APP_GROUPS && OWN_COUNT + s_app_keys + n <= SB_KEYS_MAX;
+    if (ok) {
+        s_groups[s_group_count].keys = app_keys;
+        s_groups[s_group_count].n    = n;
+        s_group_count++;
+        s_app_keys += n;
+    }
+    guard_unlock();
+    return ok;
 }
 
 bool sb_remove_app_keys(sb_key_t const *app_keys) {
@@ -88,18 +111,6 @@ void sb_app_keys_clear(void) {
     s_app_keys    = 0;
 }
 
-static void guard_lock(void) {
-    if (s_guard && s_guard->lock) {
-        s_guard->lock();
-    }
-}
-
-static void guard_unlock(void) {
-    if (s_guard && s_guard->unlock) {
-        s_guard->unlock();
-    }
-}
-
 size_t sb_key_count(void) {
     guard_lock();
     size_t n = OWN_COUNT + s_app_keys;
@@ -126,13 +137,26 @@ sb_key_t const *sb_key_at(size_t index) {
 }
 
 sb_key_t const *sb_find(char const *ns, char const *key) {
-    for (size_t i = 0; i < sb_key_count(); i++) {
-        sb_key_t const *k = sb_key_at(i);
-        if (strcmp(k->ns, ns) == 0 && strcmp(k->key, key) == 0) {
-            return k;
+    for (size_t i = 0; i < OWN_COUNT; i++) { // the fixed keys never move: no guard, so a running backup stalls nobody here
+        if (strcmp(keys[i].ns, ns) == 0 && strcmp(keys[i].key, key) == 0) {
+            return &keys[i];
         }
     }
-    return NULL;
+    if (!guard_try()) {
+        return NULL; // a backup is running: the apps' keys cannot be looked at now
+    }
+    sb_key_t const *found = NULL; // one hold for the whole scan: a group cannot leave between the count and the key
+    for (size_t g = 0; g < s_group_count && !found; g++) {
+        for (size_t i = 0; i < s_groups[g].n; i++) {
+            sb_key_t const *k = &s_groups[g].keys[i];
+            if (strcmp(k->ns, ns) == 0 && strcmp(k->key, key) == 0) {
+                found = k;
+                break;
+            }
+        }
+    }
+    guard_unlock();
+    return found;
 }
 
 // A POSIX TZ string: names, numbers, signs, commas, dots, colons, slashes and <> for numeric names; no spaces

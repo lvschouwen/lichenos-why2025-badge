@@ -143,7 +143,8 @@ static void ring_note(lichen_ctx_t ctx, char const *id, bool pin); // the crash 
 static void ring_drop(lichen_ctx_t ctx);
 static void list_changed(void);
 typedef struct list_call list_call_t;
-static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg);
+typedef enum { LIST_DONE, LIST_PENDING, LIST_FAILED } list_result_t;
+static list_result_t list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg);
 static bool ui_hold(bool *held);
 static void ui_release(bool held);
 
@@ -246,8 +247,13 @@ lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked, void (*
     if (app->backup_keys) {
         sb_remove_app_keys(app->backup_keys);
     }
-    bool finished = list_changed_ex(true, !caller_in_ui, done, done_arg);
-    return finished ? LICHEN_UNREG_OK : LICHEN_UNREG_PENDING;
+    list_result_t got = list_changed_ex(true, !caller_in_ui, done, done_arg);
+    return got == LIST_DONE ? LICHEN_UNREG_OK : got == LIST_PENDING ? LICHEN_UNREG_PENDING : LICHEN_UNREG_UNNOTIFIED;
+}
+
+lichen_unreg_t lichen_app_list_renotify(void (*done)(void *arg), void *done_arg) {
+    list_result_t got = list_changed_ex(true, !lichen_ui_ops_lock_held(), done, done_arg);
+    return got == LIST_DONE ? LICHEN_UNREG_OK : got == LIST_PENDING ? LICHEN_UNREG_PENDING : LICHEN_UNREG_UNNOTIFIED;
 }
 
 // ---- the app list changed (#520) -------------------------------------------------------------------------------------
@@ -367,9 +373,11 @@ static void ui_release(bool held) {
 
 // Queues the observers (removed: an app left, which they are told). done runs after them on the LVGL task, once (it
 // frees what the app owned). wait: the caller is no LVGL task and holds no LVGL lock, so it waits up to 2 s for the run;
-// true when the run finished in time (done has run); false when it is still to come (done runs later, on the LVGL task).
-// With nobody listening done runs here at once. No lock is held.
-static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg) {
+// LIST_DONE when the run finished in time (done has run); LIST_PENDING when it is still to come (done runs later, on the
+// LVGL task). With nobody listening done runs here, on the caller's thread, at once (LIST_DONE). LIST_FAILED: no memory for
+// the call or the LVGL task would not take it: the observers did not run and done will not, so the caller keeps whatever
+// done would have freed, and may ask again with lichen_app_list_renotify. No lock is held.
+static list_result_t list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg) {
     if (removed) {
         __atomic_store_n(&s_removed_pending, true, __ATOMIC_RELEASE); // set even when nobody listens yet: the next run says so
     }
@@ -377,15 +385,12 @@ static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void 
         if (done) {
             done(done_arg);
         }
-        return true;
+        return LIST_DONE;
     }
     list_call_t *c = gate_mem_new_for(lichen_sys_ctx_os(), sizeof(*c));
     if (!c) {
         ESP_LOGW(TAG, "app list change not delivered: no memory");
-        if (done) {
-            done(done_arg); // the observers miss this change; the app's memory is the loader's to free now
-        }
-        return true;
+        return LIST_FAILED;
     }
     c->wait     = wait;
     c->done     = done;
@@ -394,26 +399,23 @@ static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void 
     if (!lichen_ui_ops_later(list_changed_run, c)) {
         ESP_LOGW(TAG, "app list change not delivered: the LVGL lock was not free");
         list_call_free(c);
-        if (done) {
-            done(done_arg);
-        }
-        return true;
+        return LIST_FAILED;
     }
     if (!wait) {
-        return false;
+        return LIST_PENDING;
     }
     if (xSemaphoreTake(c->sem, pdMS_TO_TICKS(2000)) == pdTRUE) {
         list_call_free(c);
-        return true;
+        return LIST_DONE;
     }
     uint32_t queued = 0;
     if (__atomic_compare_exchange_n(&c->state, &queued, 2u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         ESP_LOGW(TAG, "app list observers did not run in 2 s: done follows on the LVGL task");
-        return false; // the run frees the call
+        return LIST_PENDING; // the run frees the call
     }
     xSemaphoreTake(c->sem, portMAX_DELAY); // it finished just now
     list_call_free(c);
-    return true;
+    return LIST_DONE;
 }
 
 static void list_changed(void) {

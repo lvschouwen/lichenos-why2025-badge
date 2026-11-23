@@ -170,6 +170,19 @@ static char guard_log[32];
 static void g_lock(void) { strcat(guard_log, "L "); }
 static void g_unlock(void) { strcat(guard_log, "U "); }
 static void g_removed(void) { strcat(guard_log, "R "); }
+static sb_key_t const *s_gone; // the group g_unlock_removing takes back, once
+static void g_unlock_removing(void) {
+    strcat(guard_log, "U ");
+    if (s_gone) {
+        sb_guard_t const *g = NULL;
+        sb_guard_set(g); // the removal itself must not recurse into this guard
+        sb_remove_app_keys(s_gone);
+        s_gone = NULL;
+        sb_guard_set(NULL);
+    }
+}
+static bool busy_try(void) { return false; }
+static bool g_try(void) { strcat(guard_log, "T "); return true; }
 
 // An app's keys join the table when it registers (#230 E1d): any namespace, none known to the OS
 static void test_app_keys(void) {
@@ -192,6 +205,22 @@ static void test_app_keys(void) {
     CHECK(strcmp(guard_log, "L R U L U ") == 0); // the second call found nothing: no "removed", but it still waited
     sb_app_keys_clear();
     CHECK(sb_add_app_keys(pager, 2));
+    // sb_find holds the guard once for its whole scan: a removal that lands when the guard is given back cannot make it
+    // read a key that is gone (#520). The fixed keys need no guard at all.
+    s_gone = pager;
+    guard_log[0] = '\0';
+    sb_guard_t const racing = {.lock = g_lock, .try_lock = g_try, .unlock = g_unlock_removing};
+    sb_guard_set(&racing);
+    CHECK(sb_find("badge_fw", "tz") != NULL && strcmp(guard_log, "") == 0); // a fixed key: no guard
+    CHECK(sb_find("a.pager", "name") == &pager[1] && strcmp(guard_log, "T U ") == 0); // one hold for the whole scan
+    CHECK(sb_find("a.pager", "name") == NULL); // the group left when the guard was given back
+    sb_guard_set(NULL);
+    CHECK(sb_add_app_keys(pager, 2));
+    // a backup that holds the guard: an app key is not found, the fixed ones still are
+    sb_guard_t const busy = {.try_lock = busy_try};
+    sb_guard_set(&busy);
+    CHECK(sb_find("a.pager", "name") == NULL && sb_find("badge_fw", "tz") != NULL);
+    sb_guard_set(NULL);
     // an app that unregisters takes its group back and leaves the others alone (#520)
     static sb_key_t const other[] = {{"a.other", "x", "X", SB_U8, 0, 1, 0, NULL}};
     CHECK(sb_add_app_keys(other, 1) && sb_key_count() == base + 3);

@@ -50,10 +50,13 @@ bool sb_add_app_keys(sb_key_t const *app_keys, size_t n);
 // What keeps sb_remove_app_keys off a running backup (#520): the table is read by the backup's save, plan and apply, and a
 // plan holds key pointers until its apply. The io side (settings_backup_io.c) sets lock/unlock around each of those, and
 // removed, called with the lock held after a group left, makes it drop what a plan held. The lock is recursive: the key
-// readers (sb_key_count, sb_key_at, sb_find) take it too, so a save or a load that already holds it may call them. Boot of
+// readers (sb_key_count, sb_key_at, sb_find, sb_add_app_keys) take it too, so a save or a load that already holds it may
+// call them. sb_find takes it once for its whole scan of the apps' groups, with the short try_lock (NULL: lock), and skips it
+// for the fixed keys; with a backup running an app key is then not found. Boot of
 // the io side, once; NULL members mean none.
 typedef struct {
     void (*lock)(void);
+    bool (*try_lock)(void); // a short wait, false when a backup holds it (sb_find: a caller that must not stall the LVGL task)
     void (*unlock)(void);
     void (*removed)(void);
 } sb_guard_t;

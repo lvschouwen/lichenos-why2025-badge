@@ -11,6 +11,7 @@
 #include "lichen_sys_app.h"
 
 #include "esp_log.h"
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_mem.h"
@@ -29,20 +30,20 @@ static void drop_timers(void *arg) {
 // The app's booked timers go with its stop: dead at once (any later tick deletes itself), deleted on the LVGL task
 // when its lock is free. Queued, never run here: this task holds no LVGL lock. Killed even with none booked: a task the
 // hook left running must not book one after the stop. Only the drop, which needs the lock, waits for a booked timer.
-static void stop_timers(lichen_app_t const *app, lichen_ctx_t ctx) {
+static void stop_timers(char const *name, lichen_ctx_t ctx) {
     lichen_sys_timer_kill(ctx);
     if (!lichen_sys_timer_count(ctx)) {
         return;
     }
     if (!lichen_sys_ui_call(drop_timers, (void *)(uintptr_t)ctx, TIMER_DROP_LOCK_MS)) {
-        ESP_LOGW(TAG, "%s: booked timers left to end at their next tick (LVGL busy)", app->name);
+        ESP_LOGW(TAG, "%s: booked timers left to end at their next tick (LVGL busy)", name);
     }
 }
 
 // Another caller is stopping the app (the update's stop, then the restart's save on its own task): its verdict, waited
 // for up to this caller's own reason's deadline from now. A hook that hangs past it is reported, and this caller goes
 // on; a late hook that did stop counts as stopped (app_life_wait_verdict).
-static bool wait_other(lichen_ctx_t ctx, lichen_app_t const *app, life_reason_t reason) {
+static bool wait_other(lichen_ctx_t ctx, char const *name, life_reason_t reason) {
     uint32_t since = lichen_sys_life_now_ms();
     for (;;) {
         switch (lichen_sys_life_wait(ctx, reason, since)) {
@@ -52,11 +53,11 @@ static bool wait_other(lichen_ctx_t ctx, lichen_app_t const *app, life_reason_t 
         case LIFE_WAIT_STOPPED:
             return true;
         case LIFE_WAIT_OVERDUE:
-            ESP_LOGW(TAG, "%s: still stopping, not waited for longer", app->name);
+            ESP_LOGW(TAG, "%s: still stopping, not waited for longer", name);
             return false;
         case LIFE_WAIT_FAILED:
         default:
-            ESP_LOGE(TAG, "%s is still running", app->name);
+            ESP_LOGE(TAG, "%s is still running", name);
             return false;
         }
     }
@@ -64,7 +65,7 @@ static bool wait_other(lichen_ctx_t ctx, lichen_app_t const *app, life_reason_t 
 
 // One line per app that stopped late or left something; nothing for one that stopped clean. Counted, never deleted or
 // freed: a task the app started ends when the app ends it, and a block may still be in use by it.
-static void report(lichen_app_t const *app, lichen_ctx_t ctx, size_t tasks_left) {
+static void report(char const *name, lichen_ctx_t ctx, size_t tasks_left) {
     app_life_t r;
     uint32_t   internal = 0, bulk = 0;
     lichen_os_mem_held(ctx, &internal, &bulk);
@@ -73,7 +74,7 @@ static void report(lichen_app_t const *app, lichen_ctx_t ctx, size_t tasks_left)
     }
     bool late = r.state == LIFE_FAULTED && r.fault == LIFE_FAULT_STOP_LATE;
     if (late || tasks_left || internal || bulk) {
-        ESP_LOGI(TAG, "%s stopped%s in %u ms: %u tasks run, %lu B internal, %lu B PSRAM held", app->name,
+        ESP_LOGI(TAG, "%s stopped%s in %u ms: %u tasks run, %lu B internal, %lu B PSRAM held", name,
                  late ? " late" : "", (unsigned)r.took_ms, (unsigned)tasks_left, (unsigned long)internal,
                  (unsigned long)bulk);
     }
@@ -85,9 +86,14 @@ static bool stop_one(lichen_ctx_t ctx, life_reason_t reason) {
     if (!app) {
         return true;
     }
+    // Everything of the app struct that is needed after the stop is read now: once stop_end says STOPPED or FAULTED the
+    // app may be unregistered and its struct freed (#520)
+    char name[32];
+    strlcpy(name, app->name ? app->name : "?", sizeof(name));
+    bool (*hook)(void) = app->stop_for_update;
     switch (lichen_sys_life_stop_begin(ctx, reason)) {
     case LIFE_BEGIN_BUSY:
-        return wait_other(ctx, app, reason);
+        return wait_other(ctx, name, reason);
     case LIFE_BEGIN_BAD:
         return false;
     case LIFE_BEGIN_OK:
@@ -95,18 +101,18 @@ static bool stop_one(lichen_ctx_t ctx, life_reason_t reason) {
         break;
     }
     bool stopped = true; // an app without a hook has nothing running that a stop would end
-    if (app->stop_for_update) {
+    if (hook) {
         lichen_ctx_t previous = lichen_ctx_enter(ctx); // #230: on the stopping task, for the app
-        stopped               = app->stop_for_update();
+        stopped               = hook();
         lichen_ctx_leave(previous);
     }
     if (!stopped) {
-        ESP_LOGE(TAG, "%s is still running", app->name);
+        ESP_LOGE(TAG, "%s is still running", name);
     }
     size_t tasks_left = lichen_os_task_count(ctx);
     lichen_sys_life_stop_end(ctx, stopped, (uint32_t)tasks_left);
-    report(app, ctx, tasks_left);
-    stop_timers(app, ctx);
+    report(name, ctx, tasks_left);
+    stop_timers(name, ctx);
     return stopped;
 }
 

@@ -239,7 +239,7 @@ type	radio_state.h	radio_hold_t	376d5dd1
 type	radio_state.h	radio_id_t	bb5f5f4e
 type	radio_state.h	radio_state_t	835945fa
 type	settings_backup.h	sb_err_t	32b876ee
-type	settings_backup.h	sb_guard_t	c1b5bdb7
+type	settings_backup.h	sb_guard_t	2564576e
 type	settings_backup.h	sb_key_t	26cd702e
 type	settings_backup.h	sb_result_t	d5c99783
 type	settings_backup.h	sb_type_t	22c2d914

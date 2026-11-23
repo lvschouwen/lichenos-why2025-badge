@@ -55,9 +55,11 @@ typedef enum {
 // Otherwise the block is allocated or freed unbooked: the heap does it, the book is not touched.
 bool mem_book_can_book(bool can_yield, bool scheduler_running);
 
-// Blocks allocated unbooked and not freed yet. A free that finds the book short of what it frees (no row, or more than the
-// row holds) while some are outstanding is taken to be one of them: no warning, the count goes down. The book may then be
-// a block or two off (a booked block freed unbooked, or the reverse), never more than the unbooked traffic.
+// Blocks allocated unbooked and not freed yet. A free in a context that can book, which finds the book short of what it
+// frees (no row, or more than the row holds) while some are outstanding, is taken to be one of them: no warning, the count
+// goes down. It is a guess: it can take a real wrong-owner free for one of them and stay quiet about it (until the count
+// is spent), and a block freed unbooked is not counted down (nothing frees from those contexts today, so the count only
+// goes down through this guess). The book can drift, but never by more than the unbooked traffic.
 typedef struct {
     uint32_t outstanding;
 } mem_unbooked_t;
