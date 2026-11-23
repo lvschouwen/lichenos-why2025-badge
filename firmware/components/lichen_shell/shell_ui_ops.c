@@ -13,6 +13,8 @@ static bool later(void (*fn)(void *), void *arg) {
 
 static lichen_ui_ops_t const ops = {
     .later            = later,
+    .lock             = lichen_sys_ui_lock,
+    .unlock           = lichen_sys_ui_unlock,
     .later_cancel     = lichen_sys_ui_cancel,
     .home             = shell_home_impl,
     .back             = shell_back_impl,

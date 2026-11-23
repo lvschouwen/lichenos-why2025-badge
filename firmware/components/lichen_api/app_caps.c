@@ -1,5 +1,6 @@
 // The run-time capability check (#229), see app_caps.h
 #include "app_caps.h"
+#include "app_state.h"
 
 #include "lichen_caps.h"
 
@@ -23,12 +24,15 @@ bool app_caps_check(app_caps_refusals_t *r, app_ctx_table_t const *t, uint32_t c
     if (need == 0 || slot == 0 || !app_ctx_valid(t, ctx)) {
         return true;
     }
-    void const *owner = t->owner[slot];
+    void const *owner = app_ctx_slot_owner(t, ctx);
     if (!owner || app_caps_allows(caps_of(owner), need)) {
         return true;
     }
     __atomic_fetch_add(&r->refused, 1u, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&r->per_slot[slot], 1u, __ATOMIC_RELAXED);
+    app_state_t *st = app_ctx_state(t, ctx); // the app's own count (fw app caps); gone with the app
+    if (st) {
+        __atomic_fetch_add(&st->caps_refused, 1u, __ATOMIC_RELAXED);
+    }
     __atomic_store_n(&r->last_need, need, __ATOMIC_RELAXED);
     return false;
 }

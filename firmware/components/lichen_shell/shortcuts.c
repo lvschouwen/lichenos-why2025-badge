@@ -19,8 +19,28 @@ static char const TAG[] = "shortcuts";
 
 static app_switch_t switcher = APP_SWITCH_INIT; // LVGL task only
 
+// The apps' indexes moved (an app joined or left, #520): "the last two apps" no longer name the same ones
+void shortcuts_forget_apps(void) {
+    switcher = (app_switch_t)APP_SWITCH_INIT;
+}
+
+// The slot of the app at index (0 for none) and the index of the app in slot (-1 for none): ✕ remembers slots, which stay
+// put when apps join and leave
+static int slot_of_index(size_t index) {
+    return (int)(lichen_sys_app_ctx_at(index) & 0xffu);
+}
+
+static int index_of_slot(int slot) {
+    for (size_t i = 0; slot > 0 && i < lichen_app_count(); i++) {
+        if (slot_of_index(i) == slot) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 void shortcuts_app_opened(size_t index) {
-    app_switch_opened(&switcher, (int)index);
+    app_switch_opened(&switcher, slot_of_index(index));
 }
 
 static int app_showing(void) {
@@ -29,12 +49,13 @@ static int app_showing(void) {
     for (int i = 0; i < depth; i++) {
         ids[i] = nav_at(i);
     }
-    return shortcut_top_app(ids, depth, (int)lichen_app_count());
+    return shortcut_top_app(ids, depth);
 }
 
 static int app_index_of(char const *id) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
-        if (strcmp(lichen_app_at(i)->id, id) == 0) {
+        lichen_app_t const *app = lichen_app_at(i);
+        if (app && app->id && strcmp(app->id, id) == 0) {
             return (int)i;
         }
     }
@@ -48,13 +69,13 @@ static bool open_from_home(int index) {
     }
     shell_home();
     shell_open_app((size_t)index);
-    return nav_current() == 1 + index; // shell_open refuses while booting or with the stack full
+    return nav_current() == shell_app_screen((size_t)index); // shell_open refuses while booting or with the stack full
 }
 
 static void open_messages(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (app->open_messages) {
+        if (app && app->open_messages) {
             if (open_from_home((int)i)) {
                 lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230
                 app->open_messages();
@@ -69,7 +90,7 @@ static void open_messages(void) {
 // Power and the notifications open over the current screen: Esc goes back to where the key was pressed
 static void open_over(char const *id) {
     int i = app_index_of(id);
-    if (i >= 0 && nav_current() != 1 + i) {
+    if (i >= 0 && nav_current() != shell_app_screen((size_t)i)) {
         shell_open_app((size_t)i);
     }
 }
@@ -79,7 +100,7 @@ void shortcuts_run(shortcut_t s) {
     switch (s) {
         case SHORTCUT_HOME: shell_home(); break;
         case SHORTCUT_MESSAGES: open_messages(); break;
-        case SHORTCUT_SWITCH_APP: open_from_home(app_switch_target(&switcher, app_showing())); break;
+        case SHORTCUT_SWITCH_APP: open_from_home(index_of_slot(app_switch_target(&switcher, app_showing()))); break;
         case SHORTCUT_SEARCH: shell_search(); break;
         case SHORTCUT_NOTIFICATIONS: notify_ui_cloud_key(); break;
         case SHORTCUT_POWER: open_over("power"); break;

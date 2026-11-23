@@ -15,28 +15,27 @@ static void owner_fit(char out[MEM_BOOK_OWNER_CAP], char const *owner) {
     out[n] = 0;
 }
 
-// make: a new row labelled label (os: the OS's) when ctx has none
+// make: the row is labelled label (os: the OS's) when ctx has none yet. A stale ctx has no app and so no row: a late
+// free under the ctx of an app that left finds none (MEM_RELEASE_NO_ROW).
 static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *label, bool os) {
     if (!ctx) {
         return NULL; // 0 marks a free row and is never a valid context
     }
-    mem_use_t *free_row = NULL;
-    for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
-        mem_use_t *r = &b->row[i];
-        if (!r->ctx) {
-            free_row = free_row ? free_row : r;
-        } else if (r->ctx == ctx) {
-            return r;
-        }
+    mem_use_t *r = (os || ctx == b->os.ctx) ? &b->os : (b->app_row ? b->app_row(b->user, ctx) : NULL);
+    if (!r) {
+        return NULL;
     }
-    if (make && free_row) {
-        memset(free_row, 0, sizeof(*free_row));
-        free_row->ctx = ctx;
-        free_row->os  = os;
-        owner_fit(free_row->owner, label);
-        return free_row;
+    if (r->ctx == ctx) {
+        return r;
     }
-    return NULL;
+    if (r->ctx || !make) {
+        return NULL; // another ctx's row (the OS row's ctx never changes), or nothing charged yet
+    }
+    memset(r, 0, sizeof(*r));
+    r->ctx = ctx;
+    r->os  = os;
+    owner_fit(r->owner, label);
+    return r;
 }
 
 // held + bytes would pass quota (without overflowing)

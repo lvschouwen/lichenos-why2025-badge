@@ -18,6 +18,7 @@
 #include "reg_row_text.h"
 #include "screen_ids.h"
 #include "settings_store.h"
+#include "nav.h"
 #include "shell_parts.h"
 #include "shell_ui_ops.h"
 #include "theme.h"
@@ -349,7 +350,8 @@ static void open_about(void *arg) {
     (void)arg;
     // About is the app after Settings: open it as the app it is
     for (size_t i = 0; i < lichen_app_count(); i++) {
-        if (strcmp(lichen_app_at(i)->name, "About Lichen") == 0) {
+        lichen_app_t const *app = lichen_app_at(i);
+        if (app && strcmp(app->name, "About Lichen") == 0) {
             shell_open_app(i);
             return;
         }
@@ -387,14 +389,21 @@ static lv_obj_t *build_app_page(void) {
     return screen;
 }
 
+// The row carries the app's context, not its index: an app that joined or left since the Settings screen was built has
+// moved the indexes (#520), and a context that is stale finds no app, so an old row opens nothing
 static void open_app_page(void *arg) {
-    size_t index = (size_t)(intptr_t)arg;
-    page_app     = lichen_app_at(index);
-    page_ctx     = lichen_sys_app_ctx_at(index);
-    page_index   = index;
-    if (page_app && app_page_listed(index)) {
-        _Static_assert(LICHEN_MAX_APPS <= SCREEN_APP_MAX, "app page ids would overlap");
-        shell_open(build_app_page, SCREEN_APP + (int)index);
+    lichen_ctx_t ctx = (lichen_ctx_t)(uintptr_t)arg;
+    for (size_t index = 0; index < lichen_app_count(); index++) {
+        if (lichen_sys_app_ctx_at(index) != ctx) {
+            continue;
+        }
+        page_app   = lichen_app_at(index);
+        page_ctx   = ctx;
+        page_index = index;
+        if (page_app && app_page_listed(index)) {
+            shell_open(build_app_page, SCREEN_APP_BASE + (int)(ctx & 0xffu)); // by slot: it stays with the app
+        }
+        return;
     }
 }
 
@@ -609,14 +618,14 @@ static void open_settings(lv_obj_t *screen) {
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app_page_listed(i)) {
+        if (!app || !app_page_listed(i)) {
             continue;
         }
         if (!heading) {
             menu_note(menu, "Apps");
             heading = true;
         }
-        menu_set_kind(menu_add(menu, app->name, "", open_app_page, (void *)(intptr_t)i), MENU_OPEN);
+        menu_set_kind(menu_add(menu, app->name, "", open_app_page, (void *)(uintptr_t)lichen_sys_app_ctx_at(i)), MENU_OPEN);
     }
 }
 
@@ -629,6 +638,35 @@ static lichen_app_t const settings_app = {
     .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
+// An app joined (#520): Settings' "Apps" rows are the apps it was built with. While it is on top it is closed and opened
+// again, so the rows are the apps there are now; under other screens it is rebuilt when next opened. A removal closes
+// every screen (home.c), Settings included.
+static int settings_index(void) {
+    for (size_t i = 0; i < lichen_app_count(); i++) {
+        if (lichen_app_at(i) == &settings_app) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static void reopen_settings(void *unused) {
+    (void)unused;
+    int index = settings_index();
+    if (index >= 0) {
+        shell_open_app((size_t)index);
+    }
+}
+
+static void on_apps_changed(void *unused, bool removed) {
+    (void)unused;
+    int index = settings_index();
+    if (!removed && index >= 0 && nav_current() == shell_app_screen((size_t)index)) {
+        shell_back_then(reopen_settings, NULL);
+    }
+}
+
 void settings_app_register(void) {
     lichen_register_app(&settings_app);
+    lichen_app_list_observe(on_apps_changed, NULL);
 }

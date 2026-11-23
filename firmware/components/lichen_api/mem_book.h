@@ -12,7 +12,6 @@
 extern "C" {
 #endif
 
-#define MEM_BOOK_OWNERS    25 // LICHEN_MAX_APPS apps and the OS; lichen_mem.c asserts it is enough
 #define MEM_BOOK_OWNER_CAP 14 // an app id is at most 13 characters (app_ns.h)
 #define MEM_BOOK_OS        "lichen" // the label of the OS's own allocations (label NULL): counted, never limited
 // Internal RAM is what the display's DMA and the radios need (150 KB free is the floor, docs/architecture.md); one app
@@ -35,14 +34,19 @@ typedef struct {
     uint32_t bulk_over;  // PSRAM charges that took the app past bulk_quota and were granted (not enforced)
 } mem_use_t;
 
+// The OS's row is the book's own; an app's row lives in the app's block (app_state.h, since #520: no fixed table, no
+// limit on the apps), which app_row finds from the app's context: NULL for a ctx that is no app's. A row is free until
+// its first charge sets ctx. A book without app_row has no app rows.
 typedef struct {
-    mem_use_t row[MEM_BOOK_OWNERS];
+    mem_use_t os;
+    mem_use_t *(*app_row)(void *user, uint32_t ctx);
+    void *user;
 } mem_book_t;
 
 typedef enum {
     MEM_CHARGE_OK,     // charged
     MEM_CHARGE_QUOTA,  // refused: an app's internal total would pass the quota (counted in refused)
-    MEM_CHARGE_NO_ROW, // not charged: no row left for a new owner (or ctx 0). Bookkeeping never fails an allocation:
+    MEM_CHARGE_NO_ROW, // not charged: ctx is no app's (a stale or made-up one), or 0. Bookkeeping never fails an allocation:
                        // the caller allocates anyway, unbooked
 } mem_charge_t;
 

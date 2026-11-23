@@ -33,7 +33,7 @@ shortcut_t shortcut_decide(uint8_t code, bool pressed, shortcut_gate_t const *ga
 // "home", "messages", ... (fw keys send names, logs); "none" for SHORTCUT_NONE
 char const *shortcut_name(shortcut_t s);
 
-// Switch app (✕): the last two apps opened, as lichen_app_at() indexes, -1 for none
+// Switch app (✕): the last two apps opened, as context slots (they stay put when apps join and leave, #520), -1 for none
 typedef struct {
     int cur;  // the app opened last
     int prev; // the one before it
@@ -46,6 +46,6 @@ void app_switch_opened(app_switch_t *s, int index);
 // Which app ✕ opens, given the app showing now (-1: none, e.g. home): from inside the last app the one before it, from
 // anywhere else the last one. -1 when there is none to go to.
 int  app_switch_target(app_switch_t const *s, int showing);
-// The app showing: the top-most app screen in the stack (screen ids from nav_at(), bottom first; an app's screen id is
-// 1 + its index, as shell_open_app gives it). -1 when no app screen is in the stack.
-int  shortcut_top_app(int const *ids, int depth, int app_count);
+// The app showing, as its context slot: the top-most app screen in the stack (screen ids from nav_at(), bottom first; an
+// app's screen id is SCREEN_APP_OWN + its slot, as shell_open_app gives it). -1 when no app screen is in the stack.
+int  shortcut_top_app(int const *ids, int depth);

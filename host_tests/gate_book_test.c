@@ -3,6 +3,7 @@
 // context, not a missing label; an app without an id is labelled by its name and keeps its quota; the trampoline runs
 // a task as the context it was booked under.
 #include "gate_book.h"
+#include "mem_book_fake.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -83,14 +84,14 @@ static void test_owner(void) {
 
 static void test_mem(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     reset();
     gate_owner_t who;
     // Refused: nothing booked, no lock taken (the caller then allocates nothing)
     CHECK(gate_mem_charge(&g, &b, STALE_CTX, false, 100, &who) == MEM_GATE_REFUSED);
     CHECK(gate_mem_charge(&g, &b, 0, false, 100, &who) == MEM_GATE_REFUSED);
     static mem_book_t const empty;
-    CHECK(memcmp(&b, &empty, sizeof(b)) == 0 && locks == 0 && refused == 2);
+    CHECK(memcmp(&b.os, &empty.os, sizeof(b.os)) == 0 && fake_rows[0].ctx == 0 && locks == 0 && refused == 2);
     // Valid: charged under the ctx, with the lock
     CHECK(gate_mem_charge(&g, &b, MESH_CTX, false, 4096, &who) == MEM_CHARGE_OK && who.ctx == MESH_CTX);
     CHECK(locks == 1 && unlocks == 1 && mem_book_find(&b, MESH_CTX)->bulk == 4096);

@@ -1,6 +1,6 @@
 #include "lichen_fs.h"
 
-#include "app_slot.h"
+#include "app_state.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -16,22 +16,14 @@
 
 static char const TAG[] = "files";
 
-// An app's directory on the storage drive: its owner and its path side by side, so app_slot_pick (pure) reads the
-// owners. Apps call lichen_fs_app_dir from their own tasks: the lookup, mkdir and claim run with dirs_lock held (#272).
-EXT_RAM_BSS_ATTR static void const *dir_owner[LICHEN_MAX_APPS]; // the app's id string
-EXT_RAM_BSS_ATTR static char        dir_path[LICHEN_MAX_APPS][sizeof(STORAGE_BASE) + 1 + 13 + 1]; // + the longest id
+// An app's directory on the storage drive and on the SD card are in its block (app_state.h, #520), so any number of apps
+// each have theirs and they go with the app. Apps call lichen_fs_app_dir from their own tasks: the lookup and mkdir run
+// with dirs_lock held (#272). The SD directory is made once per mount: a re-inserted (or another) card gets it again.
+_Static_assert(sizeof(STORAGE_BASE) + 1 + 13 + 1 <= APP_STATE_DIR_CAP, "the storage directory path fits the app's block");
+_Static_assert(sizeof(SD_APPS_DIR) + 1 + 13 + 1 <= APP_STATE_SD_CAP, "the SD directory path fits the app's block");
 
-// An app's directory on the SD card, made once per mount: a re-inserted (or another) card gets it again
-typedef struct {
-    char const *id;
-    uint32_t    generation; // sd_info's generation it was made in; 0 = not yet
-    char        path[sizeof(SD_APPS_DIR) + 1 + 13 + 1];
-} sd_dir_t;
-
-EXT_RAM_BSS_ATTR static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
-
-// Apps call lichen_fs_sd_dir from their own tasks: the table (claiming a slot, rewriting it after a remount) is only
-// touched with this held. Both tables' locks are mutexes, never a portMUX: mkdir runs under them, and the tables are in
+// Apps call lichen_fs_sd_dir from their own tasks: an app's SD directory (made, or rewritten after a remount) is only
+// touched with this held. Both locks are mutexes, never a portMUX: mkdir runs under them, and the blocks are in
 // PSRAM (no PSRAM in a critical section, #271). Separate, so a storage directory never waits on the SD card. Made on
 // first use.
 static SemaphoreHandle_t sd_dirs_lock, dirs_lock;
@@ -70,24 +62,23 @@ static bool made(char const *path) {
 }
 
 // With dirs_lock held
-static char const *app_dir_locked(char const *id) {
-    size_t i = app_slot_pick(dir_owner, LICHEN_MAX_APPS, id);
-    if (i == LICHEN_MAX_APPS) {
-        ESP_LOGE(TAG, "no room for %s's directory", id);
-        return NULL;
+static char const *app_dir_locked(lichen_ctx_t ctx, char const *id) {
+    app_state_t *st = lichen_sys_app_state(ctx);
+    if (!st) {
+        return NULL; // the app left
     }
-    if (dir_owner[i] == id) {
-        return dir_path[i];
+    if (st->dir_made) {
+        return st->dir_path;
     }
-    if (!fs_app_dir_path(STORAGE_BASE, id, dir_path[i], sizeof(dir_path[i]))) {
+    if (!fs_app_dir_path(STORAGE_BASE, id, st->dir_path, sizeof(st->dir_path))) {
         return NULL; // usable_id already refused it; never mkdir a path that was not written
     }
-    if (!made(dir_path[i])) {
-        ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", dir_path[i], errno);
-        return NULL; // the slot stays free: the next call tries again
+    if (!made(st->dir_path)) {
+        ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", st->dir_path, errno);
+        return NULL; // not made: the next call tries again
     }
-    dir_owner[i] = id;
-    return dir_path[i];
+    st->dir_made = true;
+    return st->dir_path;
 }
 
 char const *lichen_fs_app_dir(lichen_ctx_t ctx) {
@@ -100,7 +91,7 @@ char const *lichen_fs_app_dir(lichen_ctx_t ctx) {
         ESP_LOGW(TAG, "%s: directory table busy (lock timeout twice), not a missing drive", id);
         return NULL;
     }
-    char const *path = app_dir_locked(id);
+    char const *path = app_dir_locked(ctx, id);
     xSemaphoreGive(dirs_lock);
     return path;
 }
@@ -117,38 +108,27 @@ bool lichen_fs_drive_bytes(size_t *total, size_t *used) {
 }
 
 // With sd_dirs_lock held
-static char const *sd_dir_locked(char const *id, uint32_t generation) {
-    sd_dir_t *slot = NULL;
-    for (size_t i = 0; i < LICHEN_MAX_APPS; i++) {
-        if (sd_dirs[i].id == id) {
-            slot = &sd_dirs[i];
-            break;
-        }
-        if (!slot && !sd_dirs[i].id) {
-            slot = &sd_dirs[i];
-        }
+static char const *sd_dir_locked(lichen_ctx_t ctx, char const *id, uint32_t generation) {
+    app_state_t *st = lichen_sys_app_state(ctx);
+    if (!st) {
+        return NULL; // the app left
     }
-    if (!slot) {
-        ESP_LOGE(TAG, "no room for %s's SD directory", id);
-        return NULL;
+    if (st->sd_path[0] && st->sd_generation == generation) {
+        return st->sd_path;
     }
-    if (slot->id == id && slot->generation == generation) {
-        return slot->path;
-    }
-    fs_app_dir_path(SD_APPS_DIR, id, slot->path, sizeof(slot->path));
-    slot->id = id;
+    fs_app_dir_path(SD_APPS_DIR, id, st->sd_path, sizeof(st->sd_path));
     if (!sd_begin(1000)) {
         return NULL;
     }
-    bool ok  = made(SD_APPS_DIR) && made(slot->path);
+    bool ok  = made(SD_APPS_DIR) && made(st->sd_path);
     int  err = ok ? 0 : errno;
     sd_end(sd_io_from_errno(err)); // only a failing card counts toward the unmount, not ENOSPC or a name FAT refuses
     if (!ok) {
-        ESP_LOGE(TAG, "%s: mkdir failed (errno %d)", slot->path, err);
+        ESP_LOGE(TAG, "%s: mkdir failed (errno %d)", st->sd_path, err);
         return NULL;
     }
-    slot->generation = generation;
-    return slot->path;
+    st->sd_generation = generation;
+    return st->sd_path;
 }
 
 char const *lichen_fs_sd_dir(lichen_ctx_t ctx) {
@@ -168,7 +148,7 @@ char const *lichen_fs_sd_dir(lichen_ctx_t ctx) {
         ESP_LOGW(TAG, "%s: SD directory table busy", id);
         return NULL;
     }
-    char const *path = sd_dir_locked(id, info.generation);
+    char const *path = sd_dir_locked(ctx, id, info.generation);
     xSemaphoreGive(sd_dirs_lock);
     return path;
 }

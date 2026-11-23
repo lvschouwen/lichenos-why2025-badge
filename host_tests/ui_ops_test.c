@@ -157,8 +157,18 @@ static void f_later_cancel(void (*fn)(void *), void *arg) {
     seen.arg = arg;
 }
 
+static uint32_t s_lock_ms;
+static bool f_lock(uint32_t timeout_ms) {
+    note("lock");
+    s_lock_ms = timeout_ms;
+    return true;
+}
+static void f_unlock(void) {
+    note("unlock");
+}
+
 static lichen_ui_ops_t const full = {
-    .later = f_later, .later_cancel = f_later_cancel,
+    .later = f_later, .later_cancel = f_later_cancel, .lock = f_lock, .unlock = f_unlock,
     .home = f_home, .back = f_back, .open_keyed = f_open_keyed, .open_reuse_count = f_reuse_count,
     .open_count_reuse = f_count_reuse, .screen_open = f_screen_open, .on_esc = f_on_esc, .on_search = f_on_search,
     .scroll_by = f_scroll_by, .page_create = f_page_create, .scroll_tame = f_scroll_tame,
@@ -198,6 +208,8 @@ static void not_up(void) {
     CHECK(!lichen_date_text(NULL, 0)); // nothing to write into: still no crash
     CHECK(!lichen_keys_raw_take(raw_fn, &token));
     lichen_keys_raw_release(raw_fn, &token);
+    CHECK(!lichen_ui_ops_lock(5000)); // #520: no table, no UI to keep consistent; the caller goes on without the lock
+    lichen_ui_ops_unlock();
     CHECK(!lichen_ui_ops_later(void_fn, &token)); // #286: not queued, so a menu row's Enter does nothing yet
     lichen_ui_ops_later_cancel(void_fn, &token);
     CHECK(seen.n == before);
@@ -269,6 +281,9 @@ static void forwards_rest(void) {
     seen.arg = NULL;
     lichen_ui_ops_later_cancel(void_fn, &token);
     CHECK(strcmp(seen.call, "later_cancel") == 0 && seen.fn == (void const *)void_fn && seen.arg == &token);
+    CHECK(lichen_ui_ops_lock(1234) && strcmp(seen.call, "lock") == 0 && s_lock_ms == 1234);
+    lichen_ui_ops_unlock();
+    CHECK(strcmp(seen.call, "unlock") == 0);
 }
 
 // The key hash is the gate's own (pure): the same before the shell is up as after, never SHELL_KEY_UNIQUE

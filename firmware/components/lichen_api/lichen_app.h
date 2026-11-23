@@ -77,9 +77,8 @@ typedef struct lichen_app {
     uint16_t psram_kib;
 } lichen_app_t;
 
-// Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error
-// when it is full.
-#define LICHEN_MAX_APPS 24 // #173: 16 was full with the 2026-11-03 apps; ~110 B internal .bss per slot; ids allow 32 (SCREEN_APP_MAX)
+// There is no table size: since #520 the apps' table and what the OS keeps per app grow in PSRAM, and the only bound is the
+// 8 bits of slot in a context (255 apps, app_ctx.h). lichen_register_app logs an error when it is full.
 
 // An app's context (#230): 8 bits of slot and 24 bits of generation, not a pointer. lichen_register_app hands it out;
 // the gate calls take it (#230 E1b-E1e) and refuse one that is stale or made up (logged, counted in "fw app ctx").
@@ -87,6 +86,10 @@ typedef struct lichen_app {
 typedef uint32_t lichen_ctx_t;
 #define LICHEN_CTX_NONE ((lichen_ctx_t)0)
 
+// An app can leave again (lichen_unregister_app, lichen_sys_app.h, the OS's call for SD apps): free every lichen_alloc
+// block, task and timer the app made before that, since the OS counts what is left but cannot free it for the app, and
+// never unregister from the LVGL task.
+//
 // Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const). Returns the
 // app's context, LICHEN_CTX_NONE when the table is full or the app's id or alias is refused (#340): already registered
 // (as an id or an alias), one the OS keeps ("lichen", "test", the drive folders), no id or not an app id, or an alias

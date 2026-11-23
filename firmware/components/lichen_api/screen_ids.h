@@ -2,12 +2,15 @@
 
 // Every screen id in one place (#148). The shell's identity of a screen is (id, key), so two screens must never share an
 // id: host_tests/screen_ids_test.c fails on a duplicate and on an overlap with the app ranges. Add new ids here.
-//   1..SCREEN_APP_MAX      the apps' own screens (shell_open_app: 1 + app index)
-//   99..198                Lichen's and MeshCore's fixed screens (below)
-//   SCREEN_APP_BASE + i    app i's Settings / About page (app_settings.c)
+//   99..262                Lichen's and MeshCore's fixed screens (below)
+//   SCREEN_APP_OWN + slot  the screen of the app in context slot 1..255 (shell_open_app)
+//   SCREEN_APP_BASE + slot that app's Settings / About page (app_settings.c)
+// By the app's context slot, which stays with an app while others join and leave (#520), not by its index in the list,
+// which moves; the slot's 8 bits are the only bound on the number of apps (app_ctx.h).
 
-#define SCREEN_APP_MAX  32  // most apps the id ranges allow
-#define SCREEN_APP_BASE 200 // + app index: 200..231
+#define SCREEN_APP_MAX  255  // slots 1..255
+#define SCREEN_APP_OWN  1000 // + slot: 1001..1255
+#define SCREEN_APP_BASE 1300 // + slot: 1301..1555
 
 #define SCREEN_ID_LIST(X) \
     X(SCREEN_WELCOME, 99) \

@@ -46,37 +46,46 @@ static char const TAG[] = "home";
 #define BADGE_RED     THEME_LINK_RED // the count circle (#102): white on red, like a phone's app badge
 #define BADGE_PAD_HOR 6
 #define HOME_ID_MAX   32  // an app id's length, generously (app_ns.h allows 13)
-#define ORDER_CAP     800 // "1:" + LICHEN_MAX_APPS ids with their commas + NUL; a longer stored value reads as default
+#define ORDER_ID_BYTES 14 // an app id is 13 characters at most (app_ns.h), and its comma
 #define ORDER_LINE_APPS 6 // per "fw home" reply line: far under the console's 384-byte log line
-static_assert(ORDER_CAP >= 2 + LICHEN_MAX_APPS * (HOME_ID_MAX + 1) + 1, "ORDER_CAP holds every app's id");
+// "1:" and the n ids with their commas and the NUL: the stored order's text for n apps. A longer stored value (an app
+// left since it was saved, or a hand-made one) reads as default, and the key holds 4000 characters at most (NVS), which
+// is where the order of 280 apps would end: past it the order is not saved, and logged.
+static size_t order_cap(int n) {
+    return 3 + (size_t)n * ORDER_ID_BYTES;
+}
 
 typedef struct {
     home_layout_t layout;
     int           count;
     int           sel;                    // the selected app (a registry index, like every array here)
-    int           order[LICHEN_MAX_APPS]; // order[slot] = the app shown there
-    int           slot_of[LICHEN_MAX_APPS];
-    int           picked[LICHEN_MAX_APPS]; // the order when the tile was picked up: Esc puts it back
+    // One allocation with the struct (home_create), sized by the apps there are: no limit on them (#520)
+    int          *order;   // order[slot] = the app shown there
+    int          *slot_of;
+    int          *picked;  // the order when the tile was picked up: Esc puts it back
+    uint32_t     *ctx;     // each tile's app context, as it was when home was built
     bool          arranging;
     bool          holding;
     lv_obj_t     *moving; // the amber "Moving" label on the held tile
-    lv_obj_t     *cell[LICHEN_MAX_APPS];
-    lv_obj_t     *line1[LICHEN_MAX_APPS]; // tiles only
-    lv_obj_t     *line2[LICHEN_MAX_APPS];
-    lv_obj_t     *badge[LICHEN_MAX_APPS]; // the count circle on each icon (#102), hidden at 0
-    lv_obj_t     *icon[LICHEN_MAX_APPS];  // the box it sits on
+    lv_obj_t    **cell;
+    lv_obj_t    **line1; // tiles only
+    lv_obj_t    **line2;
+    lv_obj_t    **badge; // the count circle on each icon (#102), hidden at 0
+    lv_obj_t    **icon;  // the box it sits on
     uint32_t      badge_gen;              // lichen_badge_generation() when they were last drawn
     bool          badges_drawn;
     lv_timer_t   *timer;
 } home_t;
 
-// The app selected last, over rebuilds: a layout switch keeps it (#189). By id, not registry index, so a change in
-// the registration order still finds it. NULL: the first tile. App structs live as long as the badge runs.
-static char const *last_app;
+// The app selected last, over rebuilds: a layout switch keeps it (#189), and so does an app joining or leaving (#520).
+// By id, not registry index, so a change in the registration order still finds it; a copy, not the app's own string,
+// which an unregistered app (an SD app) takes with it. Empty: the first tile.
+static char last_app[HOME_ID_MAX + 1];
 
 static int app_index(char const *id) {
-    for (size_t i = 0; id && i < lichen_app_count(); i++) {
-        if (strcmp(lichen_app_at(i)->id, id) == 0) {
+    for (size_t i = 0; id && id[0] && i < lichen_app_count(); i++) {
+        lichen_app_t const *app = lichen_app_at(i);
+        if (app && app->id && strcmp(app->id, id) == 0) {
             return (int)i;
         }
     }
@@ -94,34 +103,58 @@ static void style_cell(home_t const *h, int i) {
 static void select(home_t *h, int sel) {
     int old = h->sel;
     h->sel  = sel;
-    last_app = lichen_app_at((size_t)sel)->id;
+    lichen_app_t const *app = lichen_app_at((size_t)sel);
+    if (app && app->id) {
+        strlcpy(last_app, app->id, sizeof(last_app));
+    }
     style_cell(h, old);
     style_cell(h, sel);
     lv_obj_scroll_to_view(h->cell[sel], LV_ANIM_ON);
 }
 
+// By context, not index: a key handled between an app leaving and the observer rebuilding home must not open the app
+// that moved into its index (#520). A context that is gone opens nothing.
 static void open_selected(void *arg) {
-    shell_open_app((size_t)(intptr_t)arg);
+    lichen_ctx_t ctx = (lichen_ctx_t)(uintptr_t)arg;
+    for (size_t i = 0; ctx && i < lichen_app_count(); i++) {
+        if (lichen_sys_app_ctx_at(i) == ctx) {
+            shell_open_app(i);
+            return;
+        }
+    }
 }
 
 // ---- The saved order (#189) ----------------------------------------------------------------------------------------
 
 static void app_ids(char const **ids, int n) {
     for (int i = 0; i < n; i++) {
-        ids[i] = lichen_app_at((size_t)i)->id;
+        lichen_app_t const *app = lichen_app_at((size_t)i);
+        ids[i]                  = app && app->id ? app->id : "";
     }
 }
 
-// order gets the saved order merged with the apps registered now; true when a saved order was used
+// Zeroed PSRAM for what scales with the apps (the console task's stack is small, and so is every other)
+static void *os_alloc(size_t size) {
+    return lichen_alloc(lichen_sys_ctx_os(), size, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+}
+
+// order gets the saved order merged with the apps registered now; true when a saved order was used. On no memory the
+// default order, as for someone who never arranged.
 static bool load_order(int *order, int n) {
-    char const *ids[LICHEN_MAX_APPS];
-    app_ids(ids, n);
-    char *text = lichen_alloc(lichen_sys_ctx_os(), ORDER_CAP, LICHEN_MEM_BULK); // the console task's stack is small too
-    if (text) {
-        settings_get_str(HOME_ORDER_KEY, text, ORDER_CAP, "");
+    char const **ids  = os_alloc((size_t)n * sizeof(*ids) + 1);
+    char        *text = os_alloc(order_cap(n));
+    bool         used = false;
+    if (ids && text) {
+        app_ids(ids, n);
+        settings_get_str(HOME_ORDER_KEY, text, order_cap(n), "");
+        used = tile_order_merge(text, ids, n, order);
+    } else {
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
     }
-    bool used = tile_order_merge(text, ids, n, order);
     lichen_free(lichen_sys_ctx_os(), text);
+    lichen_free(lichen_sys_ctx_os(), ids);
     return used;
 }
 
@@ -130,11 +163,15 @@ static bool save_order(int const *order, int n) {
     if (tile_order_is_default(order, n)) {
         return settings_erase(HOME_ORDER_KEY);
     }
-    char const *ids[LICHEN_MAX_APPS];
-    app_ids(ids, n);
-    char *text = lichen_alloc(lichen_sys_ctx_os(), ORDER_CAP, LICHEN_MEM_BULK);
-    bool  ok   = text && tile_order_encode(ids, order, n, text, ORDER_CAP) > 0 && settings_set_str(HOME_ORDER_KEY, text);
+    char const **ids  = os_alloc((size_t)n * sizeof(*ids) + 1);
+    char        *text = os_alloc(order_cap(n));
+    bool         ok   = false;
+    if (ids && text) {
+        app_ids(ids, n);
+        ok = tile_order_encode(ids, order, n, text, order_cap(n)) > 0 && settings_set_str(HOME_ORDER_KEY, text);
+    }
     lichen_free(lichen_sys_ctx_os(), text);
+    lichen_free(lichen_sys_ctx_os(), ids);
     if (!ok) {
         ESP_LOGE(TAG, "home order not saved");
     }
@@ -198,7 +235,7 @@ static void move_held(home_t *h, int from, int to) {
 }
 
 static void cancel_hold(home_t *h, lv_obj_t *home) {
-    memcpy(h->order, h->picked, sizeof(h->order));
+    memcpy(h->order, h->picked, (size_t)h->count * sizeof(int));
     tile_order_slots(h->order, h->count, h->slot_of);
     place_cells(h);
     h->holding = false;
@@ -217,7 +254,7 @@ static void hold(home_t *h, lv_obj_t *home, bool on) {
         return;
     }
     if (on) {
-        memcpy(h->picked, h->order, sizeof(h->picked));
+        memcpy(h->picked, h->order, (size_t)h->count * sizeof(int));
     }
     h->holding = on;
     show_moving(h, on);
@@ -272,7 +309,7 @@ static void on_key(lv_event_t *e) {
     }
     if (key == LV_KEY_ENTER) {
         // Outside the indev's key handling: opening swaps the indev's group
-        lichen_sys_ui_call(open_selected, (void *)(intptr_t)h->sel, 0);
+        lichen_sys_ui_call(open_selected, (void *)(uintptr_t)h->ctx[h->sel], 0);
         return;
     }
     int from = h->slot_of[h->sel];
@@ -320,8 +357,9 @@ static void refresh_badges(home_t *h) {
         return;
     }
     for (int i = 0; i < h->count; i++) {
-        if (h->badge[i]) {
-            refresh_badge(h->badge[i], h->icon[i], lichen_sys_badge_get(lichen_app_at(i)->id));
+        lichen_app_t const *app = lichen_app_at((size_t)i); // NULL: the app left, the list change is on its way (#520)
+        if (h->badge[i] && app) {
+            refresh_badge(h->badge[i], h->icon[i], lichen_sys_badge_get(app->id));
         }
     }
     h->badge_gen    = generation;
@@ -334,7 +372,7 @@ static void refresh(lv_timer_t *timer) {
     for (int i = 0; i < h->count; i++) {
         lichen_app_t const *app = lichen_app_at(i);
         char                t1[LINE_CAP], t2[LINE_CAP];
-        if (!h->line1[i] || !app->tile_text) {
+        if (!app || !h->line1[i] || !app->tile_text) {
             continue;
         }
         t1[0] = t2[0] = '\0';
@@ -466,7 +504,30 @@ char const *home_selected_name(lv_obj_t *home) {
     if (!h || h->count == 0 || h->sel >= h->count) {
         return NULL;
     }
-    return lichen_app_at(h->sel)->name;
+    lichen_app_t const *app = lichen_app_at((size_t)h->sel);
+    return app ? app->name : NULL;
+}
+
+// The struct and its arrays in one block, sized by the apps there are now (an app joining or leaving rebuilds home)
+static home_t *home_alloc(size_t n) {
+    home_t *h = os_alloc(sizeof(*h) + n * (5 * sizeof(lv_obj_t *) + 3 * sizeof(int) + sizeof(uint32_t)));
+    if (!h) {
+        return NULL;
+    }
+    h->cell    = (lv_obj_t **)(h + 1);
+    h->line1   = h->cell + n;
+    h->line2   = h->line1 + n;
+    h->badge   = h->line2 + n;
+    h->icon    = h->badge + n;
+    h->order   = (int *)(h->icon + n);
+    h->slot_of = h->order + n;
+    h->picked  = h->slot_of + n;
+    h->ctx     = (uint32_t *)(h->picked + n);
+    h->count   = (int)n;
+    for (size_t i = 0; i < n; i++) {
+        h->ctx[i] = lichen_sys_app_ctx_at(i);
+    }
+    return h;
 }
 
 lv_obj_t *home_create(void) {
@@ -484,11 +545,10 @@ lv_obj_t *home_create(void) {
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUS_KEY);
 
-    home_t *h = lichen_alloc(lichen_sys_ctx_os(), sizeof(*h), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    home_t *h = home_alloc(lichen_app_count());
     if (!h) {
         return home;
     }
-    h->count  = (int)lichen_app_count();
     h->layout = home_layout_from_u8(settings_get_u8("home_layout", HOME_TILES));
     if (h->count == 0) {
         lv_obj_t *empty = add_label(home, "No apps yet", THEME_DIM);
@@ -532,15 +592,21 @@ lv_obj_t *home_create(void) {
 // ---- "fw home": the console side of Settings > Display > Home layout, Arrange home and Reset order ---------------
 
 bool home_order_arranged(void) {
-    int n = (int)lichen_app_count();
-    int order[LICHEN_MAX_APPS];
-    return load_order(order, n) && !tile_order_is_default(order, n);
+    int  n     = (int)lichen_app_count();
+    int *order = os_alloc((size_t)n * sizeof(*order) + 1);
+    bool arranged = order && load_order(order, n) && !tile_order_is_default(order, n);
+    lichen_free(lichen_sys_ctx_os(), order);
+    return arranged;
 }
 
 // The whole order, ORDER_LINE_APPS ids a line, so no line is cut in the log or the Wi-Fi console
 static void reply_order(void) {
-    int  n = (int)lichen_app_count();
-    int  order[LICHEN_MAX_APPS];
+    int  n     = (int)lichen_app_count();
+    int *order = os_alloc((size_t)n * sizeof(*order) + 1);
+    if (!order) {
+        console_reply("home order: no memory");
+        return;
+    }
     bool arranged = load_order(order, n) && !tile_order_is_default(order, n);
     console_reply("home order (%s), %d apps:", arranged ? "arranged" : "default", n);
     for (int first = 0; first < n; first += ORDER_LINE_APPS) {
@@ -549,12 +615,14 @@ static void reply_order(void) {
         int    last = first + ORDER_LINE_APPS < n ? first + ORDER_LINE_APPS : n;
         line[0]     = '\0';
         for (int slot = first; slot < last && len < sizeof(line); slot++) {
-            int w = snprintf(line + len, sizeof(line) - len, "%s%s", slot > first ? ", " : "",
-                             lichen_app_at((size_t)order[slot])->id);
+            lichen_app_t const *app = lichen_app_at((size_t)order[slot]);
+            int                 w   = snprintf(line + len, sizeof(line) - len, "%s%s", slot > first ? ", " : "",
+                                               app && app->id ? app->id : "?");
             len += w > 0 ? (size_t)w : 0;
         }
         console_reply("  %d-%d: %s", first + 1, last, line);
     }
+    lichen_free(lichen_sys_ctx_os(), order);
 }
 
 static void cmd_home(char const *args) {
@@ -577,7 +645,22 @@ static void cmd_home(char const *args) {
     }
 }
 
+// An app joined or left (#520): the home screen is rebuilt, which keeps the selection by id. A join only appends, so the
+// screens on top stay (rebuilt below them); a removal moved the later apps' indexes, which an app page's rows and the
+// rows of an open Settings screen are keyed by: every screen closes, back to a fresh home (the screen ids are by slot,
+// and stay right)
+static void on_apps_changed(void *unused, bool removed) {
+    (void)unused;
+    shortcuts_forget_apps();
+    if (removed) {
+        shell_rebuild_home();
+    } else {
+        shell_rebuild_home_below();
+    }
+}
+
 void home_init(void) {
+    lichen_app_list_observe(on_apps_changed, NULL);
     console_register("home",
                      "home layout tiles|grid | home order [reset] (the home screen's layout and tile order, as in "
                      "Settings > Display)",

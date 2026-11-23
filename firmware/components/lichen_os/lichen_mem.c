@@ -1,10 +1,11 @@
 // lichen_alloc (#181): heap_caps with the placement rule and the per-app count (mem_book.c) on top. The count is under
-// a spinlock: an allocation can come from any task, and the book's work is a few compares. The book is in internal RAM
-// so a critical section never touches PSRAM (whose cache can be off during a flash write). The owner is the caller's
-// context (#230 E1b), checked before anything is booked: lock-free, no LVGL lock.
+// a mutex (an allocation can come from any task, and the book's work is a few compares); an app's row is in its block in
+// PSRAM (#520), which no critical section may touch (#271). The owner is the caller's context (#230 E1b), checked before
+// anything is booked: no LVGL lock.
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
+#include "app_state.h"
 #include "gate_book.h"
 #include "lichen_caps.h"
 #include "lichen_os.h"
@@ -16,22 +17,37 @@
 #include "esp_memory_utils.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include <string.h>
 
-_Static_assert(MEM_BOOK_OWNERS >= LICHEN_MAX_APPS + 1, "a row for every app and the OS");
-
 static char const TAG[] = "mem";
 
-static mem_book_t   book; // ~1 KB internal .bss
-static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
-static bool         went_unbooked; // the owner table was full once: frees without a row are expected from then on
+// The OS's row is here (internal, ~0.1 KB); an app's row is in its block (app_state.h, #520), which is PSRAM and goes with
+// the app, so the apps cost no internal RAM and there is no limit on them. Hence a mutex around the book, not a
+// spinlock: no critical section may touch PSRAM (#271). The mutex is made on first use.
+static mem_book_t        book = {.app_row = NULL}; // set up by book_init
+static bool              went_unbooked; // a ctx had no row once (a stale one): frees without a row are expected from then on
 
+static mem_use_t *app_row(void *user, uint32_t ctx) {
+    (void)user;
+    app_state_t *st = lichen_sys_app_state(ctx);
+    return st ? &st->mem : NULL;
+}
+
+// Where lichen_sys_app_lock takes the lock (see there); elsewhere the book is updated without it, which at worst
+// miscounts a block. The same answer at the take and the give: the context does not change in between.
+static bool book_locking(void) {
+    return xPortCanYield() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING;
+}
+
+// The app lock (lichen_sys_app_lock, recursive): the book's lookups of an app's row take it again for the app list
 static void book_take(void) {
-    portENTER_CRITICAL(&book_mux);
+    lichen_sys_app_lock();
 }
 static void book_give(void) {
-    portEXIT_CRITICAL(&book_mux);
+    lichen_sys_app_unlock(book_locking());
 }
 
 bool gate_os_resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
@@ -54,10 +70,10 @@ static gate_env_t const env = {.resolve = gate_os_resolve, .os = lichen_sys_ctx_
 
 // The first allocation the book had no row for (logged once); later ones are expected
 static bool first_unbooked(void) {
-    portENTER_CRITICAL(&book_mux);
+    book_take();
     bool first    = !went_unbooked;
     went_unbooked = true;
-    portEXIT_CRITICAL(&book_mux);
+    book_give();
     return first;
 }
 
@@ -83,7 +99,7 @@ static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
     }
     if (charge == MEM_CHARGE_NO_ROW && first_unbooked()) {
         // Bookkeeping never fails an allocation: this owner's memory is not counted (logged once)
-        ESP_LOGW(TAG, "%s: no row left in the memory book (%d): allocated, but not counted", owner, MEM_BOOK_OWNERS);
+        ESP_LOGW(TAG, "%s: no row in the memory book (its app is gone?): allocated, but not counted", owner);
     }
     uint32_t caps = (internal ? MALLOC_CAP_INTERNAL : MALLOC_CAP_SPIRAM) | MALLOC_CAP_8BIT;
     void    *p;
@@ -97,13 +113,13 @@ static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
     }
     size_t   got  = p ? heap_caps_get_allocated_size(p) : 0;
     if (charge == MEM_CHARGE_OK) {
-        portENTER_CRITICAL(&book_mux);
+        book_take();
         if (!p) {
             mem_book_release(&book, ctx, internal, (uint32_t)size);
         } else if (got > size) {
             mem_book_adjust(&book, ctx, internal, (uint32_t)(got - size)); // the free gives back what the heap says
         }
-        portEXIT_CRITICAL(&book_mux);
+        book_give();
     }
     return p;
 }
@@ -127,9 +143,9 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
         return; // refused (logged, counted) before ptr was looked at: the block, if it is one, stays allocated
     }
     char const *owner = label ? label : MEM_BOOK_OS;
-    portENTER_CRITICAL(&book_mux);
+    book_take();
     bool unbooked = went_unbooked;
-    portEXIT_CRITICAL(&book_mux);
+    book_give();
     if (rel == MEM_RELEASE_OVER || (rel == MEM_RELEASE_NO_ROW && !unbooked)) {
         // Freed under another owner than it was allocated with, or never from lichen_alloc: some count is now wrong
         ESP_LOGW(TAG, "%s: lichen_free of %p (%u B) is more than it holds: freed under the wrong owner?", owner, ptr,
@@ -140,11 +156,17 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
 
 // The lines "fw mem" adds: what each owner holds through lichen_alloc now, its peak, and refusals
 static void mem_report(void) {
-    for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
-        mem_use_t row; // one row at a time onto the stack: a short critical section, and no PSRAM inside it
-        portENTER_CRITICAL(&book_mux);
-        row = book.row[i];
-        portEXIT_CRITICAL(&book_mux);
+    size_t apps = lichen_app_count();
+    for (size_t i = 0; i <= apps; i++) { // the OS's row, then every app's
+        mem_use_t row; // one row at a time onto the stack
+        book_take();
+        mem_use_t const *src = i == 0 ? &book.os : app_row(NULL, lichen_sys_app_ctx_at(i - 1));
+        if (src) {
+            row = *src;
+        } else {
+            row.owner[0] = '\0'; // the app left since the count
+        }
+        book_give();
         mem_use_t const *r = &row;
         if (r->owner[0]) {
             console_reply("mem app %s internal %u (peak %u, quota %u) psram %u (peak %u) blocks %u refused %u", r->owner,
@@ -168,22 +190,22 @@ void lichen_sys_mem_quotas(void) {
         if (!app || (app->caps & CAP_SYSTEM)) {
             continue;
         }
-        portENTER_CRITICAL(&book_mux);
+        book_take();
         bool ok = mem_book_set_bulk_quota(&book, lichen_sys_app_ctx_at(i), app->id, (uint32_t)app->psram_kib * 1024u,
                                           false);
-        portEXIT_CRITICAL(&book_mux);
+        book_give();
         if (!ok) {
-            ESP_LOGW(TAG, "%s: no row left in the memory book for its PSRAM quota", app->id ? app->id : app->name);
+            ESP_LOGW(TAG, "%s: no row in the memory book for its PSRAM quota", app->id ? app->id : app->name);
         }
     }
 }
 
 bool lichen_os_mem_held(uint32_t ctx, uint32_t *internal, uint32_t *bulk) {
-    portENTER_CRITICAL(&book_mux);
+    book_take();
     mem_use_t const *r = mem_book_find(&book, ctx);
     *internal          = r ? r->internal : 0;
     *bulk              = r ? r->bulk : 0;
-    portEXIT_CRITICAL(&book_mux);
+    book_give();
     return r != NULL;
 }
 
@@ -191,6 +213,7 @@ bool lichen_os_mem_held(uint32_t ctx, uint32_t *internal, uint32_t *bulk) {
 static lichen_sys_mem_ops_t const gate_ops = {.alloc = lichen_alloc, .release = lichen_free};
 
 void lichen_sys_mem_start(void) {
+    book.app_row = app_row; // before the first booking: the apps' rows are in their blocks
     lichen_sys_mem_ops_set(&gate_ops);
 }
 

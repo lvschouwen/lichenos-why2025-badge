@@ -2,6 +2,7 @@
 // refused and counted, the OS and SYSTEM apps always pass, a ctx that is not valid is left to the call's own check,
 // and the refusal log is rate-limited.
 #include "app_caps.h"
+#include "app_state.h"
 #include "lichen_caps.h"
 
 #include <stdio.h>
@@ -36,9 +37,12 @@ typedef struct {
     uint32_t            os, timer, keytest, shell, mesh;
 } world_t;
 
+static world_t w; // one at a time: setup gives the previous one's table storage back
+
 static void setup(world_t *w) {
+    app_ctx_destroy(&w->t);
     memset(w, 0, sizeof(*w));
-    app_ctx_init(&w->t, 0x11111111u);
+    app_ctx_init_with(&w->t, 0x11111111u, NULL, APP_CTX_MAX_APPS, sizeof(app_state_t));
     w->os      = app_ctx_os(&w->t);
     w->timer   = app_ctx_add(&w->t, &timer, 0x222222u);
     w->keytest = app_ctx_add(&w->t, &keytest, 0x333333u);
@@ -56,16 +60,16 @@ static void test_allows(void) {
 }
 
 static void test_undeclared_cap_refuses(void) {
-    world_t w;
     setup(&w);
     CHECK(!app_caps_check(&w.r, &w.t, w.timer, CAP_RAW_KEYS, caps_of));
     CHECK(!app_caps_check(&w.r, &w.t, w.keytest, CAP_NOTIFY, caps_of));
     CHECK(w.r.refused == 2 && w.r.last_need == CAP_NOTIFY);
-    CHECK(w.r.per_slot[1] == 1 && w.r.per_slot[2] == 1 && w.r.per_slot[3] == 0);
+    CHECK(((app_state_t *)app_ctx_state(&w.t, w.timer))->caps_refused == 1 &&
+          ((app_state_t *)app_ctx_state(&w.t, w.keytest))->caps_refused == 1 &&
+          ((app_state_t *)app_ctx_state(&w.t, w.shell))->caps_refused == 0);
 }
 
 static void test_declared_os_and_system_pass(void) {
-    world_t w;
     setup(&w);
     CHECK(app_caps_check(&w.r, &w.t, w.timer, CAP_NOTIFY, caps_of));
     CHECK(app_caps_check(&w.r, &w.t, w.keytest, CAP_RAW_KEYS, caps_of));
@@ -77,7 +81,6 @@ static void test_declared_os_and_system_pass(void) {
 }
 
 static void test_invalid_ctx_is_left_to_the_ctx_check(void) {
-    world_t w;
     setup(&w);
     uint32_t stale = (w.timer & 0xffu) | (0x999999u << 8);
     CHECK(app_caps_check(&w.r, &w.t, stale, CAP_RAW_KEYS, caps_of));
@@ -87,7 +90,6 @@ static void test_invalid_ctx_is_left_to_the_ctx_check(void) {
 }
 
 static void test_log_rate_limit(void) {
-    world_t  w;
     uint32_t skipped = 99;
     setup(&w);
     CHECK(app_caps_log_due(&w.r, 0, &skipped) && skipped == 0); // the first one, even at time 0
@@ -119,6 +121,7 @@ int main(void) {
     test_invalid_ctx_is_left_to_the_ctx_check();
     test_log_rate_limit();
     test_names_and_format();
+    app_ctx_destroy(&w.t);
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

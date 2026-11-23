@@ -282,7 +282,14 @@ static void test_view(void) {
     view(back, 4, 5, true, false, __LINE__);
 }
 
+static void test_removable(void) {
+    CHECK(app_life_removable(LIFE_REGISTERED) && app_life_removable(LIFE_STOPPED) && app_life_removable(LIFE_FAULTED));
+    CHECK(!app_life_removable(LIFE_BACKGROUND) && !app_life_removable(LIFE_OPEN) && !app_life_removable(LIFE_SUSPENDED));
+    CHECK(!app_life_removable(LIFE_STOPPING) && !app_life_removable(LIFE_STATE_COUNT));
+}
+
 int main(void) {
+    test_removable();
     test_record();
     test_names();
     test_boot();

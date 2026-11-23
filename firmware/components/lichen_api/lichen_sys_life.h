@@ -7,6 +7,7 @@
 // and none of these but lichen_sys_apps_stop block.
 
 #include "app_life.h"
+#include "lichen_app.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,7 +22,7 @@ void lichen_sys_life_started(size_t index);
 // main.c's apps boot step: safe mode switched the app's background part off (#232). Any task.
 void lichen_sys_life_fault_crashes(size_t index);
 // The shell's screen stack changed: ids[0..depth) bottom to top (nav_at) and ctxs[] the context each screen was opened
-// in (lichen_ctx_self at the push). A screen belongs to app i when its id is 1 + i or SCREEN_APP_BASE + i (its Settings
+// in (lichen_ctx_self at the push). A screen belongs to the app in slot s when its id is SCREEN_APP_OWN + s or SCREEN_APP_BASE + s (its Settings
 // page), else to the app whose context opened it (MeshCore's chat from its notification); the OS's pages belong to no
 // app. At most LIFE_SCREENS_MAX screens are looked at. The LVGL task (the shell holds the LVGL lock); takes only the
 // records' spinlock.
@@ -33,6 +34,9 @@ life_begin_t lichen_sys_life_stop_begin(size_t index, life_reason_t reason);
 life_state_t lichen_sys_life_stop_end(size_t index, bool stopped, uint32_t tasks_left);
 life_wait_t  lichen_sys_life_wait(size_t index, life_reason_t own, uint32_t since_ms);
 uint32_t     lichen_sys_life_now_ms(void);
+// Whether the app of ctx may be unregistered now (app_life_removable of its record): false for a ctx that is no app's.
+// Any task.
+bool lichen_sys_life_removable(lichen_ctx_t ctx);
 // A copy of the app's record; false past the table. Any task.
 bool lichen_sys_life_get(size_t index, app_life_t *out);
 // "fw app life": every app's state and its last stop (console task)

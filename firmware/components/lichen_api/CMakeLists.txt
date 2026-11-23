@@ -33,7 +33,7 @@ idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "l
                             "text_entry.c"
                             "tz_table.c" "app_ns.c" "app_secret.c" "fs_path.c" "crashlog_fmt.c" "settings_backup.c" "settings_backup_swap.c"
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
-                            "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "gate_mem.c" "app_ctx.c" "app_caps.c" "gate_app.c" "test_card_layout.c" "test_card.c"
+                            "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "gate_mem.c" "app_ctx.c" "panic_ring.c" "app_caps.c" "gate_app.c" "test_card_layout.c" "test_card.c"
                             "bench_scope.c" "key_cause.c" "ui_cb.c" "lichen_ui_cb.c" "app_life.c" "lichen_app_life.c" "timer_book.c"
                             "lichen_hex.c" "lichen_str.c" "lichen_sys_data_fs.c" "lichen_manifest.c"
                        INCLUDE_DIRS "."

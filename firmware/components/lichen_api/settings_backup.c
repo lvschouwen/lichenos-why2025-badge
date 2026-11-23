@@ -51,6 +51,37 @@ bool sb_add_app_keys(sb_key_t const *app_keys, size_t n) {
     return true;
 }
 
+static sb_guard_t const *s_guard;
+
+void sb_guard_set(sb_guard_t const *guard) {
+    s_guard = guard;
+}
+
+bool sb_remove_app_keys(sb_key_t const *app_keys) {
+    sb_guard_t const *guard = s_guard;
+    bool              found = false;
+    if (guard && guard->lock) {
+        guard->lock();
+    }
+    for (size_t g = 0; g < s_group_count && !found; g++) {
+        if (s_groups[g].keys == app_keys) {
+            s_app_keys -= s_groups[g].n;
+            for (; g + 1 < s_group_count; g++) {
+                s_groups[g] = s_groups[g + 1];
+            }
+            s_group_count--;
+            found = true;
+        }
+    }
+    if (found && guard && guard->removed) {
+        guard->removed();
+    }
+    if (guard && guard->unlock) {
+        guard->unlock();
+    }
+    return found;
+}
+
 void sb_app_keys_clear(void) {
     s_group_count = 0;
     s_app_keys    = 0;

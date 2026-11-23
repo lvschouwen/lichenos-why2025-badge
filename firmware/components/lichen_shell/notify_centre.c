@@ -14,6 +14,7 @@
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "menu.h"
+#include "lichen_mem.h"
 #include "nav.h"
 #include "notify_os.h"
 #include "notify_view.h"
@@ -59,7 +60,7 @@ static uint32_t   s_ask_id;      // the notice a "clear this unread error?" ques
 static int app_index(char const *id) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (app->id && strcmp(app->id, id) == 0) {
+        if (app && app->id && strcmp(app->id, id) == 0) {
             return (int)i;
         }
     }
@@ -487,40 +488,53 @@ static lichen_app_t const notify_app = {
     .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
+static void on_apps_changed(void *unused, bool removed);
+
 void notify_app_register(void) {
     lichen_register_app(&notify_app);
+    lichen_app_list_observe(on_apps_changed, NULL);
 }
 
 // ---- Settings › Notifications --------------------------------------------------------------------------------------------
 
-#define MAX_SOURCES (LICHEN_MAX_APPS + 1)
+#define SOURCE_ID_CAP 14 // an app id with its NUL (app_ns.h)
 
+// The source rows and ids are one allocation sized by the apps there are when the page is built (#520: no limit on them),
+// freed with the page. The ids are copies: an app that leaves takes its own string with it.
 static struct {
     lv_obj_t   *dnd_row;
     lv_obj_t   *led_row;
     lv_obj_t   *vib_row;
     lv_obj_t   *vib_str_row;
     lv_obj_t   *clear_row;
-    lv_obj_t   *source_row[MAX_SOURCES];
-    char const *source[MAX_SOURCES];
+    size_t      sources;       // rows in source_row / source
+    lv_obj_t  **source_row;
+    char      (*source)[SOURCE_ID_CAP];
 } s_s;
 
 static void toggle_source(void *arg) {
     size_t i = (size_t)(uintptr_t)arg;
+    if (i >= s_s.sources) {
+        return;
+    }
     bool   on = !lichen_notify_source_is_on(s_s.source[i]);
     lichen_notify_set_source_enabled(s_s.source[i], on);
     menu_set_on(s_s.source_row[i], lichen_notify_source_is_on(s_s.source[i]));
 }
 
+// The row carries the app's context: the indexes move when an app joins or leaves (#520), a stale ctx finds no app
 static void open_app_notify_settings(void *arg) {
-    size_t              i   = (size_t)(uintptr_t)arg;
-    lichen_app_t const *app = lichen_app_at(i);
-    if (!app || !app->notify_settings_open) {
+    lichen_ctx_t ctx = (lichen_ctx_t)(uintptr_t)arg;
+    for (size_t i = 0; i < lichen_app_count(); i++) {
+        lichen_app_t const *app = lichen_app_at(i);
+        if (lichen_sys_app_ctx_at(i) != ctx || !app || !app->notify_settings_open) {
+            continue;
+        }
+        lichen_ctx_t previous = lichen_ctx_enter(ctx); // #230
+        app->notify_settings_open();
+        lichen_ctx_leave(previous);
         return;
     }
-    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230
-    app->notify_settings_open();
-    lichen_ctx_leave(previous);
 }
 
 static void toggle_dnd(void *arg) {
@@ -570,7 +584,16 @@ static void settings_clear(void *arg) {
 
 static void on_settings_delete(lv_event_t *e) {
     (void)e;
+    lichen_free(lichen_sys_ctx_os(), s_s.source_row); // the rows and the ids are one block, rows first
     memset(&s_s, 0, sizeof(s_s));
+}
+
+static bool sources_alloc(size_t apps) {
+    void *block = lichen_alloc(lichen_sys_ctx_os(), (apps + 1) * (sizeof(lv_obj_t *) + SOURCE_ID_CAP),
+                               LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    s_s.source_row = block;
+    s_s.source     = block ? (char(*)[SOURCE_ID_CAP])(s_s.source_row + apps + 1) : NULL;
+    return block != NULL;
 }
 
 static lv_obj_t *build_settings(void) {
@@ -578,28 +601,35 @@ static lv_obj_t *build_settings(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Notifications");
     menu_note(menu, "Show notifications from:");
+    size_t apps = lichen_app_count();
+    if (!sources_alloc(apps)) {
+        return screen; // no memory: an empty page, never a crash
+    }
+    lichen_ui_event_add(screen, on_settings_delete, LV_EVENT_DELETE, NULL);
     size_t n = 0;
-    for (size_t i = 0; i < lichen_app_count() && n < MAX_SOURCES - 1; i++) {
+    for (size_t i = 0; i < apps && n < apps; i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app->id || strcmp(app->id, NOTIFY_APP_ID) == 0) {
+        if (!app || !app->id || strcmp(app->id, NOTIFY_APP_ID) == 0) {
             continue;
         }
-        s_s.source[n]     = app->id;
+        strlcpy(s_s.source[n], app->id, sizeof(s_s.source[n]));
         s_s.source_row[n] = menu_add(menu, app->name, "", toggle_source, (void *)(uintptr_t)n);
         menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
         menu_set_on(s_s.source_row[n], lichen_notify_source_is_on(app->id));
         n++;
     }
-    s_s.source[n]     = "lichen";
+    s_s.sources = n + 1;
+    strlcpy(s_s.source[n], "lichen", sizeof(s_s.source[n]));
     s_s.source_row[n] = menu_add(menu, "Lichen (system)", "", toggle_source, (void *)(uintptr_t)n);
     menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
     menu_set_on(s_s.source_row[n], lichen_notify_source_is_on("lichen"));
     for (size_t i = 0; i < lichen_app_count(); i++) { // what an app sends, if it can be set (#50)
         lichen_app_t const *app = lichen_app_at(i);
-        if (app->notify_settings_open) {
+        if (app && app->notify_settings_open) {
             char label[96];
             snprintf(label, sizeof(label), "%s notifications", app->name);
-            menu_set_kind(menu_add(menu, label, "", open_app_notify_settings, (void *)(uintptr_t)i), MENU_OPEN);
+            menu_set_kind(menu_add(menu, label, "", open_app_notify_settings,
+                                   (void *)(uintptr_t)lichen_sys_app_ctx_at(i)), MENU_OPEN);
         }
     }
     s_s.dnd_row = menu_add(menu, "Do not disturb", "", toggle_dnd, NULL);
@@ -622,10 +652,23 @@ static lv_obj_t *build_settings(void) {
     menu_set_danger(s_s.clear_row, "Clear all notifications?", "clear all");
     menu_note(menu, "A source that is off loses its notices: no history, no badge. Do not disturb keeps them but shows "
                     "no pop-ups, except errors (without sound).");
-    lichen_ui_event_add(screen, on_settings_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
 
 void notify_settings_open(void) {
     shell_open(build_settings, SCREEN_NOTIFY_SETTINGS);
+}
+
+// An app joined or left (#520): the page lists the apps it was built with. On top it is closed and opened again, so the
+// rows are the apps there are now; under other screens it is rebuilt when next opened
+static void reopen_notify_settings(void *unused) {
+    (void)unused;
+    notify_settings_open();
+}
+
+static void on_apps_changed(void *unused, bool removed) {
+    (void)unused;
+    if (!removed && nav_current() == SCREEN_NOTIFY_SETTINGS) { // a removal closes every screen (home.c)
+        shell_back_then(reopen_notify_settings, NULL);
+    }
 }

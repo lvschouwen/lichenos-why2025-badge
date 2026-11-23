@@ -3,6 +3,8 @@
 #include "settings_backup_swap.h"
 
 #include "esp_app_desc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
 #include "esp_log.h"
@@ -17,6 +19,38 @@
 #include <sys/stat.h>
 
 static char const TAG[] = "backup";
+
+// One backup operation at a time against an app's keys leaving (#520: sb_remove_app_keys through the guard): save, plan,
+// apply and discard hold it, so the key table and the keys a plan holds are not freed under them. A mutex: they run
+// seconds on the SD card, and the app that left is waiting in unregister, holding no other lock.
+static StaticSemaphore_t s_io_buf;
+static SemaphoreHandle_t s_io;
+static portMUX_TYPE      s_io_make = portMUX_INITIALIZER_UNLOCKED;
+static void              held_release(void);
+
+static void io_take(void) {
+    portENTER_CRITICAL(&s_io_make);
+    if (!s_io) {
+        s_io = xSemaphoreCreateMutexStatic(&s_io_buf);
+    }
+    portEXIT_CRITICAL(&s_io_make);
+    xSemaphoreTake(s_io, portMAX_DELAY);
+}
+
+static void io_give(void) {
+    xSemaphoreGive(s_io);
+}
+
+// An app's keys left: a plan that still points at them is dropped (its apply then stores nothing). Called with s_io held.
+static void io_removed(void) {
+    held_release();
+}
+
+static sb_guard_t const s_guard = {.lock = io_take, .unlock = io_give, .removed = io_removed};
+
+void settings_backup_io_boot(void) {
+    sb_guard_set(&s_guard);
+}
 
 #define FILE_CAP  8192 // 18 short lines and a header are about 1 KB; anything larger is not ours
 #define VALUES_MAX SB_KEYS_MAX // read_all writes sb_key_count() values, which the table caps at SB_KEYS_MAX
@@ -115,7 +149,7 @@ typedef struct {
     char       buf[FILE_CAP];
 } save_scratch_t;
 
-sbk_status_t settings_backup_save(void) {
+static sbk_status_t save_locked(void) {
     if (!sd_mounted()) {
         return SBK_NO_CARD;
     }
@@ -209,7 +243,7 @@ static sbk_status_t load_backup(load_t *l, sb_result_t *result) {
     return l->io_err ? SBK_IO : saw ? SBK_INVALID : SBK_NO_FILE;
 }
 
-sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
+static sbk_status_t plan_locked(settings_backup_plan_t *plan) {
     memset(plan, 0, sizeof(*plan));
     held_release();
     if (!sd_mounted()) { // before the ~8 KB below, so no card is never reported as no memory
@@ -269,11 +303,7 @@ static bool store(sb_value_t const *v) {
     return err == ESP_OK;
 }
 
-void settings_backup_discard(void) {
-    held_release();
-}
-
-sbk_status_t settings_backup_apply(size_t *applied) {
+static sbk_status_t apply_locked(size_t *applied) {
     *applied = 0;
     for (size_t i = 0; i < s_held_count; i++) {
         if (store(&s_held[i])) {
@@ -284,4 +314,31 @@ sbk_status_t settings_backup_apply(size_t *applied) {
     ESP_LOGI(TAG, "load: %u of %u stored", (unsigned)*applied, (unsigned)s_held_count);
     held_release();
     return all ? SBK_OK : SBK_IO;
+}
+
+sbk_status_t settings_backup_save(void) {
+    io_take();
+    sbk_status_t st = save_locked();
+    io_give();
+    return st;
+}
+
+sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
+    io_take();
+    sbk_status_t st = plan_locked(plan);
+    io_give();
+    return st;
+}
+
+sbk_status_t settings_backup_apply(size_t *applied) {
+    io_take();
+    sbk_status_t st = apply_locked(applied);
+    io_give();
+    return st;
+}
+
+void settings_backup_discard(void) {
+    io_take();
+    held_release();
+    io_give();
 }

@@ -75,6 +75,11 @@ char const *app_life_state_name(life_state_t s);   // "registered" ... "faulted"
 char const *app_life_reason_name(life_reason_t r); // "update", "restart", "power off"; "?"
 char const *app_life_fault_name(life_fault_t f);   // "-", "crashes", "stop refused", "stop late"; "?"
 
+// Whether an app in this state may be unregistered (#520): nothing of it runs or shows. REGISTERED (its background never
+// started), STOPPED and FAULTED (stopped, or switched off) may; BACKGROUND, OPEN, SUSPENDED and STOPPING may not: the
+// caller stops the app first.
+bool app_life_removable(life_state_t s);
+
 // The record of a newly registered app (REGISTERED)
 void app_life_init(app_life_t *r);
 // The background part started: at boot (REGISTERED), or again after a stop (STOPPED, or FAULTED by that stop) ->

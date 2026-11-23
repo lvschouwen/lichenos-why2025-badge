@@ -19,6 +19,7 @@
 #include "restart_frame.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
+#include "screen_ids.h"
 #include "shell_parts.h"
 #include "stress_workers.h"
 #include "ui_remote.h"
@@ -354,10 +355,42 @@ void shell_home_impl(void) {
     lichen_sys_ui_unlock();
 }
 
+// A rebuild asked for while home is still settling (the boot fade) is not lost (#520: an app joining or leaving then):
+// it is retried when the fade is over. A full rebuild includes the one below.
+static bool        rebuild_pending_full;
+static lv_timer_t *rebuild_timer;
+
+static void rebuild_retry(lv_timer_t *timer) {
+    (void)timer;
+    rebuild_timer = NULL; // one shot: LVGL deletes it after this call
+    bool full     = rebuild_pending_full;
+    rebuild_pending_full = false;
+    if (full) {
+        shell_rebuild_home();
+    } else {
+        shell_rebuild_home_below();
+    }
+}
+
+static void rebuild_defer(bool full) {
+    rebuild_pending_full = rebuild_pending_full || full;
+    if (!rebuild_timer) {
+        rebuild_timer = lv_timer_create(rebuild_retry, FADE_SETTLE_MS / 4 + 50, NULL);
+        if (rebuild_timer) {
+            lv_timer_set_repeat_count(rebuild_timer, 1);
+        }
+    }
+}
+
 // The app list or the layout changed: a fresh home, and back to it from wherever the badge is
 void shell_rebuild_home(void) {
     lichen_sys_ui_lock(0);
-    if (!frames[0].screen || home_settling()) {
+    if (!frames[0].screen) {
+        lichen_sys_ui_unlock();
+        return;
+    }
+    if (home_settling()) {
+        rebuild_defer(true);
         lichen_sys_ui_unlock();
         return;
     }
@@ -378,7 +411,12 @@ void shell_rebuild_home(void) {
 // stack stays, so Esc goes back to Settings, not home. Home itself showing is swapped like shell_rebuild_home.
 void shell_rebuild_home_below(void) {
     lichen_sys_ui_lock(0);
-    if (!frames[0].screen || home_settling()) {
+    if (!frames[0].screen) {
+        lichen_sys_ui_unlock();
+        return;
+    }
+    if (home_settling()) {
+        rebuild_defer(false);
         lichen_sys_ui_unlock();
         return;
     }
@@ -446,6 +484,10 @@ static lv_obj_t *build_app(void) {
     return screen;
 }
 
+int shell_app_screen(size_t index) {
+    return SCREEN_APP_OWN + (int)(lichen_sys_app_ctx_at(index) & 0xffu);
+}
+
 void shell_open_app(size_t index) {
     lichen_app_t const *app = lichen_app_at(index);
     if (!app || !app->open) {
@@ -454,8 +496,8 @@ void shell_open_app(size_t index) {
     lichen_sys_ui_lock(0);
     opening     = app;
     opening_ctx = lichen_sys_app_ctx_at(index);
-    shell_open(build_app, 1 + (int)index);
-    if (nav_current() == 1 + (int)index) {
+    shell_open(build_app, shell_app_screen(index));
+    if (nav_current() == shell_app_screen(index)) {
         shortcuts_app_opened(index); // ✕ goes back here later (#79)
     }
     lichen_sys_ui_unlock();

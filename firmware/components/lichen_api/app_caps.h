@@ -19,7 +19,6 @@ extern "C" {
 
 typedef struct {
     uint32_t refused;                 // since boot
-    uint32_t per_slot[APP_CTX_SLOTS]; // refusals per app slot (fw app caps)
     uint32_t last_need;               // the capabilities the last refused call needed
     uint32_t unlogged;                // refusals the rate limit kept out of the log since the last logged one
     uint32_t logged_ms;               // when the last refusal was logged

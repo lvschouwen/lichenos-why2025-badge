@@ -166,6 +166,11 @@ static void test_summary(void) {
     CHECK(strlen(tiny) < sizeof(tiny));
 }
 
+static char guard_log[32];
+static void g_lock(void) { strcat(guard_log, "L "); }
+static void g_unlock(void) { strcat(guard_log, "U "); }
+static void g_removed(void) { strcat(guard_log, "R "); }
+
 // An app's keys join the table when it registers (#230 E1d): any namespace, none known to the OS
 static void test_app_keys(void) {
     static sb_key_t const pager[] = {
@@ -178,6 +183,22 @@ static void test_app_keys(void) {
     CHECK(sb_find("a.pager", "n_dm") == &pager[0] && sb_key_at(base + 1) == &pager[1] && sb_key_at(base + 2) == NULL);
     CHECK(sb_find("a.meshcore", "n_dm") == NULL && sb_find("a.pager", "pass") == NULL);
     CHECK(!sb_add_app_keys(NULL, 1) && !sb_add_app_keys(pager, 0) && !sb_add_app_keys(pager, SB_KEYS_MAX));
+    // a running backup is waited for, and a plan that held the keys is dropped (#520): lock, remove, removed, unlock
+    guard_log[0] = '\0';
+    sb_guard_t const guard = {.lock = g_lock, .unlock = g_unlock, .removed = g_removed};
+    sb_guard_set(&guard);
+    CHECK(sb_remove_app_keys(pager) && !sb_remove_app_keys(pager)); // it was added above
+    sb_guard_set(NULL);
+    CHECK(strcmp(guard_log, "L R U L U ") == 0); // the second call found nothing: no "removed", but it still waited
+    sb_app_keys_clear();
+    CHECK(sb_add_app_keys(pager, 2));
+    // an app that unregisters takes its group back and leaves the others alone (#520)
+    static sb_key_t const other[] = {{"a.other", "x", "X", SB_U8, 0, 1, 0, NULL}};
+    CHECK(sb_add_app_keys(other, 1) && sb_key_count() == base + 3);
+    CHECK(sb_remove_app_keys(pager) && sb_key_count() == base + 1 && sb_find("a.pager", "n_dm") == NULL);
+    CHECK(sb_find("a.other", "x") == &other[0] && sb_key_at(base) == &other[0]);
+    CHECK(!sb_remove_app_keys(pager) && sb_key_count() == base + 1);
+    CHECK(sb_add_app_keys(pager, 2) && sb_remove_app_keys(other) && sb_key_at(base) == &pager[0]); // re-register
     sb_app_keys_clear();
     CHECK(sb_key_count() == base && sb_find("a.pager", "n_dm") == NULL);
 }

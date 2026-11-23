@@ -20,6 +20,10 @@ uint32_t app_life_deadline_ms(life_reason_t reason) {
     }
 }
 
+bool app_life_removable(life_state_t s) {
+    return s == LIFE_REGISTERED || s == LIFE_STOPPED || s == LIFE_FAULTED;
+}
+
 char const *app_life_state_name(life_state_t s) {
     static char const *const names[LIFE_STATE_COUNT] = {"registered", "background", "open",   "suspended",
                                                         "stopping",   "stopped",    "faulted"};

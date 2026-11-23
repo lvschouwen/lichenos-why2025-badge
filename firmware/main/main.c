@@ -76,6 +76,7 @@
 #include "screenshot.h"
 #include "sensors.h"
 #include "sdcard.h"
+#include "settings_backup_io.h"
 #include "storage.h"
 #include "update_mode.h"
 #include "update_screen.h"
@@ -372,6 +373,7 @@ static void start_apps(void) {
     // Files; home is built when boot ends, and a saved order is merged by tile_order_merge
     lichen_apps_register();
     lichen_sys_mem_quotas(); // #231: every app has registered by now
+    lichen_app_list_live();  // #520: an app joining or leaving from here on is told to Home and Settings
     char   failed[96] = ""; // boot_steps cuts the reason to BOOT_REASON_LEN on a character boundary
     size_t used       = 0;
     for (size_t i = 0; i < lichen_app_count(); i++) {
@@ -609,6 +611,7 @@ static void start_nvs(boot_ctx_t *ctx) {
 
 static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
+    settings_backup_io_boot(); // #520: an app that leaves waits for a running backup
     lichen_sys_mem_start(); // the gate's widgets allocate through lichen_alloc (#296): before the boot screen
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock

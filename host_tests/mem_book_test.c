@@ -2,6 +2,7 @@
 // OS is counted but never refused), the heap's rounding, and releases that never go below zero. Rows are keyed by the
 // owner's context (#230 E1b), the label is only printed.
 #include "mem_book.h"
+#include "mem_book_fake.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,7 +26,7 @@ static int failures;
 
 static void test_quota(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     CHECK(mem_book_find(&b, MESH) == NULL);
     CHECK(mem_book_charge(&b, MESH, "meshcore", false, true, 32 * 1024) == MEM_CHARGE_OK);
     CHECK(mem_book_charge(&b, MESH, "meshcore", false, true, 32 * 1024) == MEM_CHARGE_OK); // exactly the quota
@@ -50,7 +51,7 @@ static void test_quota(void) {
 
 static void test_adjust_release(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     CHECK(mem_book_charge(&b, BENCH, "bench", false, true, 100) == MEM_CHARGE_OK);
     mem_book_adjust(&b, BENCH, true, 4); // the heap gave 104
     mem_use_t const *r = mem_book_find(&b, BENCH);
@@ -77,9 +78,9 @@ static void test_adjust_release(void) {
 
 static void test_full_table(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     char id[8];
-    for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
+    for (int i = 0; i < FAKE_ROWS; i++) {
         snprintf(id, sizeof(id), "app%d", i);
         CHECK(mem_book_charge(&b, 0x100u + (uint32_t)i, id, false, false, 10) == MEM_CHARGE_OK);
     }
@@ -97,7 +98,7 @@ static void test_full_table(void) {
 // never booked.
 static void test_keyed_by_ctx(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     uint32_t const other = MESH ^ 0x100u; // the same slot, another generation
     CHECK(mem_book_charge(&b, MESH, "meshcore", false, true, MEM_BOOK_INTERNAL_QUOTA) == MEM_CHARGE_OK);
     CHECK(mem_book_charge(&b, other, "meshcore", false, true, 1024) == MEM_CHARGE_OK); // its own row and quota
@@ -119,7 +120,7 @@ static void test_keyed_by_ctx(void) {
 // and counted like the internal quota. The OS has none; a row past a new quota counts once.
 static void test_bulk_quota(void) {
     static mem_book_t b;
-    memset(&b, 0, sizeof(b));
+    fake_book_reset(&b);
     CHECK(mem_book_set_bulk_quota(&b, WX, "weather", 3 * 1024, false));
     mem_use_t const *w = mem_book_find(&b, WX);
     CHECK(w && w->bulk_quota == 3 * 1024 && w->bulk == 0 && w->blocks == 0 && strcmp(w->owner, "weather") == 0);
@@ -156,7 +157,37 @@ static void test_bulk_quota(void) {
     CHECK(!mem_book_set_bulk_quota(&b, 0, "x", 1024, false));
 }
 
+// A ctx no app owns any more (its app left, #520) has no row: a late free under it counts nothing and charges nothing,
+// the other apps' rows are untouched, and the next app in the slot (another ctx) starts from an empty row
+static mem_use_t one_row;
+static uint32_t  one_ctx_alive;
+static mem_use_t *only_alive(void *user, uint32_t ctx) {
+    (void)user;
+    return ctx == one_ctx_alive ? &one_row : NULL;
+}
+
+static void test_stale_ctx_has_no_row(void) {
+    mem_book_t b;
+    memset(&b, 0, sizeof(b));
+    memset(&one_row, 0, sizeof(one_row));
+    b.app_row     = only_alive;
+    one_ctx_alive = MESH;
+    CHECK(mem_book_charge(&b, MESH, "meshcore", false, false, 100) == MEM_CHARGE_OK && mem_book_find(&b, MESH));
+    one_ctx_alive = 0; // the app left: its ctx maps to no row
+    CHECK(mem_book_find(&b, MESH) == NULL);
+    CHECK(mem_book_release(&b, MESH, false, 100) == MEM_RELEASE_NO_ROW);
+    CHECK(mem_book_charge(&b, MESH, "meshcore", false, false, 1) == MEM_CHARGE_NO_ROW);
+    memset(&one_row, 0, sizeof(one_row)); // a new block for the slot's next app, another ctx
+    one_ctx_alive = MESH ^ 0x100u;
+    CHECK(mem_book_find(&b, MESH ^ 0x100u) == NULL); // nothing charged yet
+    CHECK(mem_book_charge(&b, MESH ^ 0x100u, "meshcore", false, false, 5) == MEM_CHARGE_OK && one_row.bulk == 5);
+    CHECK(mem_book_find(&b, MESH) == NULL);
+    // the OS's row is the book's own, whatever the provider says
+    CHECK(mem_book_charge(&b, OS, NULL, true, true, 10) == MEM_CHARGE_OK && b.os.internal == 10 && b.os.os);
+}
+
 int main(void) {
+    test_stale_ctx_has_no_row();
     test_keyed_by_ctx();
     test_quota();
     test_adjust_release();

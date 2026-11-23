@@ -21,6 +21,10 @@ typedef enum {
     SBK_MEMORY,
 } sbk_status_t;
 
+// Boot, once: makes an app that unregisters wait for a running backup before its keys leave the table (settings_backup.h
+// sb_guard_set). Any task.
+void settings_backup_io_boot(void);
+
 // Writes every allow-listed setting as it is now
 sbk_status_t settings_backup_save(void);
 

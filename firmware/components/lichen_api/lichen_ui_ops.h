@@ -22,6 +22,9 @@ typedef struct {
     // gate may not call (#286). The shell binds lichen_sys_ui_call and lichen_sys_ui_cancel.
     bool (*later)(void (*fn)(void *), void *arg);
     void (*later_cancel)(void (*fn)(void *), void *arg);
+    // The LVGL lock (lichen_sys_ui_lock / _unlock) for the app table (#520): it changes under the lock Home reads it with
+    bool (*lock)(uint32_t timeout_ms);
+    void (*unlock)(void);
     // lichen_ui.h's navigation; shell_open is open_keyed with key 0, shell_key_hash is the gate's own (pure)
     void (*home)(void);
     void (*back)(void);
@@ -55,6 +58,11 @@ typedef struct {
 // the same table again changes nothing. The shell only: apps may not call it (a forbid line in tools/layers.conf).
 // Any task (an atomic store; a call already forwarded finishes on the old table).
 void lichen_ui_ops_set(lichen_ui_ops_t const *ops);
+
+// Takes the LVGL lock (recursive) for up to timeout_ms; true when held, then unlock once. False before the shell's table
+// is up: the caller then has no UI to keep consistent and goes on without it (lichen_app.c). Any task.
+bool lichen_ui_ops_lock(uint32_t timeout_ms);
+void lichen_ui_ops_unlock(void);
 
 // For the gate's own code only (menu.c; apps use lichen_ui_call, a forbid line in tools/layers.conf): runs fn(arg) on
 // the LVGL task soon, FIFO with every other UI-service call, never inline. False when it was not queued (no table yet,

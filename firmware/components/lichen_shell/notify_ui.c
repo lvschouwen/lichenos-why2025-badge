@@ -3,6 +3,7 @@
 // raw_keys.c) through notify_view.c's queue, and reads only copies of the entries. The toast is never clickable, in no
 // group and never focused: Enter and Esc always stay with the screen under it (Lucas, #62 Q1). The cloud key acts on
 // the showing toast (open it), otherwise opens the centre.
+#include "app_state.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_app.h"
@@ -40,7 +41,6 @@ uint32_t notify_ui_toast_drops(void) {
 static nview_toast_t s_showing;   // id 0: none
 static uint32_t      s_shown_at;  // lv_tick of the last (re)show
 static uint32_t      s_gen = UINT32_MAX; // lichen_notify_generation() at the last check; none yet: the first drain sets the badges
-static bool          s_badged[LICHEN_MAX_APPS]; // a badge this file set (so it also clears it, and no other)
 
 uint32_t notify_level_color(uint8_t level) {
     return level >= LN_ERROR ? THEME_LINK_RED : level == LN_WARN ? THEME_AMBER : THEME_DIM;
@@ -90,15 +90,18 @@ static void show_next(void) {
 // Tile badges (#102): each source app's unread count; only badges this file set are ever cleared here, so the crash
 // log's and MeshCore's own counts are left alone
 static void update_badges(void) {
-    for (size_t i = 0; i < lichen_app_count() && i < LICHEN_MAX_APPS; i++) {
+    for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app->id || strcmp(app->id, NOTIFY_APP_ID) == 0) {
+        // Whether this file set the app's badge (so it also clears it, and no other) is a flag in the app's own block
+        // (#520): it stays with the app when others leave, and goes with it
+        app_state_t *st = lichen_sys_app_state(lichen_sys_app_ctx_at(i));
+        if (!app || !app->id || !st || strcmp(app->id, NOTIFY_APP_ID) == 0) {
             continue;
         }
         size_t n = lichen_notify_unread(app->id);
-        if (n || s_badged[i]) {
+        if (n || st->notify_badged) {
             lichen_sys_badge_set(app->id, (unsigned)n);
-            s_badged[i] = n > 0;
+            st->notify_badged = n > 0;
         }
     }
     lichen_sys_badge_set(NOTIFY_APP_ID, (unsigned)lichen_notify_unread(NULL));

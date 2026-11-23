@@ -102,6 +102,7 @@ static void deleting_timer(struct _lv_timer_t *t) {
 }
 
 static void setup(void) {
+    app_ctx_destroy(&s_t); // the previous test's chunks
     app_ctx_init(&s_t, 0x1234u);
     ctx_a  = app_ctx_add(&s_t, &app_a, 0x55u);
     ctx_b  = app_ctx_add(&s_t, &app_b, 0x77u);
@@ -302,6 +303,7 @@ int main(void) {
     test_nested();
     test_callback_frees_its_record();
     test_edges();
+    app_ctx_destroy(&s_t);
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

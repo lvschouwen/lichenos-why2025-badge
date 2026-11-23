@@ -1,9 +1,7 @@
-// Host test: the tile badge table behind lichen_badge.h (#102)
+// Host test: the tile badge count behind lichen_badge.h (#102, #520)
 #include "badge_table.h"
 
 #include <stdio.h>
-
-#include <string.h>
 
 static int failures;
 
@@ -16,40 +14,19 @@ static int failures;
     } while (0)
 
 int main(void) {
-    badge_table_t t;
-    memset(&t, 0, sizeof(t));
-
-    // Set, get, change, clear; the generation moves only on a change
-    CHECK(badge_table_get(&t, "crashlog") == 0);
-    CHECK(!badge_table_set(&t, "crashlog", 0) && t.generation == 0); // none stays none
-    CHECK(badge_table_set(&t, "crashlog", 1) && t.generation == 1);
-    CHECK(badge_table_get(&t, "crashlog") == 1);
-    CHECK(!badge_table_set(&t, "crashlog", 1) && t.generation == 1); // the same count again
-    CHECK(badge_table_set(&t, "meshcore", 120) && t.generation == 2);
-    CHECK(badge_table_get(&t, "meshcore") == 120 && badge_table_get(&t, "crashlog") == 1);
-    CHECK(badge_table_set(&t, "crashlog", 3) && t.generation == 3);
-    CHECK(badge_table_set(&t, "crashlog", 0) && t.generation == 4);
-    CHECK(badge_table_get(&t, "crashlog") == 0 && badge_table_get(&t, "meshcore") == 120);
-
-    // Ids that are no app id are ignored; an unknown valid id simply has none
-    CHECK(!badge_table_set(&t, NULL, 5));
-    CHECK(!badge_table_set(&t, "", 5));
-    CHECK(!badge_table_set(&t, "Upper", 5));
-    CHECK(!badge_table_set(&t, "fourteen_chars", 5));
-    CHECK(t.generation == 4);
-    CHECK(badge_table_get(&t, NULL) == 0 && badge_table_get(&t, "nosuchapp") == 0);
-
-    // A cleared slot is reused; a full table ignores a new id but still updates the ones it holds
-    char id[8];
-    for (int i = 0; i < BADGE_SLOTS - 1; i++) {
-        snprintf(id, sizeof(id), "app%d", i);
-        CHECK(badge_table_set(&t, id, (unsigned)i + 1));
-    }
-    CHECK(!badge_table_set(&t, "onemore", 1) && badge_table_get(&t, "onemore") == 0);
-    CHECK(badge_table_set(&t, "meshcore", 0));
-    CHECK(badge_table_set(&t, "onemore", 7) && badge_table_get(&t, "onemore") == 7);
-    CHECK(badge_table_get(&t, "app0") == 1 && badge_table_get(&t, "app14") == 15);
-
+    uint32_t crashlog = 0, mesh = 0, generation = 0;
+    // Set, change, clear; the generation moves only on a change, and a count is its app's own
+    CHECK(!badge_count_set(&crashlog, &generation, 0) && generation == 0); // none stays none
+    CHECK(badge_count_set(&crashlog, &generation, 1) && crashlog == 1 && generation == 1);
+    CHECK(!badge_count_set(&crashlog, &generation, 1) && generation == 1); // the same count again
+    CHECK(badge_count_set(&mesh, &generation, 120) && mesh == 120 && generation == 2);
+    CHECK(crashlog == 1 && mesh == 120);
+    CHECK(badge_count_set(&crashlog, &generation, 3) && generation == 3);
+    CHECK(badge_count_set(&crashlog, &generation, 0) && crashlog == 0 && generation == 4);
+    CHECK(mesh == 120);
+    // The generation wraps like any counter
+    uint32_t last = 0, wrap = UINT32_MAX;
+    CHECK(badge_count_set(&last, &wrap, 5) && wrap == 0);
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

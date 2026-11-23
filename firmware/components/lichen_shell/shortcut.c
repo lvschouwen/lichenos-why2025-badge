@@ -1,6 +1,7 @@
 #include "shortcut.h"
 
 #include "key_matrix.h"
+#include "screen_ids.h"
 
 #include <stddef.h>
 
@@ -51,10 +52,10 @@ int app_switch_target(app_switch_t const *s, int showing) {
     return s->cur;
 }
 
-int shortcut_top_app(int const *ids, int depth, int app_count) {
+int shortcut_top_app(int const *ids, int depth) {
     for (int i = depth - 1; i >= 0; i--) {
-        if (ids[i] >= 1 && ids[i] <= app_count) {
-            return ids[i] - 1;
+        if (ids[i] > SCREEN_APP_OWN && ids[i] <= SCREEN_APP_OWN + SCREEN_APP_MAX) {
+            return ids[i] - SCREEN_APP_OWN;
         }
     }
     return -1;

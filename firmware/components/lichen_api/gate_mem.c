@@ -25,6 +25,10 @@ static void *alloc_for(lichen_ctx_t owner, size_t size) {
     return o && o->alloc ? o->alloc(owner, size, LICHEN_MEM_BULK | LICHEN_MEM_ZERO) : NULL;
 }
 
+void *gate_mem_new_for(lichen_ctx_t owner, size_t size) {
+    return alloc_for(owner, size);
+}
+
 void *gate_mem_new(size_t size, lichen_ctx_t *owner) {
     lichen_ctx_t self = lichen_ctx_self();
     void        *p    = alloc_for(self, size);

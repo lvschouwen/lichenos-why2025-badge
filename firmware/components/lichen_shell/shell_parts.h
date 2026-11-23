@@ -31,7 +31,9 @@ bool home_order_arranged(void);    // a saved order differs from the registratio
 // shell.c
 void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()
 lv_group_t *shell_top_group(void);   // the keypad group of the screen on top (ui_probe, LVGL context)
+int  shell_app_screen(size_t index);   // the screen id of the app at index (SCREEN_APP_OWN + its context slot)
 void shell_open_app(size_t index);     // opens lichen_app_at(index); from home's Enter
+void shortcuts_forget_apps(void);    // the apps' indexes moved (#520): the ✕ shortcut forgets its last two
 void shell_rebuild_home(void);         // after the app list or the layout changed
 void shell_rebuild_home_below(void);   // the same, keeping the screens above home open
 void shell_arrange_home(bool rebuild); // Settings > Display > Arrange home: back to home (rebuilt first), arranging

@@ -27,6 +27,9 @@ typedef struct {
 // A zeroed block in PSRAM (LICHEN_MEM_BULK | LICHEN_MEM_ZERO) charged to lichen_ctx_self(), which *owner gets for the
 // free. NULL (and *owner untouched) when the OS has not handed over its heap yet or there is no room. Any task.
 void *gate_mem_new(size_t size, lichen_ctx_t *owner);
+// As gate_mem_new, charged to owner (not to lichen_ctx_self()): for what the OS keeps for the apps (their table, #520),
+// which is the OS's whoever registers. NULL before the OS has handed over its heap. Free it with gate_mem_free(owner, p).
+void *gate_mem_new_for(lichen_ctx_t owner, size_t size);
 // Frees what gate_mem_new or gate_mem_strdup gave owner (NULL is fine). Any task.
 void gate_mem_free(lichen_ctx_t owner, void *ptr);
 // A copy of s charged to owner, cut at GATE_MEM_TEXT_MAX bytes (never inside a UTF-8 character). NULL for a NULL s,

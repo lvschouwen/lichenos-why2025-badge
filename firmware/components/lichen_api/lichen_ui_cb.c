@@ -12,6 +12,7 @@
 #include "ui_cb.h"
 
 #include "app_ctx.h"
+#include "app_state.h"
 #include "esp_log.h"
 
 #include "lvgl.h"
@@ -120,25 +121,29 @@ lv_timer_t *lichen_ui_timer_create(lv_timer_cb_t cb, uint32_t period_ms, void *u
 static char const TIMER_TAG[] = "timer";
 
 static timer_book_t s_timers;
-static uint8_t      s_timer_count[APP_CTX_SLOTS]; // per context slot: stop(reason) reads it from its own task
-static bool         s_timer_dead[APP_CTX_SLOTS];  // per context slot: the app stopped (lichen_sys_timer_kill)
-
+// The per-app count (stop(reason) reads it from its own task) and the dead flag (the app stopped, lichen_sys_timer_kill)
+// are in the app's block (app_state.h), so they cost nothing per registered app and go with it. An app that left has no
+// block: its timers are dead, and delete themselves at their next tick. The OS's context (slot 0) has no block and no
+// count; its timers are never dead.
 static bool ctx_dead(uint32_t ctx) {
-    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
-    return slot < APP_CTX_SLOTS && __atomic_load_n(&s_timer_dead[slot], __ATOMIC_ACQUIRE);
+    if ((ctx & ((1u << APP_CTX_SLOT_BITS) - 1u)) == 0) {
+        return false;
+    }
+    app_state_t *st = lichen_sys_app_state(ctx);
+    return !st || __atomic_load_n(&st->timer_dead, __ATOMIC_ACQUIRE);
 }
 
 static void dead_set(uint32_t ctx, bool dead) {
-    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
-    if (slot < APP_CTX_SLOTS) {
-        __atomic_store_n(&s_timer_dead[slot], dead, __ATOMIC_RELEASE);
+    app_state_t *st = lichen_sys_app_state(ctx);
+    if (st) {
+        __atomic_store_n(&st->timer_dead, dead, __ATOMIC_RELEASE);
     }
 }
 
 static void count_note(uint32_t ctx) {
-    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
-    if (slot < APP_CTX_SLOTS) {
-        __atomic_store_n(&s_timer_count[slot], (uint8_t)timer_book_count(&s_timers, ctx), __ATOMIC_RELAXED);
+    app_state_t *st = lichen_sys_app_state(ctx);
+    if (st) {
+        __atomic_store_n(&st->timer_count, (uint8_t)timer_book_count(&s_timers, ctx), __ATOMIC_RELAXED);
     }
 }
 
@@ -217,8 +222,8 @@ bool lichen_timer_stop(lichen_ctx_t ctx, lichen_timer_t timer) {
 }
 
 size_t lichen_sys_timer_count(uint32_t ctx) {
-    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
-    return slot < APP_CTX_SLOTS ? __atomic_load_n(&s_timer_count[slot], __ATOMIC_RELAXED) : 0;
+    app_state_t *st = lichen_sys_app_state(ctx);
+    return st ? __atomic_load_n(&st->timer_count, __ATOMIC_RELAXED) : 0;
 }
 
 void lichen_sys_timer_kill(uint32_t ctx) {

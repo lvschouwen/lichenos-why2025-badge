@@ -1,4 +1,5 @@
 // Host test: the shape keys as OS shortcuts (#79)
+#include "screen_ids.h"
 #include "shortcut.h"
 #include "ui_keys.h"
 
@@ -71,13 +72,15 @@ static void test_switch(void) {
 
 static void test_top_app(void) {
     int home_only[] = {0};
-    CHECK(shortcut_top_app(home_only, 1, 8) == -1);
-    int in_app[] = {0, 3, 170, 142}; // home, app index 2, two of its own screens
-    CHECK(shortcut_top_app(in_app, 4, 8) == 2);
-    int nested[] = {0, 1, 110, 5}; // Settings (0) > its page > the Power app (4)
-    CHECK(shortcut_top_app(nested, 4, 8) == 4);
-    int past[] = {0, 9}; // an id past the app count is not an app
-    CHECK(shortcut_top_app(past, 2, 8) == -1);
+    CHECK(shortcut_top_app(home_only, 1) == -1);
+    int in_app[] = {0, SCREEN_APP_OWN + 3, 170, 142}; // home, the app in slot 3, two of its own screens
+    CHECK(shortcut_top_app(in_app, 4) == 3);
+    int nested[] = {0, SCREEN_APP_OWN + 1, 110, SCREEN_APP_OWN + 5}; // an app > its page > the app in slot 5
+    CHECK(shortcut_top_app(nested, 4) == 5);
+    int ends[] = {0, SCREEN_APP_OWN + SCREEN_APP_MAX}; // the last slot of the handle
+    CHECK(shortcut_top_app(ends, 2) == SCREEN_APP_MAX);
+    int past[] = {0, 9, SCREEN_APP_OWN, SCREEN_APP_OWN + SCREEN_APP_MAX + 1, SCREEN_APP_BASE + 2}; // none is an app's screen
+    CHECK(shortcut_top_app(past, 5) == -1);
 }
 
 static void test_send_tokens(void) {

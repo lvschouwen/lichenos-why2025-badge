@@ -16,6 +16,7 @@
 #include "nav.h"
 #include "raw_keys.h"
 #include "remote_ctl.h"
+#include "lichen_mem.h"
 #include "shell_parts.h"
 #include "update_screen.h"
 
@@ -185,19 +186,27 @@ static void list_ids(void) {
     char   ids[160] = "";
     size_t used     = 0;
     for (size_t i = 0; i < lichen_app_count() && used < sizeof(ids); i++) {
-        used += (size_t)snprintf(ids + used, sizeof(ids) - used, "%s%s", i ? " " : "", lichen_app_at(i)->id);
+        lichen_app_t const *app = lichen_app_at(i);
+        used += (size_t)snprintf(ids + used, sizeof(ids) - used, "%s%s", i ? " " : "", app && app->id ? app->id : "?");
     }
     console_reply("ui open: apps: home %s", ids);
 }
 
 static int find_app(char const *arg) {
-    char const *ids[LICHEN_MAX_APPS], *names[LICHEN_MAX_APPS];
-    size_t      n = lichen_app_count();
-    for (size_t i = 0; i < n && i < LICHEN_MAX_APPS; i++) {
-        ids[i]   = lichen_app_at(i)->id;
-        names[i] = lichen_app_at(i)->name;
+    size_t       n     = lichen_app_count();
+    char const **ids   = lichen_alloc(lichen_sys_ctx_os(), (2 * n + 1) * sizeof(*ids), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    if (!ids) {
+        return -1; // the console task's stack is small: the lists are on the heap, sized by the apps (#520)
     }
-    return rctl_find_app(arg, ids, names, n < LICHEN_MAX_APPS ? n : LICHEN_MAX_APPS);
+    char const **names = ids + n;
+    for (size_t i = 0; i < n; i++) {
+        lichen_app_t const *app = lichen_app_at(i);
+        ids[i]                  = app && app->id ? app->id : "";
+        names[i]                = app ? app->name : "";
+    }
+    int found = rctl_find_app(arg, ids, names, n);
+    lichen_free(lichen_sys_ctx_os(), ids);
+    return found;
 }
 
 // From home, like a tile's Enter and the shape-key shortcuts (shortcuts.c open_from_home): Esc then leads home
@@ -224,10 +233,11 @@ void ui_remote_open_cmd(char const *args) {
             shell_open_app((size_t)index);
             key_cause_leave(previous);
         }
-        ok = to_home ? nav_depth() == 1 : nav_current() == 1 + index;
+        ok = to_home ? nav_depth() == 1 : nav_current() == shell_app_screen((size_t)index);
     }
     lichen_sys_ui_unlock();
-    char const *name = to_home ? "home" : lichen_app_at((size_t)index)->name;
+    lichen_app_t const *opened = to_home ? NULL : lichen_app_at((size_t)index);
+    char const         *name   = to_home ? "home" : opened ? opened->name : "?";
     if (why) {
         console_reply("ui open: not now (%s)", why);
     } else if (!ok) {
