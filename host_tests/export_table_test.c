@@ -85,15 +85,15 @@ static void load_table(void) {
     FILE *f = open_rel("tools/export_table.txt");
     char  line[512];
     while (fgets(line, sizeof(line), f)) {
-        char *tok[4] = {0};
+        char *tok[5] = {0};
         line[strcspn(line, "\n")] = 0;
         int n = 0;
-        for (char *p = strtok(line, "\t"); p && n < 4; p = strtok(NULL, "\t")) {
+        for (char *p = strtok(line, "\t"); p && n < 5; p = strtok(NULL, "\t")) {
             tok[n++] = p;
         }
         if (n >= 2 && !strcmp(tok[0], "wrap") && wrap_n < 64) {
             copy(wraps[wrap_n++], tok[1], STR);
-        } else if (n == 4 && !strcmp(tok[0], "export") && t_n < MAX_ROWS) {
+        } else if (n == 5 && !strcmp(tok[0], "export") && t_n < MAX_ROWS) {
             copy(t_rows[t_n].name, tok[1], STR);
             copy(t_rows[t_n].sym, tok[2], STR);
             copy(t_rows[t_n].origin, tok[3], STR);
@@ -145,7 +145,9 @@ static int has(char const (*list)[STR], int n, char const *s) {
 // Names an app is barred from by layers.conf (`forbid L6`) that must never be in the table under their own name
 static char const *const barred[] = {"lichen_sys_ui_lock", "lichen_ctx_enter", "lichen_ctx_leave", "lichen_radio_set",
                                      "update_mode_start", "esp_restart", "abort", "lora_internal_send", "printf",
-                                     "esp_rom_printf", "bench_scope_bind", "key_cause_bind_last_key", NULL};
+                                     "esp_rom_printf", "bench_scope_bind", "key_cause_bind_last_key", "console_register_dev",
+                                     "app_settings_erase_all", "clock_bind_store", "lora_set_link_callback",
+                                     "app_ctx_add", "mem_book_set_bulk_quota", NULL};
 
 static void check_order_and_agreement(void) {
     check(c_n > 100, "lichen_exports.c has only %d entries", c_n);

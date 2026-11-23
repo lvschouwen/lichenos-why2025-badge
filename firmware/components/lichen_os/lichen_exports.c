@@ -11,57 +11,11 @@ extern void __muldi3(void);
 extern void __udivdi3(void);
 extern void __umoddi3(void);
 extern void abs(void);
-extern void app_caps_allows(void);
-extern void app_caps_check(void);
-extern void app_caps_format(void);
-extern void app_caps_log_due(void);
-extern void app_caps_name(void);
-extern void app_ctx_add(void);
-extern void app_ctx_add_app(void);
-extern void app_ctx_app_at(void);
-extern void app_ctx_apps(void);
-extern void app_ctx_at(void);
-extern void app_ctx_count_refusal(void);
-extern void app_ctx_enter(void);
-extern void app_ctx_for_task(void);
-extern void app_ctx_init(void);
-extern void app_ctx_leave(void);
-extern void app_ctx_log_due(void);
-extern void app_ctx_of(void);
-extern void app_ctx_os(void);
-extern void app_ctx_ready(void);
-extern void app_ctx_resolve(void);
-extern void app_ctx_self(void);
-extern void app_ctx_slot_owner(void);
-extern void app_ctx_valid(void);
-extern void app_life_deadline_ms(void);
-extern void app_life_fault_crashes(void);
-extern void app_life_fault_name(void);
-extern void app_life_init(void);
-extern void app_life_note_tasks(void);
-extern void app_life_reason_name(void);
-extern void app_life_screen_owner(void);
-extern void app_life_show(void);
-extern void app_life_started(void);
-extern void app_life_state_name(void);
-extern void app_life_stop_begin(void);
-extern void app_life_stop_end(void);
-extern void app_life_view(void);
-extern void app_life_wait_verdict(void);
-extern void app_ns_declare_keep(void);
-extern void app_ns_name(void);
-extern void app_ns_owns(void);
 extern void app_secret_erase(void);
 extern void app_secret_get(void);
-extern void app_secret_key_from_stored(void);
-extern void app_secret_key_secret(void);
-extern void app_secret_keys_plain(void);
 extern void app_secret_list(void);
-extern void app_secret_prefix_ok(void);
 extern void app_secret_set(void);
-extern void app_secret_stored_name(void);
 extern void app_settings_erase(void);
-extern void app_settings_erase_all(void);
 extern void app_settings_get_str(void);
 extern void app_settings_get_u32(void);
 extern void app_settings_get_u64(void);
@@ -73,87 +27,21 @@ extern void app_settings_set_u8(void);
 extern void atan2(void);
 extern void atan2f(void);
 extern void atoi(void);
-extern void badge_table_get(void);
-extern void badge_table_set(void);
-extern void bench_chat_on_top(void);
-extern void bench_enter_starts(void);
-extern void bench_scope_set(void);
-extern void bench_screen_scoped(void);
 extern void ceil(void);
 extern void ceilf(void);
-extern void clock_bind_store(void);
-extern void clock_boot_info(void);
-extern void clock_boot_init(void);
-extern void clock_build_epoch(void);
-extern void clock_console_register(void);
 extern void clock_is_approximate(void);
 extern void clock_is_set(void);
-extern void clock_offer_sntp(void);
 extern void clock_propose(void);
-extern void clock_restore_saved(void);
-extern void clock_save_age_s(void);
-extern void clock_set_manual(void);
-extern void clock_set_saver(void);
-extern void clock_set_store(void);
 extern void clock_source_age_s(void);
 extern void clock_source_text(void);
-extern void clock_sync_info(void);
-extern void clock_sync_snapshot(void);
-extern void console_bind_dev_store(void);
-extern void console_boot_pending(void);
-extern void console_dev_mode(void);
-extern void console_dev_set(void);
-extern void console_exec(void);
-extern void console_exec_with_secrets(void);
-extern void console_line_max(void);
-extern void console_origin(void);
-extern void console_register(void);
-extern void console_register_app(void);
-extern void console_register_app_rules(void);
-extern void console_register_dev(void);
-extern void console_register_rules(void);
-extern void console_reply(void);
-extern void console_reply_private(void);
-extern void console_reply_secret(void);
-extern void console_set_activity(void);
-extern void console_set_mem_report(void);
-extern void console_set_mem_window(void);
-extern void console_set_tap(void);
-extern void console_start(void);
-extern void console_usb_hold_why(void);
 extern void cos(void);
 extern void cosf(void);
-extern void crashlog_badge(void);
-extern void crashlog_export(void);
-extern void crashlog_export_name(void);
-extern void crashlog_full(void);
-extern void crashlog_hash(void);
-extern void crashlog_parse(void);
-extern void crashlog_reason_text(void);
-extern void crashlog_remove(void);
-extern void crashlog_row(void);
-extern void crashlog_split(void);
-extern void crashlog_tile(void);
-extern void crashlog_unseen(void);
-extern void crashlog_when_text(void);
 extern void fabs(void);
 extern void fabsf(void);
 extern void floor(void);
 extern void floorf(void);
 extern void fmod(void);
 extern void fmodf(void);
-extern void fs_app_dir_path(void);
-extern void gate_app_caller(void);
-extern void gate_app_id(void);
-extern void gate_app_names_refusal(void);
-extern void gate_app_settings_ns(void);
-extern void gate_app_source(void);
-extern void gate_batch_may_end(void);
-extern void gate_mem_free(void);
-extern void gate_mem_new(void);
-extern void gate_mem_pair_clear(void);
-extern void gate_mem_pair_set(void);
-extern void gate_mem_strdup(void);
 extern void hold_exit_event(void);
 extern void hold_exit_percent(void);
 extern void hold_exit_tick(void);
@@ -163,12 +51,6 @@ extern void isalpha(void);
 extern void isdigit(void);
 extern void isspace(void);
 extern void isxdigit(void);
-extern void key_cause_enter(void);
-extern void key_cause_hand_only_ok(void);
-extern void key_cause_last_key_injected(void);
-extern void key_cause_leave(void);
-extern void key_cause_name(void);
-extern void key_cause_now(void);
 extern void key_layout(void);
 extern void key_layout_index(void);
 extern void key_matrix_code(void);
@@ -182,20 +64,7 @@ extern void labs(void);
 extern void lichen_airplane_get(void);
 extern void lichen_alloc(void);
 extern void lichen_alloc_aligned(void);
-extern void lichen_badge_generation(void);
-extern void lichen_badge_get(void);
 extern void lichen_badge_set(void);
-extern void lichen_boot_degraded(void);
-extern void lichen_crashlog_after_crash(void);
-extern void lichen_crashlog_clear(void);
-extern void lichen_crashlog_delete(void);
-extern void lichen_crashlog_export(void);
-extern void lichen_crashlog_export_sd(void);
-extern void lichen_crashlog_generation(void);
-extern void lichen_crashlog_list(void);
-extern void lichen_crashlog_mark_seen(void);
-extern void lichen_crashlog_read(void);
-extern void lichen_crashlog_status(void);
 extern void lichen_ctx_self(void);
 extern void lichen_date_text(void);
 extern void lichen_exp_calloc(void);
@@ -203,8 +72,6 @@ extern void lichen_exp_free(void);
 extern void lichen_exp_malloc(void);
 extern void lichen_exp_realloc(void);
 extern void lichen_font(void);
-extern void lichen_font_set(void);
-extern void lichen_fonts_load(void);
 extern void lichen_free(void);
 extern void lichen_fs_app_dir(void);
 extern void lichen_fs_drive_bytes(void);
@@ -213,11 +80,7 @@ extern void lichen_fs_sd_bytes(void);
 extern void lichen_fs_sd_dir(void);
 extern void lichen_fs_sd_end(void);
 extern void lichen_fs_sd_mounted(void);
-extern void lichen_haptics_enabled(void);
 extern void lichen_haptics_play(void);
-extern void lichen_haptics_set_enabled(void);
-extern void lichen_haptics_set_strength(void);
-extern void lichen_haptics_strength(void);
 extern void lichen_heading(void);
 extern void lichen_hex_decode(void);
 extern void lichen_hex_digit(void);
@@ -229,19 +92,13 @@ extern void lichen_label_line(void);
 extern void lichen_label_line_fit(void);
 extern void lichen_label_set(void);
 extern void lichen_label_wrap(void);
-extern void lichen_mem_console_register(void);
 extern void lichen_notify(void);
 extern void lichen_notify_dnd(void);
-extern void lichen_notify_dropped(void);
 extern void lichen_notify_mark_read(void);
 extern void lichen_notify_source_enabled(void);
 extern void lichen_notify_to(void);
 extern void lichen_notify_unread_top(void);
-extern void lichen_os_name(void);
-extern void lichen_os_version_line(void);
 extern void lichen_page_hint_of(void);
-extern void lichen_radio_apply_all(void);
-extern void lichen_radio_console_register(void);
 extern void lichen_radio_get(void);
 extern void lichen_radio_listen(void);
 extern void lichen_radio_lora_pause(void);
@@ -249,20 +106,15 @@ extern void lichen_radio_lora_resume(void);
 extern void lichen_radio_name(void);
 extern void lichen_radio_switch_get(void);
 extern void lichen_random_fill(void);
-extern void lichen_random_start(void);
 extern void lichen_random_u32(void);
 extern void lichen_reg_get(void);
 extern void lichen_register_app(void);
 extern void lichen_screen_locked(void);
 extern void lichen_sensors_get(void);
 extern void lichen_sensors_running(void);
-extern void lichen_sensors_set_periods(void);
-extern void lichen_sensors_start(void);
-extern void lichen_sensors_stop(void);
 extern void lichen_station_clock(void);
 extern void lichen_str_copy(void);
 extern void lichen_str_copy_n(void);
-extern void lichen_task_console_register(void);
 extern void lichen_task_leftovers(void);
 extern void lichen_task_start(void);
 extern void lichen_task_start_in(void);
@@ -281,7 +133,6 @@ extern void list_filter_match(void);
 extern void list_filter_text_has(void);
 extern void list_filter_text_starts(void);
 extern void lora_claim(void);
-extern void lora_get_boot_radio(void);
 extern void lora_get_channel_rssi(void);
 extern void lora_get_counts(void);
 extern void lora_get_freq(void);
@@ -290,11 +141,8 @@ extern void lora_get_stats(void);
 extern void lora_release(void);
 extern void lora_send(void);
 extern void lora_send_state(void);
-extern void lora_set_link_callback(void);
 extern void lora_set_radio(void);
-extern void lora_set_rx_formatter(void);
 extern void lora_set_tx_power(void);
-extern void lora_settings_pending(void);
 extern void lora_sweep(void);
 extern void lora_up(void);
 extern void lv_area_get_width(void);
@@ -423,11 +271,6 @@ extern void lv_timer_resume(void);
 extern void lv_timer_set_repeat_count(void);
 extern void lv_trigo_cos(void);
 extern void lv_trigo_sin(void);
-extern void mem_book_adjust(void);
-extern void mem_book_charge(void);
-extern void mem_book_find(void);
-extern void mem_book_release(void);
-extern void mem_book_set_bulk_quota(void);
 extern void memchr(void);
 extern void memcmp(void);
 extern void memcpy(void);
@@ -457,52 +300,13 @@ extern void menu_status_progress(void);
 extern void pow(void);
 extern void powf(void);
 extern void qr_payload_ok(void);
-extern void qr_screen_open(void);
 extern void qr_wifi_payload(void);
 extern void qsort(void);
-extern void radio_state_effective(void);
-extern void radio_state_get(void);
-extern void radio_state_held_by(void);
-extern void radio_state_hold(void);
-extern void radio_state_init(void);
-extern void radio_state_load(void);
-extern void radio_state_release(void);
-extern void radio_state_set(void);
-extern void radio_state_set_airplane(void);
-extern void radio_state_set_switch(void);
-extern void radio_state_switch(void);
-extern void sb_add_app_keys(void);
-extern void sb_app_keys_clear(void);
-extern void sb_check_complete(void);
-extern void sb_complete(void);
-extern void sb_error_text(void);
-extern void sb_find(void);
-extern void sb_format(void);
-extern void sb_key_at(void);
-extern void sb_key_count(void);
-extern void sb_parse(void);
-extern void sb_summary(void);
-extern void sb_value_equal(void);
-extern void sb_value_parse(void);
-extern void sb_value_text(void);
-extern void sbs_choose(void);
-extern void sbs_save(void);
 extern void scroll_anchor_find(void);
 extern void scroll_anchor_take(void);
 extern void scroll_keep_top(void);
 extern void scroll_key_hash(void);
 extern void scroll_step_target(void);
-extern void settings_apply_tz(void);
-extern void settings_backup_apply(void);
-extern void settings_backup_discard(void);
-extern void settings_backup_plan(void);
-extern void settings_backup_save(void);
-extern void settings_erase(void);
-extern void settings_get_str(void);
-extern void settings_get_u8(void);
-extern void settings_set_str(void);
-extern void settings_set_tz(void);
-extern void settings_set_u8(void);
 extern void shell_back(void);
 extern void shell_back_then(void);
 extern void shell_back_to(void);
@@ -545,79 +349,15 @@ extern void strtol(void);
 extern void strtoll(void);
 extern void strtoul(void);
 extern void strtoull(void);
-extern void system_power_off_requested(void);
-extern void system_restart(void);
-extern void system_restart_asked(void);
-extern void system_restart_bind_store(void);
-extern void system_restart_history(void);
-extern void system_restart_name_next(void);
-extern void system_restart_note(void);
-extern void system_restart_on_trial(void);
-extern void system_restart_set_prepare(void);
-extern void system_restart_set_save(void);
-extern void system_restart_set_trial_gate(void);
-extern void system_restart_would_wait(void);
-extern void system_save_before_off(void);
 extern void tan(void);
 extern void tanf(void);
-extern void task_book_add(void);
-extern void task_book_count(void);
-extern void task_book_remove(void);
-extern void task_class_core(void);
-extern void task_class_priority(void);
-extern void task_name_fit(void);
-extern void task_stack_name(void);
-extern void task_stack_place(void);
-extern void task_stack_reserve(void);
-extern void tcard_bar_color(void);
-extern void tcard_bar_rect(void);
-extern void tcard_border_rect(void);
-extern void tcard_circle_rect(void);
-extern void tcard_corner_rect(void);
-extern void tcard_grating(void);
-extern void tcard_grating_line(void);
-extern void tcard_grid_rect(void);
-extern void tcard_info_rect(void);
-extern void tcard_info_text(void);
-extern void tcard_marker_rect(void);
-extern void tcard_marker_track(void);
-extern void tcard_mode_parse(void);
-extern void tcard_mode_step(void);
-extern void tcard_solid_color(void);
-extern void tcard_wedge_color(void);
-extern void tcard_wedge_percent(void);
-extern void tcard_wedge_rect(void);
-extern void test_card_create(void);
-extern void test_card_set_hooks(void);
-extern void test_card_set_mode(void);
 extern void text_entry_open(void);
 extern void text_entry_typed_by_hand(void);
-extern void tile_cell_size(void);
-extern void tile_order_encode(void);
-extern void tile_order_is_default(void);
-extern void tile_order_merge(void);
-extern void tile_order_move(void);
-extern void tile_order_parse(void);
-extern void tile_order_slots(void);
-extern void timer_book_add(void);
-extern void timer_book_count(void);
-extern void timer_book_find(void);
-extern void timer_book_next(void);
-extern void timer_book_remove(void);
 extern void tolower(void);
 extern void toupper(void);
 extern void tz_at(void);
 extern void tz_count(void);
 extern void tz_find_posix(void);
-extern void ui_cb_free(void);
-extern void ui_cb_mark_enter(void);
-extern void ui_cb_mark_leave(void);
-extern void ui_cb_new_event(void);
-extern void ui_cb_new_group(void);
-extern void ui_cb_new_timer(void);
-extern void ui_cb_run_event(void);
-extern void ui_cb_run_group(void);
-extern void ui_cb_run_timer(void);
 extern void ui_confirm_hint(void);
 extern void ui_countdown_text(void);
 extern void ui_empty_text(void);
@@ -639,57 +379,11 @@ struct esp_elfsym const lichen_exports[] = {
     {"__udivdi3", (void *)__udivdi3},
     {"__umoddi3", (void *)__umoddi3},
     {"abs", (void *)abs},
-    {"app_caps_allows", (void *)app_caps_allows},
-    {"app_caps_check", (void *)app_caps_check},
-    {"app_caps_format", (void *)app_caps_format},
-    {"app_caps_log_due", (void *)app_caps_log_due},
-    {"app_caps_name", (void *)app_caps_name},
-    {"app_ctx_add", (void *)app_ctx_add},
-    {"app_ctx_add_app", (void *)app_ctx_add_app},
-    {"app_ctx_app_at", (void *)app_ctx_app_at},
-    {"app_ctx_apps", (void *)app_ctx_apps},
-    {"app_ctx_at", (void *)app_ctx_at},
-    {"app_ctx_count_refusal", (void *)app_ctx_count_refusal},
-    {"app_ctx_enter", (void *)app_ctx_enter},
-    {"app_ctx_for_task", (void *)app_ctx_for_task},
-    {"app_ctx_init", (void *)app_ctx_init},
-    {"app_ctx_leave", (void *)app_ctx_leave},
-    {"app_ctx_log_due", (void *)app_ctx_log_due},
-    {"app_ctx_of", (void *)app_ctx_of},
-    {"app_ctx_os", (void *)app_ctx_os},
-    {"app_ctx_ready", (void *)app_ctx_ready},
-    {"app_ctx_resolve", (void *)app_ctx_resolve},
-    {"app_ctx_self", (void *)app_ctx_self},
-    {"app_ctx_slot_owner", (void *)app_ctx_slot_owner},
-    {"app_ctx_valid", (void *)app_ctx_valid},
-    {"app_life_deadline_ms", (void *)app_life_deadline_ms},
-    {"app_life_fault_crashes", (void *)app_life_fault_crashes},
-    {"app_life_fault_name", (void *)app_life_fault_name},
-    {"app_life_init", (void *)app_life_init},
-    {"app_life_note_tasks", (void *)app_life_note_tasks},
-    {"app_life_reason_name", (void *)app_life_reason_name},
-    {"app_life_screen_owner", (void *)app_life_screen_owner},
-    {"app_life_show", (void *)app_life_show},
-    {"app_life_started", (void *)app_life_started},
-    {"app_life_state_name", (void *)app_life_state_name},
-    {"app_life_stop_begin", (void *)app_life_stop_begin},
-    {"app_life_stop_end", (void *)app_life_stop_end},
-    {"app_life_view", (void *)app_life_view},
-    {"app_life_wait_verdict", (void *)app_life_wait_verdict},
-    {"app_ns_declare_keep", (void *)app_ns_declare_keep},
-    {"app_ns_name", (void *)app_ns_name},
-    {"app_ns_owns", (void *)app_ns_owns},
     {"app_secret_erase", (void *)app_secret_erase},
     {"app_secret_get", (void *)app_secret_get},
-    {"app_secret_key_from_stored", (void *)app_secret_key_from_stored},
-    {"app_secret_key_secret", (void *)app_secret_key_secret},
-    {"app_secret_keys_plain", (void *)app_secret_keys_plain},
     {"app_secret_list", (void *)app_secret_list},
-    {"app_secret_prefix_ok", (void *)app_secret_prefix_ok},
     {"app_secret_set", (void *)app_secret_set},
-    {"app_secret_stored_name", (void *)app_secret_stored_name},
     {"app_settings_erase", (void *)app_settings_erase},
-    {"app_settings_erase_all", (void *)app_settings_erase_all},
     {"app_settings_get_str", (void *)app_settings_get_str},
     {"app_settings_get_u32", (void *)app_settings_get_u32},
     {"app_settings_get_u64", (void *)app_settings_get_u64},
@@ -701,70 +395,16 @@ struct esp_elfsym const lichen_exports[] = {
     {"atan2", (void *)atan2},
     {"atan2f", (void *)atan2f},
     {"atoi", (void *)atoi},
-    {"badge_table_get", (void *)badge_table_get},
-    {"badge_table_set", (void *)badge_table_set},
-    {"bench_chat_on_top", (void *)bench_chat_on_top},
-    {"bench_enter_starts", (void *)bench_enter_starts},
-    {"bench_scope_set", (void *)bench_scope_set},
-    {"bench_screen_scoped", (void *)bench_screen_scoped},
     {"calloc", (void *)lichen_exp_calloc},
     {"ceil", (void *)ceil},
     {"ceilf", (void *)ceilf},
-    {"clock_bind_store", (void *)clock_bind_store},
-    {"clock_boot_info", (void *)clock_boot_info},
-    {"clock_boot_init", (void *)clock_boot_init},
-    {"clock_build_epoch", (void *)clock_build_epoch},
-    {"clock_console_register", (void *)clock_console_register},
     {"clock_is_approximate", (void *)clock_is_approximate},
     {"clock_is_set", (void *)clock_is_set},
-    {"clock_offer_sntp", (void *)clock_offer_sntp},
     {"clock_propose", (void *)clock_propose},
-    {"clock_restore_saved", (void *)clock_restore_saved},
-    {"clock_save_age_s", (void *)clock_save_age_s},
-    {"clock_set_manual", (void *)clock_set_manual},
-    {"clock_set_saver", (void *)clock_set_saver},
-    {"clock_set_store", (void *)clock_set_store},
     {"clock_source_age_s", (void *)clock_source_age_s},
     {"clock_source_text", (void *)clock_source_text},
-    {"clock_sync_info", (void *)clock_sync_info},
-    {"clock_sync_snapshot", (void *)clock_sync_snapshot},
-    {"console_bind_dev_store", (void *)console_bind_dev_store},
-    {"console_boot_pending", (void *)console_boot_pending},
-    {"console_dev_mode", (void *)console_dev_mode},
-    {"console_dev_set", (void *)console_dev_set},
-    {"console_exec", (void *)console_exec},
-    {"console_exec_with_secrets", (void *)console_exec_with_secrets},
-    {"console_line_max", (void *)console_line_max},
-    {"console_origin", (void *)console_origin},
-    {"console_register", (void *)console_register},
-    {"console_register_app", (void *)console_register_app},
-    {"console_register_app_rules", (void *)console_register_app_rules},
-    {"console_register_dev", (void *)console_register_dev},
-    {"console_register_rules", (void *)console_register_rules},
-    {"console_reply", (void *)console_reply},
-    {"console_reply_private", (void *)console_reply_private},
-    {"console_reply_secret", (void *)console_reply_secret},
-    {"console_set_activity", (void *)console_set_activity},
-    {"console_set_mem_report", (void *)console_set_mem_report},
-    {"console_set_mem_window", (void *)console_set_mem_window},
-    {"console_set_tap", (void *)console_set_tap},
-    {"console_start", (void *)console_start},
-    {"console_usb_hold_why", (void *)console_usb_hold_why},
     {"cos", (void *)cos},
     {"cosf", (void *)cosf},
-    {"crashlog_badge", (void *)crashlog_badge},
-    {"crashlog_export", (void *)crashlog_export},
-    {"crashlog_export_name", (void *)crashlog_export_name},
-    {"crashlog_full", (void *)crashlog_full},
-    {"crashlog_hash", (void *)crashlog_hash},
-    {"crashlog_parse", (void *)crashlog_parse},
-    {"crashlog_reason_text", (void *)crashlog_reason_text},
-    {"crashlog_remove", (void *)crashlog_remove},
-    {"crashlog_row", (void *)crashlog_row},
-    {"crashlog_split", (void *)crashlog_split},
-    {"crashlog_tile", (void *)crashlog_tile},
-    {"crashlog_unseen", (void *)crashlog_unseen},
-    {"crashlog_when_text", (void *)crashlog_when_text},
     {"fabs", (void *)fabs},
     {"fabsf", (void *)fabsf},
     {"floor", (void *)floor},
@@ -772,18 +412,6 @@ struct esp_elfsym const lichen_exports[] = {
     {"fmod", (void *)fmod},
     {"fmodf", (void *)fmodf},
     {"free", (void *)lichen_exp_free},
-    {"fs_app_dir_path", (void *)fs_app_dir_path},
-    {"gate_app_caller", (void *)gate_app_caller},
-    {"gate_app_id", (void *)gate_app_id},
-    {"gate_app_names_refusal", (void *)gate_app_names_refusal},
-    {"gate_app_settings_ns", (void *)gate_app_settings_ns},
-    {"gate_app_source", (void *)gate_app_source},
-    {"gate_batch_may_end", (void *)gate_batch_may_end},
-    {"gate_mem_free", (void *)gate_mem_free},
-    {"gate_mem_new", (void *)gate_mem_new},
-    {"gate_mem_pair_clear", (void *)gate_mem_pair_clear},
-    {"gate_mem_pair_set", (void *)gate_mem_pair_set},
-    {"gate_mem_strdup", (void *)gate_mem_strdup},
     {"hold_exit_event", (void *)hold_exit_event},
     {"hold_exit_percent", (void *)hold_exit_percent},
     {"hold_exit_tick", (void *)hold_exit_tick},
@@ -793,12 +421,6 @@ struct esp_elfsym const lichen_exports[] = {
     {"isdigit", (void *)isdigit},
     {"isspace", (void *)isspace},
     {"isxdigit", (void *)isxdigit},
-    {"key_cause_enter", (void *)key_cause_enter},
-    {"key_cause_hand_only_ok", (void *)key_cause_hand_only_ok},
-    {"key_cause_last_key_injected", (void *)key_cause_last_key_injected},
-    {"key_cause_leave", (void *)key_cause_leave},
-    {"key_cause_name", (void *)key_cause_name},
-    {"key_cause_now", (void *)key_cause_now},
     {"key_layout", (void *)key_layout},
     {"key_layout_index", (void *)key_layout_index},
     {"key_matrix_code", (void *)key_matrix_code},
@@ -812,25 +434,10 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_airplane_get", (void *)lichen_airplane_get},
     {"lichen_alloc", (void *)lichen_alloc},
     {"lichen_alloc_aligned", (void *)lichen_alloc_aligned},
-    {"lichen_badge_generation", (void *)lichen_badge_generation},
-    {"lichen_badge_get", (void *)lichen_badge_get},
     {"lichen_badge_set", (void *)lichen_badge_set},
-    {"lichen_boot_degraded", (void *)lichen_boot_degraded},
-    {"lichen_crashlog_after_crash", (void *)lichen_crashlog_after_crash},
-    {"lichen_crashlog_clear", (void *)lichen_crashlog_clear},
-    {"lichen_crashlog_delete", (void *)lichen_crashlog_delete},
-    {"lichen_crashlog_export", (void *)lichen_crashlog_export},
-    {"lichen_crashlog_export_sd", (void *)lichen_crashlog_export_sd},
-    {"lichen_crashlog_generation", (void *)lichen_crashlog_generation},
-    {"lichen_crashlog_list", (void *)lichen_crashlog_list},
-    {"lichen_crashlog_mark_seen", (void *)lichen_crashlog_mark_seen},
-    {"lichen_crashlog_read", (void *)lichen_crashlog_read},
-    {"lichen_crashlog_status", (void *)lichen_crashlog_status},
     {"lichen_ctx_self", (void *)lichen_ctx_self},
     {"lichen_date_text", (void *)lichen_date_text},
     {"lichen_font", (void *)lichen_font},
-    {"lichen_font_set", (void *)lichen_font_set},
-    {"lichen_fonts_load", (void *)lichen_fonts_load},
     {"lichen_free", (void *)lichen_free},
     {"lichen_fs_app_dir", (void *)lichen_fs_app_dir},
     {"lichen_fs_drive_bytes", (void *)lichen_fs_drive_bytes},
@@ -839,11 +446,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_fs_sd_dir", (void *)lichen_fs_sd_dir},
     {"lichen_fs_sd_end", (void *)lichen_fs_sd_end},
     {"lichen_fs_sd_mounted", (void *)lichen_fs_sd_mounted},
-    {"lichen_haptics_enabled", (void *)lichen_haptics_enabled},
     {"lichen_haptics_play", (void *)lichen_haptics_play},
-    {"lichen_haptics_set_enabled", (void *)lichen_haptics_set_enabled},
-    {"lichen_haptics_set_strength", (void *)lichen_haptics_set_strength},
-    {"lichen_haptics_strength", (void *)lichen_haptics_strength},
     {"lichen_heading", (void *)lichen_heading},
     {"lichen_hex_decode", (void *)lichen_hex_decode},
     {"lichen_hex_digit", (void *)lichen_hex_digit},
@@ -855,19 +458,13 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_label_line_fit", (void *)lichen_label_line_fit},
     {"lichen_label_set", (void *)lichen_label_set},
     {"lichen_label_wrap", (void *)lichen_label_wrap},
-    {"lichen_mem_console_register", (void *)lichen_mem_console_register},
     {"lichen_notify", (void *)lichen_notify},
     {"lichen_notify_dnd", (void *)lichen_notify_dnd},
-    {"lichen_notify_dropped", (void *)lichen_notify_dropped},
     {"lichen_notify_mark_read", (void *)lichen_notify_mark_read},
     {"lichen_notify_source_enabled", (void *)lichen_notify_source_enabled},
     {"lichen_notify_to", (void *)lichen_notify_to},
     {"lichen_notify_unread_top", (void *)lichen_notify_unread_top},
-    {"lichen_os_name", (void *)lichen_os_name},
-    {"lichen_os_version_line", (void *)lichen_os_version_line},
     {"lichen_page_hint_of", (void *)lichen_page_hint_of},
-    {"lichen_radio_apply_all", (void *)lichen_radio_apply_all},
-    {"lichen_radio_console_register", (void *)lichen_radio_console_register},
     {"lichen_radio_get", (void *)lichen_radio_get},
     {"lichen_radio_listen", (void *)lichen_radio_listen},
     {"lichen_radio_lora_pause", (void *)lichen_radio_lora_pause},
@@ -875,20 +472,15 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_radio_name", (void *)lichen_radio_name},
     {"lichen_radio_switch_get", (void *)lichen_radio_switch_get},
     {"lichen_random_fill", (void *)lichen_random_fill},
-    {"lichen_random_start", (void *)lichen_random_start},
     {"lichen_random_u32", (void *)lichen_random_u32},
     {"lichen_reg_get", (void *)lichen_reg_get},
     {"lichen_register_app", (void *)lichen_register_app},
     {"lichen_screen_locked", (void *)lichen_screen_locked},
     {"lichen_sensors_get", (void *)lichen_sensors_get},
     {"lichen_sensors_running", (void *)lichen_sensors_running},
-    {"lichen_sensors_set_periods", (void *)lichen_sensors_set_periods},
-    {"lichen_sensors_start", (void *)lichen_sensors_start},
-    {"lichen_sensors_stop", (void *)lichen_sensors_stop},
     {"lichen_station_clock", (void *)lichen_station_clock},
     {"lichen_str_copy", (void *)lichen_str_copy},
     {"lichen_str_copy_n", (void *)lichen_str_copy_n},
-    {"lichen_task_console_register", (void *)lichen_task_console_register},
     {"lichen_task_leftovers", (void *)lichen_task_leftovers},
     {"lichen_task_start", (void *)lichen_task_start},
     {"lichen_task_start_in", (void *)lichen_task_start_in},
@@ -907,7 +499,6 @@ struct esp_elfsym const lichen_exports[] = {
     {"list_filter_text_has", (void *)list_filter_text_has},
     {"list_filter_text_starts", (void *)list_filter_text_starts},
     {"lora_claim", (void *)lora_claim},
-    {"lora_get_boot_radio", (void *)lora_get_boot_radio},
     {"lora_get_channel_rssi", (void *)lora_get_channel_rssi},
     {"lora_get_counts", (void *)lora_get_counts},
     {"lora_get_freq", (void *)lora_get_freq},
@@ -916,11 +507,8 @@ struct esp_elfsym const lichen_exports[] = {
     {"lora_release", (void *)lora_release},
     {"lora_send", (void *)lora_send},
     {"lora_send_state", (void *)lora_send_state},
-    {"lora_set_link_callback", (void *)lora_set_link_callback},
     {"lora_set_radio", (void *)lora_set_radio},
-    {"lora_set_rx_formatter", (void *)lora_set_rx_formatter},
     {"lora_set_tx_power", (void *)lora_set_tx_power},
-    {"lora_settings_pending", (void *)lora_settings_pending},
     {"lora_sweep", (void *)lora_sweep},
     {"lora_up", (void *)lora_up},
     {"lv_area_get_width", (void *)lv_area_get_width},
@@ -1050,11 +638,6 @@ struct esp_elfsym const lichen_exports[] = {
     {"lv_trigo_cos", (void *)lv_trigo_cos},
     {"lv_trigo_sin", (void *)lv_trigo_sin},
     {"malloc", (void *)lichen_exp_malloc},
-    {"mem_book_adjust", (void *)mem_book_adjust},
-    {"mem_book_charge", (void *)mem_book_charge},
-    {"mem_book_find", (void *)mem_book_find},
-    {"mem_book_release", (void *)mem_book_release},
-    {"mem_book_set_bulk_quota", (void *)mem_book_set_bulk_quota},
     {"memchr", (void *)memchr},
     {"memcmp", (void *)memcmp},
     {"memcpy", (void *)memcpy},
@@ -1084,53 +667,14 @@ struct esp_elfsym const lichen_exports[] = {
     {"pow", (void *)pow},
     {"powf", (void *)powf},
     {"qr_payload_ok", (void *)qr_payload_ok},
-    {"qr_screen_open", (void *)qr_screen_open},
     {"qr_wifi_payload", (void *)qr_wifi_payload},
     {"qsort", (void *)qsort},
-    {"radio_state_effective", (void *)radio_state_effective},
-    {"radio_state_get", (void *)radio_state_get},
-    {"radio_state_held_by", (void *)radio_state_held_by},
-    {"radio_state_hold", (void *)radio_state_hold},
-    {"radio_state_init", (void *)radio_state_init},
-    {"radio_state_load", (void *)radio_state_load},
-    {"radio_state_release", (void *)radio_state_release},
-    {"radio_state_set", (void *)radio_state_set},
-    {"radio_state_set_airplane", (void *)radio_state_set_airplane},
-    {"radio_state_set_switch", (void *)radio_state_set_switch},
-    {"radio_state_switch", (void *)radio_state_switch},
     {"realloc", (void *)lichen_exp_realloc},
-    {"sb_add_app_keys", (void *)sb_add_app_keys},
-    {"sb_app_keys_clear", (void *)sb_app_keys_clear},
-    {"sb_check_complete", (void *)sb_check_complete},
-    {"sb_complete", (void *)sb_complete},
-    {"sb_error_text", (void *)sb_error_text},
-    {"sb_find", (void *)sb_find},
-    {"sb_format", (void *)sb_format},
-    {"sb_key_at", (void *)sb_key_at},
-    {"sb_key_count", (void *)sb_key_count},
-    {"sb_parse", (void *)sb_parse},
-    {"sb_summary", (void *)sb_summary},
-    {"sb_value_equal", (void *)sb_value_equal},
-    {"sb_value_parse", (void *)sb_value_parse},
-    {"sb_value_text", (void *)sb_value_text},
-    {"sbs_choose", (void *)sbs_choose},
-    {"sbs_save", (void *)sbs_save},
     {"scroll_anchor_find", (void *)scroll_anchor_find},
     {"scroll_anchor_take", (void *)scroll_anchor_take},
     {"scroll_keep_top", (void *)scroll_keep_top},
     {"scroll_key_hash", (void *)scroll_key_hash},
     {"scroll_step_target", (void *)scroll_step_target},
-    {"settings_apply_tz", (void *)settings_apply_tz},
-    {"settings_backup_apply", (void *)settings_backup_apply},
-    {"settings_backup_discard", (void *)settings_backup_discard},
-    {"settings_backup_plan", (void *)settings_backup_plan},
-    {"settings_backup_save", (void *)settings_backup_save},
-    {"settings_erase", (void *)settings_erase},
-    {"settings_get_str", (void *)settings_get_str},
-    {"settings_get_u8", (void *)settings_get_u8},
-    {"settings_set_str", (void *)settings_set_str},
-    {"settings_set_tz", (void *)settings_set_tz},
-    {"settings_set_u8", (void *)settings_set_u8},
     {"shell_back", (void *)shell_back},
     {"shell_back_then", (void *)shell_back_then},
     {"shell_back_to", (void *)shell_back_to},
@@ -1173,79 +717,15 @@ struct esp_elfsym const lichen_exports[] = {
     {"strtoll", (void *)strtoll},
     {"strtoul", (void *)strtoul},
     {"strtoull", (void *)strtoull},
-    {"system_power_off_requested", (void *)system_power_off_requested},
-    {"system_restart", (void *)system_restart},
-    {"system_restart_asked", (void *)system_restart_asked},
-    {"system_restart_bind_store", (void *)system_restart_bind_store},
-    {"system_restart_history", (void *)system_restart_history},
-    {"system_restart_name_next", (void *)system_restart_name_next},
-    {"system_restart_note", (void *)system_restart_note},
-    {"system_restart_on_trial", (void *)system_restart_on_trial},
-    {"system_restart_set_prepare", (void *)system_restart_set_prepare},
-    {"system_restart_set_save", (void *)system_restart_set_save},
-    {"system_restart_set_trial_gate", (void *)system_restart_set_trial_gate},
-    {"system_restart_would_wait", (void *)system_restart_would_wait},
-    {"system_save_before_off", (void *)system_save_before_off},
     {"tan", (void *)tan},
     {"tanf", (void *)tanf},
-    {"task_book_add", (void *)task_book_add},
-    {"task_book_count", (void *)task_book_count},
-    {"task_book_remove", (void *)task_book_remove},
-    {"task_class_core", (void *)task_class_core},
-    {"task_class_priority", (void *)task_class_priority},
-    {"task_name_fit", (void *)task_name_fit},
-    {"task_stack_name", (void *)task_stack_name},
-    {"task_stack_place", (void *)task_stack_place},
-    {"task_stack_reserve", (void *)task_stack_reserve},
-    {"tcard_bar_color", (void *)tcard_bar_color},
-    {"tcard_bar_rect", (void *)tcard_bar_rect},
-    {"tcard_border_rect", (void *)tcard_border_rect},
-    {"tcard_circle_rect", (void *)tcard_circle_rect},
-    {"tcard_corner_rect", (void *)tcard_corner_rect},
-    {"tcard_grating", (void *)tcard_grating},
-    {"tcard_grating_line", (void *)tcard_grating_line},
-    {"tcard_grid_rect", (void *)tcard_grid_rect},
-    {"tcard_info_rect", (void *)tcard_info_rect},
-    {"tcard_info_text", (void *)tcard_info_text},
-    {"tcard_marker_rect", (void *)tcard_marker_rect},
-    {"tcard_marker_track", (void *)tcard_marker_track},
-    {"tcard_mode_parse", (void *)tcard_mode_parse},
-    {"tcard_mode_step", (void *)tcard_mode_step},
-    {"tcard_solid_color", (void *)tcard_solid_color},
-    {"tcard_wedge_color", (void *)tcard_wedge_color},
-    {"tcard_wedge_percent", (void *)tcard_wedge_percent},
-    {"tcard_wedge_rect", (void *)tcard_wedge_rect},
-    {"test_card_create", (void *)test_card_create},
-    {"test_card_set_hooks", (void *)test_card_set_hooks},
-    {"test_card_set_mode", (void *)test_card_set_mode},
     {"text_entry_open", (void *)text_entry_open},
     {"text_entry_typed_by_hand", (void *)text_entry_typed_by_hand},
-    {"tile_cell_size", (void *)tile_cell_size},
-    {"tile_order_encode", (void *)tile_order_encode},
-    {"tile_order_is_default", (void *)tile_order_is_default},
-    {"tile_order_merge", (void *)tile_order_merge},
-    {"tile_order_move", (void *)tile_order_move},
-    {"tile_order_parse", (void *)tile_order_parse},
-    {"tile_order_slots", (void *)tile_order_slots},
-    {"timer_book_add", (void *)timer_book_add},
-    {"timer_book_count", (void *)timer_book_count},
-    {"timer_book_find", (void *)timer_book_find},
-    {"timer_book_next", (void *)timer_book_next},
-    {"timer_book_remove", (void *)timer_book_remove},
     {"tolower", (void *)tolower},
     {"toupper", (void *)toupper},
     {"tz_at", (void *)tz_at},
     {"tz_count", (void *)tz_count},
     {"tz_find_posix", (void *)tz_find_posix},
-    {"ui_cb_free", (void *)ui_cb_free},
-    {"ui_cb_mark_enter", (void *)ui_cb_mark_enter},
-    {"ui_cb_mark_leave", (void *)ui_cb_mark_leave},
-    {"ui_cb_new_event", (void *)ui_cb_new_event},
-    {"ui_cb_new_group", (void *)ui_cb_new_group},
-    {"ui_cb_new_timer", (void *)ui_cb_new_timer},
-    {"ui_cb_run_event", (void *)ui_cb_run_event},
-    {"ui_cb_run_group", (void *)ui_cb_run_group},
-    {"ui_cb_run_timer", (void *)ui_cb_run_timer},
     {"ui_confirm_hint", (void *)ui_confirm_hint},
     {"ui_countdown_text", (void *)ui_countdown_text},
     {"ui_empty_text", (void *)ui_empty_text},

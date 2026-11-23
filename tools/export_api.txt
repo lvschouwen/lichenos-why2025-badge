@@ -1,0 +1,77 @@
+# The app-facing API an SD app may resolve (#519, Lucas's decision of 2026-11-23: opt-in, a curated list). Read by
+# tools/gen_export_table.py, together with tools/export_allow.txt (libc, libm, lv_*). What docs/app-api.md documents for
+# apps, and nothing else: a function in a lichen_api header is the OS's until a line here names it.
+#   header H.h   every function H.h declares, minus the `deny` lines below it
+#   func NAME    one function (of a header that is not listed whole)
+#   deny NAME    a function of a listed header that stays the OS's
+# A header, func or deny line that matches nothing fails the generator. layers.conf's `forbid L6` still applies on top.
+# Adding a line is an API change (tools/export_table.txt, LICHEN_API_VERSION minor).
+#
+# Left out on purpose: fw_console.h (a command registered by an app that is later unloaded would dangle; console_reply
+# and system_restart_* come with the capabilities that guard them, #523), the crash log, bench_scope.h, key_cause.h,
+# tile_order.h, test_card*.h, qr_screen.h (OS and built-in app internals), every lichen_sys_* and *_bind* hook,
+# app_ctx.h, notify_os.h, settings_store.h, mem_book.h, task_book.h, update_mode.h.
+
+# App registration and its own context
+header lichen_app.h
+# UI: screens, widgets, shared lists, text entry, keys, fonts, theme helpers
+header lichen_ui.h
+header menu.h
+header menu_filter.h
+header list_filter.h
+header scroll_anchor.h
+header text_entry.h
+header ui_text.h
+header lichen_keys.h
+header key_matrix.h
+header hold_exit.h
+func lichen_font
+# The app's own settings namespace, secrets under its prefix, files, notifications, memory, tasks, timers, registry reads
+header lichen_settings.h
+deny app_settings_erase_all
+header lichen_fs.h
+header lichen_notify.h
+header lichen_mem.h
+deny lichen_mem_console_register
+header lichen_task.h
+deny lichen_task_console_register
+header lichen_timer.h
+header lichen_reg.h
+# Pure helpers
+header lichen_hex.h
+header lichen_str.h
+header tz_table.h
+header qr_payload.h
+# Badge, haptics, sensors, radios (reads and the borrow), clock, random: only the calls an app makes
+func lichen_badge_set
+func lichen_haptics_play
+func lichen_sensors_get
+func lichen_sensors_running
+func lichen_radio_get
+func lichen_radio_switch_get
+func lichen_radio_name
+func lichen_radio_listen
+func lichen_airplane_get
+func lichen_radio_lora_pause
+func lichen_radio_lora_resume
+func clock_is_set
+func clock_is_approximate
+func clock_source_text
+func clock_source_age_s
+func clock_propose
+func lichen_random_fill
+func lichen_random_u32
+# LoRa, as the one owner of the radio (lora_app.h); the link callback and the rx formatter are MeshCore's
+func lora_claim
+func lora_release
+func lora_send
+func lora_send_state
+func lora_set_radio
+func lora_set_tx_power
+func lora_sweep
+func lora_up
+func lora_get_radio
+func lora_get_freq
+func lora_get_counts
+func lora_get_stats
+func lora_get_channel_rssi

@@ -6,16 +6,6 @@
 # Not here on purpose: printf and friends (a user-controlled format is a door; snprintf and vsnprintf only write to a
 # buffer), esp_rom_printf, file and socket calls (the gate's lichen_fs and its caps are the way), abort and exit.
 
-# Denied: declared in a lichen_api header, called by the built-in apps (so layers.conf cannot forbid them), but wiring the
-# OS's own hooks at boot, which an SD app has no business with (and lichen_os may not link up to the shell for them).
-!bench_chat_bind
-!bench_scope_bind
-!bench_screen_scoped_bind
-!bench_starts_bind
-!console_bind_boot_pending
-!console_usb_hold_bind
-!key_cause_bind_last_key
-
 # libc: memory and strings
 memcpy
 memmove
