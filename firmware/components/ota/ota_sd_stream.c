@@ -1,5 +1,7 @@
 #include "ota_sd_stream.h"
 
+#include <string.h>
+
 long long ota_sd_cap(bool free_known, uint64_t free_bytes, uint64_t written) {
     if (!free_known || free_bytes > (uint64_t)OTA_SD_TOTAL_MAX || written > (uint64_t)OTA_SD_TOTAL_MAX) {
         return OTA_SD_TOTAL_MAX;
@@ -19,6 +21,10 @@ bool ota_sd_stream_refuses(bool sd_active, ota_route_t route, bool has_offset, b
         case OTA_ROUTE_DELETE: return true;
         default: return false; // info, log, reboot, ...: nothing of the upload's
     }
+}
+
+bool ota_sd_orphan_is_live(char const *orphan, char const *live_temp, bool live) {
+    return live && orphan[0] && strcmp(orphan, live_temp) == 0;
 }
 
 bool ota_sd_piece_ok(long long len) {

@@ -37,6 +37,10 @@ long long ota_sd_cap(bool free_known, uint64_t free_bytes, uint64_t written);
 bool ota_sd_stream_refuses(bool sd_active, ota_route_t route, bool has_offset, bool same_file);
 
 // A plain or decoded piece of len bytes may go to the card (0 < len <= OTA_SD_PIECE_MAX)
+// The remembered leftover temp path is the live upload's own temp (a restart in the same folder reuses the name): it
+// is not a leftover and must not be removed
+bool ota_sd_orphan_is_live(char const *orphan, char const *live_temp, bool live);
+
 bool ota_sd_piece_ok(long long len);
 
 void ota_sd_stream_begin(ota_sd_stream_t *s, size_t total);

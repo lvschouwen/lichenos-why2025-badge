@@ -60,10 +60,15 @@ static ota_sd_stream_t sd_stream;
 // An upload to SD0: that ended without landing: remove its temp file and end the on-air "change in progress" mark that
 // covered the whole upload. A card that is gone has nothing to remove.
 // A temp file that could not be removed (the card was busy or gone): tried again from ota_piece_expire and the next
-// upload, so it does not sit on the card until someone notices
+// upload. Only the card-root stream temp is also swept blind (sd_stream_open); one left in a subfolder goes at the next
+// upload to that folder.
 static char orphan[sizeof(staged.temp)];
 
 static void orphan_sweep(void) {
+    if (ota_sd_orphan_is_live(orphan, staged.temp, staged.temp_live)) {
+        orphan[0] = '\0'; // the live upload reused the name: not a leftover
+        return;
+    }
     if (orphan[0] && sd_mounted() && sd_begin(100)) {
         unlink(orphan);
         sd_end(SD_IO_NEUTRAL);
@@ -292,6 +297,9 @@ static bool sd_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     }
     staged.sd        = true;
     staged.temp_live = true;
+    if (ota_sd_orphan_is_live(orphan, staged.temp, true)) {
+        orphan[0] = '\0'; // a leftover of the same name was just replaced by this upload's temp
+    }
     ota_sd_stream_begin(&sd_stream, staged.total);
     return true;
 }
@@ -304,12 +312,15 @@ static sd_write_t sd_write_piece(size_t offset, uint8_t const *data, size_t len)
     if (!sd_begin(SD_WAIT_MS)) {
         return SD_WRITE_BUSY;
     }
-    FILE *f  = fopen(staged.temp, "r+b");
+    FILE *f   = fopen(staged.temp, "r+b");
     int   err = errno;
     bool  ok  = f && fseek(f, (long)offset, SEEK_SET) == 0 && fwrite(data, 1, len, f) == len;
     if (f) {
         err = ok ? err : errno;
-        ok  = fclose(f) == 0 && ok; // the data reaches the card here, a full card fails here
+        if (fclose(f) != 0 && ok) { // the data reaches the card here, a full card fails here
+            err = errno;
+            ok  = false;
+        }
     }
     sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
     return ok ? SD_WRITE_OK : SD_WRITE_FAILED;
@@ -661,7 +672,7 @@ bool ota_piece_sd_refused(int fd, ota_request_t const *req, size_t pre_len) {
         return false;
     }
     ota_drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
-    ota_respond(fd, 409, "an upload to the SD card is in progress: wait for it or let it time out");
+    ota_respond(fd, 409, "an upload to the SD card is in progress: retry in up to 5 minutes (it is dropped after that without a piece)");
     return true;
 }
 

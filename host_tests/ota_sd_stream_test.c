@@ -50,6 +50,12 @@ int main(void) {
     CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_INFO, false, false));
     CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_LOG, false, false));
     CHECK(!ota_sd_stream_refuses(true, OTA_ROUTE_REBOOT, false, false));
+
+    // A leftover temp that a restart in the same folder reuses is the live upload's, not to be removed
+    CHECK(ota_sd_orphan_is_live("/sd/a/ota_upload.tmp.sd", "/sd/a/ota_upload.tmp.sd", true));
+    CHECK(!ota_sd_orphan_is_live("/sd/a/ota_upload.tmp.sd", "/sd/b/ota_upload.tmp.sd", true));
+    CHECK(!ota_sd_orphan_is_live("/sd/a/ota_upload.tmp.sd", "/sd/a/ota_upload.tmp.sd", false));
+    CHECK(!ota_sd_orphan_is_live("", "", true));
     CHECK(ota_sd_cap(true, 29ULL * 1024 * 1024 * 1024, 0) > 4LL * 1024 * 1024);
     // Every accepted piece lowers the card's free space: a 28 MB file on a card with 30 MB free, 20 MB in, still passes
     // (free is 10 MB then), where the free space alone would refuse it as too large
