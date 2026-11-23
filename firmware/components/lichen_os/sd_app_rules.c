@@ -13,6 +13,9 @@ sd_app_scan_t sd_app_scan_verdict(lichen_manifest_err_t err, lichen_manifest_t c
     if (!lichen_api_compatible(m->api_major, m->api_minor)) {
         return SD_APP_SCAN_API;
     }
+    if (m->stack_kib > SD_APP_STACK_KIB_MAX) {
+        return SD_APP_SCAN_STACK;
+    }
     if (id_taken) {
         return SD_APP_SCAN_SHADOW;
     }
@@ -26,22 +29,23 @@ void sd_app_scan_reason(sd_app_scan_t v, lichen_manifest_err_t err, lichen_manif
     }
     char const *id = (v != SD_APP_SCAN_BAD_MANIFEST && m) ? m->id : (dir_id ? dir_id : "?");
     switch (v) {
-    case SD_APP_SCAN_OK:
-        snprintf(out, cap, "%s is fine", id);
-        break;
     case SD_APP_SCAN_BAD_MANIFEST:
         snprintf(out, cap, "%s: bad manifest (%s)", id, lichen_manifest_err_text(err));
         break;
     case SD_APP_SCAN_API:
-        snprintf(out, cap, "%s needs app API %u.%u, this is " LICHEN_API_VERSION_TEXT, id, (unsigned)m->api_major,
+        snprintf(out, cap, "%s needs API %u.%u, this is " LICHEN_API_VERSION_TEXT, id, (unsigned)m->api_major,
                  (unsigned)m->api_minor);
         break;
     case SD_APP_SCAN_SHADOW:
-        snprintf(out, cap, "%s is the name of an app that is already here", id);
+        snprintf(out, cap, "%s is already an app here", id);
+        break;
+    case SD_APP_SCAN_STACK:
+        snprintf(out, cap, "%s: stack %u KiB, at most %u", id, (unsigned)m->stack_kib, (unsigned)SD_APP_STACK_KIB_MAX);
         break;
     case SD_APP_SCAN_NO_ENTRY:
-        snprintf(out, cap, "%s: the program file %s is missing", id, m ? m->entry : "?");
+        snprintf(out, cap, "%s: %s is missing", id, m ? m->entry : "?");
         break;
+    case SD_APP_SCAN_OK:
     default:
         snprintf(out, cap, "%s: refused", id);
         break;
@@ -59,9 +63,11 @@ sd_open_t sd_app_open(sd_app_t *a, char const *hold_why) {
         return SD_OPEN_BUSY;
     case SD_APP_LOADING:
         a->closing = false; // opened again before the load ended: it stays
+        a->screens++;
         return SD_OPEN_WAIT;
-    case SD_APP_LOADED:
+    case SD_APP_LOADED: // an app that is loaded reopens under the hold on purpose: the hold guards loads, not screens
         a->closing = false;
+        a->screens++;
         return SD_OPEN_NOW;
     case SD_APP_TILE:
     default:
@@ -72,6 +78,7 @@ sd_open_t sd_app_open(sd_app_t *a, char const *hold_why) {
     }
     a->state   = SD_APP_LOADING;
     a->closing = false;
+    a->screens++;
     return SD_OPEN_LOAD;
 }
 
@@ -80,14 +87,11 @@ char const *sd_open_text(sd_open_t v) {
     case SD_OPEN_HELD:
         return "Not while the on-air hold is on";
     case SD_OPEN_BUSY:
-        return "Still closing: try again in a moment";
+        return "Still closing: try again";
     case SD_OPEN_FAULTED:
-        return "This app did not stop in time: it stays closed until the card is out";
+        return "It did not stop: closed until a restart";
     case SD_OPEN_REMOVED:
         return "The card is gone";
-    case SD_OPEN_LOAD:
-    case SD_OPEN_WAIT:
-    case SD_OPEN_NOW:
     default:
         return "Loading";
     }
@@ -106,8 +110,11 @@ sd_next_t sd_app_load_done(sd_app_t *a, bool ok) {
     return (a->closing || a->removing) ? SD_NEXT_UNLOAD : SD_NEXT_OPEN;
 }
 
-bool sd_app_closed(sd_app_t *a) {
-    if (a->state != SD_APP_LOADED && a->state != SD_APP_LOADING) {
+bool sd_app_screen_deleted(sd_app_t *a) {
+    if (a->screens > 0) {
+        a->screens--;
+    }
+    if (a->screens > 0 || (a->state != SD_APP_LOADED && a->state != SD_APP_LOADING)) {
         return false;
     }
     a->closing = true;
@@ -115,12 +122,16 @@ bool sd_app_closed(sd_app_t *a) {
 }
 
 bool sd_app_unload_begin(sd_app_t *a) {
-    if (a->state != SD_APP_LOADED || !(a->closing || a->removing)) {
+    if (a->state != SD_APP_LOADED || !(a->removing || (a->closing && a->screens == 0))) {
         return false;
     }
     a->state   = SD_APP_UNLOADING;
     a->closing = false;
     return true;
+}
+
+bool sd_app_may_unregister(sd_app_t const *a, size_t tasks_left) {
+    return (a->state == SD_APP_TILE || a->state == SD_APP_UNLOADING) && tasks_left == 0;
 }
 
 void sd_app_unload_done(sd_app_t *a, bool clean) {
@@ -142,23 +153,5 @@ sd_unload_step_t sd_unload_next(sd_unload_step_t cur, bool ok) {
     if (!ok) {
         return SD_UNLOAD_FAULT;
     }
-    switch (cur) {
-    case SD_UNLOAD_STOP:
-        return SD_UNLOAD_TASKS;
-    case SD_UNLOAD_TASKS:
-        return SD_UNLOAD_UI;
-    case SD_UNLOAD_UI:
-        return SD_UNLOAD_FREE;
-    case SD_UNLOAD_FREE:
-        return SD_UNLOAD_DONE;
-    case SD_UNLOAD_DONE:
-    case SD_UNLOAD_FAULT:
-    default:
-        return cur;
-    }
-}
-
-char const *sd_unload_step_name(sd_unload_step_t s) {
-    static char const *const names[] = {"stop hook", "tasks", "timers and UI calls", "free", "done", "fault"};
-    return (unsigned)s < sizeof(names) / sizeof(names[0]) ? names[s] : "?";
+    return cur < SD_UNLOAD_DONE ? (sd_unload_step_t)(cur + 1) : cur; // the enum is the order
 }

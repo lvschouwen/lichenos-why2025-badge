@@ -19,12 +19,16 @@ extern "C" {
 
 // ---- the scan ----------------------------------------------------------------------------------------------------
 
+// The most stack an app's main() task may ask for in its manifest (KiB); 0 means the default
+#define SD_APP_STACK_KIB_MAX 16
+
 typedef enum {
     SD_APP_SCAN_OK,
     SD_APP_SCAN_BAD_MANIFEST, // the manifest does not parse (the parser's reason is in the text)
     SD_APP_SCAN_API,          // built for another API major, or a newer minor than this OS has
     SD_APP_SCAN_SHADOW,       // the id is a registered app's id or alias, or one the OS keeps
     SD_APP_SCAN_NO_ENTRY,     // the entry file next to the manifest is missing
+    SD_APP_SCAN_STACK,        // stack_kib is above SD_APP_STACK_KIB_MAX
 } sd_app_scan_t;
 
 // The verdict for one directory of the apps folder: err is the parser's answer (m is valid only for OK), id_taken
@@ -41,7 +45,8 @@ typedef enum { SD_APP_TILE, SD_APP_LOADING, SD_APP_LOADED, SD_APP_UNLOADING, SD_
 
 typedef struct {
     sd_app_state_t state;
-    bool           closing;  // the last screen left: unload once nothing reopened it (cleared by an open)
+    int            screens;  // the app's screens that exist (opened, not yet deleted by LVGL)
+    bool           closing;  // the last screen was deleted: unload once nothing reopened it (cleared by an open)
     bool           removing; // the card went: nothing opens or loads from now on
 } sd_app_t;
 
@@ -68,11 +73,16 @@ typedef enum {
 } sd_next_t;
 // The loader finished: ok says the ELF is relocated, main() ran and the hooks are set.
 sd_next_t sd_app_load_done(sd_app_t *a, bool ok);
-// The app's last screen left. True when it is LOADED, so the loader should plan the unload (after a settle); a load
-// under way remembers it and load_done answers UNLOAD.
-bool sd_app_closed(sd_app_t *a);
-// The settle is over: LOADED and closing (or removing) becomes UNLOADING and returns true. False: it was opened again.
+// One of the app's screens was deleted (LVGL's delete event, on the LVGL task). True when it was the last one and the app
+// is LOADED, so the loader should plan the unload; a load under way remembers it and load_done answers UNLOAD. This is
+// the only thing that lets an unload free the image: a screen that is still there may hold callbacks into it.
+bool sd_app_screen_deleted(sd_app_t *a);
+// LOADED and closing (no screen left) or removing becomes UNLOADING and returns true. False: it was opened again, or a
+// screen still exists. A removal starts at once: it frees the image only after the shell closed the screens (do_free).
 bool sd_app_unload_begin(sd_app_t *a);
+// May lichen_unregister_app be called for the app now? Only after a clean unload (or for a tile that never loaded), with
+// no task of the app left: never for an app whose unload faulted, which keeps its image, tasks or timers, and tile.
+bool sd_app_may_unregister(sd_app_t const *a, size_t tasks_left);
 // The unload ended: clean frees the image (TILE, or gone with the card); not clean leaves FAULTED.
 void sd_app_unload_done(sd_app_t *a, bool clean);
 // The card went: from now on opens are refused. True when the app needs an unload (it is LOADED, or LOADING: the
@@ -93,7 +103,6 @@ typedef enum {
 } sd_unload_step_t;
 // The step after cur, given whether cur went well. Never skips a step and never reaches FREE after a failure.
 sd_unload_step_t sd_unload_next(sd_unload_step_t cur, bool ok);
-char const      *sd_unload_step_name(sd_unload_step_t s);
 
 #ifdef __cplusplus
 }

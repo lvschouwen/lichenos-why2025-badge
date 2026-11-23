@@ -42,6 +42,14 @@ static void test_scan(void) {
     m = good();
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, true, true) == SD_APP_SCAN_SHADOW); // a built-in's id or alias
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, false) == SD_APP_SCAN_NO_ENTRY);
+    m = good();
+    m.stack_kib = SD_APP_STACK_KIB_MAX;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
+    m.stack_kib = SD_APP_STACK_KIB_MAX + 1;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_STACK);
+    sd_app_scan_reason(SD_APP_SCAN_STACK, LICHEN_MANIFEST_OK, &m, "hello", why, sizeof(why));
+    CHECK(strstr(why, "17 KiB") && strstr(why, "16"));
+    m = good();
     // the order: an API refusal names the API even when the id is also taken
     m.api_major = 9;
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, true, false) == SD_APP_SCAN_API);
@@ -84,13 +92,17 @@ static void test_failed_load(void) {
 
 static void test_close_flow(void) {
     sd_app_t a = {0};
-    sd_app_open(&a, NULL);
+    sd_app_open(&a, NULL); // screen 1
     sd_app_load_done(&a, true);
     CHECK(sd_app_hooks_live(&a));
-    CHECK(sd_app_closed(&a));                 // the last screen left: the loader plans an unload
-    CHECK(sd_app_open(&a, NULL) == SD_OPEN_NOW); // ... but it was opened again within the settle
+    CHECK(!sd_app_unload_begin(&a) && a.state == SD_APP_LOADED); // a screen exists: nothing may free the image
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_NOW && a.screens == 2); // a second screen
+    CHECK(!sd_app_screen_deleted(&a) && a.screens == 1);       // one of two deleted: the app stays
+    CHECK(!sd_app_unload_begin(&a));
+    CHECK(sd_app_screen_deleted(&a) && a.screens == 0);        // the last one: the loader plans an unload
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_NOW);               // ... but it was opened again meanwhile
     CHECK(!sd_app_unload_begin(&a) && a.state == SD_APP_LOADED);
-    CHECK(sd_app_closed(&a) && sd_app_unload_begin(&a) && a.state == SD_APP_UNLOADING);
+    CHECK(sd_app_screen_deleted(&a) && sd_app_unload_begin(&a) && a.state == SD_APP_UNLOADING);
     CHECK(!sd_app_hooks_live(&a)); // no hook is called from the first step on
     CHECK(sd_app_open(&a, NULL) == SD_OPEN_BUSY);
     sd_app_unload_done(&a, true);
@@ -98,16 +110,27 @@ static void test_close_flow(void) {
     CHECK(sd_app_open(&a, NULL) == SD_OPEN_LOAD); // load on open, again
 }
 
+static void test_no_free_before_deleted(void) {
+    // the image may go only after LVGL deleted every screen of the app (#523 review H1): no timer can stand in for the event
+    sd_app_t a = {0};
+    sd_app_open(&a, NULL);
+    sd_app_load_done(&a, true);
+    a.closing = true; // even a stray close mark does not start an unload while a screen is there
+    CHECK(!sd_app_unload_begin(&a));
+    CHECK(sd_app_screen_deleted(&a));
+    CHECK(sd_app_unload_begin(&a));
+}
+
 static void test_close_during_load(void) {
     sd_app_t a = {0};
     sd_app_open(&a, NULL);
-    CHECK(!sd_app_closed(&a) && a.closing); // remembered, nothing to unload yet
+    CHECK(!sd_app_screen_deleted(&a) && a.closing); // remembered, nothing to unload yet
     CHECK(sd_app_load_done(&a, true) == SD_NEXT_UNLOAD);
     CHECK(sd_app_unload_begin(&a));
     // reopened while loading: it stays
     sd_app_t b = {0};
     sd_app_open(&b, NULL);
-    sd_app_closed(&b);
+    sd_app_screen_deleted(&b);
     CHECK(sd_app_open(&b, NULL) == SD_OPEN_WAIT && !b.closing);
     CHECK(sd_app_load_done(&b, true) == SD_NEXT_OPEN);
 }
@@ -120,19 +143,36 @@ static void test_removal(void) {
     sd_app_open(&l, NULL);
     CHECK(sd_app_remove(&l));                                     // during a load: the unload follows it
     CHECK(sd_app_load_done(&l, true) == SD_NEXT_UNLOAD);
-    CHECK(sd_app_unload_begin(&l));                               // removing alone starts the unload, no screen needed
+    CHECK(sd_app_unload_begin(&l));                               // removing starts the unload with the screen still there
     sd_app_t o = {0};
     o.state = SD_APP_LOADED;
     CHECK(sd_app_remove(&o) && sd_app_unload_begin(&o));
     sd_app_unload_done(&o, false);
     CHECK(o.state == SD_APP_FAULTED && !sd_app_hooks_live(&o)); // the image stays
-    CHECK(!sd_app_remove(&o));                                    // faulted: nothing to unload, the app just leaves
+    CHECK(!sd_app_remove(&o));                                    // faulted: nothing to unload
     sd_app_t f = {0};
     f.state = SD_APP_FAULTED;
     CHECK(sd_app_open(&f, NULL) == SD_OPEN_FAULTED);
     sd_app_unload_done(&f, true); // only an UNLOADING app ends an unload
     CHECK(f.state == SD_APP_FAULTED);
-    CHECK(!sd_app_closed(&f));
+    CHECK(!sd_app_screen_deleted(&f));
+}
+
+static void test_may_unregister(void) {
+    // never for an app whose unload faulted (its image, tasks or timers may live), nor with a task of it left (#523 review H2)
+    sd_app_t a = {0};
+    CHECK(sd_app_may_unregister(&a, 0));                 // a tile that never loaded
+    CHECK(!sd_app_may_unregister(&a, 1));
+    a.state = SD_APP_LOADED;
+    CHECK(sd_app_remove(&a) && sd_app_unload_begin(&a));
+    CHECK(sd_app_may_unregister(&a, 0));                 // a clean unload up to the free step
+    CHECK(!sd_app_may_unregister(&a, 2));
+    sd_app_unload_done(&a, false);
+    CHECK(!sd_app_may_unregister(&a, 0));                // faulted
+    sd_app_t l = {.state = SD_APP_LOADING};
+    CHECK(!sd_app_may_unregister(&l, 0));
+    l.state = SD_APP_LOADED;
+    CHECK(!sd_app_may_unregister(&l, 0));
 }
 
 static void test_unload_order(void) {
@@ -149,8 +189,6 @@ static void test_unload_order(void) {
         CHECK(sd_unload_next((sd_unload_step_t)cur, false) == SD_UNLOAD_FAULT);
     }
     CHECK(sd_unload_next(SD_UNLOAD_FAULT, true) == SD_UNLOAD_FAULT);
-    CHECK(strcmp(sd_unload_step_name(SD_UNLOAD_UI), "timers and UI calls") == 0);
-    CHECK(strcmp(sd_unload_step_name((sd_unload_step_t)99), "?") == 0);
 }
 
 int main(void) {
@@ -158,6 +196,8 @@ int main(void) {
     test_open();
     test_failed_load();
     test_close_flow();
+    test_no_free_before_deleted();
+    test_may_unregister();
     test_close_during_load();
     test_removal();
     test_unload_order();

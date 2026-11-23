@@ -27,12 +27,6 @@ void lichen_sys_life_fault_crashes(lichen_ctx_t ctx);
 // app. At most LIFE_SCREENS_MAX screens are looked at. The LVGL task (the shell holds the LVGL lock); takes only the
 // records' spinlock.
 #define LIFE_SCREENS_MAX 8 // NAV_MAX_DEPTH
-// The SD apps' loader (#523) is told when an app's last screen left the stack (OPEN or SUSPENDED to the rest state), with the
-// app's ctx: on the LVGL task under the LVGL lock, after the records' spinlock is given, so cb only posts (no I/O, no
-// waiting). The screen's widgets may still exist (the shell deletes them right after, or at the end of its animation).
-// One callback, set once at boot; NULL takes it away. Any task (a pointer store).
-typedef void (*lichen_life_close_cb_t)(lichen_ctx_t ctx);
-void lichen_sys_life_on_close(lichen_life_close_cb_t cb);
 void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth);
 // app_life_stop_begin / _stop_end / _wait_verdict for the app of ctx, with the tick clock (lichen_sys_life_now_ms,
 // which a waiter's since_ms comes from). A ctx that left: BAD / LIFE_STATE_COUNT / FAILED. Any task.

@@ -45,7 +45,7 @@ static bool list_dirs(char names[][LICHEN_MANIFEST_ID_MAX], size_t *n) {
             continue; // not an app id: not ours to read
         }
         if (*n == SD_APPS_MAX) {
-            ESP_LOGW(TAG, "more than %d app folders: the rest are left out", SD_APPS_MAX);
+            ESP_LOGW(TAG, "over %d app folders, rest skipped", SD_APPS_MAX);
             break;
         }
         strlcpy(names[(*n)++], e->d_name, LICHEN_MANIFEST_ID_MAX);
@@ -113,8 +113,10 @@ static sd_app_rec_t *make_rec(lichen_manifest_t const *m) {
                               .id               = rec->m.id,
                               .open             = sd_app_tramp_open,
                               .stop_for_update  = sd_app_tramp_stop,
-                              // main() runs on a task of the app's own, which lichen_task_start allows only with BACKGROUND
-                              .caps             = rec->m.caps | CAP_BACKGROUND,
+                              // What the manifest declares, no more and no less (owner decision 2026-11-23: shown in
+                              // Settings > Apps). main()'s task is the OS's doing and needs no cap; a task the app starts
+                              // itself needs BACKGROUND declared
+                              .caps             = rec->m.caps,
                               .internal_ram_kib = rec->m.internal_ram_kib,
                               .psram_kib        = rec->m.psram_kib};
     return rec;
@@ -136,8 +138,7 @@ static void register_one(lichen_manifest_t const *m) {
     }
     lichen_sys_mem_quota_set(rec->ctx, m->psram_kib); // #520: no quota is made for an app that joins after boot
     sd_app_link(rec);
-    ESP_LOGI(TAG, "%s: tile shown (api %u.%u, stack %u KiB, psram %u KiB)", m->id, (unsigned)m->api_major,
-             (unsigned)m->api_minor, (unsigned)m->stack_kib, (unsigned)m->psram_kib);
+    ESP_LOGI(TAG, "%s: tile (api %u.%u)", m->id, (unsigned)m->api_major, (unsigned)m->api_minor);
 }
 
 static void scan_one(char const *dir, char *buf) {
@@ -154,6 +155,9 @@ static void scan_one(char const *dir, char *buf) {
     case READ_OK:
     default:
         break;
+    }
+    if (sd_app_known(dir)) {
+        return; // still here (an app that did not stop stays until the badge restarts): neither shown twice nor refused
     }
     lichen_manifest_t     m;
     lichen_manifest_err_t err = lichen_manifest_parse(buf, len, dir, &m, NULL);

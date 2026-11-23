@@ -358,9 +358,8 @@ lichen_sys_life_console	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_fault_crashes	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_get	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_now_ms	SYSTEM	unspecified	lichen_sys_life.h
-lichen_sys_life_on_close	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_removable	SYSTEM	any	lichen_sys_life.h
-lichen_sys_life_screens	SYSTEM	unspecified	lichen_sys_life.h
+lichen_sys_life_screens	SYSTEM	lvgl	lichen_sys_life.h
 lichen_sys_life_started	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_stop_begin	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_stop_end	SYSTEM	unspecified	lichen_sys_life.h

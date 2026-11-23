@@ -30,8 +30,7 @@ typedef struct sd_app_rec {
     esp_elf_t          elf;      // valid while image
     bool               image;    // an ELF image is held
     bool               hooks_set;
-    bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's)
-    int                stop_inflight; // callers of the stop hook right now: the image is freed only after they left
+    bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's); the stop task is booked under the app, so the unload waits for it
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live
     void              *screen;   // lv_obj_t: the screen waiting for the hooks' open; LVGL task only
@@ -43,6 +42,8 @@ void sd_app_lock(void);
 void sd_app_unlock(void);
 // The app of ctx, NULL when none (stale, the OS's, not an SD app's). The record stays until its unregister is done.
 sd_app_rec_t *sd_app_find(lichen_ctx_t ctx);
+// Whether an app of this id is still here, faulted or not (the scan leaves it alone).
+bool sd_app_known(char const *id);
 // Adds a made, registered record to the list.
 void sd_app_link(sd_app_rec_t *rec);
 

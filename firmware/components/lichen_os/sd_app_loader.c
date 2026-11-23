@@ -18,8 +18,10 @@
 #include "lichen_sys_app.h"
 #include "lichen_sys_life.h"
 #include "lichen_sys_notify.h"
+#include "lichen_os.h"
 #include "lichen_sys_ui.h"
 #include "lichen_task.h"
+#include "lichen_task_os.h"
 #include "sd_app_svc.h"
 #include "sd_elf_src.h"
 #include "sdcard.h"
@@ -42,14 +44,12 @@ static char const TAG[] = "sdapps";
 
 #define LOADER_STACK       6144 // the loader's own: manifests and paths on it, no big buffers
 #define OPEN_SETTLE_MS     450  // the ELF loads after the open animation: its cache flush is the #31 window
-#define CLOSE_SETTLE_MS    700  // a closed screen is deleted at the end of its animation; reopened within it, it stays
 #define HOOKS_WAIT_MS      5000 // main() has this long to call lichen_sd_app_hooks
 #define TASKS_WAIT_MS      3000 // after the stop hook, the app's tasks have this long to return
 #define UI_WAIT_MS         3000 // the barrier call through the LVGL task
 #define SD_WAIT_MS         2000
 #define UNREG_TRIES        20
 #define STACK_KIB_DEFAULT  4
-#define STACK_KIB_MAX      32
 
 typedef enum { MSG_CARD, MSG_LOAD, MSG_CLOSED, MSG_FREE } msg_kind_t;
 typedef struct {
@@ -60,7 +60,9 @@ typedef struct {
 static SemaphoreHandle_t g_mu;
 static SemaphoreHandle_t g_hooks_sem; // main() gave its hooks, or returned
 static SemaphoreHandle_t g_ui_sem;    // the barrier call ran
+static SemaphoreHandle_t g_stop_sem;  // the stop hook returned (one at a time: stop_called lets one caller per load in)
 static QueueHandle_t     g_queue;
+#define QUEUE_LEN (2 * SD_APPS_MAX + 4 + 4) // per app a load, a close and a free, plus the card events
 static sd_app_rec_t     *g_recs; // the loader task adds and removes; others read under g_mu
 static _Atomic bool      g_started;
 
@@ -69,6 +71,17 @@ void sd_app_lock(void) {
 }
 void sd_app_unlock(void) {
     xSemaphoreGive(g_mu);
+}
+
+// Is there an app with this id that is not gone (a faulted one stays registered until the badge restarts)?
+bool sd_app_known(char const *id) {
+    sd_app_lock();
+    sd_app_rec_t *r = g_recs;
+    while (r && (r->gone || strcmp(r->m.id, id) != 0)) {
+        r = r->next;
+    }
+    sd_app_unlock();
+    return r != NULL;
 }
 
 sd_app_rec_t *sd_app_find(lichen_ctx_t ctx) {
@@ -117,18 +130,24 @@ static void say(lv_obj_t *screen, char const *text) {
     lv_label_set_text(l, text);
 }
 
-// The screen waiting for an app goes away (closed, or the shell rebuilt Home): the record forgets it
+// One of the app's screens is being deleted (LVGL's delete event, LVGL task): the record forgets a screen that waited for
+// its hooks, and when it was the last one the loader is told. The event comes before the widgets go, so the loader's barrier
+// call (queued behind this deletion) is what says they are gone; only then may the image be freed (#523).
 static void screen_deleted(lv_event_t *e) {
     sd_app_rec_t *rec = lv_event_get_user_data(e);
     sd_app_lock();
     if (rec->screen == lv_event_get_target(e)) {
         rec->screen = NULL;
     }
+    bool plan = sd_app_screen_deleted(&rec->sda);
     sd_app_unlock();
+    if (plan && !post(MSG_CLOSED, rec)) {
+        ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
+    }
 }
 
 static void refused_say(sd_app_rec_t *rec, char const *why) {
-    ESP_LOGW(TAG, "%s: open refused: %s", rec->m.id, why);
+    ESP_LOGW(TAG, "%s: refused: %s", rec->m.id, why);
     lichen_sys_notify(LN_WARN, rec->m.name, why, 0);
 }
 
@@ -148,6 +167,9 @@ void sd_app_tramp_open(lv_obj_t *screen) {
         h = rec->hooks;
     }
     sd_app_unlock();
+    if (v == SD_OPEN_NOW || v == SD_OPEN_LOAD || v == SD_OPEN_WAIT) { // counted in screens: its deletion is told
+        lv_obj_add_event_cb(screen, screen_deleted, LV_EVENT_DELETE, rec);
+    }
     switch (v) {
     case SD_OPEN_NOW:
         h.open(screen); // the shell entered the app's context
@@ -155,12 +177,11 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     case SD_OPEN_LOAD:
     case SD_OPEN_WAIT:
         say(screen, "Loading...");
-        lv_obj_add_event_cb(screen, screen_deleted, LV_EVENT_DELETE, rec);
         if (v == SD_OPEN_LOAD && !post(MSG_LOAD, rec)) {
             sd_app_lock();
             sd_app_load_done(&rec->sda, false);
             sd_app_unlock();
-            say(screen, "The loader is busy: try again");
+            say(screen, "Loader busy: try again");
         }
         return;
     case SD_OPEN_HELD: {
@@ -175,32 +196,6 @@ void sd_app_tramp_open(lv_obj_t *screen) {
         refused_say(rec, sd_open_text(v));
         return;
     }
-}
-
-// An update is coming: the app's stop hook, if it is loaded and not stopped yet. The OTA task; the image is not unloaded
-// (the badge restarts). The unload waits for a caller still inside the hook before it frees the image.
-bool sd_app_tramp_stop(void) {
-    sd_app_rec_t *rec = sd_app_find(lichen_ctx_self());
-    if (!rec) {
-        return true;
-    }
-    lichen_sd_hooks_t h = {0};
-    sd_app_lock();
-    bool call = sd_app_hooks_live(&rec->sda) && !rec->stop_called && rec->hooks.stop;
-    if (call) {
-        h                = rec->hooks;
-        rec->stop_called = true;
-        rec->stop_inflight++;
-    }
-    sd_app_unlock();
-    if (!call) {
-        return true; // not loaded, no hook, or already stopped
-    }
-    bool ok = h.stop();
-    sd_app_lock();
-    rec->stop_inflight--;
-    sd_app_unlock();
-    return ok;
 }
 
 // The load ended well and the screen may still be there: the app builds into it (LVGL task)
@@ -283,56 +278,70 @@ static bool ui_barrier(lichen_ctx_t ctx) {
     return xSemaphoreTake(g_ui_sem, pdMS_TO_TICKS(UI_WAIT_MS)) == pdTRUE;
 }
 
-// The hook is called once per load (an update's stop may have called it already), and the image is freed only after every
-// caller left it: the wait is part of the tasks step
-static bool run_stop_hook(sd_app_rec_t *rec) {
+// The stop hook runs on a task of its own (the app's stack_kib, booked under the app), never on the loader's 6 KB or the
+// OTA task's stack, and the caller waits for it up to the unload deadline: a hook that hangs faults the app instead of the
+// loader. Once per load: the update's stop and the unload may both ask, the second finds it called.
+typedef struct {
+    sd_app_rec_t *rec;
+    lichen_sd_hooks_t h;
+    bool          ok;
+} stop_job_t;
+
+static stop_job_t g_stop_job; // one at a time, see g_stop_sem
+
+static uint32_t stack_bytes_of(sd_app_rec_t const *rec) {
+    return (rec->m.stack_kib ? rec->m.stack_kib : STACK_KIB_DEFAULT) * 1024u;
+}
+
+static void stop_task(void *arg) {
+    stop_job_t *job = arg;
+    lichen_sd_hooks_t h = job->h;
+    bool ok = h.stop();
+    job->ok = ok;
+    xSemaphoreGive(g_stop_sem);
+}
+
+static bool sd_app_stop_hook(sd_app_rec_t *rec, bool unloading) {
     lichen_sd_hooks_t h = {0};
     sd_app_lock();
-    bool call = rec->hooks_set && !rec->stop_called && rec->hooks.stop;
+    bool call = (unloading || sd_app_hooks_live(&rec->sda)) && rec->hooks_set && !rec->stop_called && rec->hooks.stop;
     if (call) {
         h                = rec->hooks;
         rec->stop_called = true;
-        rec->stop_inflight++;
     }
     sd_app_unlock();
     if (!call) {
-        return true; // nothing to stop but main() returning, or stopped already
+        return true; // not loaded, no hook, or already stopped: nothing to stop but main() returning
     }
-    uint32_t     t0   = lichen_sys_life_now_ms();
-    lichen_ctx_t prev = lichen_ctx_enter(rec->ctx);
-    bool         ok   = h.stop();
-    lichen_ctx_leave(prev);
-    sd_app_lock();
-    rec->stop_inflight--;
-    sd_app_unlock();
-    uint32_t took = lichen_sys_life_now_ms() - t0;
-    if (ok && took > app_life_deadline_ms(LIFE_STOP_UNLOAD)) {
-        ESP_LOGE(TAG, "%s: the stop hook took %u ms, past its deadline", rec->m.id, (unsigned)took);
-        ok = false; // late: reported, never interrupted; the image stays
+    xSemaphoreTake(g_stop_sem, 0);
+    g_stop_job = (stop_job_t){.rec = rec, .h = h, .ok = false};
+    uint32_t t0 = lichen_sys_life_now_ms();
+    if (!lichen_os_task_start_for(rec->ctx, "sdapp-stop", stop_task, &g_stop_job, stack_bytes_of(rec),
+                                  LICHEN_PRIO_BACKGROUND, LICHEN_STACK_INTERNAL, NULL)) {
+        ESP_LOGE(TAG, "%s: no stop task", rec->m.id);
+        return false;
     }
-    return ok;
+    bool done = xSemaphoreTake(g_stop_sem, pdMS_TO_TICKS(app_life_deadline_ms(LIFE_STOP_UNLOAD))) == pdTRUE;
+    if (!done || !g_stop_job.ok) {
+        ESP_LOGE(TAG, "%s: stop hook %s after %u ms", rec->m.id, done ? "failed" : "hung",
+                 (unsigned)(lichen_sys_life_now_ms() - t0));
+    }
+    return done && g_stop_job.ok;
 }
 
-// Nobody is inside the stop hook any more (an update's stop on the OTA task may still be)
-static bool stop_hook_left(sd_app_rec_t *rec) {
-    for (uint32_t waited = 0; waited <= TASKS_WAIT_MS; waited += 20) {
-        sd_app_lock();
-        int n = rec->stop_inflight;
-        sd_app_unlock();
-        if (!n) {
-            return true;
-        }
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    return false;
+// An update is coming: the app's stop hook, if it is loaded and not stopped yet. The OTA task; the image is not unloaded
+// (the badge restarts)
+bool sd_app_tramp_stop(void) {
+    sd_app_rec_t *rec = sd_app_find(lichen_ctx_self());
+    return !rec || sd_app_stop_hook(rec, false);
 }
 
 static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
     switch (step) {
     case SD_UNLOAD_STOP:
-        return run_stop_hook(rec);
+        return sd_app_stop_hook(rec, true);
     case SD_UNLOAD_TASKS:
-        return stop_hook_left(rec) && lichen_task_leftovers(rec->ctx, TASKS_WAIT_MS) == 0;
+        return lichen_task_leftovers(rec->ctx, TASKS_WAIT_MS) == 0; // the stop task is booked under the app too
     case SD_UNLOAD_UI:
         return ui_barrier(rec->ctx);
     default:
@@ -341,7 +350,9 @@ static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
 }
 
 static void free_image(sd_app_rec_t *rec) {
+    lichen_ctx_t prev = lichen_ctx_enter(rec->ctx);
     esp_elf_deinit(&rec->elf);
+    lichen_ctx_leave(prev);
     memset(&rec->elf, 0, sizeof(rec->elf));
     sd_app_lock();
     rec->image     = false;
@@ -357,7 +368,7 @@ static bool unload(sd_app_rec_t *rec, bool free_now) {
     while (step != SD_UNLOAD_FREE && step != SD_UNLOAD_FAULT) {
         bool ok = unload_step(rec, step);
         if (!ok) {
-            ESP_LOGE(TAG, "%s: unload failed at the %s: the image stays", rec->m.id, sd_unload_step_name(step));
+            ESP_LOGE(TAG, "%s: unload failed at step %d", rec->m.id, (int)step);
         }
         step = sd_unload_next(step, ok);
     }
@@ -407,12 +418,14 @@ static char const *read_image(sd_app_rec_t *rec) {
     }
     elf_source_t src = sd_elf_source(&f);
     esp_elf_init(&rec->elf);
+    lichen_ctx_t prev = lichen_ctx_enter(rec->ctx); // the image is booked under the app
     int ret = esp_elf_relocate_source(&rec->elf, &src); // closes the file
+    lichen_ctx_leave(prev);
     sd_end(ret == 0 ? SD_IO_OK : SD_IO_NEUTRAL);        // a bad image says nothing about the card
     if (ret != 0) {
         esp_elf_deinit(&rec->elf);
         ESP_LOGW(TAG, "%s: relocate failed (%d)", rec->m.id, ret);
-        return "The program could not be loaded (it needs something this OS does not have)";
+        return "The program could not be loaded";
     }
     rec->image = true;
     return NULL;
@@ -420,16 +433,14 @@ static char const *read_image(sd_app_rec_t *rec) {
 
 static void app_main_task(void *arg) {
     sd_app_rec_t *rec = arg;
-    int           ret = rec->elf.entry ? rec->elf.entry(0, NULL) : -1;
-    ESP_LOGI(TAG, "%s: main() returned %d", rec->m.id, ret);
+    // main() is called directly, like the spike: the ELF's init_array does not run, so an app has no C constructors
+    if (rec->elf.entry) {
+        rec->elf.entry(0, NULL);
+    }
     xSemaphoreGive(g_hooks_sem); // wakes a loader still waiting for hooks that never came
 }
 
 static bool start_main(sd_app_rec_t *rec) {
-    uint32_t kib = rec->m.stack_kib ? rec->m.stack_kib : STACK_KIB_DEFAULT;
-    if (kib > STACK_KIB_MAX) {
-        kib = STACK_KIB_MAX;
-    }
     xSemaphoreTake(g_hooks_sem, 0);
     lichen_sys_timer_revive(rec->ctx); // an earlier unload killed the app's timers
     sd_app_lock();
@@ -437,20 +448,23 @@ static bool start_main(sd_app_rec_t *rec) {
     sd_app_unlock();
     // An internal stack, not PSRAM: a PSRAM stack must never return and never touch flash, NVS or /storage (task_book.h),
     // and an app's main() returns and may use settings and files
-    return lichen_task_start(rec->ctx, "sdapp", app_main_task, rec, kib * 1024u, LICHEN_PRIO_BACKGROUND, NULL);
+    // The OS starts main() for the app (no BACKGROUND needed: it is the app's entry, not a task the app asked for); a task
+    // the app starts itself needs the cap in its manifest. Booked under the app, so the unload waits for it
+    return lichen_os_task_start_for(rec->ctx, "sdapp", app_main_task, rec, stack_bytes_of(rec), LICHEN_PRIO_BACKGROUND,
+                                    LICHEN_STACK_INTERNAL, NULL);
 }
 
 // After the load: the hooks are set, or why not. True when the app is ready for open
 static char const *run_main(sd_app_rec_t *rec) {
     if (!start_main(rec)) {
-        return "No task for the app (memory or the task book)";
+        return "No task for the app";
     }
     bool got = xSemaphoreTake(g_hooks_sem, pdMS_TO_TICKS(HOOKS_WAIT_MS)) == pdTRUE;
     sd_app_lock();
     bool set = rec->hooks_set;
     sd_app_unlock();
     if (!set) {
-        return got ? "The app set no hooks" : "The app did not start in time";
+        return got ? "The app set no hooks" : "The app did not start";
     }
     return NULL;
 }
@@ -479,7 +493,7 @@ static void do_load(sd_app_rec_t *rec) {
         if (!why) {
             heap_snap_t loaded = heap_now();
             why                = run_main(rec);
-            ESP_LOGI(TAG, "%s: loaded, image %d B PSRAM, %d B internal (read before open())", rec->m.id,
+            ESP_LOGI(TAG, "%s: loaded %d B PSRAM %d B int", rec->m.id,
                      (int)(before.psram - loaded.psram), (int)(before.internal - loaded.internal));
             if (why) {
                 abort_after_image(rec, why);
@@ -498,7 +512,7 @@ static void do_load(sd_app_rec_t *rec) {
     }
     if (next == SD_NEXT_OPEN) {
         if (!lichen_sys_ui_call(open_cb, rec, UI_WAIT_MS)) {
-            ESP_LOGW(TAG, "%s: the UI was busy: no open", rec->m.id);
+            fail_load(rec, "Screen busy: reopen the app");
         }
     } else if (next == SD_NEXT_UNLOAD) {
         post(MSG_CLOSED, rec); // closed while it loaded: the usual road
@@ -506,8 +520,8 @@ static void do_load(sd_app_rec_t *rec) {
 }
 
 static void do_closed(sd_app_rec_t *rec) {
-    vTaskDelay(pdMS_TO_TICKS(CLOSE_SETTLE_MS));
-    ui_barrier(LICHEN_CTX_NONE); // the screen's deletion, if the shell queued it, has run
+    // The last screen's delete event started this: the barrier call queues behind that deletion, so the widgets are gone
+    ui_barrier(LICHEN_CTX_NONE);
     sd_app_lock();
     bool begin = sd_app_unload_begin(&rec->sda);
     sd_app_unlock();
@@ -517,22 +531,8 @@ static void do_closed(sd_app_rec_t *rec) {
     heap_snap_t before = heap_now();
     if (unload(rec, true)) {
         heap_snap_t after = heap_now();
-        ESP_LOGI(TAG, "%s: unloaded, PSRAM %+d B, internal %+d B", rec->m.id, (int)(after.psram - before.psram),
+        ESP_LOGI(TAG, "%s: unloaded %+d B %+d B", rec->m.id, (int)(after.psram - before.psram),
                  (int)(after.internal - before.internal));
-    }
-}
-
-// The app's last screen left the stack (lichen_sys_life_on_close; the LVGL task, no waiting)
-static void sd_app_on_close(lichen_ctx_t ctx) {
-    sd_app_rec_t *rec = sd_app_find(ctx);
-    if (!rec) {
-        return;
-    }
-    sd_app_lock();
-    bool plan = sd_app_closed(&rec->sda);
-    sd_app_unlock();
-    if (plan) {
-        post(MSG_CLOSED, rec);
     }
 }
 
@@ -540,13 +540,13 @@ static void sd_app_on_close(lichen_ctx_t ctx) {
 
 static void freed_cb(void *arg) { // lichen_unregister_app's done, on the LVGL task: the screens are closed
     if (!post(MSG_FREE, arg)) {
-        ESP_LOGE(TAG, "%s: no room to free the app's record: left as it is", ((sd_app_rec_t *)arg)->m.id);
+        ESP_LOGE(TAG, "%s: free not queued", ((sd_app_rec_t *)arg)->m.id);
     }
 }
 
-static void unregister_one(sd_app_rec_t *rec, bool faulted) {
+static void unregister_one(sd_app_rec_t *rec) {
     if (!lichen_sys_life_removable(rec->ctx) && lichen_sys_life_stop_begin(rec->ctx, LIFE_STOP_UNLOAD) == LIFE_BEGIN_OK) {
-        lichen_sys_life_stop_end(rec->ctx, !faulted, (uint32_t)lichen_task_leftovers(rec->ctx, 0));
+        lichen_sys_life_stop_end(rec->ctx, true, (uint32_t)lichen_task_leftovers(rec->ctx, 0));
     }
     // Marked first: from here on no close callback finds the record, so no message about it is queued behind the free
     sd_app_lock();
@@ -560,10 +560,10 @@ static void unregister_one(sd_app_rec_t *rec, bool faulted) {
                                    : lichen_app_list_renotify(freed_cb, rec);
     }
     if (leaked) {
-        ESP_LOGW(TAG, "%s: left %u lichen_alloc blocks", rec->m.id, (unsigned)leaked);
+        ESP_LOGW(TAG, "%s: %u blocks leaked", rec->m.id, (unsigned)leaked);
     }
     if (r != LICHEN_UNREG_OK && r != LICHEN_UNREG_PENDING) {
-        ESP_LOGE(TAG, "%s: not unregistered (%d): the tile stays until the next card change", rec->m.id, (int)r);
+        ESP_LOGE(TAG, "%s: unregister %d", rec->m.id, (int)r);
         sd_app_lock();
         rec->gone = false; // found again by the next remove_all; its removing flag stays, so it opens nothing
         sd_app_unlock();
@@ -579,26 +579,32 @@ static void remove_one(sd_app_rec_t *rec) {
     if (begin) {
         bad = !unload(rec, false); // the image is freed after the screens are closed (do_free)
     }
-    unregister_one(rec, bad);
+    sd_app_lock();
+    bool may = sd_app_may_unregister(&rec->sda, 0);
+    sd_app_unlock();
+    size_t left = lichen_os_task_count(rec->ctx);
+    if (bad || !may || left) {
+        // Its image, a task or a timer may still run: it stays registered and FAULTED until the badge restarts, with its
+        // tile (opening it is refused) and its record; nothing of it is freed under what may still run
+        ESP_LOGE(TAG, "%s: not removed, %u tasks left", rec->m.id, (unsigned)left);
+        sd_app_lock();
+        if (rec->sda.state == SD_APP_UNLOADING) {
+            sd_app_unload_done(&rec->sda, false);
+        }
+        sd_app_unlock();
+        return;
+    }
+    unregister_one(rec);
 }
 
 static void do_free(sd_app_rec_t *rec) {
     ui_barrier(LICHEN_CTX_NONE); // whatever LVGL still had queued for the app's screens has run
-    sd_app_lock();
-    sd_app_state_t st = rec->sda.state;
-    sd_app_unlock();
-    if (st == SD_APP_FAULTED) {
-        ESP_LOGE(TAG, "%s: the image stays loaded and its record is not freed (the app did not stop)", rec->m.id);
-        return;
-    }
-    heap_snap_t before = heap_now();
+    // A faulted app is never unregistered (remove_one), so this one stopped cleanly
     if (rec->image) {
         free_image(rec);
     }
     unlink_rec(rec);
     heap_caps_free(rec);
-    heap_snap_t after = heap_now();
-    ESP_LOGI(TAG, "app freed, PSRAM %+d B", (int)(after.psram - before.psram));
 }
 
 // One pass: an app that could not leave (gone cleared again) is skipped here and tried by the next card change
@@ -664,17 +670,17 @@ void sd_apps_register_symbols(void) {
     }
 }
 
-// The card changed: marks every app's removal at once (an open stops being accepted) and tells the loader
+// The card changed, any way (a mount and a format too: the old apps are removed and the card is scanned again): marks every
+// app's removal at once (an open stops being accepted) and tells the loader
 static void card_changed(sd_state_t state) {
-    if (state != SD_STATE_MOUNTED) {
-        sd_app_lock();
-        for (sd_app_rec_t *r = g_recs; r; r = r->next) {
-            r->sda.removing = true;
-        }
-        sd_app_unlock();
+    (void)state;
+    sd_app_lock();
+    for (sd_app_rec_t *r = g_recs; r; r = r->next) {
+        r->sda.removing = true;
     }
+    sd_app_unlock();
     if (!post(MSG_CARD, NULL)) {
-        ESP_LOGE(TAG, "the loader's queue is full: the card change is not seen until the next one");
+        ESP_LOGE(TAG, "card event lost");
     }
 }
 
@@ -683,23 +689,23 @@ void sd_apps_boot(void) {
         return;
     }
     if (safe_mode_degraded_boot()) {
-        ESP_LOGW(TAG, "a crash is among the last boots: no SD apps this boot");
+        ESP_LOGW(TAG, "no SD apps: crash in the last boots");
         return;
     }
     sd_apps_register_symbols();
     g_mu        = xSemaphoreCreateMutex();
     g_hooks_sem = xSemaphoreCreateBinary();
     g_ui_sem    = xSemaphoreCreateBinary();
-    g_queue     = xQueueCreate(16, sizeof(msg_t));
-    if (!g_mu || !g_hooks_sem || !g_ui_sem || !g_queue) {
-        ESP_LOGE(TAG, "no memory for the loader");
+    g_stop_sem  = xSemaphoreCreateBinary();
+    g_queue     = xQueueCreate(QUEUE_LEN, sizeof(msg_t));
+    if (!g_mu || !g_hooks_sem || !g_ui_sem || !g_stop_sem || !g_queue) {
+        ESP_LOGE(TAG, "no memory");
         return;
     }
     if (!lichen_task_start(lichen_sys_ctx_os(), "sdapps", loader_task, NULL, LOADER_STACK, LICHEN_PRIO_SERVICE, NULL)) {
-        ESP_LOGE(TAG, "the loader task did not start");
+        ESP_LOGE(TAG, "loader task failed");
         return;
     }
-    lichen_sys_life_on_close(sd_app_on_close);
     sd_observe(card_changed);
     if (sd_mounted()) { // no event for a card that mounted before the observer
         post(MSG_CARD, NULL);

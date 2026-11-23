@@ -3,6 +3,7 @@
 // runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps; such a task
 // never returns (a return parks it, see park()).
 #include "lichen_task.h"
+#include "lichen_task_os.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
 #include "gate_book.h"
@@ -123,6 +124,13 @@ bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *a
     if (!lichen_sys_caps_ok(ctx, CAP_BACKGROUND, "lichen_task_start")) {
         return false;
     }
+    return lichen_os_task_start_for(ctx, name, fn, arg, stack_bytes, prio, mem, handle);
+}
+
+// Without the capability check: the OS starts a task that runs for an app and is booked under it, but is the OS's own
+// doing (the SD apps' main() and stop hook, #523): an app needs BACKGROUND only for the tasks it starts itself
+bool lichen_os_task_start_for(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
+                              uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle) {
     int priority = task_class_priority((task_class_t)prio);
     if (!fn || priority < 0) {
         ESP_LOGE(TAG, "task %s not started: no function or an unknown class %d", name ? name : "?", (int)prio);
