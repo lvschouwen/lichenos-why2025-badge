@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "fw_console.h"
+#include "lichen_api_version.h"
 #include "lichen_app.h"
 #include "lichen_reg.h"
 #include "lichen_sys_c6.h"
@@ -253,7 +254,7 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
-    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock", "Developer mode",
+    static char const *const KEYS[] = {"Version", "App API", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock", "Developer mode",
                                            "PSRAM clock", "Display refresh", "Wi-Fi country", "LoRa power (dBm)", "Bluetooth",
                                            "Write failures", "Last write error", "C6 registry caps"};
     lv_obj_t *row = lv_obj_create(parent);
@@ -318,6 +319,7 @@ static void open_about(lv_obj_t *screen) {
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
 
     add_row(screen, "Version", esp_app_get_description()->version);
+    add_row(screen, "App API", LICHEN_API_VERSION_TEXT); // what SD apps are checked against (#521)
     value_label[ROW_WIFI]    = add_row(screen, "Wi-Fi", NULL);
     value_label[ROW_LORA]    = add_row(screen, "LoRa", NULL);
     value_label[ROW_STORAGE] = add_row(screen, "Internal storage", NULL);
