@@ -354,9 +354,13 @@ The rule: **core 1 draws, core 0 talks to the world.**
 - Built into the firmware, each a component with a small C interface: a tile, screens, a settings page, a background
   part. What an app may use, what it must not, and the linker wraps that hold the line: [app-api.md](app-api.md)
   (#84).
-- **No downloadable apps for now.** Loadable native apps (ELF) were BadgeVMS's biggest source of trouble (per-app
-  heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (WebAssembly through WAMR, #78)
-  is the safe way to open up later and could be one app running scripts through the same interface (v2: WAMR, below).
+- **Native apps from the SD card** (#516, `sdapps/`, [app-api.md](app-api.md) "SD apps"): an ELF in
+  `/sd/lichen/apps/<id>/` with a manifest, loaded when its tile is opened and freed when it closes or the card goes.
+  The loader (`lichen_os/sd_app_loader.c`, `sd_apps.c`) resolves the app's symbols against the generated export table,
+  the only call boundary, which gives the app sandboxed file calls, memory booked under its context and LVGL calls
+  for the LVGL task. This is the trouble BadgeVMS had with loadable apps, taken on knowingly: the PSRAM is RWX until #530,
+  so there is no memory isolation, an SD app is trusted code, and the export checks resist bugs, not an attacker.
+  A sandboxed script runtime (WAMR, #78) stays the way to run untrusted code, later.
 - Anyone can write an app and build their own Lichen: `tools/badge.sh new-app <id> "<Name>"` scaffolds an app
   component that passes the checks, and [app-api.md](app-api.md) "An app in 10 minutes" walks through it (#385).
 - Notifications (#62) are an OS service in the app API: `lichen_notify(ctx, level, title, body, flags)` (the source is the ctx's app, #230) from any
@@ -744,7 +748,7 @@ Kept:
    16 KiB.
 5. **A new image is valid only after it has run properly** (45 s with UI and C6 up): rollback stays.
 
-Not kept: foreign ELF apps with their own heaps, MicroPython as the app layer, the launcher process model.
+Not kept: BadgeVMS-style foreign ELF processes with their own heaps (an SD app, #516, shares the OS heap and address space), MicroPython as the app layer, the launcher process model.
 
 OS v2 (#216) on the same lessons:
 - **No U-mode on the P4:** it runs everything in M-mode, PMP gives W^X only and ESP-TEE/U-mode is not available, so a

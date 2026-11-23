@@ -321,39 +321,94 @@ Size, clear and the switch's save run on a job task, never on the LVGL task. Tod
 every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, `fw mem`) and
 `lichen_task_leftovers` names what runs after a stop.
 
-**Not in v2:** loadable apps. A future "Scripts" app may host WAMR (WebAssembly) modules, each with its own
-capabilities (#78).
+**Apps from the card:** native ELF apps load from the SD card (below, #516). A sandboxed script runtime (WAMR,
+WebAssembly, #78) is a separate idea for later, with its own capabilities.
 
 ## SD apps (#516, #523)
 
-An app that is an ELF on the card (`/sd/lichen/apps/<id>/manifest` and its entry file, API 2.2) is not registered by code
-of its own: the OS's loader registers it from the manifest and builds its `lichen_app_t`, every hook of which is an OS
-trampoline. The app's `main()` makes one call, `lichen_sd_app_hooks(&hooks)` (`lichen_sd_app.h`: `open` on the LVGL
-task, `stop` on the loader's task), and returns or goes on as a task of the app (stack from `stack_kib`).
+An SD app is a native ELF in `/sd/lichen/apps/<id>/` next to a `manifest`. The OS's loader registers it from the
+manifest and builds its `lichen_app_t`, every hook of which is an OS trampoline. The app's `main()` makes one call,
+`lichen_sd_app_hooks(&hooks)` (`lichen_sd_app.h`: `open` on the LVGL task, `stop` on the loader's task), once, and returns
+or goes on as a task of the app. Build one in `sdapps/<id>/` (`sdapps/hello` is the smallest).
 
+### Trust: read this first
+
+The PSRAM is RWX today (#530 brings W^X back before release), so an SD app is **trusted code with no memory isolation**:
+it can read and write any RAM and jump anywhere. Everything below (the export table, the file sandbox, the caps, the
+quotas and the checks on arguments) stops mistakes and keeps an honest app from leaking, not a hostile one. Put an app on
+the card only if you would flash it.
+
+### The manifest
+
+`/sd/lichen/apps/<id>/manifest` is `key=value` lines (`lichen_api/lichen_manifest.h`; `#` starts a comment; a typo, a
+repeated key or an unknown key refuses the file):
+
+| Key | Rule |
+|---|---|
+| `id` | required, equals the folder name (the app id rules) |
+| `name` | required, 1 to 31 printable ASCII characters, shown as text only |
+| `api` | required, `MAJOR.MINOR` the app was built for |
+| `entry` | the ELF, default `app.elf`, a file in the same folder |
+| `icon` | optional file in the same folder |
+| `caps` | optional `CAP_` names (not SYSTEM), separated by spaces or commas |
+| `internal_ram_kib`, `psram_kib` | declared budgets, like a built-in app's (0 = none declared) |
+| `stack_kib` | stack of the app's `main()` task; at most 16, default 4 |
+
+- **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.2). An app of another major
+  or a newer minor is refused with a notification.
+- **Caps** are granted as the manifest declares them, shown in Settings, Apps, and checked by the OS calls that need them
+  (for example `CAP_RAW_KEYS` for the raw keys). The budgets are declared and reported like a built-in app's.
+- **A new app that uses a new export** raises the minor of the API (`tools/export_table.txt`).
+
+### The export table is the call boundary
+
+An app's undefined symbols are resolved by name against `lichen_exports` (`tools/export_allow.txt` plus the gate's
+functions, generated into `lichen_os/lichen_exports.c`); the loader's libc and ESP-IDF symbol tables are off, so nothing
+else resolves. `tools/check_layers.sh` fails the build when a built `sdapps/*/app.elf` needs a symbol that is not in the
+table, and `tools/check_sdapp_boundary.py` applies the L6 header and symbol rules of `tools/layers.conf` to the sources.
+So `malloc`, the file calls, `exit` and the `lv_*` calls an app uses are the OS's shims or the OS's own functions, with
+the rules below. Printf-style output, `system`, sockets and `getc`/`putc` are not exported on purpose. Adding a line is
+an API change.
+
+- **Memory.** `malloc calloc realloc free strdup` book into the OS's memory book under the app's context, in PSRAM.
+  Free what you allocate: the loader does not reclaim an unloaded app's blocks, it reports what is left (#536).
 - **Files and exit (API 2.2, #533).** `fopen fclose fread fwrite fseek ftell fflush remove rename mkdir` are the libc
   names, sandboxed to the app's own `/sd/lichen/apps/<id>` (relative or absolute under it; `..`, backslash, a drive or
   another folder is refused), the SD lock taken per call. At most 4 files are open per app; the loader closes them at
   unload and when the card goes, and a handle used after that returns an error. `getc`/`putc`/`feof`/`ferror` are not
-  supported. `exit()` ends the app through the normal unload and never returns; an app never calls `vTaskDelete(NULL)`.
+  supported. There is no write quota yet (#535). `exit()` ends the app through the normal unload and never returns; an
+  app never calls `vTaskDelete(NULL)`.
   The app's own ELF and manifest live in that folder too, and the file calls can overwrite them. A call on a card that was
   pulled or swapped fails; an `exit()` closes the app's own screens when it is on top and leaves the user where they are
   otherwise (its screens then stay up until the user leaves them). `exit()` must not be called from an LVGL callback or an
   open hook: that aborts the badge, counted against the app. `vTaskDelay` returns early, after a second, so an app sleeps
-  in slices. The exported `lv_*` calls are LVGL-task-only, like LVGL's own:
-  an app task wraps every one in `lichen_ui_call` (`lv_canvas_set_palette` also checks the canvas and the index).
+  in slices.
+- **LVGL.** The exported `lv_*` calls are LVGL-task-only, like LVGL's own: an app task wraps every one in
+  `lichen_ui_call` (`lv_canvas_set_palette` also checks the canvas and the index).
+- **Raw keys (#534).** An app with `CAP_RAW_KEYS` takes the keyboard with `lichen_keys_raw_take` and gets press and
+  release events (`lichen_keys.h`); the OS gives the keys back when the screen closes, or at unload or card removal
+  before the image is freed.
+
+### Lifecycle
+
 - **Tile without code.** The mount scan reads manifests only; the tile (an initial in a square) is on Home while the
   card is in. A refused app (bad manifest, API newer than the OS or of another major, an id that a built-in has, no
   entry file) gets one notification and one log line per scan.
 - **Load on open, unload on close.** Opening the tile shows "Loading..." and, after the open animation, the OS loads the
   ELF, runs `main()` on its own task and calls `open` into the screen. Under the on-air hold the open is refused with a
   message. When the app's last screen closes the OS calls `stop`, waits for the app's tasks (main() included) to return,
-  drops its timers, drains its queued UI calls and frees the ELF. An app that misses a step stays faulted with its
-  image loaded until the card is out: never end a task late.
+  drops its timers, drains its queued UI calls, closes its files, takes back the raw keys and frees the ELF. An app that
+  misses a step stays faulted with its image loaded until a reboot: never end a task late.
 - **Card out.** Unmounting or pulling the card does the same, then removes the tile; a remount rescans.
-- **Its widgets live on its own screens.** The OS watches the app's screens only; a widget on a layer above them (the top layer, the system layer) is not tracked and would still hold callbacks into the ELF after it is freed (#524).
-- **What the app must do.** Every task it starts ends after `stop`; it frees its `lichen_alloc` blocks (the OS reports
-  what is left, it cannot free them); it never keeps a pointer into the OS across a load.
+- **Constructors.** `init_array` does not run: no C++ static constructors.
+- **Tasks.** The OS starts the `main()` task; a task the app starts itself needs BACKGROUND in the manifest's caps. Every
+  task ends after `stop`.
+- **Its widgets live on its own screens.** The OS watches the app's screens only; a widget on a layer above them (the top layer, the system layer) is not tracked and would still hold callbacks into the ELF after it is freed.
+- **What the app must do.** It frees its `lichen_alloc` and `malloc` blocks; it never keeps a pointer into the OS across a
+  load.
+
+Follow-ups: W^X for the PSRAM (#530), a write quota for the file shims (#535), freeing an unloaded app's leftover blocks
+(#536).
 
 ## What an app must not do
 
