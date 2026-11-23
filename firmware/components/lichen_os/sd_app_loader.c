@@ -511,34 +511,92 @@ static void do_load(sd_app_rec_t *rec) {
     }
 }
 
-#define SHOWN_POLLS   100
-#define SHOWN_POLL_MS 100
+#define RETRY_MS  250 // a screen the app pushed itself is still on the stack: ask again, without holding the loader
+#define RETRY_MAX 80  // 20 s, then the app stays loaded (logged)
 
+// Whether the shell's stack still holds a screen of the app. An answer that is not there (the ctx left) is unknown and counts
+// as "yes": the removal path owns an app that left
 static bool app_shows_screen(sd_app_rec_t const *rec) {
     app_life_t life;
-    return lichen_sys_life_get(rec->ctx, &life) && (life.state == LIFE_OPEN || life.state == LIFE_SUSPENDED);
+    return !lichen_sys_life_get(rec->ctx, &life) || life.state == LIFE_OPEN || life.state == LIFE_SUSPENDED;
 }
 
-static void do_closed(sd_app_rec_t *rec) {
-    // The last screen's delete event started this: the barrier call queues behind that deletion, so the widgets are gone
+// Apps whose close is waiting for their own screens to go: by ctx, never by a kept record pointer (the record may be freed
+// meanwhile; sd_app_find answers NULL then)
+typedef struct {
+    lichen_ctx_t ctx;
+    uint8_t      tries;
+} retry_t;
+static retry_t g_retry[SD_APPS_MAX];
+
+static bool retry_pending(void) {
+    for (size_t i = 0; i < SD_APPS_MAX; i++) {
+        if (g_retry[i].ctx) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void retry_add(lichen_ctx_t ctx) {
+    size_t slot = SD_APPS_MAX;
+    for (size_t i = 0; i < SD_APPS_MAX; i++) {
+        if (g_retry[i].ctx == ctx) {
+            return;
+        }
+        if (!g_retry[i].ctx && slot == SD_APPS_MAX) {
+            slot = i;
+        }
+    }
+    if (slot == SD_APPS_MAX) {
+        ESP_LOGE(TAG, "close queue full");
+        return;
+    }
+    g_retry[slot] = (retry_t){ctx, 0};
+}
+
+// True when the close is settled (unloaded, or opened again, or nothing left to do); false: a screen of the app is still shown
+static bool closed_try(sd_app_rec_t *rec) {
+    // The last counted screen's delete event started this: the barrier call queues behind that deletion, so the widgets are
+    // gone. Screens the app pushed itself are not counted: the shell's lifecycle says whether any is on the stack. An SD
+    // app's widgets live on its own screens (docs, #524): nothing on a layer above them is watched.
     ui_barrier(LICHEN_CTX_NONE);
-    // Screens the app pushed itself (its own pages) are not counted by the open trampoline: the shell's lifecycle says
-    // whether any of the app's screens is on the stack. An SD app's widgets live on its own screens (docs #524): nothing
-    // on a layer above them is watched.
-    for (int i = 0; i < SHOWN_POLLS && app_shows_screen(rec); i++) {
-        vTaskDelay(pdMS_TO_TICKS(SHOWN_POLL_MS));
+    if (app_shows_screen(rec)) {
+        return false;
     }
     sd_app_lock();
-    bool begin = !app_shows_screen(rec) && sd_app_unload_begin(&rec->sda);
+    bool begin = sd_app_unload_begin(&rec->sda);
     sd_app_unlock();
     if (!begin) {
-        return; // opened again, or still showing a screen of its own after the wait: it stays loaded
+        return true; // opened again
     }
     heap_snap_t before = heap_now();
     if (unload(rec, true)) {
         heap_snap_t after = heap_now();
         ESP_LOGI(TAG, "%s: unloaded %+d B %+d B", rec->m.id, (int)(after.psram - before.psram),
                  (int)(after.internal - before.internal));
+    }
+    return true;
+}
+
+static void do_closed(sd_app_rec_t *rec) {
+    if (!closed_try(rec)) {
+        retry_add(rec->ctx);
+    }
+}
+
+static void retry_run(void) {
+    for (size_t i = 0; i < SD_APPS_MAX; i++) {
+        if (!g_retry[i].ctx) {
+            continue;
+        }
+        sd_app_rec_t *rec = sd_app_find(g_retry[i].ctx);
+        if (!rec || closed_try(rec)) {
+            g_retry[i].ctx = LICHEN_CTX_NONE; // settled, or the app left
+        } else if (++g_retry[i].tries >= RETRY_MAX) {
+            ESP_LOGW(TAG, "%s: still shows a screen, stays loaded", rec->m.id);
+            g_retry[i].ctx = LICHEN_CTX_NONE;
+        }
     }
 }
 
@@ -603,7 +661,21 @@ static void remove_one(sd_app_rec_t *rec) {
     unregister_one(rec);
 }
 
+static bool rec_listed(sd_app_rec_t const *rec) {
+    sd_app_lock();
+    sd_app_rec_t const *r = g_recs;
+    while (r && r != rec) {
+        r = r->next;
+    }
+    bool gone = r && r->gone; // a new record at a freed one's address is not gone: never freed by a stale message
+    sd_app_unlock();
+    return gone;
+}
+
 static void do_free(sd_app_rec_t *rec) {
+    if (!rec_listed(rec)) {
+        return; // freed by an earlier message: one unregister frees once, whoever posted
+    }
     // unregister's done only says the shell was told to close the screens: one that is still animating out has its delete
     // event (and ELF callbacks) to come, so the last of them posts the free again
     sd_app_lock();
@@ -657,7 +729,8 @@ static void loader_task(void *arg) {
     (void)arg;
     for (;;) {
         msg_t m;
-        if (xQueueReceive(g_queue, &m, portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(g_queue, &m, retry_pending() ? pdMS_TO_TICKS(RETRY_MS) : portMAX_DELAY) != pdTRUE) {
+            retry_run();
             continue;
         }
         switch (m.kind) {
