@@ -6,3 +6,8 @@
 void   doom_free_all(void);
 // The bytes the engine holds right now.
 size_t doom_held_bytes(void);
+// The engine task is about to leave through exit() (the menu's Quit, I_Error on a bad WAD): called by the glue first, so
+// stop does not wait for a task flag that exit() would never set.
+void   doom_engine_ending(void);
+// Runs the engine's exit functions (saves its config, stops its subsystems) once the engine is no longer ticking.
+void   doom_engine_shutdown(void);

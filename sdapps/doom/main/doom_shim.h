@@ -8,6 +8,7 @@
 //     name them, check_sdapp_boundary), so stop can free everything the engine still holds (the loader does not sweep an
 //     app's blocks yet, #536)
 //   - errno: a plain variable (newlib's per-task errno is the OS's)
+//   - exit: lichen_doom_exit first tells the app its engine task is ending (stop waits for that), then exits
 //   - system: nothing to run; isalpha and friends: the exported functions, not the C library's table
 #include <ctype.h>
 #include <errno.h>
@@ -28,6 +29,7 @@ int   lichen_doom_fputs(char const *s, FILE *f);
 int   lichen_doom_fputc(int c, FILE *f);
 int   lichen_doom_fflush(FILE *f);
 extern int lichen_doom_errno;
+void lichen_doom_exit(int code) __attribute__((noreturn));
 
 #ifdef __cplusplus
 }
@@ -59,6 +61,9 @@ extern int lichen_doom_errno;
 
 #undef errno
 #define errno lichen_doom_errno
+
+#undef exit
+#define exit(code)  lichen_doom_exit(code)
 
 #define system(cmd) ((void)(cmd), 0)
 

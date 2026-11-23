@@ -4,6 +4,7 @@ name=DOOM
 api=2.2
 entry=app.elf
 caps=BACKGROUND
+# internal RAM: 16 KiB engine task stack + 4 KiB main task (stack_kib) + 4 KiB for the loader-run stop (the file calls)
 internal_ram_kib=24
 psram_kib=7168
 stack_kib=4

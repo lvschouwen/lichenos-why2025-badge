@@ -20,6 +20,7 @@
 #undef stderr
 #undef stdin
 #undef errno
+#undef exit
 
 #include <stdint.h>
 #include <stdio.h>
@@ -65,6 +66,9 @@ static void unlink_blk(blk_t *b) {
 }
 
 void *lichen_doom_malloc(size_t n) {
+    if (n > SIZE_MAX - sizeof(blk_t)) {
+        return NULL; // a lump size read from the card must not wrap into a small block
+    }
     blk_t *b = lichen_alloc(lichen_ctx_self(), sizeof(blk_t) + n, LICHEN_MEM_BULK);
     if (!b) {
         return NULL;
@@ -75,7 +79,7 @@ void *lichen_doom_malloc(size_t n) {
 }
 
 void *lichen_doom_calloc(size_t n, size_t size) {
-    if (size && n > SIZE_MAX / size) {
+    if (size && n > (SIZE_MAX - sizeof(blk_t)) / size) {
         return NULL;
     }
     void *p = lichen_doom_malloc(n * size);
@@ -211,5 +215,14 @@ void lichen_doom_quit_engine(void);
 
 void I_Quit(void) {
     lichen_doom_quit_engine();
-    exit(0); // on the engine task: exit() from an LVGL callback would abort the badge
+    lichen_doom_exit(0); // on the engine task: exit() from an LVGL callback would abort the badge
+}
+
+void lichen_doom_exit(int code) {
+    doom_engine_ending();
+    exit(code);
+}
+
+void doom_engine_shutdown(void) {
+    lichen_doom_quit_engine();
 }
