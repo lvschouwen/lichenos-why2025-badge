@@ -26,9 +26,9 @@ int main(void) {
     CHECK(lichen_os_version_line("x", tiny, 0) == tiny);
 
     char st[40];
-    CHECK(strcmp(lichen_os_status_line("3 min", st, sizeof(st)), "Uptime 3 min, API 1.0") == 0);
-    CHECK(strcmp(lichen_os_status_line(NULL, st, sizeof(st)), "Uptime ?, API 1.0") == 0);
-    CHECK(strcmp(lichen_os_status_line("3 min", tiny, sizeof(tiny)), "Uptime ") == 0);
+    CHECK(strcmp(lichen_os_status_line("3 min", st, sizeof(st)), "API 1.0, uptime 3 min") == 0);
+    CHECK(strcmp(lichen_os_status_line(NULL, st, sizeof(st)), "API 1.0, uptime ?") == 0);
+    CHECK(strcmp(lichen_os_status_line("3 min", tiny, sizeof(tiny)), "API 1.0") == 0);
     CHECK(lichen_os_status_line("x", tiny, 0) == tiny);
 
     if (failures) {

@@ -12,7 +12,9 @@
 //   psram_kib=64
 //   stack_kib=4
 //
-// Lines end in LF or CRLF (the last needs none); blank lines and lines starting with # are skipped. A key may appear
+// Lines end in LF or CRLF (the last needs none). Rule: a line starting with # is a comment and a blank line is
+// ignored; a # anywhere else is part of the value. Every value is plain data: name is shown as text and is never used
+// as a format string. A key may appear
 // once; an unknown key, a line over LICHEN_MANIFEST_LINE_MAX or a malformed value refuses the whole file, so a typo is
 // caught rather than ignored. Capabilities and budgets are shown and checked like a built-in app's, not enforced
 // through the exports.
