@@ -52,4 +52,5 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-23)
-- Wave 1 running: impl-529 in wt-4 (wt-1 holds a stale #497 copy, left alone), impl-534 in wt-3, impl-533 in wt-2 (step 8 deferred until #534 merges). Logs: session scratchpad `check-wt-N-<issue>.log`.
+- Wave 1 (#529, #534, #533) merged at 13e90fce; its bench waits for #537 (exit-park fix + sdapps/benchtest, impl-533 in wt-2). Bench plan: from the bench-prep agent (21 steps); NEEDS-LUCAS: interrupted push, card pull, panel dim, #523 steps 3/7.
+- Wave 2 building, merges held until the wave-1 bench: #525 impl-525 in wt-1, #524 impl-524 in wt-3. #536 (loader frees app leftovers) runs after #537 (same file).
