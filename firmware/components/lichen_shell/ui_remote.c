@@ -176,8 +176,8 @@ static char const *open_refused(void) {
     if (setup_running()) {
         return "the first-run setup is on screen";
     }
-    if (raw_keys_test_open()) {
-        return "the Keyboard test is open"; // it owns the keys, like the shape-key shortcuts see it
+    if (raw_keys_held()) {
+        return raw_keys_test_open() ? "the Keyboard test is open" : "an app holds the raw keys"; // either owns the keys, like the shape-key shortcuts see it
     }
     return NULL;
 }

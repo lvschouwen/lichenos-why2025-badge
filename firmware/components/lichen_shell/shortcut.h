@@ -19,7 +19,7 @@ typedef enum {
 // What is going on when the key comes. Any of these set: the key does nothing.
 typedef struct {
     bool dialog_open;   // a confirm or countdown dialog has the keys
-    bool test_open;     // the Keyboard Test owns every key (it shows the shape keys)
+    bool test_open;     // an app holds the raw keys (the Keyboard Test, which shows the shape keys, or a game)
     bool booting;       // home is not up yet (or still fading in)
     bool update_busy;   // a firmware update or the power-down screen is on
     bool setup_running; // first-run setup

@@ -10,6 +10,7 @@ typedef struct {
     uint8_t code; // 1-0x50, without the press bit
     bool    pressed;
     bool    test_open; // stamped at capture: the Keyboard Test was the foreground screen (gates "fw keys log")
+    bool    held;      // stamped at capture: an app (the Keyboard Test or a game) holds the raw keys (#534): shortcuts stay quiet
     bool    shift;     // a Shift key is down (for a Shift key's own event: after the event)
     bool    injected;  // not from the TCA8418: "fw keys send/press", "phys" ones too (#391); a release carries its
                        // press's origin. Hand-only paths refuse it

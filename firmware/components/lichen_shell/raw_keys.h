@@ -1,6 +1,7 @@
 #pragma once
 
 #include "key_raw.h"
+#include "lichen_app.h"
 
 #include <stdbool.h>
 
@@ -15,6 +16,12 @@ typedef void (*raw_keys_cb)(key_raw_event_t const *ev, void *arg);
 // each event at capture time
 void raw_keys_set_test_open(bool open);
 bool raw_keys_test_open(void); // what the keyboard task stamps now
+// Any app holds the raw keys (the Keyboard test or a game, #534): it owns every key, so the shape-key shortcuts and the
+// remote "ui open" stay off. Only the Keyboard test also sets raw_keys_test_open.
+bool raw_keys_held(void);
+// Frees the raw keys when ctx holds them, nothing otherwise (#534, for #533's unload and card removal). OS-internal, not
+// exported. Any task: it takes the LVGL lock itself (recursive, so the LVGL task may call it too)
+void raw_keys_release_ctx(lichen_ctx_t ctx);
 
 // The listener table has no lock of its own: callers of raw_keys_listen / raw_keys_unlisten hold the LVGL lock
 // (lichen_sys_ui_lock, e.g. from a console command) or run on the LVGL task (event handlers, timers), which is what keeps

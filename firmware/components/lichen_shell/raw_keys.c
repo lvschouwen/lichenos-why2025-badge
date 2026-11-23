@@ -6,7 +6,12 @@
 #include "key_cause.h"
 #include "lichen_keys.h"
 #include "lichen_sys_keys.h"
+#include "lichen_app.h"
+#include "lichen_sys_app.h"
+#include "lichen_sys_ui.h"
 #include "lvgl.h"
+#include "raw_owner.h"
+#include "shell_parts.h"
 #include "shell_ui_ops.h"
 
 #include <stdatomic.h>
@@ -27,7 +32,8 @@ static lv_timer_t   *timer;
 static bool          hooked;
 static atomic_int    active;  // listeners registered: the hook queues nothing while 0
 static atomic_int    swallowing;
-static atomic_bool   test_open;
+static atomic_bool   test_open; // the Keyboard test holds the keys
+static atomic_bool   held;      // any app holds them: the shape-key shortcuts stay quiet
 
 void raw_keys_set_test_open(bool open) {
     atomic_store(&test_open, open);
@@ -37,12 +43,17 @@ bool raw_keys_test_open(void) {
     return atomic_load(&test_open);
 }
 
+bool raw_keys_held(void) {
+    return atomic_load(&held);
+}
+
 // Keyboard task
 static bool hook(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     if (atomic_load(&active) > 0) {
         key_raw_event_t stamped = *ev;
         stamped.test_open       = atomic_load(&test_open);
+        stamped.held            = atomic_load(&held);
         xQueueSend(queue, &stamped, 0); // a full queue drops events rather than blocking the keyboard
     }
     return atomic_load(&swallowing) > 0;
@@ -115,26 +126,43 @@ void raw_keys_unlisten(raw_keys_cb cb, void *arg) {
 }
 
 // lichen_keys.h (#180): the app's side of the raw keys, in the API's own event type (key_raw.h is board's). One app at a
-// time: it is the Keyboard test, so taking the keys also stamps the events as captured inside it.
+// time. Only the Keyboard test marks the screen as such (#534): taking the keys stamps its events as captured inside it.
+// A game just owns the keys (held), which keeps the shortcuts and remote keys off it.
 static lichen_raw_key_fn app_fn;
 static void             *app_arg;
+static raw_owner_t       owner; // under the LVGL lock, like the listener table
 
 static void to_app(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     if (app_fn) {
+        // A held key sends no repeats and a release is no wake press: the owner's keys are activity (the saver, dim)
+        screen_idle_key();
         lichen_raw_key_t key = {.code = ev->code, .pressed = ev->pressed, .shift = ev->shift};
         app_fn(&key, app_arg);
     }
 }
 
+static bool caller_is_keytest(lichen_ctx_t ctx) {
+    lichen_ctx_t keytest = LICHEN_CTX_NONE;
+    return lichen_app_by_name("keytest", &keytest) && keytest == ctx;
+}
+
 bool lichen_keys_raw_take_impl(lichen_raw_key_fn fn, void *arg) {
+    lichen_ctx_t ctx = lichen_ctx_self();
     if (!fn || app_fn) {
         ESP_LOGW(TAG, "raw keys %s", fn ? "already taken by an app" : "taken without a listener");
         return false;
     }
-    raw_keys_set_test_open(true); // before the first event can be queued
+    if (!raw_owner_take(&owner, ctx, caller_is_keytest(ctx))) {
+        ESP_LOGW(TAG, "raw keys: no app context");
+        return false;
+    }
+    atomic_store(&test_open, raw_owner_test_mark(&owner)); // before the first event can be queued
+    atomic_store(&held, true);
     if (!raw_keys_listen(to_app, NULL, true)) {
-        raw_keys_set_test_open(false);
+        raw_owner_release_ctx(&owner, ctx);
+        atomic_store(&test_open, false);
+        atomic_store(&held, false);
         return false;
     }
     app_fn  = fn;
@@ -142,11 +170,29 @@ bool lichen_keys_raw_take_impl(lichen_raw_key_fn fn, void *arg) {
     return true;
 }
 
+static void free_keys(lichen_ctx_t ctx) {
+    if (!raw_owner_release_ctx(&owner, ctx)) {
+        return;
+    }
+    raw_keys_unlisten(to_app, NULL);
+    app_fn  = NULL;
+    app_arg = NULL;
+    atomic_store(&test_open, false);
+    atomic_store(&held, false);
+}
+
 void lichen_keys_raw_release_impl(lichen_raw_key_fn fn, void *arg) {
     if (!app_fn || app_fn != fn || app_arg != arg) {
         return;
     }
-    raw_keys_unlisten(to_app, NULL);
-    app_fn = NULL;
-    raw_keys_set_test_open(false);
+    free_keys(owner.ctx); // fn and arg are the proof of ownership
+}
+
+// Any task (the SD app loader, #533): the table and the drain timer are LVGL's, so take the (recursive) lock
+void raw_keys_release_ctx(lichen_ctx_t ctx) {
+    if (ctx == LICHEN_CTX_NONE || !lichen_sys_ui_lock(0)) {
+        return;
+    }
+    free_keys(ctx);
+    lichen_sys_ui_unlock();
 }

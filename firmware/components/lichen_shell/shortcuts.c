@@ -129,7 +129,7 @@ void shortcuts_key(uint8_t code, bool pressed, bool test_open) {
 
 static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     (void)arg;
-    shortcuts_key(ev->code, ev->pressed, ev->test_open);
+    shortcuts_key(ev->code, ev->pressed, ev->held);
 }
 
 // key_cause's getter (#400): a tile's or a row's Enter is a hand's only while LVGL is handling that key; a timer or
