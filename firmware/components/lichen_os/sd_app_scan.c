@@ -107,7 +107,12 @@ static sd_app_rec_t *make_rec(lichen_manifest_t const *m) {
     if (!rec) {
         return NULL;
     }
-    rec->m = *m;
+    rec->m        = *m;
+    rec->stop_sem = xSemaphoreCreateBinary();
+    if (!rec->stop_sem) {
+        heap_caps_free(rec);
+        return NULL;
+    }
     // Every hook of the app struct is an OS trampoline: none points into the ELF (the ELF is not even loaded yet)
     rec->app = (lichen_app_t){.name             = rec->m.name,
                               .id               = rec->m.id,
@@ -132,6 +137,7 @@ static void register_one(lichen_manifest_t const *m) {
     if (rec->ctx == LICHEN_CTX_NONE) { // the table is full, or the id is one the OS keeps (lichen_register_app logs which)
         char why[SD_APP_MSG_LEN];
         sd_app_scan_reason(SD_APP_SCAN_SHADOW, LICHEN_MANIFEST_OK, m, m->id, why, sizeof(why));
+        vSemaphoreDelete(rec->stop_sem);
         heap_caps_free(rec);
         refuse(why);
         return;

@@ -158,6 +158,36 @@ static void test_removal(void) {
     CHECK(!sd_app_screen_deleted(&f));
 }
 
+static void test_removal_waits_for_screens(void) {
+    // the card went with the app open: unregister's done does not free anything while a screen still waits to be deleted
+    sd_app_t a = {0};
+    sd_app_open(&a, NULL);
+    sd_app_load_done(&a, true);
+    CHECK(sd_app_remove(&a) && sd_app_unload_begin(&a)); // the screen is still there
+    sd_app_unload_done(&a, true);
+    CHECK(!sd_app_may_free(&a));
+    CHECK(!sd_app_screen_deleted(&a)); // the deleted event: UNLOADING plans nothing, but the count is 0 now
+    CHECK(sd_app_may_free(&a));
+    sd_app_t t = {0};
+    CHECK(sd_app_may_free(&t)); // a tile that was never opened
+}
+
+static void test_load_abort(void) {
+    // an image was loaded, then main() gave no hooks: the Loading screen (screens == 1) is still there
+    sd_app_t a = {0};
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_LOAD && a.screens == 1);
+    CHECK(sd_app_load_abort(&a) && a.state == SD_APP_UNLOADING);
+    sd_app_unload_done(&a, true);
+    CHECK(a.state == SD_APP_TILE); // the unload's end lands, the image can go
+    CHECK(!sd_app_screen_deleted(&a) && a.screens == 0 && a.state == SD_APP_TILE); // the screen's delete finds a tile
+    CHECK(!sd_app_load_abort(&a)); // only a load aborts
+    sd_app_t f = {0};
+    sd_app_open(&f, NULL);
+    sd_app_load_abort(&f);
+    sd_app_unload_done(&f, false);
+    CHECK(f.state == SD_APP_FAULTED && sd_app_open(&f, NULL) == SD_OPEN_FAULTED);
+}
+
 static void test_may_unregister(void) {
     // never for an app whose unload faulted (its image, tasks or timers may live), nor with a task of it left (#523 review H2)
     sd_app_t a = {0};
@@ -197,6 +227,8 @@ int main(void) {
     test_failed_load();
     test_close_flow();
     test_no_free_before_deleted();
+    test_removal_waits_for_screens();
+    test_load_abort();
     test_may_unregister();
     test_close_during_load();
     test_removal();

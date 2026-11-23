@@ -8,6 +8,8 @@
 #include "sd_app_rules.h"
 
 #include "esp_elf.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,6 +32,9 @@ typedef struct sd_app_rec {
     esp_elf_t          elf;      // valid while image
     bool               image;    // an ELF image is held
     bool               hooks_set;
+    SemaphoreHandle_t  stop_sem;    // the stop task gave it: its own, so a late stop of one app never wakes another's wait
+    bool               stop_ok;     // what the stop hook answered (the stop task writes it before it gives stop_sem)
+    bool               free_pending; // unregister is done but a screen still exists: the last delete event posts the free
     bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's); the stop task is booked under the app, so the unload waits for it
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live

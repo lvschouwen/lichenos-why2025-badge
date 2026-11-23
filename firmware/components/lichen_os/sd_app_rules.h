@@ -73,6 +73,10 @@ typedef enum {
 } sd_next_t;
 // The loader finished: ok says the ELF is relocated, main() ran and the hooks are set.
 sd_next_t sd_app_load_done(sd_app_t *a, bool ok);
+// The load got as far as an image and then failed (no hooks, no task): LOADING goes straight to UNLOADING, so the unload's end
+// (sd_app_unload_done) lands. The app's own "Loading" screen may still exist: it is the OS's, holds nothing of the ELF, and
+// its delete event finds the tile. False when the app is not LOADING.
+bool sd_app_load_abort(sd_app_t *a);
 // One of the app's screens was deleted (LVGL's delete event, on the LVGL task). True when it was the last one and the app
 // is LOADED, so the loader should plan the unload; a load under way remembers it and load_done answers UNLOAD. This is
 // the only thing that lets an unload free the image: a screen that is still there may hold callbacks into it.
@@ -80,6 +84,9 @@ bool sd_app_screen_deleted(sd_app_t *a);
 // LOADED and closing (no screen left) or removing becomes UNLOADING and returns true. False: it was opened again, or a
 // screen still exists. A removal starts at once: it frees the image only after the shell closed the screens (do_free).
 bool sd_app_unload_begin(sd_app_t *a);
+// May the image and the record be freed (after lichen_unregister_app's done)? Only when LVGL deleted every screen of the app: a
+// screen that is deleted later (an animation still running) delivers its delete event to the record and its ELF callbacks.
+bool sd_app_may_free(sd_app_t const *a);
 // May lichen_unregister_app be called for the app now? Only after a clean unload (or for a tile that never loaded), with
 // no task of the app left: never for an app whose unload faulted, which keeps its image, tasks or timers, and tile.
 bool sd_app_may_unregister(sd_app_t const *a, size_t tasks_left);

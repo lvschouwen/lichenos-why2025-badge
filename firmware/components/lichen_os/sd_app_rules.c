@@ -110,6 +110,15 @@ sd_next_t sd_app_load_done(sd_app_t *a, bool ok) {
     return (a->closing || a->removing) ? SD_NEXT_UNLOAD : SD_NEXT_OPEN;
 }
 
+bool sd_app_load_abort(sd_app_t *a) {
+    if (a->state != SD_APP_LOADING) {
+        return false;
+    }
+    a->state   = SD_APP_UNLOADING;
+    a->closing = false;
+    return true;
+}
+
 bool sd_app_screen_deleted(sd_app_t *a) {
     if (a->screens > 0) {
         a->screens--;
@@ -128,6 +137,10 @@ bool sd_app_unload_begin(sd_app_t *a) {
     a->state   = SD_APP_UNLOADING;
     a->closing = false;
     return true;
+}
+
+bool sd_app_may_free(sd_app_t const *a) {
+    return a->screens == 0;
 }
 
 bool sd_app_may_unregister(sd_app_t const *a, size_t tasks_left) {

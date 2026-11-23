@@ -340,6 +340,7 @@ task, `stop` on the loader's task), and returns or goes on as a task of the app 
   drops its timers, drains its queued UI calls and frees the ELF. An app that misses a step stays faulted with its
   image loaded until the card is out: never end a task late.
 - **Card out.** Unmounting or pulling the card does the same, then removes the tile; a remount rescans.
+- **Its widgets live on its own screens.** The OS watches the app's screens only; a widget on a layer above them (the top layer, the system layer) is not tracked and would still hold callbacks into the ELF after it is freed (#524).
 - **What the app must do.** Every task it starts ends after `stop`; it frees its `lichen_alloc` blocks (the OS reports
   what is left, it cannot free them); it never keeps a pointer into the OS across a load.
 

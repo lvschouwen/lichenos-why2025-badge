@@ -60,7 +60,6 @@ typedef struct {
 static SemaphoreHandle_t g_mu;
 static SemaphoreHandle_t g_hooks_sem; // main() gave its hooks, or returned
 static SemaphoreHandle_t g_ui_sem;    // the barrier call ran
-static SemaphoreHandle_t g_stop_sem;  // the stop hook returned (one at a time: stop_called lets one caller per load in)
 static QueueHandle_t     g_queue;
 #define QUEUE_LEN (2 * SD_APPS_MAX + 4 + 4) // per app a load, a close and a free, plus the card events
 static sd_app_rec_t     *g_recs; // the loader task adds and removes; others read under g_mu
@@ -140,7 +139,11 @@ static void screen_deleted(lv_event_t *e) {
         rec->screen = NULL;
     }
     bool plan = sd_app_screen_deleted(&rec->sda);
+    bool free_now = rec->free_pending && sd_app_may_free(&rec->sda);
     sd_app_unlock();
+    if (free_now && !post(MSG_FREE, rec)) {
+        ESP_LOGE(TAG, "%s: free not queued", rec->m.id);
+    }
     if (plan && !post(MSG_CLOSED, rec)) {
         ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
     }
@@ -163,7 +166,7 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     sd_open_t v = sd_app_open(&rec->sda, hold);
     if (v == SD_OPEN_LOAD || v == SD_OPEN_WAIT) {
         rec->screen = screen;
-    } else if (v == SD_OPEN_NOW) {
+    } else if (v == SD_OPEN_NOW && rec->hooks_set) {
         h = rec->hooks;
     }
     sd_app_unlock();
@@ -172,7 +175,9 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     }
     switch (v) {
     case SD_OPEN_NOW:
-        h.open(screen); // the shell entered the app's context
+        if (h.open) {
+            h.open(screen); // the shell entered the app's context
+        }
         return;
     case SD_OPEN_LOAD:
     case SD_OPEN_WAIT:
@@ -281,52 +286,40 @@ static bool ui_barrier(lichen_ctx_t ctx) {
 // The stop hook runs on a task of its own (the app's stack_kib, booked under the app), never on the loader's 6 KB or the
 // OTA task's stack, and the caller waits for it up to the unload deadline: a hook that hangs faults the app instead of the
 // loader. Once per load: the update's stop and the unload may both ask, the second finds it called.
-typedef struct {
-    sd_app_rec_t *rec;
-    lichen_sd_hooks_t h;
-    bool          ok;
-} stop_job_t;
-
-static stop_job_t g_stop_job; // one at a time, see g_stop_sem
-
 static uint32_t stack_bytes_of(sd_app_rec_t const *rec) {
     return (rec->m.stack_kib ? rec->m.stack_kib : STACK_KIB_DEFAULT) * 1024u;
 }
 
 static void stop_task(void *arg) {
-    stop_job_t *job = arg;
-    lichen_sd_hooks_t h = job->h;
-    bool ok = h.stop();
-    job->ok = ok;
-    xSemaphoreGive(g_stop_sem);
+    sd_app_rec_t *rec = arg;
+    rec->stop_ok      = rec->hooks.stop();
+    xSemaphoreGive(rec->stop_sem);
 }
 
 static bool sd_app_stop_hook(sd_app_rec_t *rec, bool unloading) {
-    lichen_sd_hooks_t h = {0};
     sd_app_lock();
     bool call = (unloading || sd_app_hooks_live(&rec->sda)) && rec->hooks_set && !rec->stop_called && rec->hooks.stop;
     if (call) {
-        h                = rec->hooks;
         rec->stop_called = true;
+        rec->stop_ok     = false;
     }
     sd_app_unlock();
     if (!call) {
         return true; // not loaded, no hook, or already stopped: nothing to stop but main() returning
     }
-    xSemaphoreTake(g_stop_sem, 0);
-    g_stop_job = (stop_job_t){.rec = rec, .h = h, .ok = false};
+    xSemaphoreTake(rec->stop_sem, 0);
     uint32_t t0 = lichen_sys_life_now_ms();
-    if (!lichen_os_task_start_for(rec->ctx, "sdapp-stop", stop_task, &g_stop_job, stack_bytes_of(rec),
+    if (!lichen_os_task_start_for(rec->ctx, "sdapp-stop", stop_task, rec, stack_bytes_of(rec),
                                   LICHEN_PRIO_BACKGROUND, LICHEN_STACK_INTERNAL, NULL)) {
         ESP_LOGE(TAG, "%s: no stop task", rec->m.id);
         return false;
     }
-    bool done = xSemaphoreTake(g_stop_sem, pdMS_TO_TICKS(app_life_deadline_ms(LIFE_STOP_UNLOAD))) == pdTRUE;
-    if (!done || !g_stop_job.ok) {
+    bool done = xSemaphoreTake(rec->stop_sem, pdMS_TO_TICKS(app_life_deadline_ms(LIFE_STOP_UNLOAD))) == pdTRUE;
+    if (!done || !rec->stop_ok) {
         ESP_LOGE(TAG, "%s: stop hook %s after %u ms", rec->m.id, done ? "failed" : "hung",
                  (unsigned)(lichen_sys_life_now_ms() - t0));
     }
-    return done && g_stop_job.ok;
+    return done && rec->stop_ok;
 }
 
 // An update is coming: the app's stop hook, if it is loaded and not stopped yet. The OTA task; the image is not unloaded
@@ -357,6 +350,7 @@ static void free_image(sd_app_rec_t *rec) {
     sd_app_lock();
     rec->image     = false;
     rec->hooks_set = false;
+    memset(&rec->hooks, 0, sizeof(rec->hooks)); // no pointer into the freed image survives
     sd_app_unlock();
 }
 
@@ -368,7 +362,7 @@ static bool unload(sd_app_rec_t *rec, bool free_now) {
     while (step != SD_UNLOAD_FREE && step != SD_UNLOAD_FAULT) {
         bool ok = unload_step(rec, step);
         if (!ok) {
-            ESP_LOGE(TAG, "%s: unload failed at step %d", rec->m.id, (int)step);
+            ESP_LOGE(TAG, "%s: unload failed at step %d (0 stop hook, 1 tasks, 2 timers/UI): image and tile kept", rec->m.id, (int)step);
         }
         step = sd_unload_next(step, ok);
     }
@@ -472,9 +466,7 @@ static char const *run_main(sd_app_rec_t *rec) {
 // Everything after the image is held went wrong: the app goes through the unload like any other
 static void abort_after_image(sd_app_rec_t *rec, char const *why) {
     sd_app_lock();
-    sd_app_load_done(&rec->sda, true); // LOADED, so the unload may begin
-    rec->sda.closing = true;
-    sd_app_unload_begin(&rec->sda);
+    sd_app_load_abort(&rec->sda); // LOADING to UNLOADING: the Loading screen that waits is the OS's
     sd_app_unlock();
     unload(rec, true);
     fail_load(rec, why);
@@ -519,14 +511,28 @@ static void do_load(sd_app_rec_t *rec) {
     }
 }
 
+#define SHOWN_POLLS   100
+#define SHOWN_POLL_MS 100
+
+static bool app_shows_screen(sd_app_rec_t const *rec) {
+    app_life_t life;
+    return lichen_sys_life_get(rec->ctx, &life) && (life.state == LIFE_OPEN || life.state == LIFE_SUSPENDED);
+}
+
 static void do_closed(sd_app_rec_t *rec) {
     // The last screen's delete event started this: the barrier call queues behind that deletion, so the widgets are gone
     ui_barrier(LICHEN_CTX_NONE);
+    // Screens the app pushed itself (its own pages) are not counted by the open trampoline: the shell's lifecycle says
+    // whether any of the app's screens is on the stack. An SD app's widgets live on its own screens (docs #524): nothing
+    // on a layer above them is watched.
+    for (int i = 0; i < SHOWN_POLLS && app_shows_screen(rec); i++) {
+        vTaskDelay(pdMS_TO_TICKS(SHOWN_POLL_MS));
+    }
     sd_app_lock();
-    bool begin = sd_app_unload_begin(&rec->sda);
+    bool begin = !app_shows_screen(rec) && sd_app_unload_begin(&rec->sda);
     sd_app_unlock();
     if (!begin) {
-        return; // opened again within the settle
+        return; // opened again, or still showing a screen of its own after the wait: it stays loaded
     }
     heap_snap_t before = heap_now();
     if (unload(rec, true)) {
@@ -598,12 +604,22 @@ static void remove_one(sd_app_rec_t *rec) {
 }
 
 static void do_free(sd_app_rec_t *rec) {
-    ui_barrier(LICHEN_CTX_NONE); // whatever LVGL still had queued for the app's screens has run
+    // unregister's done only says the shell was told to close the screens: one that is still animating out has its delete
+    // event (and ELF callbacks) to come, so the last of them posts the free again
+    sd_app_lock();
+    bool wait = !sd_app_may_free(&rec->sda);
+    rec->free_pending = wait;
+    sd_app_unlock();
+    if (wait) {
+        return;
+    }
+    ui_barrier(LICHEN_CTX_NONE); // the deletions are complete, and whatever LVGL still had queued for the app has run
     // A faulted app is never unregistered (remove_one), so this one stopped cleanly
     if (rec->image) {
         free_image(rec);
     }
     unlink_rec(rec);
+    vSemaphoreDelete(rec->stop_sem);
     heap_caps_free(rec);
 }
 
@@ -696,9 +712,8 @@ void sd_apps_boot(void) {
     g_mu        = xSemaphoreCreateMutex();
     g_hooks_sem = xSemaphoreCreateBinary();
     g_ui_sem    = xSemaphoreCreateBinary();
-    g_stop_sem  = xSemaphoreCreateBinary();
     g_queue     = xQueueCreate(QUEUE_LEN, sizeof(msg_t));
-    if (!g_mu || !g_hooks_sem || !g_ui_sem || !g_stop_sem || !g_queue) {
+    if (!g_mu || !g_hooks_sem || !g_ui_sem || !g_queue) {
         ESP_LOGE(TAG, "no memory");
         return;
     }
