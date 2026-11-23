@@ -1,0 +1,10 @@
+# Manifest of the Bench test SD app (format: lichen_api/lichen_manifest.h): key=value lines, # starts a comment.
+# A bench tool for the SD app APIs (#537): file shims, sandbox, open-file book, exit. Keys: r e m f q (see main/app.c).
+id=benchtest
+name=Bench test
+api=2.2
+entry=app.elf
+caps=SD,RAW_KEYS,NOTIFY
+internal_ram_kib=8
+psram_kib=0
+stack_kib=6
