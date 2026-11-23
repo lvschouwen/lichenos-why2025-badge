@@ -3,8 +3,8 @@
 # forbid lines of tools/layers.conf; checked on every build. Changing it needs a LICHEN_API_VERSION bump: major
 # when a line is removed or its prototype hash changes, minor when one is added (lichen_api_version.h).
 # export<TAB>name<TAB>symbol<TAB>origin (header, or allow)<TAB>hash (normalised prototype; the target symbol's for
-# allow rows); header<TAB>H.h<TAB>hash: the types, structs, enums and macros of every header the exports come from and
-# what it includes (a change is a major bump);
+# allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
+# the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
 api	1.0
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
@@ -25,44 +25,237 @@ wrap	mspi_timing_psram_select_best_tuning_phase	__wrap_mspi_timing_psram_select_
 wrap	nvs_flash_erase	__wrap_nvs_flash_erase
 wrap	nvs_flash_erase_partition	__wrap_nvs_flash_erase_partition
 wrap	settimeofday	__wrap_settimeofday
-header	app_secret.h	21c03462
-header	clock_check.h	4c285eec
-header	clock_keep.h	ba1745d9
-header	fonts.h	9bff0d4a
-header	hold_exit.h	891c17d0
-header	key_matrix.h	54da6490
-header	lichen_app.h	a7e65c3a
-header	lichen_badge.h	e3b0c442
-header	lichen_caps.h	d2faefa5
-header	lichen_clock.h	aa5516cc
-header	lichen_fs.h	e3b0c442
-header	lichen_haptics.h	6df59085
-header	lichen_hex.h	e3b0c442
-header	lichen_keys.h	e2a23a21
-header	lichen_mem.h	0121c62e
-header	lichen_notify.h	90dc082d
-header	lichen_radio.h	90075815
-header	lichen_random.h	e3b0c442
-header	lichen_reg.h	e3b0c442
-header	lichen_sensors.h	67426114
-header	lichen_settings.h	e3b0c442
-header	lichen_str.h	e3b0c442
-header	lichen_task.h	481d4b78
-header	lichen_timer.h	9b1daa3d
-header	lichen_ui.h	17e6cf20
-header	list_filter.h	b0e07f6d
-header	lora_app.h	cca1015e
-header	mem_book.h	ed62bb5f
-header	menu.h	2f110eab
-header	menu_filter.h	9d035491
-header	qr_payload.h	87d7a6ee
-header	radio_state.h	0e140ba9
-header	scroll_anchor.h	6396e651
-header	settings_backup.h	104b4e06
-header	task_book.h	56402053
-header	text_entry.h	625ff593
-header	tz_table.h	4f1300ee
-header	ui_text.h	d38806d2
+type	app_secret.h	APP_SECRET_KEY_BUF	18ea0d3c
+type	app_secret.h	APP_SECRET_KEY_MAX	8514f09a
+type	app_secret.h	APP_SECRET_MARK	907cc88f
+type	app_secret.h	APP_SECRET_PREFIX_MAX	097f8559
+type	app_secret.h	APP_SECRET_STORED_MAX	75ac66bf
+type	app_secret.h	APP_SECRET_VALUE_MAX	16c1a65b
+type	lichen_caps.h	CAP_AUDIO	57fc6af6
+type	lichen_caps.h	CAP_BACKGROUND	2797d97a
+type	lichen_caps.h	CAP_BATTERY	d6c15c33
+type	lichen_caps.h	CAP_BT	e94d9359
+type	lichen_caps.h	CAP_CONSOLE	35815d56
+type	lichen_caps.h	CAP_COUNT	4e5390b7
+type	lichen_caps.h	CAP_HAPTICS	d287cab4
+type	lichen_caps.h	CAP_LORA_BORROW	f38f2afe
+type	lichen_caps.h	CAP_LORA_RX	a6932940
+type	lichen_caps.h	CAP_LORA_TX	8f2ddb7e
+type	lichen_caps.h	CAP_NET	879d0d64
+type	lichen_caps.h	CAP_NOTIFY	b4902a43
+type	lichen_caps.h	CAP_RADIO_SCAN	1dbfd804
+type	lichen_caps.h	CAP_RAW_KEYS	fdcbfc27
+type	lichen_caps.h	CAP_RESTART	00c9ccfa
+type	lichen_caps.h	CAP_SD	f7286313
+type	lichen_caps.h	CAP_SECRETS	864ce1c1
+type	lichen_caps.h	CAP_SENSORS	dcddd4d7
+type	lichen_caps.h	CAP_SYSTEM	5ff12e20
+type	clock_check.h	CLOCK_ABOVE_BUILD_S	b33ecc5a
+type	clock_check.h	CLOCK_BELOW_BUILD_S	7b939677
+type	clock_check.h	CLOCK_BIG_STEP	101d1170
+type	clock_keep.h	CLOCK_BOOT_CARRIED	d4fafa50
+type	clock_keep.h	CLOCK_BOOT_NONE	e280b20c
+type	clock_keep.h	CLOCK_BOOT_SAVED	05239f15
+type	clock_keep.h	CLOCK_FIX_NONE	e280b20c
+type	clock_keep.h	CLOCK_FIX_SLEW	d4fafa50
+type	clock_keep.h	CLOCK_FIX_STEP	05239f15
+type	clock_check.h	CLOCK_MAX_STEP_S	9268ae39
+type	clock_check.h	CLOCK_NOT_FORWARD	a6c5256a
+type	clock_check.h	CLOCK_NO_SOURCE	6de52aa3
+type	clock_check.h	CLOCK_OK	e280b20c
+type	clock_check.h	CLOCK_OUTRANKED	0def75ea
+type	clock_check.h	CLOCK_RECOVERED	4b920977
+type	clock_check.h	CLOCK_RECOVER_AGREE_S	87ad0499
+type	clock_check.h	CLOCK_RECOVER_ANSWERS	ce2ff239
+type	clock_check.h	CLOCK_RECOVER_SPACE_S	df164347
+type	clock_check.h	CLOCK_RESYNC_US	73d7ae8c
+type	clock_keep.h	CLOCK_SAVE_ELAPSED_MAX_S	b9f0456d
+type	clock_keep.h	CLOCK_SAVE_EVERY_S	5cf1a579
+type	clock_keep.h	CLOCK_SAVE_MARGIN_S	353dbe15
+type	clock_keep.h	CLOCK_SLEW_MAX_US	f2f12beb
+type	clock_check.h	CLOCK_SRC_APP	05239f15
+type	clock_check.h	CLOCK_SRC_MANUAL	101d1170
+type	clock_check.h	CLOCK_SRC_NONE	e280b20c
+type	clock_check.h	CLOCK_SRC_RTC	d4fafa50
+type	clock_check.h	CLOCK_SRC_SNTP	4b920977
+type	clock_check.h	CLOCK_TOO_NEW	05239f15
+type	clock_check.h	CLOCK_TOO_OLD	d4fafa50
+type	hold_exit.h	HOLD_EXIT_MS	b6c32fca
+type	key_matrix.h	KEY_LAYOUT_COUNT	acd3f549
+type	key_matrix.h	KEY_LAYOUT_ROWS	c827c7fc
+type	key_matrix.h	KEY_LAYOUT_WIDTH	9f37bd7a
+type	key_matrix.h	KEY_MATRIX_COLS	a8f0249f
+type	key_matrix.h	KEY_MATRIX_ESC_CODE	649d95c5
+type	key_matrix.h	KEY_MATRIX_ROWS	adf4258f
+type	key_matrix.h	KEY_SHAPE_CIRCLE	4b920977
+type	key_matrix.h	KEY_SHAPE_CLOUD	0def75ea
+type	key_matrix.h	KEY_SHAPE_CROSS	101d1170
+type	key_matrix.h	KEY_SHAPE_DIAMOND	a6c5256a
+type	key_matrix.h	KEY_SHAPE_NONE	e280b20c
+type	key_matrix.h	KEY_SHAPE_SQUARE	d4fafa50
+type	key_matrix.h	KEY_SHAPE_TRIANGLE	05239f15
+type	lichen_app.h	LICHEN_CTX_NONE	fa072cde
+type	fonts.h	LICHEN_FONT_LARGE	4a58794f
+type	fonts.h	LICHEN_FONT_MEDIUM	f6464d83
+type	fonts.h	LICHEN_FONT_SMALL	e3b8756e
+type	lichen_haptics.h	LICHEN_HAPTIC_ALERT	05239f15
+type	lichen_haptics.h	LICHEN_HAPTIC_HIGH	05239f15
+type	lichen_haptics.h	LICHEN_HAPTIC_LOW	e280b20c
+type	lichen_haptics.h	LICHEN_HAPTIC_MEDIUM	d4fafa50
+type	lichen_haptics.h	LICHEN_HAPTIC_NOTIFY	d4fafa50
+type	lichen_haptics.h	LICHEN_HAPTIC_TICK	e280b20c
+type	lichen_app.h	LICHEN_MAX_APPS	c12ae30f
+type	lichen_mem.h	LICHEN_MEM_BULK	c12ad69e
+type	lichen_mem.h	LICHEN_MEM_INTERNAL	c3c278dd
+type	lichen_mem.h	LICHEN_MEM_ZERO	0523eeae
+type	lichen_task.h	LICHEN_PRIO_APP_LOOP	5958ad4b
+type	lichen_task.h	LICHEN_PRIO_BACKGROUND	4a6bc66a
+type	lichen_task.h	LICHEN_PRIO_JOB	c36d19f5
+type	lichen_task.h	LICHEN_PRIO_SERVICE	613d0f14
+type	lichen_task.h	LICHEN_PRIO_URGENT	43b75422
+type	lichen_radio.h	LICHEN_RADIO_LISTENERS	59274437
+type	lichen_task.h	LICHEN_STACK_INTERNAL	54ac7e1d
+type	lichen_task.h	LICHEN_STACK_LP_RAM	9b0c53d9
+type	lichen_task.h	LICHEN_STACK_PSRAM	bf46eceb
+type	lichen_timer.h	LICHEN_TIMER_NONE	1aa252a8
+type	list_filter.h	LIST_FILTER_MAX	4bc9e33d
+type	lichen_notify.h	LN_COALESCE	acb84569
+type	lichen_notify.h	LN_ERROR	05239f15
+type	lichen_notify.h	LN_INFO	e280b20c
+type	lichen_notify.h	LN_ONCE_BOOT	e39c5121
+type	lichen_notify.h	LN_SILENT	19805e54
+type	lichen_notify.h	LN_WARN	d4fafa50
+type	lora_app.h	LORA_SUMMARY_MAX	309b5386
+type	lora_app.h	LORA_SWEEP_BINS	edd64b30
+type	lora_app.h	LORA_SWEEP_BUSY	101d1170
+type	lora_app.h	LORA_SWEEP_FAILED	0def75ea
+type	lora_app.h	LORA_SWEEP_NOT_RECEIVING	4b920977
+type	lora_app.h	LORA_SWEEP_NO_ANSWER	a6c5256a
+type	lora_app.h	LORA_SWEEP_OFF	05239f15
+type	lora_app.h	LORA_SWEEP_OK	e280b20c
+type	lora_app.h	LORA_SWEEP_REFUSED	d4fafa50
+type	mem_book.h	MEM_BOOK_BULK_ENFORCE	cb553799
+type	mem_book.h	MEM_BOOK_BULK_QUOTA	3f36fd46
+type	mem_book.h	MEM_BOOK_INTERNAL_QUOTA	23f2d130
+type	mem_book.h	MEM_BOOK_OS	3ae9aad2
+type	mem_book.h	MEM_BOOK_OWNERS	15a044d5
+type	mem_book.h	MEM_BOOK_OWNER_CAP	d47a6115
+type	mem_book.h	MEM_CHARGE_NO_ROW	05239f15
+type	mem_book.h	MEM_CHARGE_OK	e280b20c
+type	mem_book.h	MEM_CHARGE_QUOTA	d4fafa50
+type	mem_book.h	MEM_RELEASE_NO_ROW	d4fafa50
+type	mem_book.h	MEM_RELEASE_OK	e280b20c
+type	mem_book.h	MEM_RELEASE_OVER	05239f15
+type	menu.h	MENU_CYCLE	05239f15
+type	menu.h	MENU_DANGER	4b920977
+type	menu.h	MENU_INFO	0def75ea
+type	menu.h	MENU_OPEN	d4fafa50
+type	menu.h	MENU_PLAIN	e280b20c
+type	menu.h	MENU_TOGGLE	101d1170
+type	qr_payload.h	QR_PAYLOAD_MAX	87d7a6ee
+type	radio_state.h	RADIO_BT	05239f15
+type	radio_state.h	RADIO_COUNT	101d1170
+type	radio_state.h	RADIO_HOLD_COUNT	05239f15
+type	radio_state.h	RADIO_HOLD_NONE	e280b20c
+type	radio_state.h	RADIO_HOLD_THERMAL	d4fafa50
+type	radio_state.h	RADIO_LORA	d4fafa50
+type	radio_state.h	RADIO_MASK_ALL	ec7d2488
+type	radio_state.h	RADIO_MASK_DEFAULT	80f688ca
+type	radio_state.h	RADIO_WIFI	e280b20c
+type	settings_backup.h	SB_END_LINE	e597ac30
+type	settings_backup.h	SB_ERR_DUP	101d1170
+type	settings_backup.h	SB_ERR_EMPTY	0def75ea
+type	settings_backup.h	SB_ERR_INCOMPLETE	a6c5256a
+type	settings_backup.h	SB_ERR_SYNTAX	d4fafa50
+type	settings_backup.h	SB_ERR_TOO_LONG	4b920977
+type	settings_backup.h	SB_ERR_VALUE	05239f15
+type	settings_backup.h	SB_KEYS_MAX	bfeaa911
+type	settings_backup.h	SB_LINE_MAX	f6376deb
+type	settings_backup.h	SB_OK	e280b20c
+type	settings_backup.h	SB_STR	d4fafa50
+type	settings_backup.h	SB_STR_MAX	343c3d21
+type	settings_backup.h	SB_U8	e280b20c
+type	scroll_anchor.h	SCROLL_ANCHOR_KEYS	0aa6f0a5
+type	lichen_ui.h	SHELL_KEY_UNIQUE	db4ed08d
+type	task_book.h	TASK_BOOK_NAME_CAP	874ca4b6
+type	task_book.h	TASK_BOOK_OS	ec4abdaf
+type	task_book.h	TASK_BOOK_OWNER_CAP	ba9c03e8
+type	task_book.h	TASK_BOOK_SLOTS	60ebf5ad
+type	task_book.h	TASK_CLASS_APP_LOOP	4b920977
+type	task_book.h	TASK_CLASS_BACKGROUND	e280b20c
+type	task_book.h	TASK_CLASS_COUNT	0def75ea
+type	task_book.h	TASK_CLASS_JOB	05239f15
+type	task_book.h	TASK_CLASS_SERVICE	d4fafa50
+type	task_book.h	TASK_CLASS_URGENT	101d1170
+type	task_book.h	TASK_STACK_COUNT	101d1170
+type	task_book.h	TASK_STACK_INTERNAL	e280b20c
+type	task_book.h	TASK_STACK_LP_RAM	d4fafa50
+type	task_book.h	TASK_STACK_PSRAM	05239f15
+type	text_entry.h	TEXT_ENTRY_SECRET_BIT	625ff593
+type	tz_table.h	TZ_DEFAULT_POSIX	f73913ff
+type	tz_table.h	TZ_MAX	f5f2b6b4
+type	ui_text.h	UI_STATUS_DONE	05239f15
+type	ui_text.h	UI_STATUS_FAILED	101d1170
+type	ui_text.h	UI_STATUS_IDLE	e280b20c
+type	ui_text.h	UI_STATUS_RUNNING	d4fafa50
+type	lichen_clock.h	clock_answer_t	aff262dc
+type	lichen_clock.h	clock_boot_info_t	2fcebb2c
+type	clock_keep.h	clock_boot_t	cbd4d8b1
+type	lichen_clock.h	clock_fix_info_t	5a4b4120
+type	clock_keep.h	clock_fix_t	102a0e60
+type	clock_check.h	clock_guard_t	68885faf
+type	clock_keep.h	clock_rec_t	b32a831c
+type	clock_check.h	clock_src_t	f7e0b3bb
+type	lichen_clock.h	clock_sync_info_t	3dd2a40b
+type	clock_check.h	clock_verdict_t	f41171b2
+type	hold_exit.h	hold_exit_t	5e018ad6
+type	key_matrix.h	key_layout_t	9a197bed
+type	key_matrix.h	key_shape_t	78aef507
+type	lichen_app.h	lichen_app_t	6ca462c6
+type	lichen_app.h	lichen_ctx_t	4cb46e72
+type	lichen_haptics.h	lichen_haptic_strength_t	39897165
+type	lichen_haptics.h	lichen_haptic_t	369729b2
+type	lichen_task.h	lichen_prio_t	243e23d5
+type	lichen_radio.h	lichen_radio_cb_t	ed78a9f8
+type	lichen_keys.h	lichen_raw_key_fn	9b589c34
+type	lichen_keys.h	lichen_raw_key_t	b53fb7ea
+type	lichen_sensors.h	lichen_sensors_t	38582b85
+type	lichen_task.h	lichen_stack_t	064de069
+type	lichen_timer.h	lichen_timer_t	3ad7ccc5
+type	list_filter.h	list_filter_word_fn	2817b6d4
+type	lichen_notify.h	ln_level_t	4fe4a945
+type	lora_app.h	lora_packet_cb_t	e1429180
+type	lora_app.h	lora_rx_formatter_t	f33f2aa2
+type	lora_app.h	lora_sweep_err_t	3f31e90f
+type	lora_app.h	lora_sweep_result_t	23202136
+type	lora_app.h	lora_ui_stats_t	b1a9c7ae
+type	mem_book.h	mem_book_t	b212d14a
+type	mem_book.h	mem_charge_t	58d4b7ca
+type	mem_book.h	mem_release_t	cef3ac01
+type	mem_book.h	mem_use_t	3a8e9e69
+type	menu_filter.h	menu_filter_match_fn	a9c8b149
+type	menu_filter.h	menu_filter_t	e7e39bf6
+type	menu.h	menu_kind_t	d81f5bdf
+type	radio_state.h	radio_hold_t	376d5dd1
+type	radio_state.h	radio_id_t	bb5f5f4e
+type	radio_state.h	radio_state_t	835945fa
+type	settings_backup.h	sb_err_t	32b876ee
+type	settings_backup.h	sb_key_t	26cd702e
+type	settings_backup.h	sb_result_t	d5c99783
+type	settings_backup.h	sb_type_t	22c2d914
+type	settings_backup.h	sb_value_t	e9c6175f
+type	scroll_anchor.h	scroll_anchor_t	18260291
+type	scroll_anchor.h	scroll_item_t	92916c04
+type	lichen_ui.h	shell_dialog_fn	e888e3de
+type	lichen_ui.h	shell_dialog_t	2ee56d96
+type	task_book.h	task_book_t	21d66640
+type	task_book.h	task_class_t	c2eaa3b2
+type	task_book.h	task_owner_t	be9435f0
+type	task_book.h	task_slot_t	87e1db0f
+type	task_book.h	task_stack_t	949e813c
+type	tz_table.h	tz_entry_t	c33fe3cf
+type	ui_text.h	ui_status_state_t	b2344fe0
+type	ui_text.h	ui_status_t	9e6da743
 export	__divdi3	__divdi3	allow	6e4d106f
 export	__moddi3	__moddi3	allow	836d03dc
 export	__muldi3	__muldi3	allow	e39a89bc

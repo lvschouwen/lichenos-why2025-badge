@@ -111,17 +111,83 @@ def top_level_statements(text):
     return out
 
 
-def declarations_hash(text):
-    """Hash of everything a header declares that is not a function: types, structs, enums, variables, #defines.
-    Whitespace and comments do not count, the order does (a reordered enum is a different enum)."""
-    keep = []
+def squash(text):
+    """Whitespace collapsed and removed around punctuation, so a reformat is no change."""
+    return re.sub(r"\s*([,;{}()*=\[\]])\s*", r"\1", " ".join(text.split()))
+
+
+def enumerators(body):
+    """[(name, value)] of an enum body: the number when every step is a literal, else the expression or `base+k`, so an
+    inserted or reordered value changes the ones after it (their implicit values moved)."""
+    out, val, base, k = [], -1, None, 0
+    for item in split_params(body):
+        item = item.strip()
+        if not item:
+            continue
+        name, _, expr = (x.strip() for x in item.partition("="))
+        if expr:
+            try:
+                val, base, k = int(expr, 0), None, 0
+            except ValueError:
+                val, base, k = squash(expr), squash(expr), 0
+        elif base is None and isinstance(val, int):
+            val += 1
+        else:
+            k += 1
+            val = "%s+%d" % (base or "?", k)
+        out.append((name, str(val)))
+    return out
+
+
+def sha(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+def brace_body(stmt):
+    i, j = stmt.find("{"), stmt.rfind("}")
+    return (stmt[i + 1:j], stmt[:i + 1] + "}" + stmt[j + 1:]) if 0 <= i < j else (None, stmt)
+
+
+def last_name(stmt):
+    m = re.search(r"\(\s*\*\s*(\w+)\s*\)", stmt) or re.search(r"(\w+)\s*(?:\[[^\]]*\])?\s*(?:=[^;]*)?;?\s*$", stmt)
+    return m.group(1) if m else None
+
+
+def statement_declarations(stmt):
+    """[(name, hash)] one statement declares: a #define, typedef, struct, union, enum (its tag, and each value as its own
+    name) or variable. An enum's type hashes without its values: adding a value is an addition, changing one is a change."""
+    if stmt.startswith("#"):
+        m = re.match(r"#\s*define\s+(\w+)", stmt)
+        return [(m.group(1), sha(squash(stmt)))] if m else []
+    body, shape = brace_body(stmt)
+    is_enum = re.search(r"\benum\b", shape.split("{")[0]) is not None and body is not None
+    out = [(n, sha("enum value " + v)) for n, v in enumerators(body)] if is_enum else []
+    text = squash(shape if is_enum else stmt)
+    tag = re.match(r"(struct|union|enum)\s+(\w+)\s*\{", stmt)
+    if stmt.startswith("typedef"):
+        name = last_name(shape if body is not None else stmt)
+    elif tag:
+        name = "%s %s" % tag.groups()
+    elif body is None and cl.statement_function(stmt) is None:
+        name = last_name(stmt)
+    else:
+        name = None
+    return out + ([(name, sha(text))] if name else [])
+
+
+def declarations(text):
+    """{name: hash} of everything a header declares that is not a function: types, structs, enums and their values,
+    variables, #defines. Whitespace and comments do not count."""
+    out = {}
     for stmt in top_level_statements(text):
-        is_type = re.match(r"(typedef|struct|enum|union)\b", stmt) is not None
-        if stmt.startswith("#") or is_type and cl.statement_function(stmt) is None:
-            keep.append(" ".join(stmt.split()))
-        elif not is_type and "{" not in stmt and cl.statement_function(stmt) is None:
-            keep.append(" ".join(stmt.split()))  # a variable
-    return hashlib.sha256("\n".join(keep).encode()).hexdigest()[:8]
+        if "{" in stmt and not re.match(r"(typedef|struct|union|enum)\b", stmt):
+            continue  # a function body
+        if not stmt.startswith("#") and re.match(r"(typedef|struct|union|enum)\b", stmt) is None \
+                and cl.statement_function(stmt) is not None:
+            continue
+        for name, h in statement_declarations(stmt):
+            out.setdefault(name, h)
+    return out
 
 
 def local_includes(path):

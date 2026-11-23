@@ -57,25 +57,45 @@ class HashTest(unittest.TestCase):
 
 
 class DeclTest(unittest.TestCase):
-    h = staticmethod(g.declarations_hash)
+    d = staticmethod(g.declarations)
+    BASE = ("typedef uint32_t c_t;\n#define N 24\ntypedef struct { int a; char b; } s_t;\n"
+            "typedef enum { A, B = 5, C } e_t;\nextern int v;\ntypedef void (*cb_t)(int);\n")
 
-    def test_functions_and_comments_do_not_count(self):
-        base = "#pragma once\ntypedef uint32_t lichen_ctx_t;\n#define N 24\nint f(int a);\n"
-        more = "#pragma once\n// a comment\ntypedef  uint32_t   lichen_ctx_t; /* x */\n#define N 24\nint f(int a);\nint g(void);\nstatic inline int h(void) { return 1; }\n"
-        self.assertEqual(self.h(base), self.h(more))
+    def test_per_declaration_names(self):
+        got = self.d(self.BASE)
+        self.assertEqual(sorted(got), ["A", "B", "C", "N", "c_t", "cb_t", "e_t", "s_t", "v"])
+
+    def test_functions_comments_and_formatting_do_not_count(self):
+        more = ("// c\ntypedef  uint32_t   c_t; /* x */\n#define N   24\ntypedef struct {int a;char b;} s_t;\n"
+                "typedef enum { A,\n B=5, C } e_t;\nextern int v;\ntypedef void (*cb_t)(int);\nint g(void);\n"
+                "static inline int h(void) { return 1; }\n")
+        self.assertEqual(self.d(self.BASE), self.d(more))
 
     def test_cplusplus_guard_is_ignored(self):
-        self.assertEqual(self.h('#ifdef __cplusplus\nextern "C" {\n#endif\ntypedef int t;\n#ifdef __cplusplus\n}\n#endif\n'),
-                         self.h("typedef int t;\n"))
+        self.assertEqual(self.d('#ifdef __cplusplus\nextern "C" {\n#endif\ntypedef int t;\n#ifdef __cplusplus\n}\n#endif\n'),
+                         self.d("typedef int t;\n"))
 
-    def test_type_macro_struct_enum_changes_count(self):
-        base = "typedef uint32_t c_t;\n#define N 24\ntypedef struct { int a; char b; } s_t;\ntypedef enum { A, B } e_t;\nextern int v;\n"
-        for old, new in (("uint32_t c_t", "uint64_t c_t"), ("N 24", "N 32"), ("char b;", "short b;"), ("A, B", "B, A"),
-                         ("extern int v", "extern long v")):
-            self.assertNotEqual(self.h(base), self.h(base.replace(old, new)), new)
+    def test_changes_change_the_named_hash(self):
+        base = self.d(self.BASE)
+        for old, new, name in (("uint32_t c_t", "uint64_t c_t", "c_t"), ("N 24", "N 32", "N"), ("char b;", "short b;", "s_t"),
+                               ("B = 5", "B = 6", "B"), ("B = 5, C", "B = 5, C = 9", "C"), ("extern int v", "extern long v", "v"),
+                               ("(*cb_t)(int)", "(*cb_t)(long)", "cb_t")):
+            got = self.d(self.BASE.replace(old, new))
+            self.assertNotEqual(base[name], got[name], new)
+            self.assertEqual({k: v for k, v in base.items() if k != name and not (name == "B" and k == "C")},
+                             {k: v for k, v in got.items() if k != name and not (name == "B" and k == "C")}, new)
 
-    def test_function_pointer_typedef_counts(self):
-        self.assertNotEqual(self.h("typedef void (*cb_t)(int);"), self.h("typedef void (*cb_t)(long);"))
+    def test_enum_values_are_their_own_names(self):
+        base = self.d(self.BASE)
+        more = self.d(self.BASE.replace("C }", "C, D }"))
+        self.assertEqual(base["e_t"], more["e_t"])  # the enum type does not hash its values
+        self.assertEqual(sorted(set(more) - set(base)), ["D"])
+        moved = self.d(self.BASE.replace("{ A, B = 5, C }", "{ Z, A, B = 5, C }"))
+        self.assertNotEqual(base["A"], moved["A"])  # an inserted value moves the implicit ones after it
+
+    def test_tagged_struct_and_removed_name(self):
+        got = self.d("struct foo { int a; };\nstruct foo *make(void);\n")
+        self.assertEqual(sorted(got), ["struct foo"])
 
 
 class Conf:
@@ -128,8 +148,8 @@ class TableTest(unittest.TestCase):
         self.assertIn("extern void __wrap_b(void);", c)
 
     def test_parse_round_trip(self):
-        t = g.table_text([("a", "a", "x.h", "h1")], ["esp_restart"], (1, 2), {"x.h": "t1"})
-        self.assertEqual(g.parse_table(t), ((1, 2), {"a": "h1"}, ["esp_restart"], {"x.h": "t1"}))
+        t = g.table_text([("a", "a", "x.h", "h1")], ["esp_restart"], (1, 2), {"N": ("x.h", "t1")})
+        self.assertEqual(g.parse_table(t), ((1, 2), {"a": "h1"}, ["esp_restart"], {"N": "t1"}))
 
 
 class VersionTest(unittest.TestCase):
@@ -147,10 +167,14 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(g.bump_problems((1, 0), {"a": "h1"}, (1, 1), {"a": "h2"}))
         self.assertFalse(g.bump_problems((1, 0), {"a": "h1"}, (2, 0), {"a": "h2"}))
 
-    def test_type_change_is_major(self):
-        self.assertTrue(g.bump_problems((1, 0), {"a": "h"}, (1, 1), {"a": "h"}, {"x.h": "1"}, {"x.h": "2"}))
-        self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (2, 0), {"a": "h"}, {"x.h": "1"}, {"x.h": "2"}))
-        self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (1, 0), {"a": "h"}, {"x.h": "1"}, {"x.h": "1", "y.h": "2"}))
+    def test_adding_a_type_or_macro_is_minor(self):
+        self.assertTrue(g.bump_problems((1, 0), {"a": "h"}, (1, 0), {"a": "h"}, {"N": "1"}, {"N": "1", "M": "2"}))
+        self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (1, 1), {"a": "h"}, {"N": "1"}, {"N": "1", "M": "2"}))
+
+    def test_changed_or_removed_type_is_major(self):
+        for new_t in ({"N": "2"}, {}):
+            self.assertTrue(g.bump_problems((1, 0), {"a": "h"}, (1, 1), {"a": "h"}, {"N": "1"}, new_t))
+            self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (2, 0), {"a": "h"}, {"N": "1"}, new_t))
 
     def test_unchanged_needs_nothing(self):
         self.assertFalse(g.bump_problems((1, 0), {"a": "a"}, (1, 0), {"a": "a"}))
