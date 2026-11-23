@@ -12,6 +12,6 @@ esac
 elfs=()
 case " $* " in
     *" --no-symbols "*) ;; # no build was made: its apps are not either
-    *) for f in "$here"/../firmware/build/sdapps/*/*.app.elf; do [ -e "$f" ] && elfs+=("$f"); done ;;
+    *) for f in "$here"/../firmware/build/sdapps/*/app.elf; do [ -e "$f" ] && elfs+=("$f"); done ;;
 esac
 python3 -I "$here/gen_export_table.py" --check --elf "${elfs[@]}"
