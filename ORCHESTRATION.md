@@ -50,3 +50,6 @@ when the run ends. The old wave logs are in git history (before #483).
 1. `git status -sb`, `git log --oneline origin/main..main`, `agent-wt list`, `ListAgents`.
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
+
+## Live (2026-11-23)
+- Wave 1 running: impl-529 in wt-4 (wt-1 holds a stale #497 copy, left alone), impl-534 in wt-3, impl-533 in wt-2 (step 8 deferred until #534 merges). Logs: session scratchpad `check-wt-N-<issue>.log`.
