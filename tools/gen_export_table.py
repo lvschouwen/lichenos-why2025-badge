@@ -18,11 +18,13 @@ import fnmatch
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_layers as cl  # noqa: E402
+from export_proto import declarations_hash, header_closure, prototype_hash  # noqa: E402,F401
 
 ALLOW_REL = "tools/export_allow.txt"
 API_REL = "tools/export_api.txt"
@@ -64,63 +66,48 @@ def parse_api(text):
     return got["header"], got["func"], got["deny"]
 
 
-KEYWORDS = frozenset(("void", "int", "char", "short", "long", "unsigned", "signed", "float", "double", "const",
-                      "volatile", "struct", "enum", "union", "bool", "_Bool"))
-
-
-def normalise_param(p):
-    """A parameter without its name, so renaming one is no API change: `char const *fmt` -> `char const *`."""
-    p = re.sub(r"\s+", " ", p.strip())
-    m = re.match(r"^(.*?[\w\*\)] ?)(\b[A-Za-z_]\w*)\s*(\[[^\]]*\])?$", p)
-    if "(" in p or m is None or m.group(2) in KEYWORDS:
-        return p
-    before = m.group(1).split()
-    if not before or before[-1] in ("struct", "enum", "union"):
-        return p
-    return m.group(1).strip() + (m.group(3) or "")
-
-
-def split_params(inner):
-    out, depth, cur = [], 0, ""
-    for ch in inner:
-        depth += ch == "("
-        depth -= ch == ")"
-        if ch == "," and depth == 0:
-            out.append(cur)
-            cur = ""
-        else:
-            cur += ch
-    return out + [cur]
-
-
-def prototype_hash(stmt):
-    """Short hash of a declaration's normalised prototype: the return type, the name and the parameter types."""
-    stmt = " ".join(cl.ATTR_RE.sub(" ", stmt).split())
-    i = stmt.index("(")
-    j = stmt.rindex(")")
-    ret = stmt[:i].strip()
-    params = ",".join(normalise_param(p) for p in split_params(stmt[i + 1:j]))
-    return hashlib.sha256(("%s(%s)" % (ret, params)).encode()).hexdigest()[:8]
-
-
-def header_prototypes(root, conf):
-    """{function: (header, prototype hash)} over the headers the surface walk covers."""
-    out = {}
-    surface = set((f, h) for f, h, _ in cl.surface_functions(root, conf))  # only the headers apps may include
+def walked_dirs(root, conf):
+    """The directories whose headers an app may include: the gate's and the peer components' (surface_functions' walk)."""
     dirs = [cl.gate_dir(root)]
     comps = cl.repo_components(root)
     for (comp, peer), _globs in sorted(conf.peer_headers.items()):
-        if conf.comp_layer.get(comp) in conf.closed and peer in comps:
+        if conf.comp_layer.get(comp) in conf.closed and peer in comps and comps[peer] not in dirs:
             dirs.append(comps[peer])
-    for d in dirs:
+    return dirs
+
+
+def header_prototypes(root, conf):
+    """{function: (header, prototype hash)} over the headers the surface walk covers. A function declared in two of them
+    fails: the table would have to pick one, and a hash of the other would go unchecked."""
+    out = {}
+    surface = set((f, h) for f, h, _ in cl.surface_functions(root, conf))  # only the headers apps may include
+    for d in walked_dirs(root, conf):
         for fn in sorted(os.listdir(d)):
             if not fn.endswith(".h"):
                 continue
             for stmt, _block in cl.scan_statements(cl.read(os.path.join(d, fn))):
                 name = cl.statement_function(stmt)
-                if name and (name, fn) in surface:
-                    out.setdefault(name, (fn, prototype_hash(stmt)))
+                if not name or (name, fn) not in surface:
+                    continue
+                if name in out and out[name][0] != fn:
+                    raise ExportError("%s is declared in both %s and %s: keep one declaration" % (name, out[name][0], fn))
+                out.setdefault(name, (fn, prototype_hash(stmt)))
     return out
+
+
+def type_hashes(root, conf, listed):
+    """{header: hash of its non-function declarations} for the listed headers and the headers they include from their own
+    directory (lichen_caps.h under lichen_app.h): a changed typedef, struct, enum or macro breaks apps with no prototype
+    changing."""
+    paths = {}
+    for d in walked_dirs(root, conf):
+        for fn in os.listdir(d):
+            if fn.endswith(".h"):
+                paths.setdefault(fn, os.path.join(d, fn))
+    seen = {}
+    for h in sorted(listed):
+        header_closure(paths[h], seen)
+    return {h: declarations_hash(cl.read(p)) for h, p in sorted(seen.items())}
 
 
 def find_wraps(root):
@@ -175,35 +162,40 @@ def api_selection(root, conf, protos):
 
 
 def build_exports(root, conf):
-    """[(name, symbol, origin, hash)] sorted by name; symbol is what the table points at (a wrapped function or a shim)."""
+    """([(name, symbol, origin, hash)] sorted by name, {header: type hash}); symbol is what the table points at (a wrapped
+    function or a shim). The libc, libm and lv_* rows hash their target symbol, so a retarget shows in the table."""
     wraps = set(find_wraps(root))
-    rows = {n: (n, h, ph) for n, (h, ph) in api_selection(root, conf, header_prototypes(root, conf)).items()}
+    sel = api_selection(root, conf, header_prototypes(root, conf))
+    rows = {n: (n, h, ph) for n, (h, ph) in sel.items()}
     for name, target in parse_allow(cl.read(os.path.join(root, ALLOW_REL))):
         if name in rows:
             raise ExportError("%s: %s is already exported from %s" % (ALLOW_REL, name, rows[name][1]))
         if target is None and forbidden(conf, name):
             raise ExportError("%s: %s is forbidden to apps (layers.conf); map it to an OS function or drop it" % (ALLOW_REL, name))
-        rows[name] = (target or name, "allow", "-")
+        rows[name] = (target or name, "allow", hashlib.sha256((target or name).encode()).hexdigest()[:8])
     out = []
     for name in sorted(rows):
         sym, origin, ph = rows[name]
         if sym in wraps:
             sym = "__wrap_" + sym  # the linker would redirect &sym there anyway; the table names it so the diff shows it
         out.append((name, sym, origin, ph))
-    return out
+    return out, type_hashes(root, conf, set(h for _, h, _ in rows.values() if h != "allow"))
 
 
-def table_text(exports, wraps, version):
+def table_text(exports, wraps, version, hdrs):
     head = (
         "# Export table of the SD-card apps (#519): what an app's ELF may resolve against the OS. Generated by\n"
         "# `tools/gen_export_table.py --write` from tools/export_api.txt (the curated app API), tools/export_allow.txt and the\n"
         "# forbid lines of tools/layers.conf; checked on every build. Changing it needs a LICHEN_API_VERSION bump: major\n"
         "# when a line is removed or its prototype hash changes, minor when one is added (lichen_api_version.h).\n"
-        "# export<TAB>name<TAB>symbol<TAB>origin (header, or allow)<TAB>hash (normalised prototype; - for libc);\n"
+        "# export<TAB>name<TAB>symbol<TAB>origin (header, or allow)<TAB>hash (normalised prototype; the target symbol's for\n"
+        "# allow rows); header<TAB>H.h<TAB>hash: the types, structs, enums and macros of every header the exports come from and\n"
+        "# what it includes (a change is a major bump);\n"
         "# wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).\n"
     )
     body = "api\t%d.%d\n" % version
     body += "".join("wrap\t%s\t__wrap_%s\n" % (w, w) for w in wraps)
+    body += "".join("header\t%s\t%s\n" % h for h in sorted(hdrs.items()))
     body += "".join("export\t%s\t%s\t%s\t%s\n" % e for e in exports)
     return head + body
 
@@ -222,8 +214,8 @@ def c_text(exports):
 
 
 def parse_table(text):
-    """(version tuple or None, {name: symbol}, wraps) of an export_table.txt."""
-    version, exports, wraps = None, {}, []
+    """(version tuple or None, {name: hash}, wraps, {header: type hash}) of an export_table.txt."""
+    version, exports, wraps, hdrs = None, {}, [], {}
     for raw in text.splitlines():
         f = raw.split("\t")
         if f[0] == "api":
@@ -232,7 +224,9 @@ def parse_table(text):
             exports[f[1]] = f[4] if len(f) > 4 else f[2]  # the prototype hash; a pre-hash table compares by symbol
         elif f[0] == "wrap":
             wraps.append(f[1])
-    return version, exports, wraps
+        elif f[0] == "header":
+            hdrs[f[1]] = f[2]
+    return version, exports, wraps, hdrs
 
 
 def version_problems(root, new_text):
@@ -243,13 +237,17 @@ def version_problems(root, new_text):
     r = subprocess.run(["git", "-C", root, "show", "%s:%s" % (ref, TABLE_REL)], capture_output=True, text=True)
     if r.returncode != 0:
         return []  # the change that introduces the table
-    old_v, old, _ = parse_table(r.stdout)
-    new_v, new, _ = parse_table(new_text)
-    return [] if old_v is None or new_v is None else bump_problems(old_v, old, new_v, new)
+    old_v, old, _, old_h = parse_table(r.stdout)
+    new_v, new, _, new_h = parse_table(new_text)
+    return [] if old_v is None or new_v is None else bump_problems(old_v, old, new_v, new, old_h, new_h)
 
 
-def bump_problems(old_v, old, new_v, new):
+def bump_problems(old_v, old, new_v, new, old_h=None, new_h=None):
+    """Exports removed, a prototype hash changed or a header's declarations changed need a major bump; exports added a
+    minor bump. A header that joined or left the list is no change by itself: its exports are."""
     broke = sorted(n for n in old if new.get(n) != old[n])
+    old_h, new_h = old_h or {}, new_h or {}
+    broke += ["types of " + h for h in sorted(old_h) if h in new_h and new_h[h] != old_h[h]]
     added = sorted(n for n in new if n not in old)
     if broke and new_v[0] <= old_v[0]:
         return ["exports removed or changed (%s) need a LICHEN_API_VERSION_MAJOR above %d" % (", ".join(broke[:5]), old_v[0])]
@@ -259,30 +257,40 @@ def bump_problems(old_v, old, new_v, new):
 
 
 def undefined_symbols(path):
-    nm = os.environ.get("NM") or "riscv32-esp-elf-nm"
-    r = subprocess.run([nm, "-u", path], capture_output=True, text=True)
+    nm = os.environ.get("NM") or shutil.which("riscv32-esp-elf-nm")
+    if not nm:
+        raise ExportError("riscv32-esp-elf-nm is not on PATH (IDF export.sh), so the apps' symbols cannot be checked")
+    try:
+        r = subprocess.run([nm, "-u", path], capture_output=True, text=True)
+    except OSError as e:
+        raise ExportError("cannot run %s: %s" % (nm, e))
     if r.returncode != 0:
         raise ExportError("%s failed on %s: %s" % (nm, path, r.stderr.strip()))
     return sorted(l.split()[-1] for l in r.stdout.splitlines() if l.split())
 
 
-def elf_problems(paths, exports):
+def elf_problems(paths, exports, apps_src=None):
+    """An app whose undefined symbols are not in the table, and (with apps_src) a sdapps/<id>/ with no built app.elf."""
     names = set(e[0] for e in exports)
     out = []
+    if apps_src and os.path.isdir(apps_src):
+        built = set(os.path.basename(os.path.dirname(p)) for p in paths)
+        out += ["sdapps/%s has no built app.elf: nothing checked its symbols" % d
+                for d in sorted(os.listdir(apps_src)) if os.path.isdir(os.path.join(apps_src, d)) and d not in built]
     for p in paths:
         missing = [s for s in undefined_symbols(p) if s not in names]
         if missing:
-            out.append("%s needs symbols the export table lacks: %s" % (os.path.basename(p), " ".join(missing)))
+            out.append("%s needs symbols the export table lacks: %s" % (os.path.relpath(p), " ".join(missing)))
     return out
 
 
 def generate(root):
     conf = cl.parse_conf(cl.read(os.path.join(root, cl.CONF_REL)))
-    exports = build_exports(root, conf)
-    return exports, table_text(exports, find_wraps(root), api_version(root))
+    exports, hdrs = build_exports(root, conf)
+    return exports, table_text(exports, find_wraps(root), api_version(root), hdrs)
 
 
-def check(root, elfs):
+def check(root, elfs, apps_src=None):
     exports, table = generate(root)
     problems = []
     for rel, want in ((TABLE_REL, table), (C_REL, c_text(exports))):
@@ -290,7 +298,7 @@ def check(root, elfs):
         if not os.path.exists(path) or cl.read(path) != want:
             problems.append("%s does not match the headers (run: tools/gen_export_table.py --write)" % rel)
     problems += version_problems(root, table)
-    problems += elf_problems(elfs, exports)
+    problems += elf_problems(elfs, exports, apps_src)
     return problems, len(exports)
 
 
@@ -300,6 +308,7 @@ def main(argv):
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--elf", nargs="*", default=[], help="SD apps whose undefined symbols must be in the table")
+    ap.add_argument("--apps-src", help="sdapps/ directory: every app in it must have an ELF in --elf")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     try:
@@ -309,7 +318,7 @@ def main(argv):
             cl.write_atomic(os.path.join(root, C_REL), c_text(exports))
             print("export table: wrote %d exports" % len(exports))
             return 0
-        problems, n = check(root, args.elf)
+        problems, n = check(root, args.elf, args.apps_src)
     except (ExportError, cl.LayerError) as e:
         print("export table: " + str(e), file=sys.stderr)
         return 1

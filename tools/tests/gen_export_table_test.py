@@ -33,11 +33,49 @@ class HashTest(unittest.TestCase):
                         "bool f(lichen_ctx_t ctx, int n, int m)", "bool f(lichen_ctx_t ctx, unsigned n)"):
             self.assertNotEqual(base, self.h(changed), changed)
 
+    def test_spelling_pairs(self):
+        self.assertEqual(self.h("char *f(char const *p)"), self.h("char* f(char const* p)"))
+        self.assertEqual(self.h("void f(const char* p)"), self.h("void f(char const* p)"))
+        self.assertEqual(self.h("void f(unsigned a)"), self.h("void f(unsigned int b)"))
+        self.assertEqual(self.h("void f(long a)"), self.h("void f(long int b)"))
+        self.assertEqual(self.h("void f(void (*cb)(int))"), self.h("void f(void (*fn)(int))"))
+        self.assertEqual(self.h("void f(void (*cb)(int a, char const *s))"), self.h("void f(void (*fn)(int, const char *))"))
+        self.assertEqual(self.h("void f(char **argv)"), self.h("void f(char * * v)"))
+
+    def test_real_differences(self):
+        self.assertNotEqual(self.h("void f(char const *p)"), self.h("void f(char *p)"))
+        self.assertNotEqual(self.h("void f(unsigned a)"), self.h("void f(signed a)"))
+        self.assertNotEqual(self.h("void f(void (*cb)(int))"), self.h("void f(void (*cb)(long))"))
+        self.assertNotEqual(self.h("void f(char *const p)"), self.h("void f(char const *p)"))
+        self.assertNotEqual(self.h("void f(unsigned a)"), self.h("void f(unsigned long a)"))
+
     def test_unnamed_and_void(self):
         self.assertEqual(self.h("void f(void)"), self.h("void f( void )"))
         self.assertNotEqual(self.h("void f(int)"), self.h("void f(long)"))
         self.assertEqual(self.h("void f(unsigned)"), self.h("void f(unsigned)"))
         self.assertNotEqual(self.h("void f(struct a x)"), self.h("void f(struct b x)"))
+
+
+class DeclTest(unittest.TestCase):
+    h = staticmethod(g.declarations_hash)
+
+    def test_functions_and_comments_do_not_count(self):
+        base = "#pragma once\ntypedef uint32_t lichen_ctx_t;\n#define N 24\nint f(int a);\n"
+        more = "#pragma once\n// a comment\ntypedef  uint32_t   lichen_ctx_t; /* x */\n#define N 24\nint f(int a);\nint g(void);\nstatic inline int h(void) { return 1; }\n"
+        self.assertEqual(self.h(base), self.h(more))
+
+    def test_cplusplus_guard_is_ignored(self):
+        self.assertEqual(self.h('#ifdef __cplusplus\nextern "C" {\n#endif\ntypedef int t;\n#ifdef __cplusplus\n}\n#endif\n'),
+                         self.h("typedef int t;\n"))
+
+    def test_type_macro_struct_enum_changes_count(self):
+        base = "typedef uint32_t c_t;\n#define N 24\ntypedef struct { int a; char b; } s_t;\ntypedef enum { A, B } e_t;\nextern int v;\n"
+        for old, new in (("uint32_t c_t", "uint64_t c_t"), ("N 24", "N 32"), ("char b;", "short b;"), ("A, B", "B, A"),
+                         ("extern int v", "extern long v")):
+            self.assertNotEqual(self.h(base), self.h(base.replace(old, new)), new)
+
+    def test_function_pointer_typedef_counts(self):
+        self.assertNotEqual(self.h("typedef void (*cb_t)(int);"), self.h("typedef void (*cb_t)(long);"))
 
 
 class Conf:
@@ -90,8 +128,8 @@ class TableTest(unittest.TestCase):
         self.assertIn("extern void __wrap_b(void);", c)
 
     def test_parse_round_trip(self):
-        t = g.table_text([("a", "a", "x.h", "h1")], ["esp_restart"], (1, 2))
-        self.assertEqual(g.parse_table(t), ((1, 2), {"a": "h1"}, ["esp_restart"]))
+        t = g.table_text([("a", "a", "x.h", "h1")], ["esp_restart"], (1, 2), {"x.h": "t1"})
+        self.assertEqual(g.parse_table(t), ((1, 2), {"a": "h1"}, ["esp_restart"], {"x.h": "t1"}))
 
 
 class VersionTest(unittest.TestCase):
@@ -109,8 +147,37 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(g.bump_problems((1, 0), {"a": "h1"}, (1, 1), {"a": "h2"}))
         self.assertFalse(g.bump_problems((1, 0), {"a": "h1"}, (2, 0), {"a": "h2"}))
 
+    def test_type_change_is_major(self):
+        self.assertTrue(g.bump_problems((1, 0), {"a": "h"}, (1, 1), {"a": "h"}, {"x.h": "1"}, {"x.h": "2"}))
+        self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (2, 0), {"a": "h"}, {"x.h": "1"}, {"x.h": "2"}))
+        self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (1, 0), {"a": "h"}, {"x.h": "1"}, {"x.h": "1", "y.h": "2"}))
+
     def test_unchanged_needs_nothing(self):
         self.assertFalse(g.bump_problems((1, 0), {"a": "a"}, (1, 0), {"a": "a"}))
+
+
+class ElfTest(unittest.TestCase):
+    def test_missing_elf_for_an_app_dir(self):
+        with tempfile.TemporaryDirectory() as src:
+            for d in ("hello", "doom"):
+                os.makedirs(os.path.join(src, d))
+            old = g.undefined_symbols
+            g.undefined_symbols = lambda p: ["lichen_notify_dnd"]
+            try:
+                got = g.elf_problems(["/x/hello/app.elf"], [("lichen_notify_dnd", "", "", "")], src)
+                self.assertEqual(got, ["sdapps/doom has no built app.elf: nothing checked its symbols"])
+                self.assertIn("lichen_notify_dnd", g.elf_problems(["/x/hello/app.elf"], [], None)[0])
+            finally:
+                g.undefined_symbols = old
+
+    def test_missing_nm_is_a_clear_error(self):
+        old = os.environ.get("NM")
+        os.environ["NM"] = "/nonexistent/nm"
+        try:
+            with self.assertRaises(g.ExportError):
+                g.undefined_symbols("x.elf")
+        finally:
+            os.environ.pop("NM") if old is None else os.environ.__setitem__("NM", old)
 
 
 class RealTreeTest(unittest.TestCase):
@@ -125,7 +192,7 @@ class RealTreeTest(unittest.TestCase):
 
     def test_forbidden_never_exported(self):
         names = set(e[0] for e in g.generate(self.root)[0])
-        for bad in ("lichen_sys_ui_lock", "esp_restart", "esp_rom_printf", "printf", "console_register_dev", "console_exec",
+        for bad in ("lichen_register_app", "lichen_sys_ui_lock", "esp_restart", "esp_rom_printf", "printf", "console_register_dev", "console_exec",
                     "app_settings_erase_all", "settings_erase", "clock_bind_store", "clock_set_manual", "lora_set_link_callback",
                     "lora_set_rx_formatter", "lichen_crashlog_delete", "mem_book_set_bulk_quota", "test_card_set_hooks",
                     "app_ctx_add", "bench_scope_bind", "system_restart_set_hook"):

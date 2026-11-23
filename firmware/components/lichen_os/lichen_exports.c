@@ -108,7 +108,6 @@ extern void lichen_radio_switch_get(void);
 extern void lichen_random_fill(void);
 extern void lichen_random_u32(void);
 extern void lichen_reg_get(void);
-extern void lichen_register_app(void);
 extern void lichen_screen_locked(void);
 extern void lichen_sensors_get(void);
 extern void lichen_sensors_running(void);
@@ -474,7 +473,6 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_random_fill", (void *)lichen_random_fill},
     {"lichen_random_u32", (void *)lichen_random_u32},
     {"lichen_reg_get", (void *)lichen_reg_get},
-    {"lichen_register_app", (void *)lichen_register_app},
     {"lichen_screen_locked", (void *)lichen_screen_locked},
     {"lichen_sensors_get", (void *)lichen_sensors_get},
     {"lichen_sensors_running", (void *)lichen_sensors_running},

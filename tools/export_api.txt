@@ -13,7 +13,11 @@
 # app_ctx.h, notify_os.h, settings_store.h, mem_book.h, task_book.h, update_mode.h.
 
 # App registration and its own context
+# Not lichen_register_app: it takes the caps and budgets from the descriptor, so an app calling it would name itself
+# SYSTEM and skip the manifest. The loader registers an SD app from its manifest (#523). #520's unregister and observer
+# calls are the OS's too: when they land in lichen_app.h, add their `deny` lines with them.
 header lichen_app.h
+deny lichen_register_app
 # UI: screens, widgets, shared lists, text entry, keys, fonts, theme helpers
 header lichen_ui.h
 header menu.h

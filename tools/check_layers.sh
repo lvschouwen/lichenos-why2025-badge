@@ -10,8 +10,9 @@ case " $* " in
     *" --gen-manifest "*|*" --report "*|*" --init "*|*" --shrink "*) exit 0 ;;
 esac
 elfs=()
+src=(--apps-src "$here/../sdapps")
 case " $* " in
-    *" --no-symbols "*) ;; # no build was made: its apps are not either
+    *" --no-symbols "*) src=() ;; # no build was made: its apps are not either
     *) for f in "$here"/../firmware/build/sdapps/*/app.elf; do [ -e "$f" ] && elfs+=("$f"); done ;;
 esac
-python3 -I "$here/gen_export_table.py" --check --elf "${elfs[@]}"
+python3 -I "$here/gen_export_table.py" --check "${src[@]}" --elf "${elfs[@]}"
