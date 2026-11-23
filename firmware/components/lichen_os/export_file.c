@@ -340,6 +340,10 @@ int lichen_exp_rename(char const *from, char const *to) {
     if (!app_path(from, false, a, sizeof(a)) || !app_path(to, false, b, sizeof(b))) {
         return -1;
     }
+    if (strcmp(a, b) != 0 && fs_sandbox_within(a, b)) {
+        errno = EINVAL; // a folder into itself
+        return -1;
+    }
     call_t c;
     if (!call_begin(&c, NULL, false)) {
         return -1;

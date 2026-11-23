@@ -118,6 +118,7 @@ static void round_trip(void) {
     CHECK(lichen_exp_mkdir("sub", 0777) == 0 && exists("sub"));
     CHECK(lichen_exp_rename("save.dat", "sub/moved.dat") == 0 && exists("sub/moved.dat") && !exists("save.dat"));
     CHECK(lichen_exp_remove("sub/moved.dat") == 0 && !exists("sub/moved.dat"));
+    CHECK(lichen_exp_rename("sub", "sub/in/itself") == -1 && errno == EINVAL && exists("sub")); // not into its own subtree
     CHECK(lichen_exp_remove("sub") == 0 && !exists("sub")); // an empty folder too
     CHECK(lichen_exp_remove("sub") == -1);
     CHECK(lichen_exp_fopen("missing.dat", "r") == NULL && errno == ENOENT);

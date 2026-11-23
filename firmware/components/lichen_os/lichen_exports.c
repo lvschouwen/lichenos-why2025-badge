@@ -81,12 +81,14 @@ extern void lichen_exp_free(void);
 extern void lichen_exp_fseek(void);
 extern void lichen_exp_ftell(void);
 extern void lichen_exp_fwrite(void);
+extern void lichen_exp_lv_canvas_set_palette(void);
 extern void lichen_exp_malloc(void);
 extern void lichen_exp_mkdir(void);
 extern void lichen_exp_realloc(void);
 extern void lichen_exp_remove(void);
 extern void lichen_exp_rename(void);
 extern void lichen_exp_strdup(void);
+extern void lichen_exp_vtaskdelay(void);
 extern void lichen_font(void);
 extern void lichen_free(void);
 extern void lichen_fs_app_dir(void);
@@ -167,7 +169,6 @@ extern void lv_bar_set_range(void);
 extern void lv_bar_set_value(void);
 extern void lv_canvas_create(void);
 extern void lv_canvas_set_buffer(void);
-extern void lv_canvas_set_palette(void);
 extern void lv_chart_add_series(void);
 extern void lv_chart_create(void);
 extern void lv_chart_set_axis_range(void);
@@ -391,7 +392,6 @@ extern void ui_status_begin_text(void);
 extern void ui_status_end(void);
 extern void ui_status_fail_text(void);
 extern void ui_status_progress_text(void);
-extern void vTaskDelay(void);
 extern void vsnprintf(void);
 
 struct esp_elfsym const lichen_exports[] = {
@@ -551,7 +551,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"lv_bar_set_value", (void *)lv_bar_set_value},
     {"lv_canvas_create", (void *)lv_canvas_create},
     {"lv_canvas_set_buffer", (void *)lv_canvas_set_buffer},
-    {"lv_canvas_set_palette", (void *)lv_canvas_set_palette},
+    {"lv_canvas_set_palette", (void *)lichen_exp_lv_canvas_set_palette},
     {"lv_chart_add_series", (void *)lv_chart_add_series},
     {"lv_chart_create", (void *)lv_chart_create},
     {"lv_chart_set_axis_range", (void *)lv_chart_set_axis_range},
@@ -781,7 +781,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"ui_status_end", (void *)ui_status_end},
     {"ui_status_fail_text", (void *)ui_status_fail_text},
     {"ui_status_progress_text", (void *)ui_status_progress_text},
-    {"vTaskDelay", (void *)vTaskDelay},
+    {"vTaskDelay", (void *)lichen_exp_vtaskdelay},
     {"vsnprintf", (void *)vsnprintf},
     {NULL, NULL},
 };

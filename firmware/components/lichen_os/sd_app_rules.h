@@ -103,7 +103,7 @@ bool sd_app_hooks_live(sd_app_t const *a);
 // What the OS does for an app that called exit(), a bit set (SD_EXIT_NONE: nothing, the app is already leaving or not running)
 #define SD_EXIT_NONE   0u
 #define SD_EXIT_WAKE   1u // the loader may be waiting for hooks that will not come: wake it
-#define SD_EXIT_HOME   2u // the app's screens are still up: the shell closes them, their delete events start the unload
+#define SD_EXIT_HOME   2u // the app's screens are still up: close them (only its own, and only if it is on top), the delete events start the unload
 #define SD_EXIT_UNLOAD 4u // no screen is left to start it: queue the unload now
 unsigned sd_app_exit(sd_app_t *a);
 

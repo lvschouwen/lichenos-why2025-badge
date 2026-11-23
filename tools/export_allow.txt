@@ -17,6 +17,9 @@
 # (lichen_fs_sd_dir; a relative path, or an absolute one under it; no "..", other drive or backslash), at most 4 open files,
 # the SD lock per call. exit ends the app through the normal unload and never returns (sd_app_loader.c).
 # An SD app may not call vTaskDelete(NULL) (the task book wants the function to return); it returns, or calls exit.
+# The lv_* below are LVGL-task-only, like the originals: an app task wraps every call in lichen_ui_call (which takes the LVGL
+# lock and runs it on the LVGL task); an app that calls one from its own task races LVGL (#525, #526 rely on this).
+# The app's SD folder (/sd/lichen/apps/<id>) also holds its own manifest and ELF, and the file calls can overwrite them.
 # Adding a line is an API change (tools/export_table.txt, LICHEN_API_VERSION minor).
 
 # libc: memory and strings
@@ -77,8 +80,8 @@ rename = lichen_exp_rename
 mkdir = lichen_exp_mkdir
 exit = lichen_exp_exit
 
-# FreeRTOS: DG_SleepMs of the DOOM glue (#525)
-vTaskDelay
+# FreeRTOS: DG_SleepMs of the DOOM glue (#525); at most a second per call (export_wrap.c)
+vTaskDelay = lichen_exp_vtaskdelay
 
 # libc: float parsing
 atof
@@ -124,7 +127,7 @@ lv_bar_set_range
 lv_bar_set_value
 lv_canvas_create
 lv_canvas_set_buffer
-lv_canvas_set_palette
+lv_canvas_set_palette = lichen_exp_lv_canvas_set_palette
 lv_chart_add_series
 lv_chart_create
 lv_chart_set_axis_range

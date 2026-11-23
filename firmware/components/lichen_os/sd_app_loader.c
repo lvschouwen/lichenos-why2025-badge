@@ -22,6 +22,7 @@
 #include "lichen_os.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
+#include "lichen_ui_ops.h"
 #include "lichen_task.h"
 #include "lichen_task_os.h"
 #include "sd_app_svc.h"
@@ -34,11 +35,13 @@
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "safe_mode.h"
 
 #include <errno.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -349,6 +352,7 @@ static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
 // listener calls into the image) and when the card goes. The context may already be stale: both are keyed by the number only.
 // False: something may still call into the app, so its image is not freed (the app counts as one that did not stop).
 static bool release_app_holdings(sd_app_rec_t *rec) {
+    lichen_fs_sd_release_ctx(rec->ctx); // a batch it left open locks the card for everyone (only logged when its task is gone)
     export_file_close_all(rec->ctx);
     bool ok = lichen_sys_app_leave(rec->ctx); // takes the LVGL lock: never under sd_app_lock or the app lock
     if (!ok) {
@@ -838,30 +842,62 @@ void sd_apps_boot(void) {
 
 // What an SD app's exit() resolves to (tools/export_allow.txt, #533): ask the OS to close the app, then end this task like a
 // return would. The normal unload runs from there (stop hook, tasks, timers, barrier); nothing is freed under this task.
-// Known limits: a task that is not in the task book (a callback on the LVGL task, "fw elf run") cannot end: the close is
-// asked and the call returns; a task with its stack outside internal RAM is parked (the unload then faults); exit() from the
-// stop hook ends its task before it answers (the unload times out and faults).
-void lichen_exp_exit(int code) {
-    sd_app_rec_t *rec  = sd_app_find(lichen_ctx_self());
-    unsigned      todo = SD_EXIT_NONE;
-    if (!rec) {
-        ESP_LOGW(TAG, "exit(%d) from a context that is no SD app: ignored", code);
-        return;
+// Only this app's screens go, and only when the app is on top (the user may be elsewhere): the screens it pushed and its own,
+// not the whole stack. The call never returns, because the app's compiler knows it as noreturn: a booked task ends; any
+// other task (the LVGL task, a timer or console task, a context that is no SD app) cannot end, so on the LVGL task, which
+// cannot be parked without freezing the display, and for a context without an app, the badge aborts with a log line naming
+// the cause (the crash is attributed to the app, like any other fault); any other unbooked task of an app is suspended for
+// good after the close was asked. A PSRAM-stack task is parked by lichen_os_task_end_self (the unload then faults), and
+// exit() from the stop hook ends its task before it answers (the unload times out and faults).
+static void pop_root(void *arg) {
+    (void)arg;
+    shell_back(); // the app's first screen, now on top
+}
+
+static void close_app_screens(sd_app_rec_t *rec) {
+    app_life_t life;
+    if (!lichen_sys_life_get(rec->ctx, &life) || life.state != LIFE_OPEN) {
+        return; // another screen covers the app: the user stays where they are, the unload follows when the app's screens go
     }
     sd_app_lock();
-    todo = sd_app_exit(&rec->sda);
+    lv_obj_t *root = rec->screen;
+    sd_app_unlock();
+    if (root) {
+        shell_back_to(root, pop_root, NULL);
+    } else {
+        shell_back();
+    }
+}
+
+void lichen_exp_exit(int code) {
+    sd_app_rec_t *rec = sd_app_find(lichen_ctx_self());
+    if (!rec) {
+        ESP_LOGE(TAG, "exit(%d) from a context that is no SD app: nothing can end here, abort", code);
+        abort();
+    }
+    sd_app_lock();
+    unsigned todo = sd_app_exit(&rec->sda);
     sd_app_unlock();
     ESP_LOGI(TAG, "%s: exit(%d)", rec->m.id, code);
+    lichen_fs_sd_release_ctx(rec->ctx); // before this task ends: only its taker can end the batch
     if (todo & SD_EXIT_WAKE) {
         xSemaphoreGive(g_hooks_sem); // the loader's wait for hooks main() will not give
     }
     if (todo & SD_EXIT_HOME) {
-        shell_home(); // the app's screens go; the last delete event queues the unload
+        close_app_screens(rec);
     }
     if ((todo & SD_EXIT_UNLOAD) && !post(MSG_CLOSED, rec)) {
         ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
     }
-    if (!lichen_os_task_end_self()) {
-        ESP_LOGW(TAG, "%s: exit() on a task that cannot end: returns", rec->m.id);
+    if (lichen_os_task_end_self()) {
+        return; // not reached
+    }
+    if (lichen_ui_ops_lock_held()) {
+        ESP_LOGE(TAG, "%s: exit() on the LVGL task cannot end it: abort", rec->m.id);
+        abort();
+    }
+    ESP_LOGW(TAG, "%s: exit() on a task the OS did not start: suspended for good", rec->m.id);
+    for (;;) {
+        vTaskSuspend(NULL);
     }
 }

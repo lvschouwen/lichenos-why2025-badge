@@ -104,3 +104,11 @@ bool fs_sandbox_resolve(char const *dir, char const *path, bool with_root, char 
     }
     return ok;
 }
+
+bool fs_sandbox_within(char const *from, char const *to) {
+    if (!from || !to) {
+        return false;
+    }
+    size_t n = strlen(from);
+    return strncmp(from, to, n) == 0 && (to[n] == '\0' || to[n] == '/');
+}

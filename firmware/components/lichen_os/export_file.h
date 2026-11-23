@@ -15,6 +15,10 @@ extern "C" {
 // belong to someone else now. Takes the SD lock (the loader task, never the LVGL task). Returns how many were open.
 size_t export_file_close_all(lichen_ctx_t ctx);
 
+// Ends the SD batch (lichen_fs_sd_begin) that ctx still holds, when the calling task took it (lichen_fs.c). The exiting app's
+// own task calls it before it ends; the loader at unload (the holder is gone by then: only logged).
+void lichen_fs_sd_release_ctx(lichen_ctx_t ctx);
+
 #ifdef __cplusplus
 }
 #endif

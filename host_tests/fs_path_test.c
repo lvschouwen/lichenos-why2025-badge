@@ -90,6 +90,8 @@ int main(void) {
     CHECK(!fs_sandbox_resolve(D, "abcd", false, tight, sizeof(tight)) && tight[0] == '\0');
     CHECK(!fs_sandbox_resolve(D, "a", false, r, 0));
 
+    CHECK(fs_sandbox_within("/d/a", "/d/a") && fs_sandbox_within("/d/a", "/d/a/b/c"));
+    CHECK(!fs_sandbox_within("/d/a", "/d/ab") && !fs_sandbox_within("/d/a/b", "/d/a") && !fs_sandbox_within(NULL, "/d"));
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

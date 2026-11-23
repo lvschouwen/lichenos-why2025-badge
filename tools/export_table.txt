@@ -413,7 +413,7 @@ export	lv_bar_set_range	lv_bar_set_range	allow	e72a9615
 export	lv_bar_set_value	lv_bar_set_value	allow	60e2b324
 export	lv_canvas_create	lv_canvas_create	allow	7c3f18cc
 export	lv_canvas_set_buffer	lv_canvas_set_buffer	allow	030b54b7
-export	lv_canvas_set_palette	lv_canvas_set_palette	allow	45147702
+export	lv_canvas_set_palette	lichen_exp_lv_canvas_set_palette	allow	7e350cee
 export	lv_chart_add_series	lv_chart_add_series	allow	0fafc92f
 export	lv_chart_create	lv_chart_create	allow	bcab8a59
 export	lv_chart_set_axis_range	lv_chart_set_axis_range	allow	3d839712
@@ -643,5 +643,5 @@ export	ui_status_begin_text	ui_status_begin_text	ui_text.h	2b51db71
 export	ui_status_end	ui_status_end	ui_text.h	110912a6
 export	ui_status_fail_text	ui_status_fail_text	ui_text.h	08a13f60
 export	ui_status_progress_text	ui_status_progress_text	ui_text.h	f906ea63
-export	vTaskDelay	vTaskDelay	allow	0467eba2
+export	vTaskDelay	lichen_exp_vtaskdelay	allow	976b5f4f
 export	vsnprintf	vsnprintf	allow	e6d1ce35

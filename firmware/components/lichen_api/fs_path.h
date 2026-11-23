@@ -24,6 +24,10 @@ bool fs_app_dir_path(char const *base, char const *id, char *out, size_t cap);
 // the answer is dir); without it the path must name something below dir (open, remove and rename never touch the folder).
 bool fs_sandbox_resolve(char const *dir, char const *path, bool with_root, char *out, size_t cap);
 
+// Whether `to` is `from` itself or below it (both canonical, from fs_sandbox_resolve): a rename of a folder into its own
+// subtree, which FAT would refuse only half way (#533). The prefix must end at a component boundary ("/a/b" is not in "/a/bc").
+bool fs_sandbox_within(char const *from, char const *to);
+
 #ifdef __cplusplus
 }
 #endif

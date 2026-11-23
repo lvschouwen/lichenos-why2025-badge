@@ -52,7 +52,7 @@ set(dev_srcs)
 if(CONFIG_LICHEN_DEV_COMMANDS)
     list(APPEND dev_srcs "sd_apps.c" "sd_elf_args.c")
 endif()
-idf_component_register(SRCS ${dev_srcs} "sd_app_loader.c" "sd_app_scan.c" "sd_app_rules.c" "sd_elf_src.c" "lichen_exports.c" "export_shims.c" "export_file.c" "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "update_mode.c"
+idf_component_register(SRCS ${dev_srcs} "sd_app_loader.c" "sd_app_scan.c" "sd_app_rules.c" "sd_elf_src.c" "lichen_exports.c" "export_shims.c" "export_file.c" "export_wrap.c" "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "update_mode.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"

@@ -1,6 +1,7 @@
 #include "lichen_fs.h"
 
 #include "app_state.h"
+#include "export_file.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -171,6 +172,7 @@ static char const *volatile sd_holder;
 // whoever waits in vain. Written under the lock, read racily: a hint, not a decision, except for the ctx compare in
 // lichen_fs_sd_end, which only the holder can pass.
 static volatile uint32_t sd_holder_ctx;
+static TaskHandle_t volatile sd_holder_task; // who took the lock: a mutex is given back by its taker only
 
 bool lichen_fs_sd_begin(lichen_ctx_t ctx, uint32_t wait_ms) {
     if (!lichen_sys_caps_ok(ctx, CAP_SD, "lichen_fs_sd_begin")) {
@@ -189,8 +191,9 @@ bool lichen_fs_sd_begin(lichen_ctx_t ctx, uint32_t wait_ms) {
         }
         return false;
     }
-    sd_holder     = id;
-    sd_holder_ctx = ctx;
+    sd_holder      = id;
+    sd_holder_ctx  = ctx;
+    sd_holder_task = xTaskGetCurrentTaskHandle();
     return true;
 }
 
@@ -204,11 +207,30 @@ void lichen_fs_sd_end(lichen_ctx_t ctx, int err) {
                  sd_holder ? sd_holder : "nobody");
         return;
     }
-    sd_holder     = NULL;
-    sd_holder_ctx = 0;
+    sd_holder      = NULL;
+    sd_holder_ctx  = 0;
+    sd_holder_task = NULL;
     sd_end(sd_io_from_errno(err));
 }
 
 bool lichen_fs_sd_mounted(void) {
     return sd_mounted();
+}
+
+// The loader's side (#533): an app that leaves must not keep the card locked. Ends the batch ctx still holds, when this very
+// task took it (a FreeRTOS mutex given back by another task asserts); a holder task that is already gone cannot be undone
+// from here: logged, and the card stays locked until a restart.
+void lichen_fs_sd_release_ctx(lichen_ctx_t ctx) {
+    if (!ctx || sd_holder_ctx != ctx) {
+        return;
+    }
+    if (sd_holder_task != xTaskGetCurrentTaskHandle()) {
+        ESP_LOGE(TAG, "%s: left with the SD batch open on a task that is gone: the card stays locked", sd_holder ? sd_holder : "?");
+        return;
+    }
+    ESP_LOGW(TAG, "%s: left with the SD batch open: ended", sd_holder ? sd_holder : "?");
+    sd_holder      = NULL;
+    sd_holder_ctx  = 0;
+    sd_holder_task = NULL;
+    sd_end(SD_IO_NEUTRAL);
 }

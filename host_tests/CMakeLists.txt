@@ -1400,7 +1400,7 @@ add_test(NAME app_ns_test COMMAND app_ns_test)
 # The apps' secrets class (#288): the declared prefix, the stored name, out of backup groups and keep lists
 add_executable(app_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/app_secret_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c)
 target_include_directories(app_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(app_secret_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_secret_test COMMAND app_secret_test)
