@@ -176,9 +176,10 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     if (refusal) {
         ESP_LOGE(TAG, "app %s (id %s, alias %s) not registered: %s", app->name ? app->name : "?",
                  app->id ? app->id : "-", app->alias ? app->alias : "-", refusal);
-    } else if (ctx == LICHEN_CTX_NONE) {
-        ESP_LOGE(TAG, "no room for app %s: %d apps are registered already, or no memory for its slot", app->name,
-                 APP_CTX_MAX_APPS);
+    } else if (ctx == LICHEN_CTX_NONE && app_ctx_apps(t) >= APP_CTX_MAX_APPS) {
+        ESP_LOGE(TAG, "no room for app %s: %d apps are registered already", app->name, APP_CTX_MAX_APPS);
+    } else if (ctx == LICHEN_CTX_NONE) { // #531: also what a registration before lichen_sys_mem_start gets
+        ESP_LOGE(TAG, "app %s not registered: no memory for its slot (is lichen_sys_mem_start done?)", app->name);
     } else {
         ring_note(ctx, app->id, false);
         if (app->backup_keys) {

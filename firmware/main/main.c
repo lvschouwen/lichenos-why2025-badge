@@ -591,6 +591,10 @@ static void start_nvs(boot_ctx_t *ctx) {
     // Right after NVS is up and before anything can restart: the restart history (the "factory reset: ..." note, the PSRAM
     // restarts below) is written through this binding. It only stores function pointers (#235).
     settings_bind_services();
+    // Before the first registration (#531): since #520 an app's slot and block are PSRAM from lichen_alloc, which the
+    // gate has only once lichen_sys_mem_start handed it over, and its backup keys go through the backup guard
+    settings_backup_io_boot(); // #520: an app that leaves waits for a running backup
+    lichen_sys_mem_start();    // the gate's widgets allocate through lichen_alloc (#296): before the boot screen
     meshcore_app_register(); // first in home's order; its keep list is needed by the reset
     declare_keep_keys();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
@@ -611,8 +615,6 @@ static void start_nvs(boot_ctx_t *ctx) {
 
 static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
-    settings_backup_io_boot(); // #520: an app that leaves waits for a running backup
-    lichen_sys_mem_start(); // the gate's widgets allocate through lichen_alloc (#296): before the boot screen
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     clock_boot_init();   // the carried or the saved clock (#326), before anything stamps a time
