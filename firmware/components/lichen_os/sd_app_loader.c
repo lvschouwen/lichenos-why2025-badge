@@ -566,12 +566,15 @@ static bool closed_try(sd_app_rec_t *rec) {
     }
     sd_app_lock();
     bool begin = sd_app_unload_begin(&rec->sda);
+    // A removal starts the unload with a counted screen still animating out: then the image stays, and the free is left to
+    // remove_one and the free_pending / MSG_FREE path (sd_app_may_free)
+    bool free_now = sd_app_may_free(&rec->sda);
     sd_app_unlock();
     if (!begin) {
         return true; // opened again
     }
     heap_snap_t before = heap_now();
-    if (unload(rec, true)) {
+    if (unload(rec, free_now) && free_now) {
         heap_snap_t after = heap_now();
         ESP_LOGI(TAG, "%s: unloaded %+d B %+d B", rec->m.id, (int)(after.psram - before.psram),
                  (int)(after.internal - before.internal));
