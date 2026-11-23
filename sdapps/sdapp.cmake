@@ -28,7 +28,16 @@ macro(sdapp_elf app_id)
     endif()
     file(STRINGS "${SDAPP_FW_SDKCONFIG}" _sdapp_lv REGEX "^#define CONFIG_LV_")
     string(REPLACE ";" "\n" _sdapp_lv "${_sdapp_lv}")
-    file(WRITE "${CMAKE_BINARY_DIR}/sdapp_lv_config.h" "#pragma once\n${_sdapp_lv}\n")
+    # only when the content changes: a rewrite would recompile the app on every configure
+    set(_sdapp_lv_file "${CMAKE_BINARY_DIR}/sdapp_lv_config.h")
+    set(_sdapp_lv_new "#pragma once\n${_sdapp_lv}\n")
+    set(_sdapp_lv_old "")
+    if(EXISTS "${_sdapp_lv_file}")
+        file(READ "${_sdapp_lv_file}" _sdapp_lv_old)
+    endif()
+    if(NOT "${_sdapp_lv_old}" STREQUAL "${_sdapp_lv_new}")
+        file(WRITE "${_sdapp_lv_file}" "${_sdapp_lv_new}")
+    endif()
     # one list argument: idf_build_set_property takes a single value
     set(_sdapp_opts "-I${SDAPP_ROOT}/firmware/components/lichen_api"
                     "-I${SDAPP_ROOT}/firmware/managed_components/lvgl__lvgl"

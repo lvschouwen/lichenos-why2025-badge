@@ -205,6 +205,8 @@ build_sdapps() {
         [ -f "$app/manifest" ] && grep -qx "id=$id" "$app/manifest" || { echo "sdapps/$id: manifest missing or its id is not '$id'" >&2; return 1; }
         IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" reconfigure
         cmake --build "$out" --target elf
+        # The app's LVGL structs must be the firmware's (sdapps/sdapp.cmake forces the firmware's CONFIG_LV_* values)
+        python3 -I "$repo/tools/check_lv_layout.py" --fw "$bdir/compile_commands.json" --app "$out/compile_commands.json"
         cp "$out/$id.app.elf" "$out/app.elf"
         cp "$app/manifest" "$out/manifest"
     done

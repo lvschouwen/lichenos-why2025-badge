@@ -1,3 +1,5 @@
+# Manifest of the @NAME_C@ SD app (format: lichen_api/lichen_manifest.h): key=value lines, # starts a comment.
+# caps: bare names from lichen_caps.h without CAP_, comma or space separated, e.g. caps=NOTIFY,SD
 id=@ID@
 name=@NAME_C@
 api=@API@

@@ -1,3 +1,4 @@
+# Manifest of the hello SD app (format: lichen_api/lichen_manifest.h): key=value lines, # starts a comment.
 id=hello
 name=Hello
 api=1.0

@@ -2908,3 +2908,4 @@ target_include_directories(lichen_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(lichen_manifest_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_manifest_test COMMAND lichen_manifest_test)
 add_test(NAME new_app_sd_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/new_app_sd_test.sh)
+add_test(NAME check_lv_layout_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_lv_layout_test.py)

@@ -33,7 +33,7 @@ refuses() { # refuses <why> <id> <name>
     [ "$before" = "$(snap)" ] || bad "$why: the tree changed"
 }
 
-for id in "" Foo 1abc a-b a/b ../x .. a.b "a b" toolongidentifier1 'a;b'; do refuses "bad id '$id'" "$id" Fine; done
+for id in $'demo\n' "" Foo 1abc a-b a/b ../x .. a.b "a b" toolongidentifier1 'a;b'; do refuses "bad id '$id'" "$id" Fine; done
 for id in notes calc settings meshcore lichen c6 crash test hello; do refuses "taken id '$id'" "$id" Fine; done
 refuses "empty name" ok1 ""
 refuses "quote in name" ok1 'My "App"'

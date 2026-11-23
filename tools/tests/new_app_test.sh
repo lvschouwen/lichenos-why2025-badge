@@ -48,7 +48,7 @@ refuses() { # refuses <why> <id> <name>: exit 1, a message, tree untouched
 }
 
 # Refusals first, all on the clean tree
-for id in "" Foo 1abc a-b a/b ../x ..  a.b "a b" toolongidentifier1 .hidden 'a;b' 'a$(id)'; do
+for id in $'demo\n' "" Foo 1abc a-b a/b ../x ..  a.b "a b" toolongidentifier1 .hidden 'a;b' 'a$(id)'; do
     refuses "bad id '$id'" "$id" "Fine"
 done
 for id in notes calc clock meshcore settings lichen c6 crash test qrcode lora_spectrum; do

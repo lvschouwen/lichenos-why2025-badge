@@ -23,7 +23,7 @@ import sys
 import tempfile
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_template")
-ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,12}$")  # lichen_app.h: 1..13 of a-z0-9_; a letter first, it becomes C identifiers
+ID_RE = re.compile(r"[a-z][a-z0-9_]{0,12}")  # lichen_app.h: 1..13 of a-z0-9_; a letter first, it becomes C identifiers. fullmatch: `$` would accept a trailing newline
 NAME_MAX = 24                                  # a tile and a menu title are narrow
 BUILTIN_RESERVED = ("c6", "crash", "lichen", "test")  # lichen_register_app refuses these (lichen_app.h)
 
@@ -33,7 +33,7 @@ class Refused(Exception):
 
 
 def check_id(app_id):
-    if not ID_RE.match(app_id):
+    if not ID_RE.fullmatch(app_id):
         raise Refused("id '%s': 1-13 characters of a-z, 0-9 and _, starting with a letter (it names C functions and "
                       "the app's settings namespace)" % app_id)
 
