@@ -1,7 +1,7 @@
 # Manifest of the hello SD app (format: lichen_api/lichen_manifest.h): key=value lines, # starts a comment.
 id=hello
 name=Hello
-api=1.0
+api=2.0
 entry=app.elf
 caps=NOTIFY
 internal_ram_kib=8

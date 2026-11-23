@@ -6,7 +6,7 @@
 # allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
 # the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
-api	1.0
+api	2.0
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
 wrap	bootloader_random_enable	__wrap_bootloader_random_enable
 wrap	esp_panic_handler	__wrap_esp_panic_handler
@@ -104,7 +104,6 @@ type	lichen_haptics.h	LICHEN_HAPTIC_LOW	e280b20c
 type	lichen_haptics.h	LICHEN_HAPTIC_MEDIUM	d4fafa50
 type	lichen_haptics.h	LICHEN_HAPTIC_NOTIFY	d4fafa50
 type	lichen_haptics.h	LICHEN_HAPTIC_TICK	e280b20c
-type	lichen_app.h	LICHEN_MAX_APPS	c12ae30f
 type	lichen_mem.h	LICHEN_MEM_BULK	c12ad69e
 type	lichen_mem.h	LICHEN_MEM_INTERNAL	c3c278dd
 type	lichen_mem.h	LICHEN_MEM_ZERO	0523eeae
@@ -138,7 +137,6 @@ type	mem_book.h	MEM_BOOK_BULK_ENFORCE	cb553799
 type	mem_book.h	MEM_BOOK_BULK_QUOTA	3f36fd46
 type	mem_book.h	MEM_BOOK_INTERNAL_QUOTA	23f2d130
 type	mem_book.h	MEM_BOOK_OS	3ae9aad2
-type	mem_book.h	MEM_BOOK_OWNERS	15a044d5
 type	mem_book.h	MEM_BOOK_OWNER_CAP	d47a6115
 type	mem_book.h	MEM_CHARGE_NO_ROW	05239f15
 type	mem_book.h	MEM_CHARGE_OK	e280b20c
@@ -229,7 +227,7 @@ type	lora_app.h	lora_rx_formatter_t	f33f2aa2
 type	lora_app.h	lora_sweep_err_t	3f31e90f
 type	lora_app.h	lora_sweep_result_t	23202136
 type	lora_app.h	lora_ui_stats_t	b1a9c7ae
-type	mem_book.h	mem_book_t	b212d14a
+type	mem_book.h	mem_book_t	0a87df37
 type	mem_book.h	mem_charge_t	58d4b7ca
 type	mem_book.h	mem_release_t	cef3ac01
 type	mem_book.h	mem_use_t	3a8e9e69
@@ -240,6 +238,7 @@ type	radio_state.h	radio_hold_t	376d5dd1
 type	radio_state.h	radio_id_t	bb5f5f4e
 type	radio_state.h	radio_state_t	835945fa
 type	settings_backup.h	sb_err_t	32b876ee
+type	settings_backup.h	sb_guard_t	c1b5bdb7
 type	settings_backup.h	sb_key_t	26cd702e
 type	settings_backup.h	sb_result_t	d5c99783
 type	settings_backup.h	sb_type_t	22c2d914
