@@ -531,6 +531,19 @@ ota_zpieces() {
     [ "$OTA_ZPIECES" = yes ]
 }
 
+# Whether the receiver streams SD0: pieces to the card (it says "sd0-stream" in /info, #529), so a file above the
+# 4 MiB its PSRAM stage takes can go there; asked once per run
+OTA_SD_STREAM=
+ota_sd_stream() {
+    if [ -z "$OTA_SD_STREAM" ]; then
+        OTA_SD_STREAM=no
+        if [[ $(ota_info_line "$1") == *sd0-stream* ]]; then
+            OTA_SD_STREAM=yes
+        fi
+    fi
+    [ "$OTA_SD_STREAM" = yes ]
+}
+
 # ota_zpiece <route> <offset> <piece> <out>: write the piece as a zlib stream to <out> when the receiver takes one and
 # it comes out smaller; false = send the piece as it is. The first firmware piece always goes plain: the badge checks
 # the image header in it before it erases anything (#298).
@@ -706,7 +719,17 @@ cmd_ota_firmware() {
 
 cmd_ota_file() {
     [ -f "$2" ] || { echo "no such file: $2" >&2; exit 1; }
-    ota_room "$1" "$(stat -c %s "$2")" "$2" || exit 1
+    local size
+    size=$(stat -c %s "$2")
+    if [[ ${3^^} == SD0:* ]]; then
+        # The card has its own free space (the badge answers 507 when it is short); /storage's is not the limit
+        if [ "$size" -gt $((4 * 1024 * 1024)) ] && ! ota_sd_stream "$1"; then
+            echo "this firmware takes at most 4 MiB for SD0: ($2 is $size bytes): update it first, or copy the file onto the card by hand" >&2
+            exit 1
+        fi
+    else
+        ota_room "$1" "$size" "$2" || exit 1
+    fi
     ota_put "$1" file "$2" "$3"
 }
 

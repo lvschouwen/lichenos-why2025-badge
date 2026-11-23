@@ -62,7 +62,7 @@ static bool memory_sink(void *ctx, uint8_t const *data, size_t len) {
 }
 
 // Create every directory leading up to the file at path (a /storage/... or /sd/... path)
-static void mkdir_parents(char const *path) {
+void ota_mkdir_parents(char const *path) {
     char dir[OTA_PATH_MAX + 16];
     snprintf(dir, sizeof(dir), "%s", path);
     for (size_t n = ota_path_next_dir(path, 0); n; n = ota_path_next_dir(path, n)) {
@@ -114,6 +114,17 @@ bool ota_drive_ready(int fd, char const *vms) {
     return false;
 }
 
+// The swap alone (the temp file is written): see place_file. Sets errno for what failed.
+ota_place_t ota_swap_temp(char const *path, char const *temp, bool sd) {
+    if (rename(temp, path) == 0) {
+        return OTA_PLACE_OK;
+    }
+    if (ota_rename_retry(sd, errno) && unlink(path) == 0) {
+        return rename(temp, path) == 0 ? OTA_PLACE_OK : OTA_PLACE_LOST;
+    }
+    return OTA_PLACE_SWAP;
+}
+
 // The write and the swap of one upload, under the card's batch lock on SD0: (a card pulled mid-write fails the call).
 // FLASH0: is LittleFS (#300): one rename replaces the old file atomically. SD0: is FAT, whose rename refuses an
 // existing target: the old file is removed first, so there a power cut between the two leaves the data in the temp
@@ -122,20 +133,40 @@ static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8
     if (ota_is_directory(path)) { // the early check in the handler ran outside the card's lock
         return OTA_PLACE_DIR;
     }
-    mkdir_parents(path);
+    ota_mkdir_parents(path);
     unlink(temp); // left by an upload that was cut; only the target's own directory is cleaned
     ota_place_t step = write_file(temp, data, len) ? OTA_PLACE_OK : OTA_PLACE_WRITE;
-    if (step == OTA_PLACE_OK && rename(temp, path) != 0) {
-        step = OTA_PLACE_SWAP;
-        if (ota_rename_retry(sd, errno) && unlink(path) == 0) {
-            step = rename(temp, path) == 0 ? OTA_PLACE_OK : OTA_PLACE_LOST;
-        }
+    if (step == OTA_PLACE_OK) {
+        step = ota_swap_temp(path, temp, sd);
     }
     *err = errno;
     if (ota_place_drops_temp(step)) {
         unlink(temp);
     }
     return step;
+}
+
+// Answer how a file's swap into place ended (ota_finish_file and the pieces' SD0: finish); true = it landed
+bool ota_place_reply(int fd, ota_place_t step, int err, char const *vms, size_t len, long long sent) {
+    if (step == OTA_PLACE_DIR) {
+        ota_respond(fd, 409, "%s is a directory, nothing written", vms);
+        return false;
+    }
+    if (step == OTA_PLACE_WRITE) {
+        ota_respond(fd, 500, "couldn't write the upload, file left as it was");
+        return false;
+    }
+    if (step == OTA_PLACE_LOST) {
+        ota_respond(fd, 500, "old file removed, new data kept as ota_upload.tmp (%s)", strerror(err));
+        return false;
+    }
+    if (step == OTA_PLACE_SWAP) {
+        ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
+        return false;
+    }
+    ESP_LOGI(TAG, "wrote %s (%zu bytes)", vms, len);
+    ota_respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
+    return true;
 }
 
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
@@ -163,25 +194,7 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
     }
     ota_change_end(false);
-    if (step == OTA_PLACE_DIR) {
-        ota_respond(fd, 409, "%s is a directory, nothing written", vms);
-        return false;
-    }
-    if (step == OTA_PLACE_WRITE) {
-        ota_respond(fd, 500, "couldn't write %s, file left as it was", temp);
-        return false;
-    }
-    if (step == OTA_PLACE_LOST) {
-        ota_respond(fd, 500, "old file removed, new data kept as ota_upload.tmp (%s)", strerror(err));
-        return false;
-    }
-    if (step == OTA_PLACE_SWAP) {
-        ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
-        return false;
-    }
-    ESP_LOGI(TAG, "wrote %s (%zu bytes)", path, len);
-    ota_respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
-    return true;
+    return ota_place_reply(fd, step, err, vms, len, sent);
 }
 
 // Validate what was written to the slot and make it the boot slot; it runs after a reboot, on trial until it proves itself

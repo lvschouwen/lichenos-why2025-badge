@@ -4,6 +4,7 @@
 // (info, screenshot, log, crashes, console) and ota_token.c. All of it runs on the one server task, one request at a
 // time, except the screenshot sender (ota_extra.c). Not for use outside this component.
 
+#include "ota_path.h"
 #include "ota_proto.h"
 #include "ota_route.h"
 #include "ota_server.h"
@@ -92,6 +93,9 @@ bool        ota_is_directory(char const *posix_path);
 bool        ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_len, long long body);
 // 409 and false when vms is on SD0: and no card is mounted (#528)
 bool        ota_drive_ready(int fd, char const *vms);
+void        ota_mkdir_parents(char const *posix_path);
+ota_place_t ota_swap_temp(char const *path, char const *temp, bool sd);
+bool        ota_place_reply(int fd, ota_place_t step, int err, char const *vms, size_t len, long long sent);
 bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent);
 bool        ota_finish_assets(int fd, uint8_t const *data, size_t len, long long sent);
 bool ota_install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t handle, size_t len, long long sent);

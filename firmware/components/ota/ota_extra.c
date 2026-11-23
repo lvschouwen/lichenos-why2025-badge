@@ -298,7 +298,8 @@ static void start_screenshot(int fd) {
 }
 
 // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces, "zpieces" compressed pieces
-// (#298); "storage free N" (#299) lets
+// (#298), "sd0-stream" that a file for SD0: may exceed FILE_MAX because its pieces go straight to the card (#529);
+// "storage free N" (#299) lets
 // it check a file push fits before it sends a byte
 static void respond_info(int fd) {
     uint64_t free_b, total_b;
@@ -309,7 +310,7 @@ static void respond_info(int fd) {
     // The hw object makes the line longer than ota_respond's stack buffer: built in the PSRAM body buffer, which no other
     // request uses while this one is answered (#321)
     char *line = (char *)ota_body_buf;
-    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces%s%s%s%s; hw ", esp_app_get_description()->version,
+    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces sd0-stream%s%s%s%s; hw ", esp_app_get_description()->version,
                           ota_hooks.prepare ? " prepare" : "", room, ota_hooks.api_version ? "; api " : "",
                           ota_hooks.api_version ? ota_hooks.api_version : "");
     n          = n < 0 ? 0 : n > 255 ? 255 : n; // snprintf says what it would have written
