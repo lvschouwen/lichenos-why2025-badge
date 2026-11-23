@@ -31,6 +31,7 @@ typedef enum {
     START_LORA,           // lora_start, only with the C6 link up
     START_C6_HOOKS,       // the C6 reset recovery hooks (#14 T-B)
     START_APPS,           // every app's background part (#66)
+    START_SD_APPS,        // the SD apps' loader: tiles from the card, after every built-in app and the app list are live (#523)
     START_OTA,            // the OTA server and its hooks (#76)
     START_COUNT
 } boot_start_t;

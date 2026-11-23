@@ -109,6 +109,7 @@ extern void lichen_random_fill(void);
 extern void lichen_random_u32(void);
 extern void lichen_reg_get(void);
 extern void lichen_screen_locked(void);
+extern void lichen_sd_app_hooks(void);
 extern void lichen_sensors_get(void);
 extern void lichen_sensors_running(void);
 extern void lichen_station_clock(void);
@@ -474,6 +475,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_random_u32", (void *)lichen_random_u32},
     {"lichen_reg_get", (void *)lichen_reg_get},
     {"lichen_screen_locked", (void *)lichen_screen_locked},
+    {"lichen_sd_app_hooks", (void *)lichen_sd_app_hooks},
     {"lichen_sensors_get", (void *)lichen_sensors_get},
     {"lichen_sensors_running", (void *)lichen_sensors_running},
     {"lichen_station_clock", (void *)lichen_station_clock},

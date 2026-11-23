@@ -2898,6 +2898,24 @@ add_executable(lichen_manifest_test
 target_include_directories(lichen_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(lichen_manifest_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_manifest_test COMMAND lichen_manifest_test)
+# The SD apps' loader rules (#523): scan verdicts, open refusals, the load/unload state machine and its order
+add_executable(sd_app_rules_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sd_app_rules_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/sd_app_rules.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_manifest.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_caps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
+)
+target_include_directories(sd_app_rules_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+)
+target_compile_options(sd_app_rules_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sd_app_rules_test COMMAND sd_app_rules_test)
 add_test(NAME new_app_sd_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/new_app_sd_test.sh)
 add_test(NAME check_lv_layout_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_lv_layout_test.py)
 # The SD apps' export table (#519): sorted, unique, from the headers or the allow list, wraps never exported raw

@@ -72,6 +72,9 @@ void lichen_sys_mem_start(void);
 // main.c's apps boot step, once every app registered (#231): each app's declared PSRAM budget becomes its PSRAM quota in
 // the memory book, accounted (a charge past it is granted and counted in "fw mem"), not enforced. Any task.
 void lichen_sys_mem_quotas(void);
+// The same for one app that registered after that (an SD app, #523): ctx's PSRAM quota is psram_kib KiB (0: none declared).
+// False for a ctx that is stale or a SYSTEM app's. Any task but an interrupt.
+bool lichen_sys_mem_quota_set(uint32_t ctx, uint32_t psram_kib);
 
 #ifdef __cplusplus
 }

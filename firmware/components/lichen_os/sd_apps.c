@@ -5,6 +5,7 @@
 
 #include "lichen_exports.h"
 #include "sd_elf_args.h"
+#include "sd_elf_src.h"
 #include "sdcard.h"
 
 #include "esp_elf.h"
@@ -22,39 +23,6 @@
 #include <unistd.h>
 
 typedef struct {
-    int    fd;
-    size_t size;
-} file_src_t;
-
-// Plain read(): no stdio buffer (newlib would take it from internal RAM) and nothing left holding the file's bytes.
-static int src_read(void *ctx, size_t off, void *buf, size_t len) {
-    file_src_t *s = ctx;
-    if (lseek(s->fd, (off_t)off, SEEK_SET) == (off_t)-1) {
-        return -EIO;
-    }
-    for (size_t got = 0; got < len;) {
-        ssize_t n = read(s->fd, (uint8_t *)buf + got, len - got);
-        if (n <= 0) {
-            return -EIO;
-        }
-        got += (size_t)n;
-    }
-    return 0;
-}
-
-static size_t src_size(void *ctx) {
-    return ((file_src_t *)ctx)->size;
-}
-
-static void src_close(void *ctx) {
-    file_src_t *s = ctx;
-    if (s->fd >= 0) {
-        close(s->fd);
-        s->fd = -1;
-    }
-}
-
-typedef struct {
     size_t psram;
     size_t internal;
 } heap_snap_t;
@@ -63,41 +31,17 @@ static heap_snap_t snap(void) {
     return (heap_snap_t){heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_free_size(MALLOC_CAP_INTERNAL)};
 }
 
-// Opens the file for the loader; false with errno set. The loader closes it (src_close) on every path once given it.
-static bool open_source(char const *path, file_src_t *s) {
-    s->fd = open(path, O_RDONLY);
-    if (s->fd < 0) {
-        return false;
-    }
-    struct stat st;
-    int         err = 0;
-    if (fstat(s->fd, &st) != 0) {
-        err = errno;
-    } else if (!S_ISREG(st.st_mode)) {
-        err = EISDIR;
-    } else if (st.st_size <= 0) {
-        err = ENOENT; // an empty file is no image
-    }
-    if (err) {
-        src_close(s);
-        errno = err;
-        return false;
-    }
-    s->size = (size_t)st.st_size;
-    return true;
-}
-
 // The entry runs on the calling task's stack, which is the console's (the update server's task over Wi-Fi): about 4 KB
-// of it is free, shared with everything the app calls through the OS. Until every app has its own task (#523) an app
-// must stay small: no big locals, no deep call chains. The spike's hello needs next to nothing.
+// of it is free, shared with everything the app calls through the OS, so an app run this way must stay small. The loader
+// service (sd_app_loader.c, #523) gives an app a task of its own; the app's lichen_sd_app_hooks answers false here (no load).
 static void run_elf(char const *path) {
     bool on_sd = sd_elf_on_sd(path); // /storage needs no card
     if (on_sd && !sd_begin(2000)) {
         console_reply("elf run: card not mounted (or busy)");
         return;
     }
-    file_src_t file;
-    if (!open_source(path, &file)) {
+    sd_elf_file_t file;
+    if (!sd_elf_open_source(path, &file)) {
         int err = errno;
         if (on_sd) {
             sd_end(sd_io_from_errno(err));
@@ -105,7 +49,7 @@ static void run_elf(char const *path) {
         console_reply("elf run: cannot open %s (errno %d)", path, err);
         return;
     }
-    elf_source_t src = {.size = src_size, .read = src_read, .close = src_close, .ctx = &file};
+    elf_source_t src = sd_elf_source(&file);
     esp_elf_t    elf;
     heap_snap_t  before = snap();
     int64_t      t0     = esp_timer_get_time();
@@ -146,12 +90,7 @@ static void cmd_elf(char const *args) {
 }
 
 void sd_apps_console_register(void) {
-    static bool registered; // main calls this once; a second esp_elf_register_symbol would only answer -EEXIST
-    if (registered) {
-        return;
-    }
-    registered = true;
-    esp_elf_register_symbol(lichen_exports);
+    sd_apps_register_symbols(); // the export table, shared with the loader service (#523)
     console_register_dev("elf",
                          "elf run <path>  (a native ELF from /sd or /storage: load, run once, unload; the app runs on "
                          "this task's small stack, so keep it small until #523; #517)",

@@ -473,12 +473,30 @@ static bool take(uint32_t wait_ms) {
     return lock && xSemaphoreTake(lock, pdMS_TO_TICKS(wait_ms)) == pdTRUE;
 }
 
+static void (*_Atomic observer)(sd_state_t);
+
+void sd_observe(void (*fn)(sd_state_t state)) {
+    atomic_store(&observer, fn);
+}
+
+// After the batch mutex is given: a mount or an unmount is told once, outside every lock the card holds
+static void tell(sd_state_t state) {
+    void (*fn)(sd_state_t) = atomic_load(&observer);
+    if (fn) {
+        fn(state);
+    }
+}
+
 bool sd_mount(void) {
     if (!take(SD_LOCK_WAIT_MS)) {
         return false;
     }
-    bool ok = atomic_load(&mounted) || mount_locked(false);
+    bool fresh = !atomic_load(&mounted);
+    bool ok    = !fresh || mount_locked(false);
     xSemaphoreGive(lock);
+    if (fresh && ok) {
+        tell(SD_STATE_MOUNTED);
+    }
     return ok;
 }
 
@@ -494,6 +512,7 @@ void sd_unmount(void) {
     portEXIT_CRITICAL(&info_lock);
     bring_down();
     xSemaphoreGive(lock);
+    tell(SD_STATE_OFF);
 }
 
 bool sd_format(void) {
@@ -503,6 +522,7 @@ bool sd_format(void) {
     bring_down();
     bool ok = mount_locked(true);
     xSemaphoreGive(lock);
+    tell(ok ? SD_STATE_MOUNTED : SD_STATE_OFF); // the old card's files are gone either way
     return ok;
 }
 
@@ -544,6 +564,7 @@ bool sd_begin(uint32_t wait_ms) {
 }
 
 void sd_end(sd_io_t result) {
+    bool removed = false;
     if (sd_policy_io(&io, result)) {
         ESP_LOGE(TAG, "%d failed batches in a row: unmounting the card", SD_IO_ERRORS_TO_UNMOUNT);
         portENTER_CRITICAL(&info_lock);
@@ -553,6 +574,7 @@ void sd_end(sd_io_t result) {
         atomic_store(&mounted, false);
         portEXIT_CRITICAL(&info_lock);
         bring_down();
+        removed = true;
     } else {
         portENTER_CRITICAL(&info_lock);
         info.io_errors = io.total;
@@ -562,6 +584,9 @@ void sd_end(sd_io_t result) {
         }
     }
     xSemaphoreGive(lock);
+    if (removed) {
+        tell(SD_STATE_REMOVED);
+    }
 }
 
 void sd_info(sd_info_t *out) {

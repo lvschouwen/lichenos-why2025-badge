@@ -15,6 +15,8 @@ uint32_t app_life_deadline_ms(life_reason_t reason) {
     case LIFE_STOP_RESTART:
     case LIFE_STOP_POWER_OFF:
         return LIFE_DEADLINE_RESTART_MS;
+    case LIFE_STOP_UNLOAD:
+        return LIFE_DEADLINE_UNLOAD_MS;
     default:
         return 0;
     }
@@ -31,7 +33,7 @@ char const *app_life_state_name(life_state_t s) {
 }
 
 char const *app_life_reason_name(life_reason_t r) {
-    static char const *const names[LIFE_STOP_REASON_COUNT] = {"update", "restart", "power off"};
+    static char const *const names[LIFE_STOP_REASON_COUNT] = {"update", "restart", "power off", "unload"};
     return (unsigned)r < LIFE_STOP_REASON_COUNT ? names[r] : "?";
 }
 

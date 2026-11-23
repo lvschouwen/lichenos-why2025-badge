@@ -273,6 +273,7 @@ lichen_random_u32	-	unspecified	lichen_random.h
 lichen_reg_get	-	any	lichen_reg.h
 lichen_register_app	-	lvgl	lichen_app.h
 lichen_screen_locked	-	any	lichen_ui.h
+lichen_sd_app_hooks	-	any	lichen_sd_app.h
 lichen_sensors_get	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_running	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_set_periods	SENSORS	unspecified	lichen_sensors.h
@@ -357,8 +358,9 @@ lichen_sys_life_console	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_fault_crashes	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_get	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_now_ms	SYSTEM	unspecified	lichen_sys_life.h
+lichen_sys_life_on_close	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_removable	SYSTEM	any	lichen_sys_life.h
-lichen_sys_life_screens	SYSTEM	lvgl	lichen_sys_life.h
+lichen_sys_life_screens	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_started	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_stop_begin	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_stop_end	SYSTEM	unspecified	lichen_sys_life.h
@@ -375,6 +377,7 @@ lichen_sys_mem_internal	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_largest	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_min	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_ops_set	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_quota_set	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_quotas	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_stacks	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_start	SYSTEM	any	lichen_sys_mem.h

@@ -206,18 +206,25 @@ static void mem_report(void) {
 // #231: every app's declared PSRAM budget (lichen_app_t.psram_kib, tools/layers.conf) as its PSRAM quota, accounted and
 // not enforced: the budgets were measured as statics and stacks (#229), the heap part is not measured yet, so a refusal
 // would fail an app that works today. SYSTEM apps (the shell's) declare none.
+bool lichen_sys_mem_quota_set(lichen_ctx_t ctx, uint32_t psram_kib) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
+    if (!app || (app->caps & CAP_SYSTEM)) {
+        return false;
+    }
+    book_take();
+    bool ok = mem_book_set_bulk_quota(&book, ctx, app->id, psram_kib * 1024u, false);
+    book_give();
+    if (!ok) {
+        ESP_LOGW(TAG, "%s: no row in the memory book for its PSRAM quota", app->id ? app->id : app->name);
+    }
+    return ok;
+}
+
 void lichen_sys_mem_quotas(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app || (app->caps & CAP_SYSTEM)) {
-            continue;
-        }
-        book_take();
-        bool ok = mem_book_set_bulk_quota(&book, lichen_sys_app_ctx_at(i), app->id, (uint32_t)app->psram_kib * 1024u,
-                                          false);
-        book_give();
-        if (!ok) {
-            ESP_LOGW(TAG, "%s: no row in the memory book for its PSRAM quota", app->id ? app->id : app->name);
+        if (app) {
+            lichen_sys_mem_quota_set(lichen_sys_app_ctx_at(i), app->psram_kib);
         }
     }
 }

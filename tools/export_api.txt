@@ -39,6 +39,8 @@ header lichen_mem.h
 deny lichen_mem_console_register
 header lichen_task.h
 deny lichen_task_console_register
+# The one call an SD app's main() makes (#523, API 2.1): its hooks struct
+func lichen_sd_app_hooks
 header lichen_timer.h
 header lichen_reg.h
 # Pure helpers

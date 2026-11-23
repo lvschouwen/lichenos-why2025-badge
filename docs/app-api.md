@@ -324,6 +324,25 @@ every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, 
 **Not in v2:** loadable apps. A future "Scripts" app may host WAMR (WebAssembly) modules, each with its own
 capabilities (#78).
 
+## SD apps (#516, #523)
+
+An app that is an ELF on the card (`/sd/lichen/apps/<id>/manifest` and its entry file, API 2.1) is not registered by code
+of its own: the OS's loader registers it from the manifest and builds its `lichen_app_t`, every hook of which is an OS
+trampoline. The app's `main()` makes one call, `lichen_sd_app_hooks(&hooks)` (`lichen_sd_app.h`: `open` on the LVGL
+task, `stop` on the loader's task), and returns or goes on as a task of the app (stack from `stack_kib`).
+
+- **Tile without code.** The mount scan reads manifests only; the tile (an initial in a square) is on Home while the
+  card is in. A refused app (bad manifest, API newer than the OS or of another major, an id that a built-in has, no
+  entry file) gets one notification and one log line per scan.
+- **Load on open, unload on close.** Opening the tile shows "Loading..." and, after the open animation, the OS loads the
+  ELF, runs `main()` on its own task and calls `open` into the screen. Under the on-air hold the open is refused with a
+  message. When the app's last screen closes the OS calls `stop`, waits for the app's tasks (main() included) to return,
+  drops its timers, drains its queued UI calls and frees the ELF. An app that misses a step stays faulted with its
+  image loaded until the card is out: never end a task late.
+- **Card out.** Unmounting or pulling the card does the same, then removes the tile; a remount rescans.
+- **What the app must do.** Every task it starts ends after `stop`; it frees its `lichen_alloc` blocks (the OS reports
+  what is left, it cannot free them); it never keeps a pointer into the OS across a load.
+
 ## What an app must not do
 
 - Touch drivers or buses: no `driver/*`, I2C, SPI, GPIO, ADC, LEDC, the display, the backlight or the keyboard chip.

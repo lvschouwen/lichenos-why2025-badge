@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	313161
+size	<merged-strings>	315477
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -49,7 +49,7 @@ size	libesp_driver_i2c.a	15991
 size	libesp_driver_ledc.a	6320
 size	libesp_driver_ppa.a	12365
 size	libesp_driver_sd_intf.a	866
-size	libesp_driver_sdmmc.a	18079
+size	libesp_driver_sdmmc.a	18127
 size	libesp_driver_tsens.a	2351
 size	libesp_driver_uart.a	19682
 size	libesp_driver_usb_serial_jtag.a	2492
@@ -91,7 +91,7 @@ size	libesp_wifi.a	2319
 size	libesp_wifi_remote_glue.a	674
 size	libespcoredump.a	13200
 size	libespressif__elf_loader.a	6700
-size	libespressif__esp-serial-flasher.a	123671
+size	libespressif__esp-serial-flasher.a	123683
 size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	39181
 size	libfatfs.a	30649
@@ -101,9 +101,9 @@ size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34398
-size	liblichen_api.a	46294
+size	liblichen_api.a	49788
 size	liblichen_apps.a	51552
-size	liblichen_boot.a	13412
+size	liblichen_boot.a	13428
 size	liblichen_clock.a	11176
 size	liblichen_haptics.a	2813
 size	liblichen_led.a	1460
@@ -111,7 +111,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
 size	liblichen_notify.a	13382
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	81442
+size	liblichen_os.a	89193
 size	liblichen_random.a	63
 size	liblichen_shell.a	197635
 size	liblog.a	2726
@@ -119,9 +119,9 @@ size	liblora.a	36481
 size	liblvgl__lvgl.a	541799
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	112015
-size	libmain.a	13737
+size	libmain.a	13765
 size	libmbedtls.a	22
-size	libmesh.a	428200
+size	libmesh.a	428264
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
@@ -129,7 +129,7 @@ size	libota.a	79412
 size	libpsram_guard.a	25357
 size	libpthread.a	1229
 size	libriscv.a	1684
-size	libsdcard.a	10592
+size	libsdcard.a	10782
 size	libsdmmc.a	24355
 size	libsensors.a	29341
 size	libsoc.a	793

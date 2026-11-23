@@ -69,6 +69,12 @@ static int owner_slot(uint32_t ctx) {
     return lichen_sys_app_state(ctx) ? (int)(ctx & ((1u << APP_CTX_SLOT_BITS) - 1u)) : 0;
 }
 
+static lichen_life_close_cb_t close_cb; // set once at boot, before any screen of an SD app can close
+
+void lichen_sys_life_on_close(lichen_life_close_cb_t cb) {
+    close_cb = cb;
+}
+
 void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth) {
     size_t apps = lichen_app_count();
     int    owners[LIFE_SCREENS_MAX] = {0};
@@ -89,11 +95,20 @@ void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth) {
         app_life_view(owners, depth, slot, &shown, &on_top);
         bool taken = life_take();
         app_life_t *r       = record_of(ctx);
+        uint8_t     was     = r ? r->state : 0;
         bool        changed = r && app_life_show(r, shown, on_top);
         uint8_t     state   = r ? r->state : 0;
         life_give(taken);
         if (changed) {
             ESP_LOGD(TAG, "%s %s", app_label(ctx), app_life_state_name((life_state_t)state));
+            // The app's last screen left the stack: told after the record's spinlock is given (the callback may take
+            // other locks), still on the LVGL task under the LVGL lock
+            bool had_screen = was == LIFE_OPEN || was == LIFE_SUSPENDED;
+            bool has_screen = state == LIFE_OPEN || state == LIFE_SUSPENDED;
+            lichen_life_close_cb_t cb = close_cb;
+            if (cb && had_screen && !has_screen) {
+                cb(ctx);
+            }
         }
     }
 }

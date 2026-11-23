@@ -107,6 +107,11 @@ when one breaks:
 The OS rules in the same test include `START_WATCH` (the thermal watchdog and the notices, #281) after `START_NOTICES`
 and `START_SHELL`: its own step, so `start_shell` returning early without a display cannot skip it.
 
+`START_SD_APPS` (the SD apps' loader, #523) comes after `START_APPS` (the built-in apps, the memory gate and
+`lichen_app_list_live`: an SD app registers into the live table), after `START_SD` and `START_SHELL`, and before
+`START_OTA` (the update's stop reaches a loaded SD app). It only starts the loader task and watches the card; the
+tiles appear when the loader has scanned `/sd/lichen/apps`. A degraded boot (safe mode) starts nothing.
+
 ### 2. Peer-data channel (ESP-Hosted `eh_*_peer_data`)
 | Id | Direction | Service | Registered at |
 |---|---|---|---|

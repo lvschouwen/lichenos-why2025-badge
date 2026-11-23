@@ -68,6 +68,12 @@ static void os_rules(void) {
     before(START_STORAGE, START_SHELL);  // the shell's screens read /storage
     before(START_STORAGE, START_APPS);   // app background parts open their files
     before(START_APPS, START_OTA);       // the update hooks stop apps that already run
+    // #523: an SD app registers into the live table (lichen_app_list_live, after the memory gate #531 and the quotas), from the
+    // card (START_SD), and an update must be able to stop it (the OTA hooks come after)
+    before(START_APPS, START_SD_APPS);
+    before(START_SD, START_SD_APPS);
+    before(START_SHELL, START_SD_APPS);  // its tile joins home through the app list observers
+    before(START_SD_APPS, START_OTA);
     // #281: the thermal watchdog and the OS notices start in their own step, never inside the shell's (which returns
     // early without a display); they raise notices, and the shell's hooks exist once it started
     before(START_NOTICES, START_WATCH);

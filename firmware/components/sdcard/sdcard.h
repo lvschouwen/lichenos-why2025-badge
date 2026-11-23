@@ -41,6 +41,13 @@ bool sd_mounted(void);
 bool sd_begin(uint32_t wait_ms);
 void sd_end(sd_io_t result);
 
+// Tells fn(state) after the card's state changed: mounted (SD_STATE_MOUNTED), unmounted by hand (SD_STATE_OFF), pulled or dying
+// (SD_STATE_REMOVED), also after "fw sd mount" and "fw sd format". One observer (the SD apps' loader, #523); NULL takes it
+// away. fn runs on the task that made the change, after the card's locks are given; it only posts: never sd_begin, no
+// waiting, not the LVGL task's work. A changed state is told at most once per change, but a call may repeat a state
+// (a format reports the mount again). Any task.
+void sd_observe(void (*fn)(sd_state_t state));
+
 // Cached state, sizes and card details; never touches the card, safe from LVGL. Free space is refreshed at mount,
 // after every sd_end and by "fw sd".
 void sd_info(sd_info_t *out);

@@ -39,12 +39,14 @@ static void test_names(void) {
     CHECK(strcmp(app_life_state_name(LIFE_STATE_COUNT), "?") == 0);
     CHECK(strcmp(app_life_state_name((life_state_t)-1), "?") == 0);
     CHECK(strcmp(app_life_reason_name(LIFE_STOP_POWER_OFF), "power off") == 0);
+    CHECK(strcmp(app_life_reason_name(LIFE_STOP_UNLOAD), "unload") == 0);
     CHECK(strcmp(app_life_reason_name(LIFE_STOP_REASON_COUNT), "?") == 0);
     CHECK(strcmp(app_life_fault_name(LIFE_FAULT_STOP_LATE), "stop late") == 0);
     CHECK(strcmp(app_life_fault_name(LIFE_FAULT_COUNT), "?") == 0);
     CHECK(app_life_deadline_ms(LIFE_STOP_UPDATE) == LIFE_DEADLINE_UPDATE_MS);
     CHECK(app_life_deadline_ms(LIFE_STOP_RESTART) == LIFE_DEADLINE_RESTART_MS);
     CHECK(app_life_deadline_ms(LIFE_STOP_POWER_OFF) == LIFE_DEADLINE_RESTART_MS);
+    CHECK(app_life_deadline_ms(LIFE_STOP_UNLOAD) == LIFE_DEADLINE_UNLOAD_MS);
     CHECK(app_life_deadline_ms(LIFE_STOP_REASON_COUNT) == 0);
 }
 

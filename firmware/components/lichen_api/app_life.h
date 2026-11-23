@@ -37,11 +37,13 @@ typedef enum {
     LIFE_STATE_COUNT,
 } life_state_t;
 
-// Why the OS stops the apps; each is final for this boot (the badge restarts or goes off afterwards)
+// Why the OS stops the apps; each is final for this boot (the badge restarts or goes off afterwards), except UNLOAD: the
+// app is unregistered right after
 typedef enum {
     LIFE_STOP_UPDATE,    // a firmware image is coming (the OTA task, #76)
     LIFE_STOP_RESTART,   // a deliberate restart: the restart's save (#123) or the Power app
     LIFE_STOP_POWER_OFF, // the Power app or a headless power off (#281)
+    LIFE_STOP_UNLOAD,    // an SD app leaves (its card went, #523): the one reason that is not final for the boot
     LIFE_STOP_REASON_COUNT,
 } life_reason_t;
 
@@ -69,6 +71,7 @@ typedef struct {
 // for up to 15 s (mesh_stop); a restart's save is bounded at 8 s in all (SYSTEM_RESTART_SAVE_MS)
 #define LIFE_DEADLINE_UPDATE_MS  20000u
 #define LIFE_DEADLINE_RESTART_MS 8000u
+#define LIFE_DEADLINE_UNLOAD_MS  5000u
 uint32_t app_life_deadline_ms(life_reason_t reason); // 0 for an unknown reason
 
 char const *app_life_state_name(life_state_t s);   // "registered" ... "faulted"; "?" for an unknown one

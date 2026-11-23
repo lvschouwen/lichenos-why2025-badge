@@ -25,6 +25,7 @@ boot_start_t const boot_order[] = {
     START_LORA,
     START_C6_HOOKS,       // after keyboard and LoRa: from now on a C6 reset is recovered from
     START_APPS,
+    START_SD_APPS,        // after the apps, the memory gate and lichen_app_list_live: an SD app joins the live table (#523)
     START_OTA,
 };
 
@@ -48,7 +49,7 @@ char const *boot_start_name(boot_start_t step) {
         [START_LORA_IDENT] = "lora ident", [START_C6LINK] = "c6link",   [START_BACKLIGHT] = "backlight",
         [START_KEYBOARD] = "keyboard",   [START_SENSORS] = "sensors",   [START_BATTERY] = "battery",
         [START_LORA] = "lora",
-        [START_C6_HOOKS] = "c6 hooks",   [START_APPS] = "apps",         [START_OTA] = "ota",
+        [START_C6_HOOKS] = "c6 hooks",   [START_APPS] = "apps",         [START_SD_APPS] = "sd apps",   [START_OTA] = "ota",
     };
     if ((unsigned)step >= START_COUNT || !names[step]) {
         return "?";

@@ -6,7 +6,7 @@
 # allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
 # the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
-api	2.0
+api	2.1
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
 wrap	bootloader_random_enable	__wrap_bootloader_random_enable
 wrap	esp_panic_handler	__wrap_esp_panic_handler
@@ -217,6 +217,7 @@ type	lichen_task.h	lichen_prio_t	243e23d5
 type	lichen_radio.h	lichen_radio_cb_t	ed78a9f8
 type	lichen_keys.h	lichen_raw_key_fn	9b589c34
 type	lichen_keys.h	lichen_raw_key_t	b53fb7ea
+type	lichen_sd_app.h	lichen_sd_hooks_t	5368bd8f
 type	lichen_sensors.h	lichen_sensors_t	38582b85
 type	lichen_task.h	lichen_stack_t	064de069
 type	lichen_timer.h	lichen_timer_t	3ad7ccc5
@@ -358,6 +359,7 @@ export	lichen_random_fill	lichen_random_fill	lichen_random.h	c92a3470
 export	lichen_random_u32	lichen_random_u32	lichen_random.h	66e7c311
 export	lichen_reg_get	lichen_reg_get	lichen_reg.h	13188524
 export	lichen_screen_locked	lichen_screen_locked	lichen_ui.h	7a93fbd2
+export	lichen_sd_app_hooks	lichen_sd_app_hooks	lichen_sd_app.h	070ff4f2
 export	lichen_sensors_get	lichen_sensors_get	lichen_sensors.h	a31c672b
 export	lichen_sensors_running	lichen_sensors_running	lichen_sensors.h	f054b54f
 export	lichen_station_clock	lichen_station_clock	lichen_ui.h	90040937

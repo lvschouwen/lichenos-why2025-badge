@@ -880,6 +880,12 @@ static void start_apps_step(boot_ctx_t *ctx) {
     start_apps();
 }
 
+// The SD apps (#523): the loader task and the card watch; the tiles come when the loader has scanned the card
+static void start_sd_apps(boot_ctx_t *ctx) {
+    (void)ctx;
+    sd_apps_boot();
+}
+
 static void start_ota(boot_ctx_t *ctx) {
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
     ota_hooks_t hooks = {
@@ -928,6 +934,7 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
     [START_LORA]           = start_lora,
     [START_C6_HOOKS]       = start_c6_hooks,
     [START_APPS]           = start_apps_step,
+    [START_SD_APPS]        = start_sd_apps,
     [START_OTA]            = start_ota,
 };
 
