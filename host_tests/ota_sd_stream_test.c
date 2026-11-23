@@ -31,11 +31,18 @@ static bool piece(ota_sd_stream_t *s, uint8_t const *data, size_t off, size_t le
 
 int main(void) {
     // The cap is the free space, not the 4 MB the PSRAM stage allows
-    CHECK(ota_sd_cap(true, 28ULL * 1024 * 1024 + 5) == 28LL * 1024 * 1024 + 5);
-    CHECK(ota_sd_cap(true, 0) == 0);
-    CHECK(ota_sd_cap(false, 123) == OTA_SD_TOTAL_MAX);
-    CHECK(ota_sd_cap(true, UINT64_MAX) == OTA_SD_TOTAL_MAX);
-    CHECK(ota_sd_cap(true, 29ULL * 1024 * 1024 * 1024) > 4LL * 1024 * 1024);
+    CHECK(ota_sd_cap(true, 28ULL * 1024 * 1024 + 5, 0) == 28LL * 1024 * 1024 + 5);
+    CHECK(ota_sd_cap(true, 0, 0) == 0);
+    CHECK(ota_sd_cap(false, 123, 0) == OTA_SD_TOTAL_MAX);
+    CHECK(ota_sd_cap(true, UINT64_MAX, 0) == OTA_SD_TOTAL_MAX);
+    CHECK(ota_sd_cap(true, 0x7ffffff0ULL, 0x100) == OTA_SD_TOTAL_MAX);
+    CHECK(ota_sd_cap(true, 29ULL * 1024 * 1024 * 1024, 0) > 4LL * 1024 * 1024);
+    // Every accepted piece lowers the card's free space: a 28 MB file on a card with 30 MB free, 20 MB in, still passes
+    // (free is 10 MB then), where the free space alone would refuse it as too large
+    long long const total = 28LL * 1024 * 1024;
+    CHECK(ota_sd_cap(true, 10ULL * 1024 * 1024, 0) < total);
+    CHECK(ota_sd_cap(true, 10ULL * 1024 * 1024, 20ULL * 1024 * 1024) >= total);
+    CHECK(ota_sd_cap(true, 30ULL * 1024 * 1024, 0) >= total);
 
     CHECK(ota_sd_piece_ok(1) && ota_sd_piece_ok(OTA_SD_PIECE_MAX));
     CHECK(!ota_sd_piece_ok(0) && !ota_sd_piece_ok(-1) && !ota_sd_piece_ok(OTA_SD_PIECE_MAX + 1));

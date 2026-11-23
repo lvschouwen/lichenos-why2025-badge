@@ -95,7 +95,13 @@ bool        ota_storage_room(int fd, char const *vms, uint64_t size, size_t pre_
 bool        ota_drive_ready(int fd, char const *vms);
 void        ota_mkdir_parents(char const *posix_path);
 ota_place_t ota_swap_temp(char const *path, char const *temp, bool sd);
-bool        ota_place_reply(int fd, ota_place_t step, int err, char const *vms, size_t len, long long sent);
+// The names a placed file goes by: as badge.sh sent it, on the filesystem, and its temp file
+typedef struct {
+    char const *vms;
+    char const *path;
+    char const *temp;
+} ota_place_names_t;
+bool        ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const *names, size_t len, long long sent);
 bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent);
 bool        ota_finish_assets(int fd, uint8_t const *data, size_t len, long long sent);
 bool ota_install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t handle, size_t len, long long sent);

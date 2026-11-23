@@ -22,9 +22,10 @@ typedef struct {
     size_t       total; // the file's size
 } ota_sd_stream_t;
 
-// The largest file SD0: takes: what the card has free. Unknown free space lets the upload go ahead (the room check and
-// the write report it), like the other drive.
-long long ota_sd_cap(bool free_known, uint64_t free_bytes);
+// The largest file SD0: takes: what the card has free plus what this upload already wrote to it (written: its temp
+// file counts against the free space, which every piece lowers; the cap must not shrink under the upload). Unknown free
+// space lets the upload go ahead (the room check and the write report it), like the other drive.
+long long ota_sd_cap(bool free_known, uint64_t free_bytes, uint64_t written);
 
 // A plain or decoded piece of len bytes may go to the card (0 < len <= OTA_SD_PIECE_MAX)
 bool ota_sd_piece_ok(long long len);

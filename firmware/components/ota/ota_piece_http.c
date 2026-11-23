@@ -50,7 +50,8 @@ static struct {
 
 static ota_sd_stream_t sd_stream;
 
-#define SD_WAIT_MS 2000
+#define SD_WAIT_MS        2000
+#define SD_FINISH_WAIT_MS 10000 // the swap is the last step: waiting is cheaper than losing the whole upload
 
 // Whole cache lines, so no neighbouring allocation or DMA driver shares a line with the staging buffer (#37)
 #define STAGE_ALIGN CONFIG_CACHE_L2_CACHE_LINE_SIZE
@@ -291,7 +292,7 @@ __attribute__((noinline)) static bool sd_piece_receive(int fd, ota_request_t con
                                                        size_t pre_len, bool continued, size_t len) {
     sha256_ctx_t *cand = ota_sd_stream_piece(&sd_stream, staged.got);
     if (!cand || !sd_begin(SD_WAIT_MS)) {
-        ota_respond(fd, 409, "SD card busy or not mounted, send the piece at %lld again", req->offset);
+        ota_respond(fd, 409, "SD card busy or not mounted, send it again"); // the client retries on these words
         return false;
     }
     if (req->expect_continue && !continued) {
@@ -309,9 +310,13 @@ __attribute__((noinline)) static bool sd_piece_receive(int fd, ota_request_t con
     bool closed = !w.f || fclose(w.f) == 0; // the data reaches the card here, a full card fails here
     err         = closed ? err : errno;
     sd_end(w.write_failed || !closed || !w.f ? sd_io_from_errno(err) : SD_IO_OK);
-    if (!ok || !closed || strcmp(sha_hex, req->sha256) != 0) {
-        ota_respond(fd, 400, "piece at %lld %s, send it again", req->offset,
-                    !ok || !closed ? "didn't arrive" : "arrived damaged");
+    if (!w.f || w.write_failed || !closed) { // the card, not the link: sending it again would fail the same way
+        ota_respond(fd, 500, "the SD card couldn't take the piece at %lld (full or removed), nothing more is written",
+                    req->offset);
+        return false;
+    }
+    if (!ok || strcmp(sha_hex, req->sha256) != 0) {
+        ota_respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
         return false; // staged.got and the running hash are unchanged
     }
     ota_sd_stream_accept(&sd_stream, len); // inside the file: ota_piece_bounds
@@ -334,7 +339,15 @@ static void finish_sd(int fd) {
     char path[OTA_PATH_MAX + 16];
     ota_place_t step = OTA_PLACE_SWAP;
     int         err  = EIO;
-    if (ota_path_to_posix(staged.path, path, sizeof(path)) && sd_begin(SD_WAIT_MS)) {
+    bool        mapped = ota_path_to_posix(staged.path, path, sizeof(path));
+    // The mark may have been cleared by another request in between, and the hold may have gone on: ask again, like an
+    // installed image does (#420)
+    if (mapped && !ota_file_change_begin(fd, path)) {
+        hook_end(false, false);
+        staged_reset();
+        return;
+    }
+    if (mapped && sd_begin(SD_FINISH_WAIT_MS)) {
         step = ota_is_directory(path) ? OTA_PLACE_DIR : ota_swap_temp(path, staged.temp, true);
         err  = errno;
         if (ota_place_drops_temp(step)) {
@@ -343,7 +356,8 @@ static void finish_sd(int fd) {
         sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
         staged.temp_live = false; // renamed, dropped, or (LOST) kept on purpose: not ours to remove any more
     }
-    bool landed = ota_place_reply(fd, step, err, staged.path, staged.total, staged.sent);
+    ota_place_names_t const names = {.vms = staged.path, .path = path, .temp = staged.temp};
+    bool landed = ota_place_reply(fd, step, err, &names, staged.total, staged.sent);
     hook_end(landed, false);
     staged_reset();
 }
@@ -524,7 +538,7 @@ static bool piece_refused(int fd, ota_request_t const *req, char *posix, size_t 
     if (sd) { // the card's free space limits it, not the PSRAM stage (#529); the room check answers the exact fit
         sd_info_t info;
         sd_info(&info);
-        max = ota_sd_cap(info.free_known, info.free_bytes);
+        max = ota_sd_cap(info.free_known, info.free_bytes, staged.active && staged.sd ? staged.got : 0);
     }
     if (file && !file_allowed()) { // firmware and assets come after /prepare
         ota_respond(fd, 409, "updating");

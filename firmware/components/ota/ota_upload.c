@@ -147,13 +147,14 @@ static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8
 }
 
 // Answer how a file's swap into place ended (ota_finish_file and the pieces' SD0: finish); true = it landed
-bool ota_place_reply(int fd, ota_place_t step, int err, char const *vms, size_t len, long long sent) {
+bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const *n, size_t len, long long sent) {
+    char const *vms = n->vms;
     if (step == OTA_PLACE_DIR) {
         ota_respond(fd, 409, "%s is a directory, nothing written", vms);
         return false;
     }
     if (step == OTA_PLACE_WRITE) {
-        ota_respond(fd, 500, "couldn't write the upload, file left as it was");
+        ota_respond(fd, 500, "couldn't write %s, file left as it was", n->temp);
         return false;
     }
     if (step == OTA_PLACE_LOST) {
@@ -164,7 +165,7 @@ bool ota_place_reply(int fd, ota_place_t step, int err, char const *vms, size_t 
         ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;
     }
-    ESP_LOGI(TAG, "wrote %s (%zu bytes)", vms, len);
+    ESP_LOGI(TAG, "wrote %s (%zu bytes)", n->path, len);
     ota_respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
     return true;
 }
@@ -194,7 +195,8 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
     }
     ota_change_end(false);
-    return ota_place_reply(fd, step, err, vms, len, sent);
+    ota_place_names_t const names = {.vms = vms, .path = path, .temp = temp};
+    return ota_place_reply(fd, step, err, &names, len, sent);
 }
 
 // Validate what was written to the slot and make it the boot slot; it runs after a reboot, on trial until it proves itself
