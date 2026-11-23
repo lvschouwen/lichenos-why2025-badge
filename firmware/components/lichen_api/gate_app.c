@@ -88,3 +88,10 @@ char const *gate_app_names_refusal(char const *id, char const *alias, char const
 bool gate_batch_may_end(uint32_t held, uint32_t ctx) {
     return held != 0 && held == ctx;
 }
+
+gate_rel_t gate_batch_release(uint32_t held_ctx, uintptr_t held_task, uint32_t ctx, uintptr_t self_task) {
+    if (!ctx || held_ctx != ctx) {
+        return GATE_REL_NONE;
+    }
+    return held_task == self_task ? GATE_REL_END : GATE_REL_OTHER_TASK;
+}

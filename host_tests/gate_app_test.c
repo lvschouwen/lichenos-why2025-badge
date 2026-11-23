@@ -115,6 +115,11 @@ static void test_batch(void) {
     CHECK(gate_batch_may_end(MESH_CTX, MESH_CTX));
     CHECK(!gate_batch_may_end(MESH_CTX, NOID_CTX)); // another ctx cannot end somebody's batch
     CHECK(!gate_batch_may_end(0, MESH_CTX));        // nobody holds one
+    // #537: what an app's exit or park does with a batch it left open
+    CHECK(gate_batch_release(MESH_CTX, 5, MESH_CTX, 5) == GATE_REL_END);
+    CHECK(gate_batch_release(MESH_CTX, 5, MESH_CTX, 6) == GATE_REL_OTHER_TASK); // never given back by another task
+    CHECK(gate_batch_release(MESH_CTX, 5, NOID_CTX, 5) == GATE_REL_NONE && gate_batch_release(0, 0, MESH_CTX, 5) == GATE_REL_NONE);
+    CHECK(gate_batch_release(0, 0, 0, 0) == GATE_REL_NONE); // the OS ctx holds none, whatever the tasks
     CHECK(!gate_batch_may_end(0, 0));
 }
 

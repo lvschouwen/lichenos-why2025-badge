@@ -876,7 +876,8 @@ static void close_app_screens(sd_app_rec_t *rec) {
 
 // exit() on a task that cannot end: on the LVGL task (parking it would freeze the display) the badge aborts, which is
 // attributed to the app; any other task is suspended for good. Never returns.
-__attribute__((noreturn)) static void park_caller(char const *id) {
+__attribute__((noreturn)) static void park_caller(char const *id, lichen_ctx_t ctx) {
+    lichen_fs_sd_release_ctx(ctx); // the trampoline's release never runs for a task that stays: a batch it left open locks the card
     if (lichen_ui_ops_lock_held()) {
         ESP_LOGE(TAG, "%s: exit() on the LVGL task cannot end it: abort", id ? id : "(no app)");
         abort();
@@ -891,7 +892,7 @@ void lichen_exp_exit(int code) {
     sd_app_rec_t *rec = sd_app_find(lichen_ctx_self());
     if (!rec) {
         ESP_LOGE(TAG, "exit(%d) from a context that is no SD app: nothing to close", code);
-        park_caller(NULL);
+        park_caller(NULL, lichen_ctx_self());
     }
     sd_app_lock();
     unsigned todo = sd_app_exit(&rec->sda);
@@ -909,5 +910,5 @@ void lichen_exp_exit(int code) {
     if (lichen_os_task_end_self()) {
         return; // not reached
     }
-    park_caller(rec->m.id);
+    park_caller(rec->m.id, rec->ctx);
 }

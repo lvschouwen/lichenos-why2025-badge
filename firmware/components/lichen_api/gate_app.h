@@ -64,6 +64,11 @@ char const *gate_app_names_refusal(char const *id, char const *alias, char const
 // An SD batch is ended by the ctx that began it: held is the ctx recorded at begin (0 = no batch), ctx the caller's
 bool gate_batch_may_end(uint32_t held, uint32_t ctx);
 
+// What a leaving app's batch needs (#537): nothing (ctx holds none), ending it (ctx holds it and this very task took it: a
+// FreeRTOS mutex is only given back by its taker), or a holder that is another task (cannot be ended from here)
+typedef enum { GATE_REL_NONE, GATE_REL_END, GATE_REL_OTHER_TASK } gate_rel_t;
+gate_rel_t gate_batch_release(uint32_t held_ctx, uintptr_t held_task, uint32_t ctx, uintptr_t self_task);
+
 #ifdef __cplusplus
 }
 #endif

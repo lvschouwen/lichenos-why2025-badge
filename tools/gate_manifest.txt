@@ -142,6 +142,7 @@ gate_app_names_refusal	-	unspecified	gate_app.h
 gate_app_settings_ns	-	unspecified	gate_app.h
 gate_app_source	-	unspecified	gate_app.h
 gate_batch_may_end	-	unspecified	gate_app.h
+gate_batch_release	-	unspecified	gate_app.h
 gate_mem_free	-	any	gate_mem.h
 gate_mem_new	-	any	gate_mem.h
 gate_mem_new_for	-	unspecified	gate_mem.h

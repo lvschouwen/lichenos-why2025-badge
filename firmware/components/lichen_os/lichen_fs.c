@@ -221,10 +221,11 @@ bool lichen_fs_sd_mounted(void) {
 // task took it (a FreeRTOS mutex given back by another task asserts); a batch another task took cannot be ended from here
 // (that task is gone, or still running): logged.
 void lichen_fs_sd_release_ctx(uint32_t ctx) {
-    if (!ctx || sd_holder_ctx != ctx) {
+    gate_rel_t act = gate_batch_release(sd_holder_ctx, (uintptr_t)sd_holder_task, ctx, (uintptr_t)xTaskGetCurrentTaskHandle());
+    if (act == GATE_REL_NONE) {
         return;
     }
-    if (sd_holder_task != xTaskGetCurrentTaskHandle()) {
+    if (act == GATE_REL_OTHER_TASK) {
         ESP_LOGE(TAG, "%s: leaving while another task holds its SD batch: the card stays locked until that task ends it or a restart", sd_holder ? sd_holder : "?");
         return;
     }
