@@ -15,6 +15,7 @@ static lichen_ui_ops_t const ops = {
     .later            = later,
     .lock             = lichen_sys_ui_lock,
     .unlock           = lichen_sys_ui_unlock,
+    .lock_held        = lichen_sys_ui_lock_held,
     .later_cancel     = lichen_sys_ui_cancel,
     .home             = shell_home_impl,
     .back             = shell_back_impl,

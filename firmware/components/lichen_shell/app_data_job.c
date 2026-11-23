@@ -23,21 +23,21 @@ static void job_task(void *arg) {
     (void)arg;
     switch (s_job.kind) {
     case ADJ_MEASURE:
-        s_job.ok = lichen_sys_app_data_measure(s_job.index, &s_job.data) && s_job.data.ok;
+        s_job.ok = lichen_sys_app_data_measure(s_job.ctx, &s_job.data) && s_job.data.ok;
         break;
     case ADJ_CLEAR:
-        s_job.ok = lichen_sys_app_data_clear(s_job.index, &s_job.clear);
+        s_job.ok = lichen_sys_app_data_clear(s_job.ctx, &s_job.clear);
         break;
     case ADJ_BACKGROUND:
-        s_job.ok = lichen_sys_app_background_set(s_job.index, s_allowed);
+        s_job.ok = lichen_sys_app_background_set(s_job.ctx, s_allowed);
         break;
     }
-    ESP_LOGI(TAG, "job %d for app %u -> %s, stack margin %u", (int)s_job.kind, (unsigned)s_job.index,
+    ESP_LOGI(TAG, "job %d for app %u -> %s, stack margin %u", (int)s_job.kind, (unsigned)s_job.ctx,
              s_job.ok ? "ok" : "failed", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_state, DONE);
 }
 
-bool app_data_job_start(adj_kind_t kind, size_t index, bool allowed) {
+bool app_data_job_start(adj_kind_t kind, lichen_ctx_t ctx, bool allowed) {
     int expected = IDLE;
     // A finished job nobody took (its page was left) must not block the next one: its result is dropped
     if (!atomic_compare_exchange_strong(&s_state, &expected, RUNNING) &&
@@ -46,7 +46,7 @@ bool app_data_job_start(adj_kind_t kind, size_t index, bool allowed) {
     }
     memset(&s_job, 0, sizeof(s_job));
     s_job.kind  = kind;
-    s_job.index = index;
+    s_job.ctx = ctx;
     s_allowed   = allowed;
     if (!lichen_task_start(lichen_ctx_self(), "appdata", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "no memory for an app data job");

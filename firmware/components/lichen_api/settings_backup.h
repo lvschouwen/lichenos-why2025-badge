@@ -49,8 +49,9 @@ sb_key_t const *sb_find(char const *ns, char const *key); // NULL: not in the al
 bool sb_add_app_keys(sb_key_t const *app_keys, size_t n);
 // What keeps sb_remove_app_keys off a running backup (#520): the table is read by the backup's save, plan and apply, and a
 // plan holds key pointers until its apply. The io side (settings_backup_io.c) sets lock/unlock around each of those, and
-// removed, called with the lock held after a group left, makes it drop what a plan held. Boot of the io side, once; NULL
-// members mean none.
+// removed, called with the lock held after a group left, makes it drop what a plan held. The lock is recursive: the key
+// readers (sb_key_count, sb_key_at, sb_find) take it too, so a save or a load that already holds it may call them. Boot of
+// the io side, once; NULL members mean none.
 typedef struct {
     void (*lock)(void);
     void (*unlock)(void);

@@ -382,7 +382,7 @@ static void start_apps(void) {
         // ones have a background part it may switch off (never an exempt one: MeshCore)
         bool may_off = safe_mode_may_switch_off(app->start_background != NULL, app->safe_mode_exempt);
         if (safe_mode_background_off(app->id, may_off)) {
-            lichen_sys_life_fault_crashes(i); // #231: FAULTED until a boot after fw app background <id> on
+            lichen_sys_life_fault_crashes(lichen_sys_app_ctx_at(i)); // #231: FAULTED until a boot after fw app background <id> on
             continue;
         }
         if (!app->start_background) {
@@ -397,7 +397,7 @@ static void start_apps(void) {
             lichen_ctx_leave(previous);
         }
         if (started) {
-            lichen_sys_life_started(i);
+            lichen_sys_life_started(lichen_sys_app_ctx_at(i));
             continue;
         }
         ESP_LOGE(TAG, "%s not started%s", app->name,

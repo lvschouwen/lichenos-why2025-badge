@@ -17,10 +17,10 @@
 extern "C" {
 #endif
 
-// main.c's apps boot step, for the app at index (lichen_app_at's): its start_background said yes. Any task.
-void lichen_sys_life_started(size_t index);
+// main.c's apps boot step, for the app of ctx (the index moves when apps leave, #520): its start_background said yes. Any task.
+void lichen_sys_life_started(lichen_ctx_t ctx);
 // main.c's apps boot step: safe mode switched the app's background part off (#232). Any task.
-void lichen_sys_life_fault_crashes(size_t index);
+void lichen_sys_life_fault_crashes(lichen_ctx_t ctx);
 // The shell's screen stack changed: ids[0..depth) bottom to top (nav_at) and ctxs[] the context each screen was opened
 // in (lichen_ctx_self at the push). A screen belongs to the app in slot s when its id is SCREEN_APP_OWN + s or SCREEN_APP_BASE + s (its Settings
 // page), else to the app whose context opened it (MeshCore's chat from its notification); the OS's pages belong to no
@@ -28,17 +28,17 @@ void lichen_sys_life_fault_crashes(size_t index);
 // records' spinlock.
 #define LIFE_SCREENS_MAX 8 // NAV_MAX_DEPTH
 void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth);
-// app_life_stop_begin / _stop_end / _wait_verdict for the app at index, with the tick clock (lichen_sys_life_now_ms,
-// which a waiter's since_ms comes from). An index past the table: BAD / LIFE_STATE_COUNT / FAILED. Any task.
-life_begin_t lichen_sys_life_stop_begin(size_t index, life_reason_t reason);
-life_state_t lichen_sys_life_stop_end(size_t index, bool stopped, uint32_t tasks_left);
-life_wait_t  lichen_sys_life_wait(size_t index, life_reason_t own, uint32_t since_ms);
+// app_life_stop_begin / _stop_end / _wait_verdict for the app of ctx, with the tick clock (lichen_sys_life_now_ms,
+// which a waiter's since_ms comes from). A ctx that left: BAD / LIFE_STATE_COUNT / FAILED. Any task.
+life_begin_t lichen_sys_life_stop_begin(lichen_ctx_t ctx, life_reason_t reason);
+life_state_t lichen_sys_life_stop_end(lichen_ctx_t ctx, bool stopped, uint32_t tasks_left);
+life_wait_t  lichen_sys_life_wait(lichen_ctx_t ctx, life_reason_t own, uint32_t since_ms);
 uint32_t     lichen_sys_life_now_ms(void);
 // Whether the app of ctx may be unregistered now (app_life_removable of its record): false for a ctx that is no app's.
 // Any task.
 bool lichen_sys_life_removable(lichen_ctx_t ctx);
-// A copy of the app's record; false past the table. Any task.
-bool lichen_sys_life_get(size_t index, app_life_t *out);
+// A copy of the app's record; false for a ctx that left. Any task.
+bool lichen_sys_life_get(lichen_ctx_t ctx, app_life_t *out);
 // "fw app life": every app's state and its last stop (console task)
 void lichen_sys_life_console(void);
 

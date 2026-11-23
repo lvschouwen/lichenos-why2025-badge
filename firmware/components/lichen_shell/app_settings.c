@@ -358,10 +358,9 @@ static void open_about(void *arg) {
     }
 }
 
-// A page an app provides under Settings, and the app's context for its hooks
-static lichen_app_t const *page_app;
-static lichen_ctx_t        page_ctx;
-static size_t              page_index; // its place in the OS's table (#233: the OS's rows on the page)
+// The app whose page is being opened, by context: the app struct is looked up when the page is built, never kept (an app
+// that leaves takes it with it, #520)
+static lichen_ctx_t page_ctx;
 
 #define PAGE_SCROLL_STEP 96
 
@@ -375,6 +374,10 @@ static void on_page_key(lv_event_t *e) {
 
 static lv_obj_t *build_app_page(void) {
     lv_obj_t *screen = shell_page_create();
+    lichen_app_t const *page_app = lichen_sys_app_of(page_ctx);
+    if (!page_app) {
+        return screen; // the app left between the click and the build: an empty page
+    }
     lv_obj_t *menu   = menu_create_named(screen, "App settings", page_app->name);
     lichen_ctx_t previous = lichen_ctx_enter(page_ctx); // #230: both hooks run for their app
     if (page_app->settings) {
@@ -384,7 +387,7 @@ static lv_obj_t *build_app_page(void) {
         page_app->about(menu);
     }
     lichen_ctx_leave(previous);
-    app_page_add_rows(screen, menu, page_index); // #233: after the app's own rows, so they keep their places
+    app_page_add_rows(screen, menu, page_ctx); // #233: after the app's own rows, so they keep their places
     lichen_ui_event_add(screen, on_page_key, LV_EVENT_KEY, menu);
     return screen;
 }
@@ -397,10 +400,8 @@ static void open_app_page(void *arg) {
         if (lichen_sys_app_ctx_at(index) != ctx) {
             continue;
         }
-        page_app   = lichen_app_at(index);
-        page_ctx   = ctx;
-        page_index = index;
-        if (page_app && app_page_listed(index)) {
+        page_ctx = ctx;
+        if (lichen_app_at(index) && app_page_listed(index)) {
             shell_open(build_app_page, SCREEN_APP_BASE + (int)(ctx & 0xffu)); // by slot: it stays with the app
         }
         return;

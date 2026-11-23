@@ -31,34 +31,33 @@ static uint32_t now_ms(void) {
     return (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
 }
 
-// The record of the app at index (NULL past the table), found under the lock: the block is freed when the app leaves,
+// The record of the app of ctx (NULL when it has left), found under the lock: the block is freed when the app leaves,
 // and an app only leaves while its record says it is not running (lichen_sys_life_removable)
-static app_life_t *record_at(size_t index) {
-    app_state_t *st = lichen_sys_app_state(lichen_sys_app_ctx_at(index));
+static app_life_t *record_of(lichen_ctx_t ctx) {
+    app_state_t *st = lichen_sys_app_state(ctx);
     return st ? &st->life : NULL;
 }
 
-static char const *app_label(size_t index) {
-    lichen_app_t const *app = lichen_app_at(index);
+static char const *app_label(lichen_ctx_t ctx) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     return app ? (app->id ? app->id : app->name) : "?";
 }
 
-void lichen_sys_life_started(size_t index) {
-    lichen_ctx_t ctx = lichen_sys_app_ctx_at(index);
+void lichen_sys_life_started(lichen_ctx_t ctx) {
     bool taken = life_take();
-    app_life_t *r  = record_at(index);
+    app_life_t *r  = record_of(ctx);
     bool        ok = r && app_life_started(r);
     life_give(taken);
     if (ok) {
         lichen_sys_timer_revive(ctx); // a restarted app may book timers again
     } else {
-        ESP_LOGW(TAG, "%s: background start not recorded", app_label(index));
+        ESP_LOGW(TAG, "%s: background start not recorded", app_label(ctx));
     }
 }
 
-void lichen_sys_life_fault_crashes(size_t index) {
+void lichen_sys_life_fault_crashes(lichen_ctx_t ctx) {
     bool taken = life_take();
-    app_life_t *r = record_at(index);
+    app_life_t *r = record_of(ctx);
     if (r) {
         app_life_fault_crashes(r);
     }
@@ -83,32 +82,35 @@ void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth) {
     for (size_t i = 0; i < apps; i++) {
         lichen_ctx_t ctx  = lichen_sys_app_ctx_at(i);
         int          slot = (int)(ctx & ((1u << APP_CTX_SLOT_BITS) - 1u));
+        if (!ctx) {
+            continue; // the app left since the count
+        }
         bool         shown, on_top;
         app_life_view(owners, depth, slot, &shown, &on_top);
         bool taken = life_take();
-        app_life_t *r       = record_at(i);
+        app_life_t *r       = record_of(ctx);
         bool        changed = r && app_life_show(r, shown, on_top);
         uint8_t     state   = r ? r->state : 0;
         life_give(taken);
         if (changed) {
-            ESP_LOGD(TAG, "%s %s", app_label(i), app_life_state_name((life_state_t)state));
+            ESP_LOGD(TAG, "%s %s", app_label(ctx), app_life_state_name((life_state_t)state));
         }
     }
 }
 
-life_begin_t lichen_sys_life_stop_begin(size_t index, life_reason_t reason) {
+life_begin_t lichen_sys_life_stop_begin(lichen_ctx_t ctx, life_reason_t reason) {
     uint32_t now = now_ms();
     bool taken = life_take();
-    app_life_t  *r   = record_at(index);
+    app_life_t  *r   = record_of(ctx);
     life_begin_t got = r ? app_life_stop_begin(r, reason, now) : LIFE_BEGIN_BAD;
     life_give(taken);
     return got;
 }
 
-life_state_t lichen_sys_life_stop_end(size_t index, bool stopped, uint32_t tasks_left) {
+life_state_t lichen_sys_life_stop_end(lichen_ctx_t ctx, bool stopped, uint32_t tasks_left) {
     uint32_t now = now_ms();
     bool taken = life_take();
-    app_life_t  *r   = record_at(index);
+    app_life_t  *r   = record_of(ctx);
     life_state_t got = r ? app_life_stop_end(r, stopped, now) : LIFE_STATE_COUNT;
     if (r && got != LIFE_STATE_COUNT) {
         app_life_note_tasks(r, tasks_left);
@@ -117,10 +119,10 @@ life_state_t lichen_sys_life_stop_end(size_t index, bool stopped, uint32_t tasks
     return got;
 }
 
-life_wait_t lichen_sys_life_wait(size_t index, life_reason_t own, uint32_t since_ms) {
+life_wait_t lichen_sys_life_wait(lichen_ctx_t ctx, life_reason_t own, uint32_t since_ms) {
     uint32_t now = now_ms();
     bool taken = life_take();
-    app_life_t *r   = record_at(index);
+    app_life_t *r   = record_of(ctx);
     life_wait_t got = r ? app_life_wait_verdict(r, own, since_ms, now) : LIFE_WAIT_FAILED;
     life_give(taken);
     return got;
@@ -138,9 +140,9 @@ uint32_t lichen_sys_life_now_ms(void) {
     return now_ms();
 }
 
-bool lichen_sys_life_get(size_t index, app_life_t *out) {
+bool lichen_sys_life_get(lichen_ctx_t ctx, app_life_t *out) {
     bool taken = life_take();
-    app_life_t const *r = record_at(index);
+    app_life_t const *r = record_of(ctx);
     if (r) {
         *out = *r;
     }
@@ -151,14 +153,15 @@ bool lichen_sys_life_get(size_t index, app_life_t *out) {
 void lichen_sys_life_console(void) {
     size_t apps = lichen_app_count();
     for (size_t i = 0; i < apps; i++) {
-        app_life_t r;
-        if (!lichen_sys_life_get(i, &r)) {
+        app_life_t   r;
+        lichen_ctx_t ctx = lichen_sys_app_ctx_at(i);
+        if (!lichen_sys_life_get(ctx, &r)) {
             continue; // the app left since the count
         }
         // One line per app; the stop part reads "0 stops" until one happened
-        console_reply("app life %s: %s, fault %s, %u timers, %u stops (last %s, %u ms, %u tasks left)", app_label(i),
+        console_reply("app life %s: %s, fault %s, %u timers, %u stops (last %s, %u ms, %u tasks left)", app_label(ctx),
                       app_life_state_name((life_state_t)r.state), app_life_fault_name((life_fault_t)r.fault),
-                      (unsigned)lichen_sys_timer_count(lichen_sys_app_ctx_at(i)), (unsigned)r.stops,
+                      (unsigned)lichen_sys_timer_count(ctx), (unsigned)r.stops,
                       r.stops ? app_life_reason_name((life_reason_t)r.reason) : "-", (unsigned)r.took_ms,
                       (unsigned)r.tasks_left);
     }

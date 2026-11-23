@@ -186,7 +186,24 @@ static void test_stale_ctx_has_no_row(void) {
     CHECK(mem_book_charge(&b, OS, NULL, true, true, 10) == MEM_CHARGE_OK && b.os.internal == 10 && b.os.os);
 }
 
+// #520: a caller that cannot block does not book; its blocks are counted apart, so their later free is no mismatch
+static void test_unbooked(void) {
+    CHECK(mem_book_can_book(true, true));
+    CHECK(!mem_book_can_book(false, true) && !mem_book_can_book(true, false) && !mem_book_can_book(false, false));
+    mem_unbooked_t u = {0};
+    CHECK(!mem_unbooked_absorb(&u, MEM_RELEASE_NO_ROW)); // nothing unbooked: a real mismatch, reported
+    mem_unbooked_note(&u);
+    mem_unbooked_note(&u);
+    CHECK(!mem_unbooked_absorb(&u, MEM_RELEASE_OK) && u.outstanding == 2); // a matching booked free is not one of ours
+    CHECK(mem_unbooked_absorb(&u, MEM_RELEASE_NO_ROW) && u.outstanding == 1);
+    CHECK(mem_unbooked_absorb(&u, MEM_RELEASE_OVER) && u.outstanding == 0);
+    CHECK(!mem_unbooked_absorb(&u, MEM_RELEASE_OVER)); // all accounted: the next mismatch is real
+    mem_unbooked_freed(&u);                            // an unbooked free with none outstanding stays at zero
+    CHECK(u.outstanding == 0);
+}
+
 int main(void) {
+    test_unbooked();
     test_stale_ctx_has_no_row();
     test_keyed_by_ctx();
     test_quota();

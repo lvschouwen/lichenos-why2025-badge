@@ -37,6 +37,11 @@ void lichen_ui_ops_unlock(void) {
     }
 }
 
+bool lichen_ui_ops_lock_held(void) {
+    bool (*held)(void) = OP(lock_held);
+    return held && held();
+}
+
 bool lichen_ui_ops_later(void (*fn)(void *), void *arg) {
     bool (*later)(void (*)(void *), void *) = OP(later);
     return later && later(fn, arg);

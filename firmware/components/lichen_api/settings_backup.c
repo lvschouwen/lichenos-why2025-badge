@@ -33,7 +33,8 @@ _Static_assert(sizeof(keys) / sizeof(keys[0]) <= SB_KEYS_MAX, "the key table out
 #define OWN_COUNT (sizeof(keys) / sizeof(keys[0]))
 #define APP_GROUPS 8
 
-// The apps' groups (lichen_register_app, boot, core 1 or main: before anything exports); read-only afterwards
+// The apps' groups: added when an app registers and taken back when it leaves (#520). The readers (sb_key_count, sb_key_at,
+// sb_find) go through the guard, so they never see a group move or its keys freed under them
 static struct {
     sb_key_t const *keys;
     size_t          n;
@@ -87,22 +88,41 @@ void sb_app_keys_clear(void) {
     s_app_keys    = 0;
 }
 
+static void guard_lock(void) {
+    if (s_guard && s_guard->lock) {
+        s_guard->lock();
+    }
+}
+
+static void guard_unlock(void) {
+    if (s_guard && s_guard->unlock) {
+        s_guard->unlock();
+    }
+}
+
 size_t sb_key_count(void) {
-    return OWN_COUNT + s_app_keys;
+    guard_lock();
+    size_t n = OWN_COUNT + s_app_keys;
+    guard_unlock();
+    return n;
 }
 
 sb_key_t const *sb_key_at(size_t index) {
+    sb_key_t const *found = NULL;
+    guard_lock();
     if (index < OWN_COUNT) {
-        return &keys[index];
-    }
-    index -= OWN_COUNT;
-    for (size_t g = 0; g < s_group_count; g++) {
-        if (index < s_groups[g].n) {
-            return &s_groups[g].keys[index];
+        found = &keys[index];
+    } else {
+        index -= OWN_COUNT;
+        for (size_t g = 0; g < s_group_count && !found; g++) {
+            if (index < s_groups[g].n) {
+                found = &s_groups[g].keys[index];
+            }
+            index -= index < s_groups[g].n ? 0 : s_groups[g].n;
         }
-        index -= s_groups[g].n;
     }
-    return NULL;
+    guard_unlock();
+    return found;
 }
 
 sb_key_t const *sb_find(char const *ns, char const *key) {

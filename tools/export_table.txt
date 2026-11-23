@@ -230,6 +230,7 @@ type	lora_app.h	lora_ui_stats_t	b1a9c7ae
 type	mem_book.h	mem_book_t	0a87df37
 type	mem_book.h	mem_charge_t	58d4b7ca
 type	mem_book.h	mem_release_t	cef3ac01
+type	mem_book.h	mem_unbooked_t	7b2106dc
 type	mem_book.h	mem_use_t	3a8e9e69
 type	menu_filter.h	menu_filter_match_fn	a9c8b149
 type	menu_filter.h	menu_filter_t	e7e39bf6

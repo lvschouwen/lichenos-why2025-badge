@@ -7,7 +7,7 @@
 // removed or its prototype changed = major, one added = minor).
 #define LICHEN_API_VERSION_MAJOR 2
 #define LICHEN_API_VERSION_MINOR 0
-// "1.0", for the `fw version` reply (GET /info) and logs
+// "2.0", for the `fw version` reply (GET /info) and logs
 #define LICHEN_API_VERSION_STR2(x) #x
 #define LICHEN_API_VERSION_STR(x)  LICHEN_API_VERSION_STR2(x)
 #define LICHEN_API_VERSION_TEXT \

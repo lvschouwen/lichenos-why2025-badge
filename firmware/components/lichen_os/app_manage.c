@@ -1,5 +1,5 @@
 // What Settings > Apps asks of the OS about one app (#233, lichen_sys_app_data.h): its data, its background switch and
-// its crash count. Every call names an index of the OS's table: the app's id, its context and the paths all come from
+// its crash count. Every call names an app by its context (the index of the OS's table moves when apps leave, #520): the app's id, its context and the paths all come from
 // there, never from the caller, and every path is built by lichen_sys_data_fs.h from that id (one plain component below the
 // drive's apps directory). No value of an app's settings is read, logged or counted.
 #include "lichen_sys_app_data.h"
@@ -20,10 +20,10 @@ static char const TAG[] = "app_data";
 #define SD_WAIT_MS      3000
 #define NVS_ENTRY_BYTES 32                               // one NVS entry
 
-// The table's app at index and its context; false past the table or for an app with no usable id
-static bool resolve(size_t index, lichen_app_t const **app, lichen_ctx_t *ctx) {
-    *app = lichen_app_at(index);
-    *ctx = lichen_sys_app_ctx_at(index);
+// The app of ctx; false for an app that left or has no usable id
+static bool resolve(lichen_ctx_t ctx_in, lichen_app_t const **app, lichen_ctx_t *ctx) {
+    *app = lichen_sys_app_of(ctx_in);
+    *ctx = ctx_in;
     return *app && (*app)->id && *ctx != LICHEN_CTX_NONE;
 }
 
@@ -53,11 +53,11 @@ static sd_walk_t on_sd(lichen_app_t const *app, dir_fn fn, app_data_fs_t *fs) {
     return ok ? SD_DONE : SD_FAILED;
 }
 
-bool lichen_sys_app_data_measure(size_t index, lichen_app_data_t *out) {
+bool lichen_sys_app_data_measure(lichen_ctx_t app_ctx, lichen_app_data_t *out) {
     lichen_app_t const *app;
     lichen_ctx_t        ctx;
     memset(out, 0, sizeof(*out));
-    if (!resolve(index, &app, &ctx)) {
+    if (!resolve(app_ctx, &app, &ctx)) {
         return false;
     }
     size_t        entries = 0;
@@ -79,13 +79,13 @@ bool lichen_sys_app_data_measure(size_t index, lichen_app_data_t *out) {
     return true;
 }
 
-bool lichen_sys_app_data_clear(size_t index, lichen_app_clear_t *out) {
+bool lichen_sys_app_data_clear(lichen_ctx_t app_ctx, lichen_app_clear_t *out) {
     lichen_app_t const *app;
     lichen_ctx_t        ctx;
     memset(out, 0, sizeof(*out));
     // The OS's own apps and an app that keeps an identity and keys are not cleared here (the page does not offer it
     // either): a second check, since this is the call that erases
-    if (!resolve(index, &app, &ctx) || (app->caps & CAP_SYSTEM) || app->storage_secret) {
+    if (!resolve(app_ctx, &app, &ctx) || (app->caps & CAP_SYSTEM) || app->storage_secret) {
         return false;
     }
     app_data_fs_t fs = {0}, sd = {0};
@@ -105,18 +105,18 @@ static bool switchable(lichen_app_t const *app) {
     return app->start_background && !app->safe_mode_exempt && !(app->caps & CAP_SYSTEM);
 }
 
-bool lichen_sys_app_background_allowed(size_t index) {
-    lichen_app_t const *app = lichen_app_at(index);
+bool lichen_sys_app_background_allowed(lichen_ctx_t ctx) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     return app && app->id && !safe_mode_background_listed(app->id);
 }
 
-bool lichen_sys_app_background_set(size_t index, bool allowed) {
-    lichen_app_t const *app = lichen_app_at(index);
+bool lichen_sys_app_background_set(lichen_ctx_t ctx, bool allowed) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     return app && app->id && switchable(app) && safe_mode_background_set(app->id, allowed);
 }
 
-unsigned lichen_sys_app_crashes(size_t index, unsigned *window) {
-    lichen_app_t const *app = lichen_app_at(index);
+unsigned lichen_sys_app_crashes(lichen_ctx_t ctx, unsigned *window) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     *window                 = app && app->id ? SAFE_MODE_WINDOW_BOOTS : 0;
     return app && app->id ? safe_mode_app_crashes(app->id) : 0;
 }

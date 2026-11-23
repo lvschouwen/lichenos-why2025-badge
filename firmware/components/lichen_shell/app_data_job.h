@@ -12,15 +12,15 @@ typedef enum { ADJ_MEASURE, ADJ_CLEAR, ADJ_BACKGROUND } adj_kind_t;
 
 typedef struct {
     adj_kind_t         kind;
-    size_t             index;      // the app (the OS table's index) the job was for
+    lichen_ctx_t       ctx;        // the app (its context) the job was for
     bool               ok;         // MEASURE: the figures are complete; CLEAR: everything went; BACKGROUND: it was saved
     lichen_app_data_t  data;       // MEASURE
     lichen_app_clear_t clear;      // CLEAR
 } adj_result_t;
 
-// Starts a job for the app at index; allowed is the wanted switch state of ADJ_BACKGROUND. False when another job runs
+// Starts a job for the app of ctx; allowed is the wanted switch state of ADJ_BACKGROUND. False when another job runs
 // or the task could not start (no memory); nothing runs then.
-bool app_data_job_start(adj_kind_t kind, size_t index, bool allowed);
+bool app_data_job_start(adj_kind_t kind, lichen_ctx_t ctx, bool allowed);
 // True once per finished job; fills *out
 bool app_data_job_take(adj_result_t *out);
 bool app_data_job_busy(void);

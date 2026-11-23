@@ -38,6 +38,28 @@ static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *lab
     return r;
 }
 
+bool mem_book_can_book(bool can_yield, bool scheduler_running) {
+    return can_yield && scheduler_running;
+}
+
+void mem_unbooked_note(mem_unbooked_t *u) {
+    __atomic_fetch_add(&u->outstanding, 1u, __ATOMIC_RELAXED);
+}
+
+void mem_unbooked_freed(mem_unbooked_t *u) {
+    uint32_t n = __atomic_load_n(&u->outstanding, __ATOMIC_RELAXED);
+    while (n && !__atomic_compare_exchange_n(&u->outstanding, &n, n - 1u, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+    }
+}
+
+bool mem_unbooked_absorb(mem_unbooked_t *u, int release_kind) {
+    if (release_kind == (int)MEM_RELEASE_OK || !__atomic_load_n(&u->outstanding, __ATOMIC_RELAXED)) {
+        return false;
+    }
+    mem_unbooked_freed(u);
+    return true;
+}
+
 // held + bytes would pass quota (without overflowing)
 static bool past(uint32_t held, uint32_t bytes, uint32_t quota) {
     return bytes > quota || held > quota - bytes;

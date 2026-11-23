@@ -23,7 +23,7 @@ static char const TAG[] = "backup";
 // One backup operation at a time against an app's keys leaving (#520: sb_remove_app_keys through the guard): save, plan,
 // apply and discard hold it, so the key table and the keys a plan holds are not freed under them. A mutex: they run
 // seconds on the SD card, and the app that left is waiting in unregister, holding no other lock.
-static StaticSemaphore_t s_io_buf;
+static StaticSemaphore_t s_io_buf; // a recursive mutex: the key readers take it too
 static SemaphoreHandle_t s_io;
 static portMUX_TYPE      s_io_make = portMUX_INITIALIZER_UNLOCKED;
 static void              held_release(void);
@@ -31,14 +31,14 @@ static void              held_release(void);
 static void io_take(void) {
     portENTER_CRITICAL(&s_io_make);
     if (!s_io) {
-        s_io = xSemaphoreCreateMutexStatic(&s_io_buf);
+        s_io = xSemaphoreCreateRecursiveMutexStatic(&s_io_buf);
     }
     portEXIT_CRITICAL(&s_io_make);
-    xSemaphoreTake(s_io, portMAX_DELAY);
+    xSemaphoreTakeRecursive(s_io, portMAX_DELAY);
 }
 
 static void io_give(void) {
-    xSemaphoreGive(s_io);
+    xSemaphoreGiveRecursive(s_io);
 }
 
 // An app's keys left: a plan that still points at them is dropped (its apply then stores nothing). Called with s_io held.

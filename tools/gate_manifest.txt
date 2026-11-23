@@ -289,6 +289,7 @@ lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_data_clear	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_data_measure	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_lock	SYSTEM	any	lichen_sys_app.h
+lichen_sys_app_of	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_settings_entries	SYSTEM	unspecified	lichen_sys_app_data.h
 lichen_sys_app_state	SYSTEM	any	lichen_sys_app.h
 lichen_sys_app_unlock	SYSTEM	unspecified	lichen_sys_app.h
@@ -418,6 +419,7 @@ lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cb_mark	SYSTEM	lvgl	lichen_sys_app.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_lock_held	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_refused	SYSTEM	any	lichen_sys_ui.h
@@ -476,6 +478,7 @@ lichen_ui_group_focus_cb	-	lvgl	lichen_ui.h
 lichen_ui_ops_later	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_later_cancel	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_lock	SYSTEM	any	lichen_ui_ops.h
+lichen_ui_ops_lock_held	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
 lichen_ui_ops_unlock	SYSTEM	unspecified	lichen_ui_ops.h
 lichen_ui_timer_create	-	lvgl	lichen_ui.h
@@ -507,10 +510,14 @@ lora_settings_pending	-	any	lora_app.h
 lora_sweep	LORA_BORROW	unspecified	lora_app.h
 lora_up	-	unspecified	lora_app.h
 mem_book_adjust	-	unspecified	mem_book.h
+mem_book_can_book	-	unspecified	mem_book.h
 mem_book_charge	-	unspecified	mem_book.h
 mem_book_find	-	unspecified	mem_book.h
 mem_book_release	-	unspecified	mem_book.h
 mem_book_set_bulk_quota	-	unspecified	mem_book.h
+mem_unbooked_absorb	-	unspecified	mem_book.h
+mem_unbooked_freed	-	unspecified	mem_book.h
+mem_unbooked_note	-	unspecified	mem_book.h
 menu_add	-	unspecified	menu.h
 menu_add_slider	-	unspecified	menu.h
 menu_create	-	unspecified	menu.h

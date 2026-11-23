@@ -3,7 +3,8 @@
 // The crash hook's names for apps (#232, #520): which app a context stands for, read with nothing but internal RAM,
 // because the hook may be running because PSRAM faulted and the app table lives there. A small ring, not one entry per
 // registered app: it holds the apps that ran lately (lichen_ctx_enter and a task's start note them), so a hundred
-// registered apps cost the same eight entries. A crash in a context the ring no longer holds blames nobody (the safe
+// registered apps cost the same eight entries. The limit is deliberate: when more than eight apps run on their own or the
+// hooks of many apps interleave, an app the ring evicted that then crashes is not named (nobody is blamed). A crash in a context the ring no longer holds blames nobody (the safe
 // mode rule only counts crashes it can name). Pure (no ESP-IDF), host-tested in host_tests/panic_ring_test.c.
 //
 // note and drop run on ordinary tasks (the caller serialises them: lichen_app.c holds a spinlock, which is fine as the

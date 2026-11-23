@@ -12,6 +12,9 @@
 // lichen_sys_ui_unlock once. Any task, the LVGL task included (it already holds the lock while LVGL runs its timers,
 // so it never waits).
 bool lichen_sys_ui_lock(uint32_t timeout_ms);
+// Whether the calling task is the LVGL task or holds the LVGL lock (the lock-owner check's answer); true too while the
+// service is not armed yet (boot). Any task.
+bool lichen_sys_ui_lock_held(void);
 // Gives back one lichen_sys_ui_lock. Any task (the one that took it).
 void lichen_sys_ui_unlock(void);
 // Runs fn(arg) on the LVGL task, soon, as lichen_ui_call does, but waits for the lock up to timeout_ms (0 = forever,

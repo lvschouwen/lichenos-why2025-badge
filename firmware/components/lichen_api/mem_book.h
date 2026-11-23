@@ -50,6 +50,21 @@ typedef enum {
                        // the caller allocates anyway, unbooked
 } mem_charge_t;
 
+// Whether a lichen_alloc or lichen_free may be booked now (#520): the book's rows are in PSRAM blocks behind a mutex, so
+// only a caller that may block can: not in an interrupt, not inside a critical section (#271), with the scheduler running.
+// Otherwise the block is allocated or freed unbooked: the heap does it, the book is not touched.
+bool mem_book_can_book(bool can_yield, bool scheduler_running);
+
+// Blocks allocated unbooked and not freed yet. A free that finds the book short of what it frees (no row, or more than the
+// row holds) while some are outstanding is taken to be one of them: no warning, the count goes down. The book may then be
+// a block or two off (a booked block freed unbooked, or the reverse), never more than the unbooked traffic.
+typedef struct {
+    uint32_t outstanding;
+} mem_unbooked_t;
+void mem_unbooked_note(mem_unbooked_t *u);                    // an unbooked allocation (atomic)
+void mem_unbooked_freed(mem_unbooked_t *u);                   // an unbooked free: one fewer, never below zero (atomic)
+bool mem_unbooked_absorb(mem_unbooked_t *u, int release_kind); // a booked free that did not match: one of ours (true), or not
+
 // Before an allocation of bytes for ctx. label names a new row (cut to MEM_BOOK_OWNER_CAP - 1; NULL: MEM_BOOK_OS); os
 // marks the OS's row, which has no quota. Give a charge back with mem_book_release when the allocation fails.
 mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool os, bool internal, uint32_t bytes);

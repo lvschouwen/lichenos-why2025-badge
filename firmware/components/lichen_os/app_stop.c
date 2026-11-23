@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_mem.h"
 #include "lichen_os.h"
 #include "lichen_sys_ui.h"
 
@@ -41,10 +42,10 @@ static void stop_timers(lichen_app_t const *app, lichen_ctx_t ctx) {
 // Another caller is stopping the app (the update's stop, then the restart's save on its own task): its verdict, waited
 // for up to this caller's own reason's deadline from now. A hook that hangs past it is reported, and this caller goes
 // on; a late hook that did stop counts as stopped (app_life_wait_verdict).
-static bool wait_other(size_t index, lichen_app_t const *app, life_reason_t reason) {
+static bool wait_other(lichen_ctx_t ctx, lichen_app_t const *app, life_reason_t reason) {
     uint32_t since = lichen_sys_life_now_ms();
     for (;;) {
-        switch (lichen_sys_life_wait(index, reason, since)) {
+        switch (lichen_sys_life_wait(ctx, reason, since)) {
         case LIFE_WAIT_PENDING:
             vTaskDelay(pdMS_TO_TICKS(WAIT_POLL_MS));
             continue;
@@ -63,11 +64,11 @@ static bool wait_other(size_t index, lichen_app_t const *app, life_reason_t reas
 
 // One line per app that stopped late or left something; nothing for one that stopped clean. Counted, never deleted or
 // freed: a task the app started ends when the app ends it, and a block may still be in use by it.
-static void report(lichen_app_t const *app, size_t index, lichen_ctx_t ctx, size_t tasks_left) {
+static void report(lichen_app_t const *app, lichen_ctx_t ctx, size_t tasks_left) {
     app_life_t r;
     uint32_t   internal = 0, bulk = 0;
     lichen_os_mem_held(ctx, &internal, &bulk);
-    if (!lichen_sys_life_get(index, &r)) {
+    if (!lichen_sys_life_get(ctx, &r)) {
         return;
     }
     bool late = r.state == LIFE_FAULTED && r.fault == LIFE_FAULT_STOP_LATE;
@@ -78,15 +79,15 @@ static void report(lichen_app_t const *app, size_t index, lichen_ctx_t ctx, size
     }
 }
 
-static bool stop_one(size_t index, life_reason_t reason) {
-    lichen_app_t const *app = lichen_app_at(index);
+// Stops the app of ctx; one that has left since the loop began (a removal mid-stop) is stopped already
+static bool stop_one(lichen_ctx_t ctx, life_reason_t reason) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     if (!app) {
         return true;
     }
-    lichen_ctx_t ctx = lichen_sys_app_ctx_at(index);
-    switch (lichen_sys_life_stop_begin(index, reason)) {
+    switch (lichen_sys_life_stop_begin(ctx, reason)) {
     case LIFE_BEGIN_BUSY:
-        return wait_other(index, app, reason);
+        return wait_other(ctx, app, reason);
     case LIFE_BEGIN_BAD:
         return false;
     case LIFE_BEGIN_OK:
@@ -103,18 +104,30 @@ static bool stop_one(size_t index, life_reason_t reason) {
         ESP_LOGE(TAG, "%s is still running", app->name);
     }
     size_t tasks_left = lichen_os_task_count(ctx);
-    lichen_sys_life_stop_end(index, stopped, (uint32_t)tasks_left);
-    report(app, index, ctx, tasks_left);
+    lichen_sys_life_stop_end(ctx, stopped, (uint32_t)tasks_left);
+    report(app, ctx, tasks_left);
     stop_timers(app, ctx);
     return stopped;
 }
 
+// Every app, from a snapshot of the contexts taken first: an app joining or leaving while the hooks run (seconds) cannot
+// make the loop skip one or stop one twice, and an update's stop-all must stop every app that was there (#520)
 bool lichen_sys_apps_stop(life_reason_t reason) {
-    bool all_stopped = true;
-    for (size_t i = 0; i < lichen_app_count(); i++) {
-        if (!stop_one(i, reason)) {
-            all_stopped = false;
+    bool         all_stopped = true;
+    size_t       n           = lichen_app_count();
+    lichen_ctx_t *ctxs       = lichen_alloc(lichen_sys_ctx_os(), (n + 1) * sizeof(*ctxs), LICHEN_MEM_BULK);
+    if (!ctxs) { // no memory: one by one, each ctx read as its turn comes
+        for (size_t i = 0; i < lichen_app_count(); i++) {
+            all_stopped = stop_one(lichen_sys_app_ctx_at(i), reason) && all_stopped;
         }
+        return all_stopped;
     }
+    for (size_t i = 0; i < n; i++) {
+        ctxs[i] = lichen_sys_app_ctx_at(i);
+    }
+    for (size_t i = 0; i < n; i++) {
+        all_stopped = stop_one(ctxs[i], reason) && all_stopped;
+    }
+    lichen_free(lichen_sys_ctx_os(), ctxs);
     return all_stopped;
 }

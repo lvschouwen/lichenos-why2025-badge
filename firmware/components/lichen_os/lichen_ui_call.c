@@ -77,6 +77,10 @@ ui_lock_verdict_t ui_service_lock_check(void) {
     return ui_lock_owner_check(&s_owner, self_task());
 }
 
+bool lichen_sys_ui_lock_held(void) {
+    return !ui_lock_owner_armed(&s_owner) || ui_lock_owner_check(&s_owner, self_task()) == UI_LOCK_OK;
+}
+
 bool ui_service_armed(void) {
     return ui_lock_owner_armed(&s_owner);
 }

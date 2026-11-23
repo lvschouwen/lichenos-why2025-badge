@@ -47,8 +47,6 @@ static app_ctx_table_t s_table;
 // section may touch (#271). Taken after the LVGL lock, never before; whoever holds it never waits for the LVGL lock.
 static StaticSemaphore_t s_app_lock_buf;
 static SemaphoreHandle_t s_app_lock;
-static StaticSemaphore_t s_done_buf;
-static SemaphoreHandle_t s_done; // given by list_changed_run when a waiter asked (arg not NULL)
 
 // The table's storage is zeroed PSRAM through lichen_alloc (gate_mem.h): lichen_os hands its heap over at boot, before
 // any app registers. Charged to the OS, whoever registers or unregisters
@@ -105,7 +103,6 @@ static app_ctx_table_t *table(void) {
     if (__atomic_compare_exchange_n(&s_table_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         app_ctx_init_with(&s_table, lichen_random_u32(), &s_mem, APP_CTX_MAX_APPS, sizeof(app_state_t));
         s_app_lock = xSemaphoreCreateRecursiveMutexStatic(&s_app_lock_buf);
-        s_done     = xSemaphoreCreateBinaryStatic(&s_done_buf);
         __atomic_store_n(&s_table_state, 2, __ATOMIC_RELEASE);
         return &s_table;
     }
@@ -145,7 +142,8 @@ static void app_names(void const *owner, char const **id, char const **alias) {
 static void ring_note(lichen_ctx_t ctx, char const *id, bool pin); // the crash hook's ring of app names (below)
 static void ring_drop(lichen_ctx_t ctx);
 static void list_changed(void);
-static void list_changed_ex(bool wait);
+typedef struct list_call list_call_t;
+static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg);
 static bool ui_hold(bool *held);
 static void ui_release(bool held);
 
@@ -190,14 +188,20 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     return ctx;
 }
 
+lichen_app_t const *lichen_sys_app_of(lichen_ctx_t ctx) {
+    app_ctx_table_t *t = table();
+    return (ctx & ((1u << APP_CTX_SLOT_BITS) - 1u)) && app_ctx_valid(t, ctx) ? app_ctx_slot_owner(t, ctx) : NULL;
+}
+
 app_state_t *lichen_sys_app_state(lichen_ctx_t ctx) {
     return app_ctx_state(table(), ctx);
 }
 
-lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked) {
+lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked, void (*done)(void *arg), void *done_arg) {
     if (leaked) {
         *leaked = 0;
     }
+    bool caller_in_ui = lichen_ui_ops_lock_held(); // before ui_hold takes it: the LVGL task and its lock holders cannot wait
     uint32_t held_blocks = 0, held_internal = 0, held_bulk = 0;
     app_ctx_table_t *t = table();
     bool             held;
@@ -242,8 +246,8 @@ lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked) {
     if (app->backup_keys) {
         sb_remove_app_keys(app->backup_keys);
     }
-    list_changed_ex(true);
-    return r;
+    bool finished = list_changed_ex(true, !caller_in_ui, done, done_arg);
+    return finished ? LICHEN_UNREG_OK : LICHEN_UNREG_PENDING;
 }
 
 // ---- the app list changed (#520) -------------------------------------------------------------------------------------
@@ -282,30 +286,52 @@ void lichen_app_list_unobserve(void (*cb)(void *arg, bool removed), void *arg) {
     portEXIT_CRITICAL_SAFE(&s_obs_mux);
 }
 
-static void list_changed_run(void *waiter) {
-    bool removed = __atomic_exchange_n(&s_removed_pending, false, __ATOMIC_ACQ_REL);
-    for (size_t i = 0; i < LIST_OBSERVERS; i++) {
-        void (*cb)(void *, bool) = NULL;
-        void *arg           = NULL;
-        portENTER_CRITICAL_SAFE(&s_obs_mux);
-        cb  = s_observers[i].cb;
-        arg = s_observers[i].arg;
-        portEXIT_CRITICAL_SAFE(&s_obs_mux);
-        if (cb) {
-            cb(arg, removed);
-        }
-    }
-    if (waiter) {
-        xSemaphoreGive(s_done);
-    }
-}
-
 // Off while the apps register at boot, which happens after the shell started and Home subscribed: no lock, no queued
 // rebuild for each of them. lichen_app_list_live turns it on.
 static bool s_live;
 
 void lichen_app_list_live(void) {
     __atomic_store_n(&s_live, true, __ATOMIC_RELEASE);
+}
+
+// One queued run of the observers. The caller that waits for it and the run hand it over by state: 0 queued, 1 the run is
+// over (the waiter frees it), 2 the waiter gave up (the run frees it). A call that nobody waits for is freed by its run.
+struct list_call {
+    uint32_t          state;
+    bool              wait;
+    void            (*done)(void *arg); // after the observers, on the LVGL task
+    void             *done_arg;
+    StaticSemaphore_t sem_buf;
+    SemaphoreHandle_t sem;
+};
+
+static void list_call_free(list_call_t *c) {
+    gate_mem_free(lichen_sys_ctx_os(), c);
+}
+
+static void list_changed_run(void *arg) {
+    list_call_t *c       = arg;
+    bool         removed = __atomic_exchange_n(&s_removed_pending, false, __ATOMIC_ACQ_REL);
+    for (size_t i = 0; i < LIST_OBSERVERS; i++) {
+        void (*cb)(void *, bool) = NULL;
+        void *obs_arg            = NULL;
+        portENTER_CRITICAL_SAFE(&s_obs_mux);
+        cb      = s_observers[i].cb;
+        obs_arg = s_observers[i].arg;
+        portEXIT_CRITICAL_SAFE(&s_obs_mux);
+        if (cb) {
+            cb(obs_arg, removed);
+        }
+    }
+    if (c->done) {
+        c->done(c->done_arg);
+    }
+    uint32_t queued = 0;
+    if (!c->wait || !__atomic_compare_exchange_n(&c->state, &queued, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        list_call_free(c); // nobody waits, or the waiter gave up
+    } else {
+        xSemaphoreGive(c->sem);
+    }
 }
 
 static bool observers_any(void) {
@@ -339,25 +365,59 @@ static void ui_release(bool held) {
     }
 }
 
-// Nothing is queued while nobody listens. wait: return after the observers ran (a task other than the LVGL task, which
-// would wait for itself)
-static void list_changed_ex(bool wait) {
-    if (wait) {
+// Queues the observers (removed: an app left, which they are told). done runs after them on the LVGL task, once (it
+// frees what the app owned). wait: the caller is no LVGL task and holds no LVGL lock, so it waits up to 2 s for the run;
+// true when the run finished in time (done has run); false when it is still to come (done runs later, on the LVGL task).
+// With nobody listening done runs here at once. No lock is held.
+static bool list_changed_ex(bool removed, bool wait, void (*done)(void *), void *done_arg) {
+    if (removed) {
         __atomic_store_n(&s_removed_pending, true, __ATOMIC_RELEASE); // set even when nobody listens yet: the next run says so
     }
     if (!observers_any()) {
-        return;
+        if (done) {
+            done(done_arg);
+        }
+        return true;
     }
-    xSemaphoreTake(s_done, 0); // a late give of an earlier timed-out wait
-    if (!lichen_ui_ops_later(list_changed_run, wait ? (void *)&s_done : NULL)) {
+    list_call_t *c = gate_mem_new_for(lichen_sys_ctx_os(), sizeof(*c));
+    if (!c) {
+        ESP_LOGW(TAG, "app list change not delivered: no memory");
+        if (done) {
+            done(done_arg); // the observers miss this change; the app's memory is the loader's to free now
+        }
+        return true;
+    }
+    c->wait     = wait;
+    c->done     = done;
+    c->done_arg = done_arg;
+    c->sem      = wait ? xSemaphoreCreateBinaryStatic(&c->sem_buf) : NULL;
+    if (!lichen_ui_ops_later(list_changed_run, c)) {
         ESP_LOGW(TAG, "app list change not delivered: the LVGL lock was not free");
-    } else if (wait && xSemaphoreTake(s_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-        ESP_LOGW(TAG, "app list observers did not run in 2 s");
+        list_call_free(c);
+        if (done) {
+            done(done_arg);
+        }
+        return true;
     }
+    if (!wait) {
+        return false;
+    }
+    if (xSemaphoreTake(c->sem, pdMS_TO_TICKS(2000)) == pdTRUE) {
+        list_call_free(c);
+        return true;
+    }
+    uint32_t queued = 0;
+    if (__atomic_compare_exchange_n(&c->state, &queued, 2u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        ESP_LOGW(TAG, "app list observers did not run in 2 s: done follows on the LVGL task");
+        return false; // the run frees the call
+    }
+    xSemaphoreTake(c->sem, portMAX_DELAY); // it finished just now
+    list_call_free(c);
+    return true;
 }
 
 static void list_changed(void) {
-    list_changed_ex(false);
+    list_changed_ex(false, false, NULL, NULL);
 }
 
 // The index view (registration order) moves when an app leaves, so every read of it is under the view lock; a pointer
@@ -461,8 +521,10 @@ static portMUX_TYPE s_ring_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool         s_panic_mirror_ok;
 
 static void ring_note(lichen_ctx_t ctx, char const *id, bool pin) {
+    char name[PANIC_RING_ID_CAP]; // a copy: the id may be flash or PSRAM, which the critical section must not read (#271)
+    strlcpy(name, id ? id : "", sizeof(name));
     portENTER_CRITICAL_SAFE(&s_ring_mux);
-    panic_ring_note(&s_ring, ctx, id, pin);
+    panic_ring_note(&s_ring, ctx, id ? name : NULL, pin);
     portEXIT_CRITICAL_SAFE(&s_ring_mux);
 }
 

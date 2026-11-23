@@ -24,7 +24,7 @@ static char const TAG[] = "app_page";
 static struct {
     lv_obj_t   *menu;
     lv_obj_t   *data_row, *sd_row, *bg_row, *crash_row, *clear_row;
-    size_t      index;
+    lichen_ctx_t ctx; // the app, by context: the index moves when apps leave (#520)
     app_page_rows_t rows;
 } s_pg;
 
@@ -54,11 +54,11 @@ static void refresh_background(void) {
         return;
     }
     app_life_t life = {0};
-    lichen_sys_life_get(s_pg.index, &life);
+    lichen_sys_life_get(s_pg.ctx, &life);
     unsigned window;
-    unsigned crashes = lichen_sys_app_crashes(s_pg.index, &window);
+    unsigned crashes = lichen_sys_app_crashes(s_pg.ctx, &window);
     char     text[32];
-    app_page_bg_text(s_pg.rows.bg, lichen_sys_app_background_allowed(s_pg.index), app_page_bg_running(&life),
+    app_page_bg_text(s_pg.rows.bg, lichen_sys_app_background_allowed(s_pg.ctx), app_page_bg_running(&life),
                      life.fault == LIFE_FAULT_CRASHES && crashes > 0, text, sizeof(text));
     menu_set_value(s_pg.bg_row, text);
 }
@@ -68,7 +68,7 @@ static void refresh_crashes(void) {
         return;
     }
     unsigned window;
-    unsigned crashes = lichen_sys_app_crashes(s_pg.index, &window);
+    unsigned crashes = lichen_sys_app_crashes(s_pg.ctx, &window);
     char     text[40];
     app_page_crash_text(crashes, window, text, sizeof(text));
     menu_set_value(s_pg.crash_row, text);
@@ -86,7 +86,7 @@ static void show_data(lichen_app_data_t const *d) {
 
 static void finish_clear(adj_result_t const *r) {
     app_life_t life = {0};
-    lichen_sys_life_get(s_pg.index, &life);
+    lichen_sys_life_get(s_pg.ctx, &life);
     app_page_clear_msg_t m;
     app_page_clear_msg(&r->clear, app_page_needs_restart(&life), &m);
     if (m.ok) {
@@ -94,7 +94,7 @@ static void finish_clear(adj_result_t const *r) {
     } else {
         menu_status_fail(s_pg.menu, m.text, m.next);
     }
-    if (app_data_job_start(ADJ_MEASURE, s_pg.index, false)) { // the rows show what is left
+    if (app_data_job_start(ADJ_MEASURE, s_pg.ctx, false)) { // the rows show what is left
         return;
     }
     menu_set_value(s_pg.data_row, "Unknown");
@@ -110,7 +110,7 @@ static void finish_background(adj_result_t const *r) {
 static void poll(lv_timer_t *t) {
     (void)t;
     adj_result_t r;
-    if (!s_pg.menu || !app_data_job_take(&r) || r.index != s_pg.index) {
+    if (!s_pg.menu || !app_data_job_take(&r) || r.ctx != s_pg.ctx) {
         return; // a job of a page that is gone: its result is dropped
     }
     if (r.kind == ADJ_MEASURE) {
@@ -135,7 +135,7 @@ static void forget_page(lv_event_t *e) {
 
 // A second job cannot start while one runs: say so in words (R5) instead of ignoring the key (R10)
 static bool start_job(adj_kind_t kind, bool allowed) {
-    if (app_data_job_start(kind, s_pg.index, allowed)) {
+    if (app_data_job_start(kind, s_pg.ctx, allowed)) {
         return true;
     }
     menu_status_fail(s_pg.menu, "Still busy with the last change", "Try again in a moment.");
@@ -146,13 +146,13 @@ static bool start_job(adj_kind_t kind, bool allowed) {
 
 static void toggle_background(void *arg) {
     (void)arg;
-    bool allowed = !lichen_sys_app_background_allowed(s_pg.index);
+    bool allowed = !lichen_sys_app_background_allowed(s_pg.ctx);
     if (!start_job(ADJ_BACKGROUND, allowed)) {
         return;
     }
     // The answer is at once (R10); the job saves it and the row is read back from the list when it ends
     app_life_t life = {0};
-    lichen_sys_life_get(s_pg.index, &life);
+    lichen_sys_life_get(s_pg.ctx, &life);
     char text[32];
     app_page_bg_text(s_pg.rows.bg, allowed, app_page_bg_running(&life), false, text, sizeof(text));
     menu_set_value(s_pg.bg_row, text);
@@ -161,7 +161,7 @@ static void toggle_background(void *arg) {
 static void clear_data(void *arg) {
     (void)arg; // runs only after the careful dialog said yes
     menu_status_begin(s_pg.menu, "Clearing");
-    if (!app_data_job_start(ADJ_CLEAR, s_pg.index, false)) {
+    if (!app_data_job_start(ADJ_CLEAR, s_pg.ctx, false)) {
         menu_status_fail(s_pg.menu, "Could not start", "Try again in a moment.");
         return;
     }
@@ -195,14 +195,14 @@ static void add_caps_note(lv_obj_t *menu, lichen_app_t const *app) {
     menu_note(menu, caps);
 }
 
-void app_page_add_rows(lv_obj_t *screen, lv_obj_t *menu, size_t index) {
-    lichen_app_t const *app = lichen_app_at(index);
+void app_page_add_rows(lv_obj_t *screen, lv_obj_t *menu, lichen_ctx_t ctx) {
+    lichen_app_t const *app = lichen_sys_app_of(ctx);
     if (!app) {
         return;
     }
     memset(&s_pg, 0, sizeof(s_pg));
     s_pg.menu  = menu;
-    s_pg.index = index;
+    s_pg.ctx = ctx;
     app_page_app_t d = describe(app);
     s_pg.rows        = app_page_rows(&d);
     menu_note(menu, "Managed by Lichen");
@@ -234,7 +234,7 @@ void app_page_add_rows(lv_obj_t *screen, lv_obj_t *menu, size_t index) {
     } else if (s_pg.rows.clear_note) {
         menu_note(menu, "Its identity and keys are erased only by Factory reset.");
     }
-    if (s_pg.rows.data && !app_data_job_start(ADJ_MEASURE, index, false)) {
+    if (s_pg.rows.data && !app_data_job_start(ADJ_MEASURE, ctx, false)) {
         menu_set_value(s_pg.data_row, "Unknown");
         menu_set_value(s_pg.sd_row, "Unknown");
         ESP_LOGW(TAG, "%s: the size could not be read (a job is running)", app->id ? app->id : app->name);

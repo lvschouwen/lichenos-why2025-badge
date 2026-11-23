@@ -46,19 +46,22 @@ lichen_ctx_t lichen_sys_app_ctx_at(size_t index);
 // (every copy of it is refused), its slot is free for the next app (with another generation), its backup keys leave the
 // SD backup and its booked timers die. Refused while the app runs (any state but registered, stopped or faulted, see
 // app_life_removable): the caller stops it first with lichen_sys_apps_stop. The app list observers run afterwards on the
-// LVGL task, and unregister returns only after they ran (up to 2 s), so the caller may free the lichen_app_t once it
-// has returned. Any task but the LVGL task (it waits for it), not from an ISR; takes the LVGL lock and then the table's
-// write lock, so the caller holds neither (nor any lock the LVGL task waits for).
+// LVGL task, then done(done_arg) (when not NULL), exactly once: the lichen_app_t and everything the observers may still
+// point into are freed there, never before. A caller that is no LVGL task and holds no LVGL lock waits up to 2 s for
+// that and gets LICHEN_UNREG_OK with done run. The LVGL task, a holder of the LVGL lock, or a wait that ran out: gets
+// LICHEN_UNREG_PENDING at once and done runs later on the LVGL task. Not from an interrupt; takes the LVGL lock and then the
+// app lock, so the caller holds neither (nor any lock the LVGL task waits for).
 typedef enum {
     LICHEN_UNREG_OK,
     LICHEN_UNREG_BAD_CTX, // no such app (stale, made up, the OS's)
     LICHEN_UNREG_RUNNING, // the app runs: stop it first
     LICHEN_UNREG_BUSY,    // the LVGL lock was not free in 5 s: nothing changed, try again
+    LICHEN_UNREG_PENDING, // the app is gone, but the observers and done have not run yet (see done below)
 } lichen_unreg_t;
 // leaked, when not NULL, gets the lichen_alloc blocks the app still held when it left (0: none): the book counts them but
 // cannot free them, so a loader frees everything the app allocated first (lichen_task_leftovers and the memory row tell
 // what remains), and a non-zero count is logged as a leak.
-lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked);
+lichen_unreg_t lichen_unregister_app(lichen_ctx_t ctx, uint32_t *leaked, void (*done)(void *arg), void *done_arg);
 // Calls cb(arg, removed) on the LVGL task after the app table changed (an app registered or left), until
 // lichen_app_list_unobserve with the same pair. removed: an app left since the last call, so the indexes of the apps
 // after it moved up by one (a join only appends): whatever is keyed by index (an app page's index, the rows of
@@ -78,6 +81,9 @@ void lichen_app_list_unobserve(void (*cb)(void *arg, bool removed), void *arg);
 // it then. Any task; never from an interrupt's handler on purpose.
 bool lichen_sys_app_lock(void);
 void lichen_sys_app_unlock(bool held);
+// The app struct of ctx, NULL for a ctx that is stale, made up or the OS's (no refusal is counted or logged: it is a
+// lookup, not a gate call). The struct stays valid until the app is unregistered. Any task.
+lichen_app_t const *lichen_sys_app_of(lichen_ctx_t ctx);
 // The block the OS keeps for the app of ctx (app_state.h): its lifecycle record, memory row, timer flags and directories.
 // NULL for a ctx that is stale, made up or the OS's. It is freed when the app is unregistered, so a caller that may race
 // with that (a timer's tick, a console command) asks again each time and holds the pointer only briefly. Any task or ISR.

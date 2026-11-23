@@ -15,7 +15,7 @@
 // Locking: the slot reads (app_ctx_valid, _resolve, _slot_owner) take no lock and are safe against a concurrent add
 // or remove (owner is published before the generation, and cleared after it). Writers (add, remove) must be
 // serialised by the caller, and so must the index view (app_ctx_apps, _app_at, _at, _of) against them: lichen_app.c
-// holds a spinlock for both. The refusal counters are atomic.
+// holds the app lock (a recursive mutex) for both. The refusal counters are atomic.
 
 #include <stdbool.h>
 #include <stddef.h>
