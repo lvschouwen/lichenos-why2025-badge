@@ -1,0 +1,9 @@
+# Manifest of the DOOM SD app (format: lichen_api/lichen_manifest.h). freedoom1.wad goes next to it on the card.
+id=doom
+name=DOOM
+api=2.2
+entry=app.elf
+caps=BACKGROUND
+internal_ram_kib=24
+psram_kib=7168
+stack_kib=4

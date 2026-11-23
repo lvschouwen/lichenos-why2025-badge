@@ -1,0 +1,4 @@
+# Nothing of the firmware's configuration matters to an app that only links against the OS's export table; this keeps
+# the app's own configure small and quiet.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
