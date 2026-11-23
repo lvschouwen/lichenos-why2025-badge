@@ -15,6 +15,7 @@
 #include "lichen_sys_ui.h"
 #include "nav.h"
 #include "raw_keys.h"
+#include "raw_owner.h"
 #include "remote_ctl.h"
 #include "lichen_mem.h"
 #include "shell_parts.h"
@@ -176,8 +177,9 @@ static char const *open_refused(void) {
     if (setup_running()) {
         return "the first-run setup is on screen";
     }
-    if (raw_keys_held()) {
-        return raw_keys_test_open() ? "the Keyboard test is open" : "an app holds the raw keys"; // either owns the keys, like the shape-key shortcuts see it
+    char const *keys = raw_owner_refusal(raw_keys_held(), raw_keys_test_open());
+    if (keys) {
+        return keys; // either owns the keys, like the shape-key shortcuts see it
     }
     return NULL;
 }

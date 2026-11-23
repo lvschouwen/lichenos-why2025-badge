@@ -1577,6 +1577,7 @@ add_test(NAME key_matrix_test COMMAND key_matrix_test)
 add_executable(shortcut_test
     ${CMAKE_CURRENT_SOURCE_DIR}/shortcut_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/shortcut.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/raw_owner.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/ui_keys.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/key_matrix.c
 )
@@ -1584,6 +1585,7 @@ target_include_directories(shortcut_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
 )
 target_compile_options(shortcut_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME shortcut_test COMMAND shortcut_test)
@@ -1593,7 +1595,8 @@ add_executable(raw_owner_test
     ${CMAKE_CURRENT_SOURCE_DIR}/raw_owner_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/raw_owner.c
 )
-target_include_directories(raw_owner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(raw_owner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(raw_owner_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME raw_owner_test COMMAND raw_owner_test)
 

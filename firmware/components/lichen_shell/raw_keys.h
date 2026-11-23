@@ -20,8 +20,11 @@ bool raw_keys_test_open(void); // what the keyboard task stamps now
 // remote "ui open" stay off. Only the Keyboard test also sets raw_keys_test_open.
 bool raw_keys_held(void);
 // Frees the raw keys when ctx holds them, nothing otherwise (#534, for #533's unload and card removal). OS-internal, not
-// exported. Any task: it takes the LVGL lock itself (recursive, so the LVGL task may call it too)
-void raw_keys_release_ctx(lichen_ctx_t ctx);
+// exported. Any task: it takes the LVGL lock itself (recursive, so the LVGL task may call it too). The caller must not
+// hold lichen_sys_app_lock: the lock order is LVGL, then the app lock. True when ctx does not hold the keys afterwards
+// (it never did, or they are free now); false when the LVGL lock could not be taken, so the callback may still run:
+// do not free the image then.
+bool raw_keys_release_ctx(lichen_ctx_t ctx);
 
 // The listener table has no lock of its own: callers of raw_keys_listen / raw_keys_unlisten hold the LVGL lock
 // (lichen_sys_ui_lock, e.g. from a console command) or run on the LVGL task (event handlers, timers), which is what keeps

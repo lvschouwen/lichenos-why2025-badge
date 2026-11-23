@@ -1,5 +1,7 @@
 #pragma once
 
+#include "key_raw.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -18,3 +20,13 @@ bool raw_owner_release_ctx(raw_owner_t *o, uint32_t ctx);
 bool raw_owner_held(raw_owner_t const *o);
 // Whether the screen counts as the Keyboard test: held, and by the Keyboard test
 bool raw_owner_test_mark(raw_owner_t const *o);
+
+// The caller is the Keyboard test: its ctx is the one registered for it (neither may be 0)
+bool raw_owner_is_keytest(uint32_t caller, uint32_t keytest_ctx);
+// What the keyboard task stamps into each raw event at capture: the mark and the held flag as the owner left them
+void raw_owner_stamp(key_raw_event_t *ev, bool test_mark, bool held);
+// Whether a stamped event is for an app that owns the keys (the shape-key shortcuts stay quiet): any holder, not only
+// the Keyboard test
+bool raw_owner_event_owned(key_raw_event_t const *ev);
+// Why a remote "ui open" is refused while raw keys are held: NULL when they are not
+char const *raw_owner_refusal(bool held, bool test_mark);

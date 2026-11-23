@@ -52,8 +52,7 @@ static bool hook(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     if (atomic_load(&active) > 0) {
         key_raw_event_t stamped = *ev;
-        stamped.test_open       = atomic_load(&test_open);
-        stamped.held            = atomic_load(&held);
+        raw_owner_stamp(&stamped, atomic_load(&test_open), atomic_load(&held));
         xQueueSend(queue, &stamped, 0); // a full queue drops events rather than blocking the keyboard
     }
     return atomic_load(&swallowing) > 0;
@@ -144,7 +143,7 @@ static void to_app(key_raw_event_t const *ev, void *arg) {
 
 static bool caller_is_keytest(lichen_ctx_t ctx) {
     lichen_ctx_t keytest = LICHEN_CTX_NONE;
-    return lichen_app_by_name("keytest", &keytest) && keytest == ctx;
+    return lichen_app_by_name("keytest", &keytest) && raw_owner_is_keytest(ctx, keytest);
 }
 
 bool lichen_keys_raw_take_impl(lichen_raw_key_fn fn, void *arg) {
@@ -189,10 +188,16 @@ void lichen_keys_raw_release_impl(lichen_raw_key_fn fn, void *arg) {
 }
 
 // Any task (the SD app loader, #533): the table and the drain timer are LVGL's, so take the (recursive) lock
-void raw_keys_release_ctx(lichen_ctx_t ctx) {
-    if (ctx == LICHEN_CTX_NONE || !lichen_sys_ui_lock(0)) {
-        return;
+bool raw_keys_release_ctx(lichen_ctx_t ctx) {
+    if (ctx == LICHEN_CTX_NONE) {
+        return true;
+    }
+    if (!lichen_sys_ui_lock(0)) {
+        ESP_LOGW(TAG, "raw keys of ctx %u not released: no LVGL lock", (unsigned)ctx);
+        return false;
     }
     free_keys(ctx);
+    bool free_of_ctx = owner.ctx != ctx;
     lichen_sys_ui_unlock();
+    return free_of_ctx;
 }

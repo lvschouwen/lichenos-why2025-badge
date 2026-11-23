@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "nav.h"
 #include "raw_keys.h"
+#include "raw_owner.h"
 #include "shell_parts.h"
 #include "shortcut.h"
 #include "update_screen.h"
@@ -129,7 +130,7 @@ void shortcuts_key(uint8_t code, bool pressed, bool test_open) {
 
 static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     (void)arg;
-    shortcuts_key(ev->code, ev->pressed, ev->held);
+    shortcuts_key(ev->code, ev->pressed, raw_owner_event_owned(ev));
 }
 
 // key_cause's getter (#400): a tile's or a row's Enter is a hand's only while LVGL is handling that key; a timer or

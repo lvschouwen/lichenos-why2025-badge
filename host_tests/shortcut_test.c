@@ -1,5 +1,6 @@
 // Host test: the shape keys as OS shortcuts (#79)
 #include "screen_ids.h"
+#include "raw_owner.h"
 #include "shortcut.h"
 #include "ui_keys.h"
 
@@ -95,12 +96,25 @@ static void test_send_tokens(void) {
     CHECK(!UI_KEY_IS_SHAPE(k[0]) && !UI_KEY_IS_SHAPE(k[1])); // nor is wait (UINT32_MAX)
 }
 
+// #534: an app that holds the raw keys without being the Keyboard test (a game) still owns every key: the gate the
+// shortcut filter builds from the event's stamp must refuse the shape keys
+static void test_held_event_suppresses(void) {
+    key_raw_event_t ev = {.code = 0x02, .pressed = true};
+    raw_owner_stamp(&ev, false, true); // a game: held, not the Keyboard test
+    shortcut_gate_t g = {.test_open = raw_owner_event_owned(&ev)};
+    CHECK(shortcut_decide(ev.code, ev.pressed, &g) == SHORTCUT_NONE);
+    raw_owner_stamp(&ev, false, false);
+    g.test_open = raw_owner_event_owned(&ev);
+    CHECK(shortcut_decide(ev.code, ev.pressed, &g) == SHORTCUT_HOME);
+}
+
 int main(void) {
     test_mapping();
     test_gate();
     test_switch();
     test_top_app();
     test_send_tokens();
+    test_held_event_suppresses();
     if (failures) {
         return 1;
     }
