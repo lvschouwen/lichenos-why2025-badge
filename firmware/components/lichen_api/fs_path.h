@@ -26,7 +26,11 @@ bool fs_sandbox_resolve(char const *dir, char const *path, bool with_root, char 
 
 // Whether `to` is `from` itself or below it (both canonical, from fs_sandbox_resolve): a rename of a folder into its own
 // subtree, which FAT would refuse only half way (#533). The prefix must end at a component boundary ("/a/b" is not in "/a/bc").
+// Compared ASCII case-insensitively, as FAT does; its 8.3 aliases ("LONGDI~1") are not resolved, so a folder's rename is
+// held to the same parent instead (fs_sandbox_same_parent), which no alias can get around.
 bool fs_sandbox_within(char const *from, char const *to);
+// Both canonical paths have the same parent folder (ASCII case-insensitive): the rename only changes a name.
+bool fs_sandbox_same_parent(char const *a, char const *b);
 
 #ifdef __cplusplus
 }

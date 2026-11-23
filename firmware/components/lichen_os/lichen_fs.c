@@ -1,7 +1,7 @@
 #include "lichen_fs.h"
 
 #include "app_state.h"
-#include "export_file.h"
+#include "lichen_os.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -218,14 +218,14 @@ bool lichen_fs_sd_mounted(void) {
 }
 
 // The loader's side (#533): an app that leaves must not keep the card locked. Ends the batch ctx still holds, when this very
-// task took it (a FreeRTOS mutex given back by another task asserts); a holder task that is already gone cannot be undone
-// from here: logged, and the card stays locked until a restart.
-void lichen_fs_sd_release_ctx(lichen_ctx_t ctx) {
+// task took it (a FreeRTOS mutex given back by another task asserts); a batch another task took cannot be ended from here
+// (that task is gone, or still running): logged.
+void lichen_fs_sd_release_ctx(uint32_t ctx) {
     if (!ctx || sd_holder_ctx != ctx) {
         return;
     }
     if (sd_holder_task != xTaskGetCurrentTaskHandle()) {
-        ESP_LOGE(TAG, "%s: left with the SD batch open on a task that is gone: the card stays locked", sd_holder ? sd_holder : "?");
+        ESP_LOGE(TAG, "%s: leaving while another task holds its SD batch: the card stays locked until that task ends it or a restart", sd_holder ? sd_holder : "?");
         return;
     }
     ESP_LOGW(TAG, "%s: left with the SD batch open: ended", sd_holder ? sd_holder : "?");

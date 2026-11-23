@@ -105,10 +105,35 @@ bool fs_sandbox_resolve(char const *dir, char const *path, bool with_root, char 
     return ok;
 }
 
+static char ascii_lower(char c) {
+    return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+}
+
+// n bytes equal, ASCII case folded (FAT folds case; its 8.3 aliases are not resolved here, see fs_sandbox_same_parent)
+static bool equal_fold(char const *a, char const *b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (ascii_lower(a[i]) != ascii_lower(b[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool fs_sandbox_within(char const *from, char const *to) {
     if (!from || !to) {
         return false;
     }
     size_t n = strlen(from);
-    return strncmp(from, to, n) == 0 && (to[n] == '\0' || to[n] == '/');
+    return strlen(to) >= n && equal_fold(from, to, n) && (to[n] == '\0' || to[n] == '/');
+}
+
+bool fs_sandbox_same_parent(char const *a, char const *b) {
+    if (!a || !b) {
+        return false;
+    }
+    char const *sa = strrchr(a, '/'), *sb = strrchr(b, '/');
+    if (!sa || !sb || sa - a != sb - b) {
+        return false;
+    }
+    return equal_fold(a, b, (size_t)(sa - a));
 }

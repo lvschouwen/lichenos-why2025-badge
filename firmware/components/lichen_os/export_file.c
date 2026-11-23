@@ -348,6 +348,13 @@ int lichen_exp_rename(char const *from, char const *to) {
     if (!call_begin(&c, NULL, false)) {
         return -1;
     }
+    // A folder only changes its name, in its own parent: FAT folds case and answers to 8.3 aliases, so "within" cannot be
+    // decided from the names, and a folder moved into its own subtree must never reach FatFs. Files move anywhere inside.
+    struct stat st;
+    if (stat(a, &st) == 0 && S_ISDIR(st.st_mode) && !fs_sandbox_same_parent(a, b)) {
+        errno = EINVAL;
+        return call_end(&c, -1);
+    }
     return call_end(&c, rename(a, b));
 }
 

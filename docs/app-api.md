@@ -338,7 +338,9 @@ task, `stop` on the loader's task), and returns or goes on as a task of the app 
   supported. `exit()` ends the app through the normal unload and never returns; an app never calls `vTaskDelete(NULL)`.
   The app's own ELF and manifest live in that folder too, and the file calls can overwrite them. A call on a card that was
   pulled or swapped fails; an `exit()` closes the app's own screens when it is on top and leaves the user where they are
-  otherwise. `vTaskDelay` sleeps at most a second per call. The exported `lv_*` calls are LVGL-task-only, like LVGL's own:
+  otherwise (its screens then stay up until the user leaves them). `exit()` must not be called from an LVGL callback or an
+  open hook: that aborts the badge, counted against the app. `vTaskDelay` returns early, after a second, so an app sleeps
+  in slices. The exported `lv_*` calls are LVGL-task-only, like LVGL's own:
   an app task wraps every one in `lichen_ui_call` (`lv_canvas_set_palette` also checks the canvas and the index).
 - **Tile without code.** The mount scan reads manifests only; the tile (an initial in a square) is on Home while the
   card is in. A refused app (bad manifest, API newer than the OS or of another major, an id that a built-in has, no

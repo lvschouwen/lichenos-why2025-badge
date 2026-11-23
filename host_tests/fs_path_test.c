@@ -91,6 +91,10 @@ int main(void) {
     CHECK(!fs_sandbox_resolve(D, "a", false, r, 0));
 
     CHECK(fs_sandbox_within("/d/a", "/d/a") && fs_sandbox_within("/d/a", "/d/a/b/c"));
+    CHECK(fs_sandbox_within("/d/Dir", "/d/dir/sub") && fs_sandbox_within("/D/LongDirName", "/d/longdirname"));
+    CHECK(!fs_sandbox_within("/d/LONGDI~1", "/d/longdirname/x")); // an alias is not resolved: rename holds folders to one parent
+    CHECK(fs_sandbox_same_parent("/d/a/x", "/d/A/y") && fs_sandbox_same_parent("/d/x", "/d/y"));
+    CHECK(!fs_sandbox_same_parent("/d/a/x", "/d/a/b/x") && !fs_sandbox_same_parent("/d/a/x", "/d/b/x") && !fs_sandbox_same_parent("/d", NULL));
     CHECK(!fs_sandbox_within("/d/a", "/d/ab") && !fs_sandbox_within("/d/a/b", "/d/a") && !fs_sandbox_within(NULL, "/d"));
     if (failures) {
         printf("%d failures\n", failures);

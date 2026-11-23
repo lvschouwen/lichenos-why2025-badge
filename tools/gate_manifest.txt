@@ -134,6 +134,7 @@ crashlog_unseen	-	unspecified	crashlog_fmt.h
 crashlog_when_text	-	unspecified	crashlog_fmt.h
 fs_app_dir_path	-	unspecified	fs_path.h
 fs_sandbox_resolve	-	unspecified	fs_path.h
+fs_sandbox_same_parent	-	unspecified	fs_path.h
 fs_sandbox_within	-	unspecified	fs_path.h
 gate_app_caller	-	unspecified	gate_app.h
 gate_app_id	-	unspecified	gate_app.h

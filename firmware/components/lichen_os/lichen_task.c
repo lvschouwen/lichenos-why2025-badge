@@ -59,6 +59,7 @@ static void trampoline(void *arg) {
     lichen_ctx_t ctx       = book.slot[slot].ctx;
     portEXIT_CRITICAL(&book_mux);
     gate_task_run(&env, ctx, fn, fn_arg); // runs as the context it was booked under (#230)
+    lichen_fs_sd_release_ctx(ctx);        // a return inside an SD batch would strand the card's mutex
     if (with_caps) {
         park(slot);
     }
@@ -217,10 +218,12 @@ bool lichen_os_task_end_self(void) {
         }
     }
     bool with_caps = slot >= 0 && book.slot[slot].mem != TASK_STACK_INTERNAL;
+    uint32_t ctx   = slot >= 0 ? book.slot[slot].ctx : 0;
     portEXIT_CRITICAL(&book_mux);
     if (slot < 0) {
         return false;
     }
+    lichen_fs_sd_release_ctx(ctx); // exit() inside an SD batch: only this task can end it
     if (with_caps) {
         park(slot);
     }

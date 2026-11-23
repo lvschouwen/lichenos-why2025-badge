@@ -17,7 +17,8 @@
 # (lichen_fs_sd_dir; a relative path, or an absolute one under it; no "..", other drive or backslash), at most 4 open files,
 # the SD lock per call. exit ends the app through the normal unload and never returns (sd_app_loader.c).
 # An SD app may not call vTaskDelete(NULL) (the task book wants the function to return); it returns, or calls exit.
-# The lv_* below are LVGL-task-only, like the originals: an app task wraps every call in lichen_ui_call (which takes the LVGL
+# exit() from an LVGL callback or hook aborts the badge (it cannot end that task), counted against the app; vTaskDelay returns
+# early after a second. The lv_* below are LVGL-task-only, like the originals: an app task wraps every call in lichen_ui_call (which takes the LVGL
 # lock and runs it on the LVGL task); an app that calls one from its own task races LVGL (#525, #526 rely on this).
 # The app's SD folder (/sd/lichen/apps/<id>) also holds its own manifest and ELF, and the file calls can overwrite them.
 # Adding a line is an API change (tools/export_table.txt, LICHEN_API_VERSION minor).

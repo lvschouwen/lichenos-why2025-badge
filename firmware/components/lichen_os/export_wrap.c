@@ -40,7 +40,8 @@ void lichen_exp_lv_canvas_set_palette(lv_obj_t *obj, uint8_t index, lv_color32_t
     default:
         return; // not an indexed format: there is no palette
     }
-    if (index < entries) {
+    // the palette is the first bytes of the buffer's data, 4 per entry
+    if (index < entries && ((size_t)index + 1) * 4 <= buf->data_size) {
         lv_canvas_set_palette(obj, index, color);
     }
 }

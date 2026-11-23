@@ -845,15 +845,12 @@ void sd_apps_boot(void) {
 // Only this app's screens go, and only when the app is on top (the user may be elsewhere): the screens it pushed and its own,
 // not the whole stack. The call never returns, because the app's compiler knows it as noreturn: a booked task ends; any
 // other task (the LVGL task, a timer or console task, a context that is no SD app) cannot end, so on the LVGL task, which
-// cannot be parked without freezing the display, and for a context without an app, the badge aborts with a log line naming
-// the cause (the crash is attributed to the app, like any other fault); any other unbooked task of an app is suspended for
-// good after the close was asked. A PSRAM-stack task is parked by lichen_os_task_end_self (the unload then faults), and
+// cannot be parked without freezing the display, the badge aborts with a log line naming the cause (the crash is attributed to
+// the app, like any other fault); any other unbooked task (or a context without an app) is suspended for good after the
+// close was asked. A PSRAM-stack task is parked by lichen_os_task_end_self (the unload then faults), and
 // exit() from the stop hook ends its task before it answers (the unload times out and faults).
-static void pop_root(void *arg) {
-    (void)arg;
-    shell_back(); // the app's first screen, now on top
-}
-
+// One pop job to the screen under the app's root: the shell pops down to it only if it is still on the stack and runs no follow-up,
+// so an Esc between two steps cannot take another app's screen. Nothing when the root is not on the stack.
 static void close_app_screens(sd_app_rec_t *rec) {
     app_life_t life;
     if (!lichen_sys_life_get(rec->ctx, &life) || life.state != LIFE_OPEN) {
@@ -862,25 +859,45 @@ static void close_app_screens(sd_app_rec_t *rec) {
     sd_app_lock();
     lv_obj_t *root = rec->screen;
     sd_app_unlock();
-    if (root) {
-        shell_back_to(root, pop_root, NULL);
-    } else {
-        shell_back();
+    for (int i = 0; root && i < LIFE_SCREENS_MAX; i++) {
+        lv_obj_t *at = shell_stack_screen(i);
+        if (!at) {
+            return;
+        }
+        if (at == root) {
+            lv_obj_t *below = shell_stack_screen(i + 1);
+            if (below) {
+                shell_back_to(below, NULL, NULL);
+            }
+            return;
+        }
+    }
+}
+
+// exit() on a task that cannot end: on the LVGL task (parking it would freeze the display) the badge aborts, which is
+// attributed to the app; any other task is suspended for good. Never returns.
+__attribute__((noreturn)) static void park_caller(char const *id) {
+    if (lichen_ui_ops_lock_held()) {
+        ESP_LOGE(TAG, "%s: exit() on the LVGL task cannot end it: abort", id ? id : "(no app)");
+        abort();
+    }
+    ESP_LOGW(TAG, "%s: exit() on a task the OS did not start: suspended for good", id ? id : "(no app)");
+    for (;;) {
+        vTaskSuspend(NULL);
     }
 }
 
 void lichen_exp_exit(int code) {
     sd_app_rec_t *rec = sd_app_find(lichen_ctx_self());
     if (!rec) {
-        ESP_LOGE(TAG, "exit(%d) from a context that is no SD app: nothing can end here, abort", code);
-        abort();
+        ESP_LOGE(TAG, "exit(%d) from a context that is no SD app: nothing to close", code);
+        park_caller(NULL);
     }
     sd_app_lock();
     unsigned todo = sd_app_exit(&rec->sda);
     sd_app_unlock();
     ESP_LOGI(TAG, "%s: exit(%d)", rec->m.id, code);
-    lichen_fs_sd_release_ctx(rec->ctx); // before this task ends: only its taker can end the batch
-    if (todo & SD_EXIT_WAKE) {
+        if (todo & SD_EXIT_WAKE) {
         xSemaphoreGive(g_hooks_sem); // the loader's wait for hooks main() will not give
     }
     if (todo & SD_EXIT_HOME) {
@@ -892,12 +909,5 @@ void lichen_exp_exit(int code) {
     if (lichen_os_task_end_self()) {
         return; // not reached
     }
-    if (lichen_ui_ops_lock_held()) {
-        ESP_LOGE(TAG, "%s: exit() on the LVGL task cannot end it: abort", rec->m.id);
-        abort();
-    }
-    ESP_LOGW(TAG, "%s: exit() on a task the OS did not start: suspended for good", rec->m.id);
-    for (;;) {
-        vTaskSuspend(NULL);
-    }
+    park_caller(rec->m.id);
 }
