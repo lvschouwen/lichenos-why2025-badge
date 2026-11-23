@@ -17,7 +17,7 @@ static int failures;
 
 int main(void) {
     CHECK(strcmp(lichen_os_name(), "Lichen OS 2") == 0);
-    CHECK(strcmp(LICHEN_API_VERSION_TEXT, "2.1") == 0);
+    CHECK(strcmp(LICHEN_API_VERSION_TEXT, "2.2") == 0);
     char line[48];
     CHECK(strcmp(lichen_os_version_line("fw-abc1234", line, sizeof(line)), "Lichen OS 2 (fw-abc1234)") == 0);
     CHECK(strcmp(lichen_os_version_line(NULL, line, sizeof(line)), "Lichen OS 2 (?)") == 0);
@@ -26,9 +26,9 @@ int main(void) {
     CHECK(lichen_os_version_line("x", tiny, 0) == tiny);
 
     char st[40];
-    CHECK(strcmp(lichen_os_status_line("3 min", st, sizeof(st)), "API 2.1, uptime 3 min") == 0);
-    CHECK(strcmp(lichen_os_status_line(NULL, st, sizeof(st)), "API 2.1, uptime ?") == 0);
-    CHECK(strcmp(lichen_os_status_line("3 min", tiny, sizeof(tiny)), "API 2.1") == 0);
+    CHECK(strcmp(lichen_os_status_line("3 min", st, sizeof(st)), "API 2.2, uptime 3 min") == 0);
+    CHECK(strcmp(lichen_os_status_line(NULL, st, sizeof(st)), "API 2.2, uptime ?") == 0);
+    CHECK(strcmp(lichen_os_status_line("3 min", tiny, sizeof(tiny)), "API 2.2") == 0);
     CHECK(lichen_os_status_line("x", tiny, 0) == tiny);
 
     if (failures) {

@@ -46,3 +46,16 @@ void *lichen_exp_realloc(void *ptr, size_t size) {
     lichen_exp_free(ptr);
     return fresh;
 }
+
+// strdup booked under the calling app like malloc (#533): a block the app frees with free()
+char *lichen_exp_strdup(char const *s) {
+    if (!s) {
+        return NULL;
+    }
+    size_t n = strlen(s) + 1;
+    char  *p = lichen_exp_malloc(n);
+    if (p) {
+        memcpy(p, s, n);
+    }
+    return p;
+}

@@ -1400,7 +1400,7 @@ add_test(NAME app_ns_test COMMAND app_ns_test)
 # The apps' secrets class (#288): the declared prefix, the stored name, out of backup groups and keep lists
 add_executable(app_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/app_secret_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c)
 target_include_directories(app_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(app_secret_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_secret_test COMMAND app_secret_test)
@@ -2954,6 +2954,17 @@ target_include_directories(export_shims_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs_lvgl ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(export_shims_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME export_shims_test COMMAND export_shims_test)
+# The SD apps' file calls (#533): export_file.c over a real temp directory, with recorded fakes of the SD lock and the card
+add_executable(export_file_test ${CMAKE_CURRENT_SOURCE_DIR}/export_file_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/export_file.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c)
+target_include_directories(export_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs_exports
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs_lvgl ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard)
+target_compile_options(export_file_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME export_file_test COMMAND export_file_test)
+set_tests_properties(export_file_test PROPERTIES TIMEOUT 30) # a blocking read fails the test instead of stalling the check
 # The crash hook's ring of app names, internal RAM only (#520)
 add_executable(panic_ring_test
     ${CMAKE_CURRENT_SOURCE_DIR}/panic_ring_test.c

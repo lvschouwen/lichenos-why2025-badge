@@ -14,12 +14,14 @@
 // never once the state left LOADED; the unload's barrier call queues behind any hook that runs on the LVGL task.
 #include "sd_apps.h"
 
+#include "export_file.h"
 #include "lichen_exports.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_life.h"
 #include "lichen_sys_notify.h"
 #include "lichen_os.h"
 #include "lichen_sys_ui.h"
+#include "lichen_ui.h"
 #include "lichen_task.h"
 #include "lichen_task_os.h"
 #include "sd_app_svc.h"
@@ -342,10 +344,25 @@ static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
     }
 }
 
+// What a leaving app may still hold in the OS, given back by the loader: its open files (#533). Before the image goes
+// (an open file's descriptor outlives main()) and when the card goes. The context may already be stale: the book is keyed by
+// the number only.
+static void release_app_holdings(sd_app_rec_t *rec) {
+    export_file_close_all(rec->ctx);
+    // #534: raw_keys_release_ctx(rec->ctx) joins here (OS-only, not exported): the raw keys a dying app still holds
+}
+
 static void free_image(sd_app_rec_t *rec) {
-    lichen_ctx_t prev = lichen_ctx_enter(rec->ctx);
+    release_app_holdings(rec);
+    sd_app_lock();
+    bool enter = sd_app_free_enters(rec->gone);
+    sd_app_unlock();
+    // #532: after lichen_unregister_app the context is stale; entering it was refused and logged on every card removal
+    lichen_ctx_t prev = enter ? lichen_ctx_enter(rec->ctx) : LICHEN_CTX_NONE;
     esp_elf_deinit(&rec->elf);
-    lichen_ctx_leave(prev);
+    if (enter) {
+        lichen_ctx_leave(prev);
+    }
     memset(&rec->elf, 0, sizeof(rec->elf));
     sd_app_lock();
     rec->image     = false;
@@ -646,6 +663,7 @@ static void remove_one(sd_app_rec_t *rec) {
     if (begin) {
         bad = !unload(rec, false); // the image is freed after the screens are closed (do_free)
     }
+    release_app_holdings(rec); // the card is gone or changed: its files are dropped while the context is still valid, faulted or not
     sd_app_lock();
     bool may = sd_app_may_unregister(&rec->sda, 0);
     sd_app_unlock();
@@ -800,5 +818,37 @@ void sd_apps_boot(void) {
     sd_observe(card_changed);
     if (sd_mounted()) { // no event for a card that mounted before the observer
         post(MSG_CARD, NULL);
+    }
+}
+
+// ---- exit ------------------------------------------------------------------------------------------------------------
+
+// What an SD app's exit() resolves to (tools/export_allow.txt, #533): ask the OS to close the app, then end this task like a
+// return would. The normal unload runs from there (stop hook, tasks, timers, barrier); nothing is freed under this task.
+// Known limits: a task that is not in the task book (a callback on the LVGL task, "fw elf run") cannot end: the close is
+// asked and the call returns; a task with its stack outside internal RAM is parked (the unload then faults); exit() from the
+// stop hook ends its task before it answers (the unload times out and faults).
+void lichen_exp_exit(int code) {
+    sd_app_rec_t *rec  = sd_app_find(lichen_ctx_self());
+    unsigned      todo = SD_EXIT_NONE;
+    if (!rec) {
+        ESP_LOGW(TAG, "exit(%d) from a context that is no SD app: ignored", code);
+        return;
+    }
+    sd_app_lock();
+    todo = sd_app_exit(&rec->sda);
+    sd_app_unlock();
+    ESP_LOGI(TAG, "%s: exit(%d)", rec->m.id, code);
+    if (todo & SD_EXIT_WAKE) {
+        xSemaphoreGive(g_hooks_sem); // the loader's wait for hooks main() will not give
+    }
+    if (todo & SD_EXIT_HOME) {
+        shell_home(); // the app's screens go; the last delete event queues the unload
+    }
+    if ((todo & SD_EXIT_UNLOAD) && !post(MSG_CLOSED, rec)) {
+        ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
+    }
+    if (!lichen_os_task_end_self()) {
+        ESP_LOGW(TAG, "%s: exit() on a task that cannot end: returns", rec->m.id);
     }
 }

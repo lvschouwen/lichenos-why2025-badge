@@ -6,7 +6,7 @@
 # allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
 # the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
-api	2.1
+api	2.2
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
 wrap	bootloader_random_enable	__wrap_bootloader_random_enable
 wrap	esp_panic_handler	__wrap_esp_panic_handler
@@ -258,8 +258,11 @@ type	tz_table.h	tz_entry_t	c33fe3cf
 type	ui_text.h	ui_status_state_t	b2344fe0
 type	ui_text.h	ui_status_t	9e6da743
 export	__divdi3	__divdi3	allow	6e4d106f
+export	__extendsfdf2	__extendsfdf2	allow	76010ff6
+export	__ltdf2	__ltdf2	allow	1612531b
 export	__moddi3	__moddi3	allow	836d03dc
 export	__muldi3	__muldi3	allow	e39a89bc
+export	__truncdfsf2	__truncdfsf2	allow	d1e7d2c5
 export	__udivdi3	__udivdi3	allow	7e0b7a10
 export	__umoddi3	__umoddi3	allow	cff7a618
 export	abs	abs	allow	78da4a59
@@ -278,6 +281,7 @@ export	app_settings_set_u64	app_settings_set_u64	lichen_settings.h	90f6a6a2
 export	app_settings_set_u8	app_settings_set_u8	lichen_settings.h	80883902
 export	atan2	atan2	allow	896128b6
 export	atan2f	atan2f	allow	c399a1ab
+export	atof	atof	allow	503418d1
 export	atoi	atoi	allow	d02f9152
 export	calloc	lichen_exp_calloc	allow	f18924ad
 export	ceil	ceil	allow	0fdfeaa6
@@ -289,13 +293,21 @@ export	clock_source_age_s	clock_source_age_s	lichen_clock.h	64fd6238
 export	clock_source_text	clock_source_text	lichen_clock.h	aa0dc00f
 export	cos	cos	allow	9be28bbe
 export	cosf	cosf	allow	a498cdf3
+export	exit	lichen_exp_exit	allow	88d3320b
 export	fabs	fabs	allow	a903ef9b
 export	fabsf	fabsf	allow	0691b148
+export	fclose	lichen_exp_fclose	allow	4ef868b3
+export	fflush	lichen_exp_fflush	allow	9d496b82
 export	floor	floor	allow	a3e1f493
 export	floorf	floorf	allow	d27b0682
 export	fmod	fmod	allow	8541ad55
 export	fmodf	fmodf	allow	a8aad499
+export	fopen	lichen_exp_fopen	allow	6e6b714b
+export	fread	lichen_exp_fread	allow	d85f298f
 export	free	lichen_exp_free	allow	a31ba324
+export	fseek	lichen_exp_fseek	allow	05518634
+export	ftell	lichen_exp_ftell	allow	088d2b80
+export	fwrite	lichen_exp_fwrite	allow	f213fbc1
 export	hold_exit_event	hold_exit_event	hold_exit.h	c07f4834
 export	hold_exit_percent	hold_exit_percent	hold_exit.h	079a2947
 export	hold_exit_tick	hold_exit_tick	hold_exit.h	0aebd28e
@@ -399,6 +411,9 @@ export	lv_area_get_width	lv_area_get_width	allow	c63f47ce
 export	lv_bar_create	lv_bar_create	allow	78ff3035
 export	lv_bar_set_range	lv_bar_set_range	allow	e72a9615
 export	lv_bar_set_value	lv_bar_set_value	allow	60e2b324
+export	lv_canvas_create	lv_canvas_create	allow	7c3f18cc
+export	lv_canvas_set_buffer	lv_canvas_set_buffer	allow	030b54b7
+export	lv_canvas_set_palette	lv_canvas_set_palette	allow	45147702
 export	lv_chart_add_series	lv_chart_add_series	allow	0fafc92f
 export	lv_chart_create	lv_chart_create	allow	bcab8a59
 export	lv_chart_set_axis_range	lv_chart_set_axis_range	allow	3d839712
@@ -430,6 +445,7 @@ export	lv_group_get_focused	lv_group_get_focused	allow	8fbeaa5f
 export	lv_group_get_user_data	lv_group_get_user_data	allow	6d3a72df
 export	lv_group_remove_obj	lv_group_remove_obj	allow	38cc13ba
 export	lv_group_set_user_data	lv_group_set_user_data	allow	5cc1cf08
+export	lv_image_set_scale	lv_image_set_scale	allow	b24dc525
 export	lv_label_create	lv_label_create	allow	3ba19217
 export	lv_label_set_long_mode	lv_label_set_long_mode	allow	2ebf6a79
 export	lv_label_set_text	lv_label_set_text	allow	0f110d70
@@ -454,6 +470,7 @@ export	lv_obj_get_style_text_font	lv_obj_get_style_text_font	allow	a2189267
 export	lv_obj_get_user_data	lv_obj_get_user_data	allow	16f183e9
 export	lv_obj_get_y	lv_obj_get_y	allow	e949f61d
 export	lv_obj_has_state	lv_obj_has_state	allow	3817971f
+export	lv_obj_invalidate	lv_obj_invalidate	allow	4ca42aeb
 export	lv_obj_is_hidden	lv_obj_is_hidden	allow	6f9f9738
 export	lv_obj_move_to_index	lv_obj_move_to_index	allow	7e8165f9
 export	lv_obj_remove_state	lv_obj_remove_state	allow	db10c92d
@@ -548,12 +565,15 @@ export	menu_status_begin	menu_status_begin	menu.h	dfd542a9
 export	menu_status_done	menu_status_done	menu.h	96c603a1
 export	menu_status_fail	menu_status_fail	menu.h	1c23ab35
 export	menu_status_progress	menu_status_progress	menu.h	1c5ea146
+export	mkdir	lichen_exp_mkdir	allow	17bc3f78
 export	pow	pow	allow	a6b829b0
 export	powf	powf	allow	393231f8
 export	qr_payload_ok	qr_payload_ok	qr_payload.h	4a5196b6
 export	qr_wifi_payload	qr_wifi_payload	qr_payload.h	4d6144c3
 export	qsort	qsort	allow	87cc8b00
 export	realloc	lichen_exp_realloc	allow	2ac4afd7
+export	remove	lichen_exp_remove	allow	1608d64f
+export	rename	lichen_exp_rename	allow	82516b47
 export	scroll_anchor_find	scroll_anchor_find	scroll_anchor.h	5ab1804e
 export	scroll_anchor_take	scroll_anchor_take	scroll_anchor.h	77dfd9c6
 export	scroll_keep_top	scroll_keep_top	scroll_anchor.h	0ae113d3
@@ -589,6 +609,7 @@ export	sscanf	sscanf	allow	f900fa9b
 export	strcasecmp	strcasecmp	allow	f1ebbc4e
 export	strchr	strchr	allow	a23a2787
 export	strcmp	strcmp	allow	64205d6e
+export	strdup	lichen_exp_strdup	allow	bc73d03b
 export	strlen	strlen	allow	a46bd920
 export	strncasecmp	strncasecmp	allow	df8020f7
 export	strncat	strncat	allow	4712ece5
@@ -622,4 +643,5 @@ export	ui_status_begin_text	ui_status_begin_text	ui_text.h	2b51db71
 export	ui_status_end	ui_status_end	ui_text.h	110912a6
 export	ui_status_fail_text	ui_status_fail_text	ui_text.h	08a13f60
 export	ui_status_progress_text	ui_status_progress_text	ui_text.h	f906ea63
+export	vTaskDelay	vTaskDelay	allow	0467eba2
 export	vsnprintf	vsnprintf	allow	e6d1ce35

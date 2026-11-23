@@ -98,6 +98,19 @@ bool sd_app_remove(sd_app_t *a);
 // May the hooks of the ELF be called now (LOADED, and not closing for good)?
 bool sd_app_hooks_live(sd_app_t const *a);
 
+// ---- exit (#533) --------------------------------------------------------------------------------------------------
+
+// What the OS does for an app that called exit(), a bit set (SD_EXIT_NONE: nothing, the app is already leaving or not running)
+#define SD_EXIT_NONE   0u
+#define SD_EXIT_WAKE   1u // the loader may be waiting for hooks that will not come: wake it
+#define SD_EXIT_HOME   2u // the app's screens are still up: the shell closes them, their delete events start the unload
+#define SD_EXIT_UNLOAD 4u // no screen is left to start it: queue the unload now
+unsigned sd_app_exit(sd_app_t *a);
+
+// The context to enter around freeing the image: the app's while it is registered, none once lichen_unregister_app made it
+// stale (#532: entering a stale context is refused and logged on the card-removal path).
+bool sd_app_free_enters(bool unregistered);
+
 // ---- the unload order (the invariant of #523) --------------------------------------------------------------------
 
 typedef enum {

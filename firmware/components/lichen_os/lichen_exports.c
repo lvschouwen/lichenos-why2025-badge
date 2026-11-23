@@ -6,8 +6,11 @@
 #pragma GCC diagnostic ignored "-Wattributes"
 
 extern void __divdi3(void);
+extern void __extendsfdf2(void);
+extern void __ltdf2(void);
 extern void __moddi3(void);
 extern void __muldi3(void);
+extern void __truncdfsf2(void);
 extern void __udivdi3(void);
 extern void __umoddi3(void);
 extern void abs(void);
@@ -26,6 +29,7 @@ extern void app_settings_set_u64(void);
 extern void app_settings_set_u8(void);
 extern void atan2(void);
 extern void atan2f(void);
+extern void atof(void);
 extern void atoi(void);
 extern void ceil(void);
 extern void ceilf(void);
@@ -68,9 +72,21 @@ extern void lichen_badge_set(void);
 extern void lichen_ctx_self(void);
 extern void lichen_date_text(void);
 extern void lichen_exp_calloc(void);
+extern void lichen_exp_exit(void);
+extern void lichen_exp_fclose(void);
+extern void lichen_exp_fflush(void);
+extern void lichen_exp_fopen(void);
+extern void lichen_exp_fread(void);
 extern void lichen_exp_free(void);
+extern void lichen_exp_fseek(void);
+extern void lichen_exp_ftell(void);
+extern void lichen_exp_fwrite(void);
 extern void lichen_exp_malloc(void);
+extern void lichen_exp_mkdir(void);
 extern void lichen_exp_realloc(void);
+extern void lichen_exp_remove(void);
+extern void lichen_exp_rename(void);
+extern void lichen_exp_strdup(void);
 extern void lichen_font(void);
 extern void lichen_free(void);
 extern void lichen_fs_app_dir(void);
@@ -149,6 +165,9 @@ extern void lv_area_get_width(void);
 extern void lv_bar_create(void);
 extern void lv_bar_set_range(void);
 extern void lv_bar_set_value(void);
+extern void lv_canvas_create(void);
+extern void lv_canvas_set_buffer(void);
+extern void lv_canvas_set_palette(void);
 extern void lv_chart_add_series(void);
 extern void lv_chart_create(void);
 extern void lv_chart_set_axis_range(void);
@@ -180,6 +199,7 @@ extern void lv_group_get_focused(void);
 extern void lv_group_get_user_data(void);
 extern void lv_group_remove_obj(void);
 extern void lv_group_set_user_data(void);
+extern void lv_image_set_scale(void);
 extern void lv_label_create(void);
 extern void lv_label_set_long_mode(void);
 extern void lv_label_set_text(void);
@@ -204,6 +224,7 @@ extern void lv_obj_get_style_text_font(void);
 extern void lv_obj_get_user_data(void);
 extern void lv_obj_get_y(void);
 extern void lv_obj_has_state(void);
+extern void lv_obj_invalidate(void);
 extern void lv_obj_is_hidden(void);
 extern void lv_obj_move_to_index(void);
 extern void lv_obj_remove_state(void);
@@ -370,12 +391,16 @@ extern void ui_status_begin_text(void);
 extern void ui_status_end(void);
 extern void ui_status_fail_text(void);
 extern void ui_status_progress_text(void);
+extern void vTaskDelay(void);
 extern void vsnprintf(void);
 
 struct esp_elfsym const lichen_exports[] = {
     {"__divdi3", (void *)__divdi3},
+    {"__extendsfdf2", (void *)__extendsfdf2},
+    {"__ltdf2", (void *)__ltdf2},
     {"__moddi3", (void *)__moddi3},
     {"__muldi3", (void *)__muldi3},
+    {"__truncdfsf2", (void *)__truncdfsf2},
     {"__udivdi3", (void *)__udivdi3},
     {"__umoddi3", (void *)__umoddi3},
     {"abs", (void *)abs},
@@ -394,6 +419,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"app_settings_set_u8", (void *)app_settings_set_u8},
     {"atan2", (void *)atan2},
     {"atan2f", (void *)atan2f},
+    {"atof", (void *)atof},
     {"atoi", (void *)atoi},
     {"calloc", (void *)lichen_exp_calloc},
     {"ceil", (void *)ceil},
@@ -405,13 +431,21 @@ struct esp_elfsym const lichen_exports[] = {
     {"clock_source_text", (void *)clock_source_text},
     {"cos", (void *)cos},
     {"cosf", (void *)cosf},
+    {"exit", (void *)lichen_exp_exit},
     {"fabs", (void *)fabs},
     {"fabsf", (void *)fabsf},
+    {"fclose", (void *)lichen_exp_fclose},
+    {"fflush", (void *)lichen_exp_fflush},
     {"floor", (void *)floor},
     {"floorf", (void *)floorf},
     {"fmod", (void *)fmod},
     {"fmodf", (void *)fmodf},
+    {"fopen", (void *)lichen_exp_fopen},
+    {"fread", (void *)lichen_exp_fread},
     {"free", (void *)lichen_exp_free},
+    {"fseek", (void *)lichen_exp_fseek},
+    {"ftell", (void *)lichen_exp_ftell},
+    {"fwrite", (void *)lichen_exp_fwrite},
     {"hold_exit_event", (void *)hold_exit_event},
     {"hold_exit_percent", (void *)hold_exit_percent},
     {"hold_exit_tick", (void *)hold_exit_tick},
@@ -515,6 +549,9 @@ struct esp_elfsym const lichen_exports[] = {
     {"lv_bar_create", (void *)lv_bar_create},
     {"lv_bar_set_range", (void *)lv_bar_set_range},
     {"lv_bar_set_value", (void *)lv_bar_set_value},
+    {"lv_canvas_create", (void *)lv_canvas_create},
+    {"lv_canvas_set_buffer", (void *)lv_canvas_set_buffer},
+    {"lv_canvas_set_palette", (void *)lv_canvas_set_palette},
     {"lv_chart_add_series", (void *)lv_chart_add_series},
     {"lv_chart_create", (void *)lv_chart_create},
     {"lv_chart_set_axis_range", (void *)lv_chart_set_axis_range},
@@ -546,6 +583,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"lv_group_get_user_data", (void *)lv_group_get_user_data},
     {"lv_group_remove_obj", (void *)lv_group_remove_obj},
     {"lv_group_set_user_data", (void *)lv_group_set_user_data},
+    {"lv_image_set_scale", (void *)lv_image_set_scale},
     {"lv_label_create", (void *)lv_label_create},
     {"lv_label_set_long_mode", (void *)lv_label_set_long_mode},
     {"lv_label_set_text", (void *)lv_label_set_text},
@@ -570,6 +608,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"lv_obj_get_user_data", (void *)lv_obj_get_user_data},
     {"lv_obj_get_y", (void *)lv_obj_get_y},
     {"lv_obj_has_state", (void *)lv_obj_has_state},
+    {"lv_obj_invalidate", (void *)lv_obj_invalidate},
     {"lv_obj_is_hidden", (void *)lv_obj_is_hidden},
     {"lv_obj_move_to_index", (void *)lv_obj_move_to_index},
     {"lv_obj_remove_state", (void *)lv_obj_remove_state},
@@ -664,12 +703,15 @@ struct esp_elfsym const lichen_exports[] = {
     {"menu_status_done", (void *)menu_status_done},
     {"menu_status_fail", (void *)menu_status_fail},
     {"menu_status_progress", (void *)menu_status_progress},
+    {"mkdir", (void *)lichen_exp_mkdir},
     {"pow", (void *)pow},
     {"powf", (void *)powf},
     {"qr_payload_ok", (void *)qr_payload_ok},
     {"qr_wifi_payload", (void *)qr_wifi_payload},
     {"qsort", (void *)qsort},
     {"realloc", (void *)lichen_exp_realloc},
+    {"remove", (void *)lichen_exp_remove},
+    {"rename", (void *)lichen_exp_rename},
     {"scroll_anchor_find", (void *)scroll_anchor_find},
     {"scroll_anchor_take", (void *)scroll_anchor_take},
     {"scroll_keep_top", (void *)scroll_keep_top},
@@ -705,6 +747,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"strcasecmp", (void *)strcasecmp},
     {"strchr", (void *)strchr},
     {"strcmp", (void *)strcmp},
+    {"strdup", (void *)lichen_exp_strdup},
     {"strlen", (void *)strlen},
     {"strncasecmp", (void *)strncasecmp},
     {"strncat", (void *)strncat},
@@ -738,6 +781,7 @@ struct esp_elfsym const lichen_exports[] = {
     {"ui_status_end", (void *)ui_status_end},
     {"ui_status_fail_text", (void *)ui_status_fail_text},
     {"ui_status_progress_text", (void *)ui_status_progress_text},
+    {"vTaskDelay", (void *)vTaskDelay},
     {"vsnprintf", (void *)vsnprintf},
     {NULL, NULL},
 };

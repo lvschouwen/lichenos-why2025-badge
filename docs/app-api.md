@@ -326,11 +326,17 @@ capabilities (#78).
 
 ## SD apps (#516, #523)
 
-An app that is an ELF on the card (`/sd/lichen/apps/<id>/manifest` and its entry file, API 2.1) is not registered by code
+An app that is an ELF on the card (`/sd/lichen/apps/<id>/manifest` and its entry file, API 2.2) is not registered by code
 of its own: the OS's loader registers it from the manifest and builds its `lichen_app_t`, every hook of which is an OS
 trampoline. The app's `main()` makes one call, `lichen_sd_app_hooks(&hooks)` (`lichen_sd_app.h`: `open` on the LVGL
 task, `stop` on the loader's task), and returns or goes on as a task of the app (stack from `stack_kib`).
 
+- **Files and exit (API 2.2, #533).** `fopen fclose fread fwrite fseek ftell fflush remove rename mkdir` are the libc
+  names, sandboxed to the app's own `/sd/lichen/apps/<id>` (relative or absolute under it; `..`, backslash, a drive or
+  another folder is refused), the SD lock taken per call. At most 4 files are open per app; the loader closes them at
+  unload and when the card goes, and a handle used after that returns an error. `getc`/`putc`/`feof`/`ferror` are not
+  supported. `exit()` ends the app through the normal unload and never returns; an app never calls `vTaskDelete(NULL)`.
+  The app's own ELF and manifest live in that folder too.
 - **Tile without code.** The mount scan reads manifests only; the tile (an initial in a square) is on Home while the
   card is in. A refused app (bad manifest, API newer than the OS or of another major, an id that a built-in has, no
   entry file) gets one notification and one log line per scan.

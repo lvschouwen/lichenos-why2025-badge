@@ -6,3 +6,7 @@
 
 bool lichen_os_task_start_for(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                               uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle);
+
+// The calling task ends like a returning one (an SD app's exit(), #533, lichen_task.c). Does not return for a booked task;
+// false for one that is not in the book.
+bool lichen_os_task_end_self(void);

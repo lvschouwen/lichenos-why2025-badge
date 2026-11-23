@@ -203,6 +203,34 @@ size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms) {
     return left;
 }
 
+// The calling task ends as if its function had returned (#533: an SD app's exit()): out of the book, then deleted, so the
+// unload's wait for the app's tasks does not stall on it. False (and it returns) for a task that is not in the book (the
+// LVGL task, a console task, a timer callback): the caller decides. A task with its stack outside internal RAM is parked
+// like a returning one (park()): it stays booked, so the unload faults rather than free the image under it.
+bool lichen_os_task_end_self(void) {
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    int          slot = -1;
+    portENTER_CRITICAL(&book_mux);
+    for (int i = 0; i < TASK_BOOK_SLOTS && slot < 0; i++) {
+        if (book.slot[i].used && book.slot[i].handle == self) {
+            slot = i;
+        }
+    }
+    bool with_caps = slot >= 0 && book.slot[slot].mem != TASK_STACK_INTERNAL;
+    portEXIT_CRITICAL(&book_mux);
+    if (slot < 0) {
+        return false;
+    }
+    if (with_caps) {
+        park(slot);
+    }
+    portENTER_CRITICAL(&book_mux);
+    task_book_remove(&book, slot);
+    portEXIT_CRITICAL(&book_mux);
+    vTaskDelete(NULL);
+    return true; // not reached
+}
+
 size_t lichen_os_task_count(uint32_t ctx) {
     portENTER_CRITICAL(&book_mux);
     size_t left = task_book_count(&book, ctx, xTaskGetCurrentTaskHandle());

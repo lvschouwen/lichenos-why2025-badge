@@ -168,3 +168,23 @@ sd_unload_step_t sd_unload_next(sd_unload_step_t cur, bool ok) {
     }
     return cur < SD_UNLOAD_DONE ? (sd_unload_step_t)(cur + 1) : cur; // the enum is the order
 }
+
+unsigned sd_app_exit(sd_app_t *a) {
+    switch (a->state) {
+    case SD_APP_LOADING: // main() exited: the loader's wait ends, and a load that did finish unloads at once
+        a->closing = true;
+        return SD_EXIT_WAKE | (a->screens > 0 ? SD_EXIT_HOME : 0u);
+    case SD_APP_LOADED:
+        if (a->screens > 0) {
+            return SD_EXIT_HOME;
+        }
+        a->closing = true;
+        return SD_EXIT_UNLOAD;
+    default:
+        return SD_EXIT_NONE; // unloading, faulted or not loaded: the unload that runs (or none) is all there is
+    }
+}
+
+bool sd_app_free_enters(bool unregistered) {
+    return !unregistered;
+}

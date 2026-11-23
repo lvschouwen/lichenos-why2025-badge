@@ -221,6 +221,24 @@ static void test_unload_order(void) {
     CHECK(sd_unload_next(SD_UNLOAD_FAULT, true) == SD_UNLOAD_FAULT);
 }
 
+// exit() (#533): the app's own task asks for the close; the normal unload does the rest
+static void test_exit(void) {
+    sd_app_t a = {.state = SD_APP_LOADED, .screens = 2};
+    CHECK(sd_app_exit(&a) == SD_EXIT_HOME && !a.closing); // the shell closes the screens; the last delete event unloads
+    sd_app_t n = {.state = SD_APP_LOADED, .screens = 0};
+    CHECK(sd_app_exit(&n) == SD_EXIT_UNLOAD && n.closing && sd_app_unload_begin(&n));
+    sd_app_t l = {.state = SD_APP_LOADING, .screens = 1};
+    CHECK(sd_app_exit(&l) == (SD_EXIT_WAKE | SD_EXIT_HOME) && l.closing); // before its hooks: the loader wakes, the placeholder goes
+    CHECK(sd_app_load_done(&l, true) == SD_NEXT_UNLOAD); // hooks were set in time: unloads, never opens
+    sd_app_t l0 = {.state = SD_APP_LOADING, .screens = 0};
+    CHECK(sd_app_exit(&l0) == SD_EXIT_WAKE);
+    sd_app_t t = {.state = SD_APP_TILE}, u = {.state = SD_APP_UNLOADING}, f = {.state = SD_APP_FAULTED};
+    CHECK(sd_app_exit(&t) == SD_EXIT_NONE && sd_app_exit(&u) == SD_EXIT_NONE && sd_app_exit(&f) == SD_EXIT_NONE);
+    CHECK(!t.closing && u.state == SD_APP_UNLOADING);
+    // #532: the image is freed after lichen_unregister_app; entering the stale context was refused and logged there
+    CHECK(sd_app_free_enters(false) && !sd_app_free_enters(true));
+}
+
 int main(void) {
     test_scan();
     test_open();
@@ -233,6 +251,7 @@ int main(void) {
     test_close_during_load();
     test_removal();
     test_unload_order();
+    test_exit();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

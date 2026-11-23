@@ -3,8 +3,21 @@
 # layers.conf forbids apps (`forbid L6`) needs a mapping or is refused by the generator. Adding a line is an API change
 # (tools/export_table.txt, LICHEN_API_VERSION minor).
 #
-# Not here on purpose: printf and friends (a user-controlled format is a door; snprintf and vsnprintf only write to a
-# buffer), esp_rom_printf, file and socket calls (the gate's lichen_fs and its caps are the way), abort and exit.
+# Not here on purpose (the DOOM glue, #525, avoids them with a force-included shim header, so a ported program needs no change):
+#   printf puts putchar fprintf fputs vfprintf  a user-controlled format is a door, and they need stdout, which is reached
+#                                               through __getreent; snprintf and vsnprintf only write to a buffer
+#   system                                      runs another program
+#   _ctype_ __getreent __errno                  newlib's per-task state: the app would read the OS's reent, and the PSRAM
+#                                               image has no business with it (isalpha and friends are functions above)
+#   esp_rom_printf, socket calls                the gate's caps are the way
+#   getc putc feof ferror fgets and the rest of stdio: the file shims below are fread/fwrite/fseek/ftell only, on a handle
+#                                               of the OS's own (a slot of export_file.c's book, never a real FILE), so the
+#                                               getc/putc macros, which reach into the FILE struct, are not supported.
+# Files (#533): fopen fclose fread fwrite fseek ftell fflush remove rename mkdir work on the app's own SD directory only
+# (lichen_fs_sd_dir; a relative path, or an absolute one under it; no "..", other drive or backslash), at most 4 open files,
+# the SD lock per call. exit ends the app through the normal unload and never returns (sd_app_loader.c).
+# An SD app may not call vTaskDelete(NULL) (the task book wants the function to return); it returns, or calls exit.
+# Adding a line is an API change (tools/export_table.txt, LICHEN_API_VERSION minor).
 
 # libc: memory and strings
 memcpy
@@ -49,6 +62,26 @@ malloc = lichen_exp_malloc
 calloc = lichen_exp_calloc
 realloc = lichen_exp_realloc
 free = lichen_exp_free
+strdup = lichen_exp_strdup
+
+# Files, sandboxed to the app's SD directory and booked per app (export_file.c); exit is in sd_app_loader.c
+fopen = lichen_exp_fopen
+fclose = lichen_exp_fclose
+fread = lichen_exp_fread
+fwrite = lichen_exp_fwrite
+fseek = lichen_exp_fseek
+ftell = lichen_exp_ftell
+fflush = lichen_exp_fflush
+remove = lichen_exp_remove
+rename = lichen_exp_rename
+mkdir = lichen_exp_mkdir
+exit = lichen_exp_exit
+
+# FreeRTOS: DG_SleepMs of the DOOM glue (#525)
+vTaskDelay
+
+# libc: float parsing
+atof
 
 # libm
 sinf
@@ -78,6 +111,10 @@ __udivdi3
 __moddi3
 __umoddi3
 __muldi3
+# softfloat: the compiler's calls for double arithmetic on a core without a double FPU
+__extendsfdf2
+__ltdf2
+__truncdfsf2
 
 # lv_*: the LVGL functions the built-in apps (lichen_apps, mesh) call, from the undefined symbols of their archives
 # minus `forbid L6`. A new one is a line here (and a minor version bump).
@@ -85,6 +122,9 @@ lv_area_get_width
 lv_bar_create
 lv_bar_set_range
 lv_bar_set_value
+lv_canvas_create
+lv_canvas_set_buffer
+lv_canvas_set_palette
 lv_chart_add_series
 lv_chart_create
 lv_chart_set_axis_range
@@ -109,6 +149,7 @@ lv_event_get_target_obj
 lv_event_get_user_data
 lv_event_stop_processing
 lv_font_get_line_height
+lv_image_set_scale
 lv_group_add_obj
 lv_group_focus_obj
 lv_group_get_default
@@ -140,6 +181,7 @@ lv_obj_get_style_text_font
 lv_obj_get_user_data
 lv_obj_get_y
 lv_obj_has_state
+lv_obj_invalidate
 lv_obj_is_hidden
 lv_obj_move_to_index
 lv_obj_remove_state
