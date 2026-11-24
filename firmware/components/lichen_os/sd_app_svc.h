@@ -39,6 +39,10 @@ typedef struct sd_app_rec {
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live
     void              *screen;   // lv_obj_t: the screen waiting for the hooks' open; LVGL task only
+    void              *bar;      // lv_obj_t: the load bar and its text on the waiting screen; LVGL task only (sd_app_lock),
+    void              *label;    // cleared by their own delete events
+    sd_progress_t      prog;     // the loader task's throttle
+    int                pct;      // the last percent handed to the bar (sd_app_lock)
     char               msg[SD_APP_MSG_LEN]; // what the waiting screen shows after a refusal
 } sd_app_rec_t;
 

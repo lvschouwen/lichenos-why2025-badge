@@ -254,6 +254,25 @@ static void test_load_skip(void) {
     CHECK(sd_app_open(&a, NULL) == SD_OPEN_LOAD); // a reopen after the skip loads again
 }
 
+// #548: the bar's percent and its throttle (about 10 updates a second, the end always shown)
+static void test_progress(void) {
+    CHECK(sd_progress_pct(0, 0) == 0 && sd_progress_pct(0, 1000) == 0 && sd_progress_pct(500, 1000) == 50);
+    CHECK(sd_progress_pct(999, 1000) == 99 && sd_progress_pct(1000, 1000) == 100 && sd_progress_pct(2000, 1000) == 100);
+    CHECK(sd_progress_pct((size_t)1 << 31, (size_t)1 << 32) == 50); // no overflow in the multiply
+    sd_progress_t p = {0};
+    int           v = -1;
+    CHECK(sd_progress_due(&p, 0, 1000, 5000, &v) && v == 0); // the first update is always handed out
+    CHECK(!sd_progress_due(&p, 100, 1000, 5050, &v));        // 50 ms: too soon
+    CHECK(sd_progress_due(&p, 100, 1000, 5100, &v) && v == 10);
+    CHECK(!sd_progress_due(&p, 105, 1000, 5400, &v));        // same percent: nothing to draw
+    CHECK(!sd_progress_due(&p, 50, 1000, 5500, &v));         // never backwards
+    CHECK(sd_progress_due(&p, 1000, 1000, 5101, &v) && v == 100); // the end is not held back
+    CHECK(!sd_progress_due(&p, 1000, 1000, 9000, &v));       // and not repeated
+    CHECK(sd_progress_due(&p, 400, 1000, 9000 + 0xFFFFFF00u, &v) == false); // 100 stays 100
+    sd_progress_t w = {.any = true, .last_pct = 10, .last_ms = 0xFFFFFFF0u};
+    CHECK(sd_progress_due(&w, 200, 1000, 0x80u, &v) && v == 20); // the millisecond clock wrapped
+}
+
 int main(void) {
     test_scan();
     test_open();
@@ -268,6 +287,7 @@ int main(void) {
     test_unload_order();
     test_exit();
     test_load_skip();
+    test_progress();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

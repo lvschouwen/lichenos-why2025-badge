@@ -12,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,6 +101,22 @@ void sd_app_unload_done(sd_app_t *a, bool clean);
 bool sd_app_remove(sd_app_t *a);
 // May the hooks of the ELF be called now (LOADED, and not closing for good)?
 bool sd_app_hooks_live(sd_app_t const *a);
+
+// ---- the load bar (#548) -----------------------------------------------------------------------------------------------
+
+#define SD_PROGRESS_MIN_MS 100 // about 10 updates a second at most
+
+typedef struct {
+    uint32_t last_ms;
+    int      last_pct;
+    bool     any; // an update was handed out
+} sd_progress_t;
+
+// Percent (0..100) of total that done is; total 0 is 0, done past total is 100.
+int sd_progress_pct(size_t done, size_t total);
+// Whether the bar is told now: the percent moved and SD_PROGRESS_MIN_MS passed since the last update, or it reached 100
+// (the last step is never held back). On true *pct is the value and the state is updated. Loader task only.
+bool sd_progress_due(sd_progress_t *p, size_t done, size_t total, uint32_t now_ms, int *pct);
 
 // ---- exit (#533) --------------------------------------------------------------------------------------------------
 

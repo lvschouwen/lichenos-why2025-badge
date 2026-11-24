@@ -18,6 +18,12 @@ static int src_read(void *ctx, size_t off, void *buf, size_t len) {
         }
         got += (size_t)n;
     }
+    if (s->on_read) {
+        if (off + len > s->high) {
+            s->high = off + len;
+        }
+        s->on_read(s->arg, s->high, s->size);
+    }
     return 0;
 }
 
@@ -52,7 +58,10 @@ bool sd_elf_open_source(char const *path, sd_elf_file_t *s) {
         errno = err;
         return false;
     }
-    s->size = (size_t)st.st_size;
+    s->size    = (size_t)st.st_size;
+    s->on_read = NULL;
+    s->arg     = NULL;
+    s->high    = 0;
     return true;
 }
 

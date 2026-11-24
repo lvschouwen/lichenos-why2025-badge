@@ -28,6 +28,8 @@
 #include "sd_app_svc.h"
 #include "sd_elf_src.h"
 #include "sdcard.h"
+#include "theme.h"
+#include "esp_timer.h"
 
 #include "esp_elf.h"
 #include "esp_heap_caps.h"
@@ -154,6 +156,62 @@ static void screen_deleted(lv_event_t *e) {
     }
 }
 
+// The bar and its text are forgotten when LVGL deletes them (the app's open cleans the screen): a queued update then finds NULL
+static void obj_deleted(lv_event_t *e) {
+    void **slot = lv_event_get_user_data(e);
+    sd_app_lock();
+    if (*slot == lv_event_get_target(e)) {
+        *slot = NULL;
+    }
+    sd_app_unlock();
+}
+
+// Under the placeholder text: an amber fill on the track, as the Keyboard test's hold bar (#548)
+static void add_bar(sd_app_rec_t *rec, lv_obj_t *screen) {
+    lv_obj_t *label = lv_obj_get_child(screen, -1);
+    lv_obj_t *bar   = lv_bar_create(screen);
+    lv_obj_set_size(bar, LV_PCT(100), 10);
+    lv_bar_set_range(bar, 0, 100);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
+    sd_app_lock();
+    rec->bar   = bar;
+    rec->label = label;
+    rec->pct   = 0;
+    sd_app_unlock();
+    lv_obj_add_event_cb(bar, obj_deleted, LV_EVENT_DELETE, &rec->bar);
+    lv_obj_add_event_cb(label, obj_deleted, LV_EVENT_DELETE, &rec->label);
+}
+
+// LVGL task: the percent the loader last handed over, and "Starting..." once the file is read
+static void progress_cb(void *arg) {
+    sd_app_rec_t *rec = arg;
+    sd_app_lock();
+    lv_obj_t *bar   = rec->bar;
+    lv_obj_t *label = rec->label;
+    int       pct   = rec->pct;
+    sd_app_unlock();
+    if (bar) {
+        lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+    }
+    if (label && pct >= 100) {
+        lv_label_set_text(label, "Starting...");
+    }
+}
+
+// Loader task, on every read of the file: never LVGL itself, only a queued call, and one that finds the lock busy is dropped
+static void read_progress(void *arg, size_t high, size_t total) {
+    sd_app_rec_t *rec = arg;
+    int           pct;
+    if (!sd_progress_due(&rec->prog, high, total, (uint32_t)(esp_timer_get_time() / 1000), &pct)) {
+        return;
+    }
+    sd_app_lock();
+    rec->pct = pct;
+    sd_app_unlock();
+    lichen_sys_ui_call(progress_cb, rec, 0);
+}
+
 static void refused_say(sd_app_rec_t *rec, char const *why) {
     ESP_LOGW(TAG, "%s: refused: %s", rec->m.id, why);
     lichen_sys_notify(LN_WARN, rec->m.name, why, 0);
@@ -187,6 +245,7 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     case SD_OPEN_LOAD:
     case SD_OPEN_WAIT:
         say(screen, "Loading...");
+        add_bar(rec, screen);
         if (v == SD_OPEN_LOAD && !post(MSG_LOAD, rec)) {
             sd_app_lock();
             sd_app_load_done(&rec->sda, false);
@@ -441,6 +500,9 @@ static char const *read_image(sd_app_rec_t *rec) {
         sd_end(sd_io_from_errno(errno));
         return "The program file cannot be read";
     }
+    rec->prog = (sd_progress_t){0};
+    f.on_read = read_progress;
+    f.arg     = rec;
     elf_source_t src = sd_elf_source(&f);
     esp_elf_init(&rec->elf);
     lichen_ctx_t prev = lichen_ctx_enter(rec->ctx); // the image is booked under the app
@@ -453,6 +515,10 @@ static char const *read_image(sd_app_rec_t *rec) {
         return "The program could not be loaded";
     }
     rec->image = true;
+    sd_app_lock();
+    rec->pct = 100; // relocation, main() and the hooks follow: a full bar and "Starting..."
+    sd_app_unlock();
+    lichen_sys_ui_call(progress_cb, rec, UI_WAIT_MS);
     return NULL;
 }
 

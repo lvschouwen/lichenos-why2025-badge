@@ -197,3 +197,22 @@ unsigned sd_app_exit(sd_app_t *a) {
 bool sd_app_free_enters(bool unregistered) {
     return !unregistered;
 }
+
+int sd_progress_pct(size_t done, size_t total) {
+    if (total == 0) {
+        return 0;
+    }
+    return done >= total ? 100 : (int)((uint64_t)done * 100 / total);
+}
+
+bool sd_progress_due(sd_progress_t *p, size_t done, size_t total, uint32_t now_ms, int *pct) {
+    int v = sd_progress_pct(done, total);
+    if (p->any && (v <= p->last_pct || (v < 100 && now_ms - p->last_ms < SD_PROGRESS_MIN_MS))) {
+        return false;
+    }
+    p->any      = true;
+    p->last_pct = v;
+    p->last_ms  = now_ms;
+    *pct        = v;
+    return true;
+}
