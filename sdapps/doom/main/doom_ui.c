@@ -274,7 +274,9 @@ bool doom_ui_open(lv_obj_t *screen) {
         return fail_open("DOOM could not take the keyboard (another app may hold it). Close it and open DOOM again.");
     }
     // only with the keys held does Esc mean the game's menu; the failed screens above leave Esc as the OS's own
-    shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
+    // the screen has no padding (the picture fills it), so the hint carries the THEME_PAD edges itself (UI rule 7, #554)
+    lv_obj_t *hint = shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
+    lv_obj_set_style_pad_hor(hint, THEME_PAD, 0);
     atomic_store(&present_on, true);
     return true;
 }
