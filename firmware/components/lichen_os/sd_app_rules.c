@@ -231,6 +231,22 @@ unsigned sd_app_exit(sd_app_t *a) {
     }
 }
 
+uint32_t sd_blk_targets(sd_blk_rec_t const *recs, size_t n, uint32_t ctx, bool add) {
+    size_t own = n;
+    for (size_t i = 0; i < n && i < SD_BLK_RECS_MAX; i++) {
+        if (recs[i].ctx == ctx && (own == n || recs[own].gone)) {
+            own = i;
+        }
+    }
+    uint32_t mask = own < n ? 1u << own : 0u;
+    for (size_t i = 0; !add && i < n && i < SD_BLK_RECS_MAX; i++) {
+        if (recs[i].gone) {
+            mask |= 1u << i;
+        }
+    }
+    return mask;
+}
+
 bool sd_app_free_enters(bool unregistered) {
     return !unregistered;
 }

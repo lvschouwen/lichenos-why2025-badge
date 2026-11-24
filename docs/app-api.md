@@ -413,7 +413,8 @@ an API change.
 - **Its widgets live on its own screens.** The OS watches the app's screens only; a widget on a layer above them (the top layer, the system layer) is not tracked and would still hold callbacks into the ELF after it is freed.
 - **Leftover blocks.** What the app still holds from `malloc` (and `calloc`, `realloc`, `strdup`) when it unloads is freed by
   the OS after its screens, tasks, timers and queued UI calls are gone, with one log line. Never leave an object outside your
-  own screens (on `lv_layer_sys`, say) pointing at such a buffer.
+  own screens (on `lv_layer_sys`, say) pointing at such a buffer. A `malloc` in a delete callback that runs after the card was
+  pulled is not tracked (it runs as the OS), so free it there.
 - **What the app must do.** It frees its `lichen_alloc` and `malloc` blocks; it never keeps a pointer into the OS across a
   load.
 

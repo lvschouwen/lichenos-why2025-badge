@@ -367,7 +367,26 @@ static void test_late_unload(void) {
     CHECK(!sd_app_late_begin(&t, 0));
 }
 
+// #536: which block sets a malloc or a free touches. A free in a delete callback after the card went arrives under the OS's
+// context (the stale one resolves to it) and must still leave the gone app's set
+static void test_blk_targets(void) {
+    uint32_t const OS = 0x100, A = 0x201, B = 0x302;
+    sd_blk_rec_t   recs[3] = {{A, false}, {B, false}, {0x403, true}};
+    CHECK(sd_blk_targets(recs, 3, A, true) == 1u && sd_blk_targets(recs, 3, B, true) == 2u);
+    CHECK(sd_blk_targets(recs, 3, OS, true) == 0u); // a malloc as the OS: nobody's
+    CHECK(sd_blk_targets(recs, 3, 0x403, true) == 4u); // the gone record's own ctx still resolves
+    CHECK(sd_blk_targets(recs, 3, A, false) == (1u | 4u)); // a free: the app's set and every gone one
+    CHECK(sd_blk_targets(recs, 3, OS, false) == 4u); // the H1 case: freed as the OS, leaves the gone record's set
+    CHECK(sd_blk_targets(recs, 3, 0x403, false) == 4u);
+    sd_blk_rec_t live[2] = {{A, false}, {B, false}};
+    CHECK(sd_blk_targets(live, 2, OS, false) == 0u); // nothing gone: nothing to leave
+    sd_blk_rec_t twin[2] = {{A, true}, {A, false}}; // a live record is preferred over a gone one of the same ctx
+    CHECK(sd_blk_targets(twin, 2, A, true) == 2u);
+    CHECK(sd_blk_targets(NULL, 0, A, false) == 0u);
+}
+
 int main(void) {
+    test_blk_targets();
     test_late_unload();
     test_scan();
     test_open();
