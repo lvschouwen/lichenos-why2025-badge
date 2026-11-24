@@ -51,15 +51,19 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-24, wave bench fw-5084772f done; next wave building)
-- Badge runs fw-5084772f (ota_1 valid). Closed by the bench: #538 #548 #553. #536 reopened (sweep never ran).
-- Merged since the flash: #547 tag fix 87aff2d3.
-- Agents: impl-555 (Opus) wt-1 fix/555-sdio-rx-release-idle (esp_hosted fork: fetch its fork branch, push the fork
-  BEFORE main; Opus review), impl-549 wt-2 feat/549-esc-loading-wake (review: raw-key path), impl-554 wt-3
-  fix/554-doom-hint-pad, impl-541 wt-4 test/541-benchtest-slow-stop (benchtest flags slowstop + leak).
-- Next flash bench: #541 (slowstop -> "unloaded late"), #536 (leak -> "freed N leftover blocks"), #547 tag
-  ("by sdio_read" expected), #555 (7 pushes, DMA back within 1 KB of boot; 8 MB push vs 29 s baseline), #549, #554
-  screenshot, #551 firmware half (stopped ota-firmware: Lucas `!`).
-- NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance) and 7 (`owner-onair.sh
-  sync`/`off`); #391, #281, #237.
+## Live (2026-11-24, wave merged at 9fd59b59, NOT flashed yet)
+- Badge still runs fw-5084772f. Main 9fd59b59 = #547 tag fix, #554, #541+#536 benchtest flags, #549, #555 (fork
+  020fdea5 pushed). Image relabelled fw-9fd59b59; no C6 change. All slots free; no agents running.
+- My ota-firmware is refused by the permission check: Lucas runs it with `!` via scratchpad fw.sh (recreate after a
+  /clear: ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted).
+- NEXT: (1) #551 firmware half on fw-5084772f: start a background `fw ui` watcher (screenshot + `fw ui overflow`
+  when "old version"/"not received" shows), Lucas runs `timeout 10 fw.sh ota-firmware`. (2) Lucas flashes fw-9fd59b59.
+- Bench after 75 s: #555 (boot DMA free; 7 SD pushes; within 1 KB; 8 MB push <= 30.5 s vs 29 s; one "rx idle:
+  released" I line, no sdmmc_periph E; `fw mem diff` no sdio_read blocks); #547 ("by <task>" on diff lines);
+  `sdapp-push benchtest` + `sdapp-push doom`; #541 (`slowstop` flag in SD0:[lichen.apps.benchtest] -> "unloaded
+  late"); #536 (`leak` flag -> "freed 2 leftover blocks (8192 B)"; if benchtest psram stays 12288 after close, the
+  lichen_alloc blocks leak on a plain close: new issue); #549 (dim, open hello, one Esc -> Home; dim lock: wake only);
+  #554 (DOOM hint inset, screenshot). Keys: `fw keys send esc hold:2500` leaves DOOM (2000 ms rule).
+- NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance), 7 (`owner-onair.sh sync`/`off`);
+  stray `stash@{0}` from impl-549 (duplicate, drop it); #391, #281, #237.
 - #527 next after this wave: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
