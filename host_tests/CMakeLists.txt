@@ -3016,3 +3016,9 @@ add_executable(sdapp_manifests_test
 target_include_directories(sdapp_manifests_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(sdapp_manifests_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME sdapp_manifests_test COMMAND sdapp_manifests_test ${SDAPP_MANIFESTS})
+
+add_executable(sdio_rx_idle_test ${CMAKE_CURRENT_SOURCE_DIR}/sdio_rx_idle_test.c)
+target_compile_options(sdio_rx_idle_test PRIVATE -Wall -Wextra -Werror)
+target_include_directories(sdio_rx_idle_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/include)
+add_test(NAME sdio_rx_idle_test COMMAND sdio_rx_idle_test)

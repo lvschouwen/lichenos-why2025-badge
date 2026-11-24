@@ -37,7 +37,7 @@ size	libeh_host_feat_system.a	1192
 size	libeh_host_feat_wifi.a	14178
 size	libeh_host_feat_wifi_ext_ent.a	2524
 size	libeh_host_feat_wifi_ext_itwt.a	994
-size	libeh_host_mcu_transport.a	22731
+size	libeh_host_mcu_transport.a	22877
 size	libeh_host_mcu_vserial.a	1040
 size	libeh_host_port_idf.a	6251
 size	libeh_proto_v2.a	80331
