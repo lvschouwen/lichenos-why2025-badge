@@ -334,6 +334,15 @@ static void test_late_unload(void) {
     sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
     CHECK(!sd_app_late_begin(&a, 0));
 
+    a = unloading_app(); // a hung task: after the loader's patience the open answers as for a dead app, the resume stays possible
+    sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
+    sd_app_late_expire(&a);
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_FAULTED);
+    CHECK(sd_app_late_begin(&a, 0) && !a.late_stale);
+    sd_app_t g = {.state = SD_APP_LOADED};
+    sd_app_late_expire(&g);
+    CHECK(!g.late_stale); // only a resumable fault expires
+
     // #541 review: one message between the three askers, and a screen that left later asks again
     a = unloading_app();
     a.screens = 1; // a removal's screen still animating out

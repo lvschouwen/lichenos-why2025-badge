@@ -54,6 +54,7 @@ static char const TAG[] = "sdapps";
 #define HOOKS_WAIT_MS      5000 // main() has this long to call lichen_sd_app_hooks
 #define TASKS_WAIT_MS      3000 // after the stop hook, the app's tasks have this long to return
 #define PROGRESS_LOCK_MS   5    // a bar update never holds the loader up (0 would wait for ever)
+#define LATE_PATIENCE_MS   30000 // a resumable fault older than this answers as a dead app (a hung task never ends)
 #define UI_WAIT_MS         3000 // the barrier call through the LVGL task
 #define SD_WAIT_MS         2000
 #define UNREG_TRIES        20
@@ -250,6 +251,9 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     char const     *hold = console_usb_hold_why();
     lichen_sd_hooks_t h  = {0};
     sd_app_lock();
+    if (rec->sda.state == SD_APP_FAULTED && lichen_sys_life_now_ms() - rec->fault_ms > LATE_PATIENCE_MS) {
+        sd_app_late_expire(&rec->sda);
+    }
     sd_open_t v = sd_app_open(&rec->sda, hold);
     if (v == SD_OPEN_LOAD || v == SD_OPEN_WAIT) {
         rec->screen = screen;
@@ -545,6 +549,7 @@ static bool unload(sd_app_rec_t *rec, sd_unload_step_t from, bool free_now) {
             sd_app_lock();
             sd_app_unload_fault(&rec->sda, step);
             bool late = rec->sda.late;
+            rec->fault_ms = lichen_sys_life_now_ms();
             sd_app_unlock();
             if (late) {
                 atomic_fetch_add(&g_late_apps, 1);

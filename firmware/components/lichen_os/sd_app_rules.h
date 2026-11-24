@@ -50,6 +50,7 @@ typedef struct {
     bool           closing;  // the last screen was deleted: unload once nothing reopened it (cleared by an open)
     bool           removing; // the card went: nothing opens or loads from now on
     bool           late_queued; // a MSG_LATE for it is on its way (sd_app_late_claim): duplicates collapse into one
+    bool           late_stale;  // FAULTED and resumable, but for so long that it answers as a dead app again (sd_app_late_expire)
     bool           late;     // FAULTED at the stop hook or the tasks (#541): the unload resumes when no task of the app is left
 } sd_app_t;
 
@@ -161,6 +162,9 @@ void sd_app_unload_fault(sd_app_t *a, sd_unload_step_t at);
 // message between them. The caller still checks that no task is left. A false return after a failed post is undone by
 // sd_app_late_unclaim.
 bool sd_app_late_claim(sd_app_t *a);
+// A resumable fault older than the loader's patience (a hung engine task never ends): opens are refused as for a dead app,
+// while the late unload stays possible should the task end after all.
+void sd_app_late_expire(sd_app_t *a);
 void sd_app_late_unclaim(sd_app_t *a);
 // FAULTED and resumable, no task of the app left and no screen of it: UNLOADING again and true; the caller resumes at
 // SD_UNLOAD_TASKS (the stop hook has been called once and is never called again). False leaves the state as it was.

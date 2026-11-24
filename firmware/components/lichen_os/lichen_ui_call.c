@@ -109,7 +109,7 @@ static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner) {
 
 // The burst past the queue's size (#541): an app's call that did not fit is one LVGL async call of its own, which a FIFO
 // barrier cannot order against, so it is booked here (LVGL lock held) with its owner and runs as it, and can be taken back by
-// owner before the app's image is freed. The OS's own calls (and an app's when no node can be made) stay plain async calls.
+// owner before the app's image is freed. The OS's own calls stay plain async calls; an app's call with no memory for its node is refused.
 typedef struct fb_call {
     struct fb_call *next;
     ui_call_fn_t    fn;
@@ -144,7 +144,7 @@ static bool fallback_call(ui_call_fn_t fn, void *arg) {
     }
     fb_call_t *n = malloc(sizeof(*n));
     if (!n) {
-        return async_call(fn, arg);
+        return false; // an app's call that cannot be booked cannot be taken back by owner either: refused, not run later (#541)
     }
     *n = (fb_call_t){s_fb, fn, arg, s_fb_owner};
     if (!async_call(fb_run, n)) {

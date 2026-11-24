@@ -360,6 +360,9 @@ The rule: **core 1 draws, core 0 talks to the world.**
   the only call boundary, which gives the app sandboxed file calls, memory booked under its context and LVGL calls
   for the LVGL task. This is the trouble BadgeVMS had with loadable apps, taken on knowingly: the PSRAM is RWX until #530,
   so there is no memory isolation, an SD app is trusted code, and the export checks resist bugs, not an attacker.
+  The unload does not drop an app's LVGL animations (their `exec_cb` points into the image): the app's objects must be
+  deleted (no screen left) and it must not put objects on layers above its screens. An unload that overran the stop hook or
+  the task wait is finished by the loader when the app's last task ends (#541).
   A sandboxed script runtime (WAMR, #78) stays the way to run untrusted code, later.
 - Anyone can write an app and build their own Lichen: `tools/badge.sh new-app <id> "<Name>"` scaffolds an app
   component that passes the checks, and [app-api.md](app-api.md) "An app in 10 minutes" walks through it (#385).
