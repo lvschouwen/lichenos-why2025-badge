@@ -203,6 +203,12 @@ build_sdapps() {
         id=${app##*/}
         out="$here/build/sdapps/$id"
         [ -f "$app/manifest" ] && grep -qx "id=$id" "$app/manifest" || { echo "sdapps/$id: manifest missing or its id is not '$id'" >&2; return 1; }
+        # The file shims and lichen_fs_sd_* are refused at run time without the SD cap (#229); catch it here (#539)
+        if grep -rqE '\b(fopen|opendir|lichen_fs_sd_[a-z_]+)\(' "$app/main" &&
+            ! grep -qE '^caps=([A-Z_]+,)*SD(,|$)' "$app/manifest"; then
+            echo "sdapps/$id: the app opens files on the card but its manifest does not declare caps=SD" >&2
+            return 1
+        fi
         IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" reconfigure
         cmake --build "$out" --target elf
         # The app's LVGL structs must be the firmware's (sdapps/sdapp.cmake forces the firmware's CONFIG_LV_* values)
