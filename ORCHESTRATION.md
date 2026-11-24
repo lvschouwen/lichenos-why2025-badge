@@ -52,8 +52,8 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-24)
-- impl-546 holds wt-1 (fix/546-esc-on-loading, clean): waits for a bench log (keys log on, open hello/doom, Esc at ~0.2 s and during the ELF read, injected and physical: does `key 27 pressed` appear?). wt-2..6 free.
-- The badge runs fw-e4507b9c (valid). Someone was using it (DOOM): no remote bench until the owner says it is free.
-- Owed on the bench: #546 log, #544 screen text (a sender-cut file push shows "Not received: the sender stopped"; close #544 after).
-- NEEDS-LUCAS: #525 item 6 (card pull), #523 steps 3/7, #545 decisions (user profiles).
-- Then wave 3 of the SD apps: #547 (RAM at the first SD0: stream), #541 (late unload, a reviewer pass), #536 and #538 (same loader files: in sequence), #526 (DOOM video, keys, a loading state). The port ideas are #542.
+- impl-546 RUNNING in wt-1 (fix/546-esc-on-loading): the read skip when closing + host test, local commit `Refs #546`; it may report the wake-hook swallow as the cause. State on #546 (latest comment). On its report: a reviewer pass (lichen-reviewer), merge-one.sh, push. wt-2..6 free.
+- Then #548 (loading bar on the Loading screen, same loader file, owner: right after #546), then ONE flash for #546+#548, bench: Esc on Loading (awake and dimmed, injected), the bar, plus the owed #544 screen text (a sender-cut file push shows "Not received: the sender stopped"; close #544 after).
+- The badge runs fw-e4507b9c (valid), free for remote bench; key log is on.
+- NEEDS-LUCAS: the #546 physical Esc test (awake and dimmed), #525 item 6 (card pull), #523 steps 3/7, #545 decisions (user profiles).
+- Then wave 3: #547 (RAM at the first SD0: stream), #541 (late unload, a reviewer pass), #536 and #538 (same loader files: in sequence), #526 (DOOM video, keys, a WAD loading bar). The port ideas are #542.
