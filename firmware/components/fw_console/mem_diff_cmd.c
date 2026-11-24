@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define SNAP_MAX   3072 // blocks; 24 KB each list
-#define LINES_MAX  24   // blocks named per diff, biggest effect first is not worth the sort: address order
+#define LINES_MAX  24   // blocks named per diff, in address order (sorting by size is not worth the code)
 #define MIN_DEFAULT 64
 
 typedef struct {
@@ -76,38 +76,66 @@ static void print_one(mem_diff_kind_t kind, mem_blk_t const *was, mem_blk_t cons
     }
 }
 
+// Parses a plain decimal minimum; false for a sign, junk or an empty string
+static bool parse_min(char const *s, uint32_t *out) {
+    if (*s < '0' || *s > '9') {
+        return false;
+    }
+    char         *end;
+    unsigned long v = strtoul(s, &end, 10);
+    if (*end != '\0' || v > UINT32_MAX) {
+        return false;
+    }
+    *out = (uint32_t)v;
+    return true;
+}
+
 static void do_mark(void) {
-    heap_caps_free(mark.v);
-    memset(&mark, 0, sizeof(mark));
-    if (!take(&mark)) {
-        console_reply("mem diff: no PSRAM for the list");
+    snap_t fresh = {0};
+    if (!take(&fresh)) {
+        heap_caps_free(fresh.v);
+        console_reply("mem diff: no PSRAM for the list (old mark kept)");
         return;
     }
-    console_reply("mem diff: marked %u internal blocks%s", (unsigned)mark.n, mark.full ? " (list full, the rest is not compared)" : "");
+    heap_caps_free(mark.v); // only now: a failed take leaves the old mark
+    mark = fresh;
+    console_reply("mem diff: marked %u internal blocks%s", (unsigned)mark.n,
+                  mark.full ? " (list full, the rest is not compared)" : "");
 }
 
 static void do_compare(char const *args) {
+    uint32_t min = MIN_DEFAULT;
+    if (*args && !parse_min(args, &min)) {
+        console_reply("mem diff: usage: mem diff mark | mem diff [min bytes]");
+        return;
+    }
     if (!mark.v) {
         console_reply("mem diff: no mark yet (fw mem diff mark)");
         return;
     }
     snap_t now = {0};
     if (!take(&now)) {
+        heap_caps_free(now.v);
         console_reply("mem diff: no PSRAM for the list");
         return;
     }
-    uint32_t       min = *args ? (uint32_t)atoi(args) : MIN_DEFAULT;
-    print_t        p   = {.min = min};
+    print_t        p = {.min = min};
     mem_diff_sum_t sum;
     mem_diff(mark.v, mark.n, now.v, now.n, &sum, print_one, &p);
-    console_reply("mem diff: added %u = %llu B, removed %u = %llu B, resized %u, net %lld B; %u of them >= %u B listed%s",
+    bool partial = mark.full || now.full;
+    console_reply("mem diff: added %u = %llu B, removed %u = %llu B, resized %u, net %lld B%s; %u of them >= %u B listed%s",
                   sum.added_n, (unsigned long long)sum.added_bytes, sum.removed_n, (unsigned long long)sum.removed_bytes,
-                  sum.resized_n, (long long)sum.net, p.listed, (unsigned)min, p.hidden ? " (more not listed)" : "");
+                  sum.resized_n, (long long)sum.net, partial ? " (UNRELIABLE)" : "", p.listed, (unsigned)min,
+                  p.hidden ? " (more not listed)" : "");
+    if (partial) {
+        console_reply("mem diff: a list was full (%u blocks): blocks past it are missing, so adds and removes may be false",
+                      SNAP_MAX);
+    }
     heap_caps_free(now.v);
 }
 
 void mem_diff_command(char const *args) {
-    if (strncmp(args, "mark", 4) == 0) {
+    if (strncmp(args, "mark", 4) == 0 && (args[4] == '\0' || args[4] == ' ')) {
         do_mark();
     } else {
         do_compare(args);

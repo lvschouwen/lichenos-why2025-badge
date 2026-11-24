@@ -58,6 +58,9 @@ static pin_t const PINS[] = {
     {"mem blocks psram",           "RRR", "RRR", "RRR", false},
     {"mem window",                 "RRR", "DDD", "RRR", false}, // release: "not in this build" from fw_console itself
     {"mem window reset",           "RRR", "DDD", "RRR", false},
+    {"mem diff",                   "RRR", "DDD", "RRR", false}, // #547
+    {"mem diff mark",              "RRR", "DDD", "RRR", false},
+    {"mem diff 256",               "RRR", "DDD", "RRR", false},
     {"assets",                     "RRR", "RRR", "RRR", false},
     {"slot",                       "RRR", "RRR", "RRR", false},
     {"slot other",                 "RRR", "RRR", "RRR", false},
