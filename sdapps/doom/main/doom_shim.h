@@ -9,6 +9,8 @@
 //     app's blocks yet, #536)
 //   - errno: a plain variable (newlib's per-task errno is the OS's)
 //   - exit: lichen_doom_exit first tells the app its engine task is ending (stop waits for that), then exits
+//   - fread: lichen_doom_fread reads nothing once a close comes during the WAD load, so the engine leaves through I_Error
+//     at its next read instead of loading for seconds past the OS's stop deadline (#525)
 //   - system: nothing to run; isalpha and friends: the exported functions, not the C library's table
 #include <ctype.h>
 #include <errno.h>
@@ -30,6 +32,7 @@ int   lichen_doom_fputc(int c, FILE *f);
 int   lichen_doom_fflush(FILE *f);
 extern int lichen_doom_errno;
 void lichen_doom_exit(int code) __attribute__((noreturn));
+size_t lichen_doom_fread(void *buf, size_t size, size_t n, FILE *f);
 
 #ifdef __cplusplus
 }
@@ -66,6 +69,9 @@ void lichen_doom_exit(int code) __attribute__((noreturn));
 #define exit(code)  lichen_doom_exit(code)
 
 #define system(cmd) ((void)(cmd), 0)
+
+#undef fread
+#define fread lichen_doom_fread
 
 // the exported functions, not the C library's inline or table versions
 #undef isalpha

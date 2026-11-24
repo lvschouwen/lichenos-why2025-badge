@@ -21,13 +21,16 @@ typedef enum { START_NO_WAD, START_FAILED, START_OK } start_t;
 
 static volatile bool stop_req;
 static volatile bool task_done;
+static volatile bool loading; // doomgeneric_Create runs: the WAD load, which never looks at stop_req
 static start_t       start_state = START_NO_WAD;
 
 static void engine_task(void *arg) {
     (void)arg;
     // -iwad: the file in the app's folder (the file shims' relative path); -mb: the zone, in MiB (psram_kib of the manifest)
     char *argv[] = {(char *)"doom", (char *)"-iwad", (char *)WAD_NAME, (char *)"-mb", (char *)ZONE_MIB, NULL};
+    loading = true;
     doomgeneric_Create(5, argv);
+    loading = false;
     while (!stop_req) {
         doomgeneric_Tick();
         vTaskDelay(1); // the engine paces itself with DG_SleepMs; this yields in a frame that waits for nothing
@@ -40,6 +43,10 @@ static void engine_task(void *arg) {
 
 void doom_engine_ending(void) {
     task_done = true; // the last thing the task does before exit(), which never returns
+}
+
+bool doom_load_cancelled(void) {
+    return loading && stop_req;
 }
 
 static bool wad_present(void) {

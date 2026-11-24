@@ -226,3 +226,12 @@ void lichen_doom_exit(int code) {
 void doom_engine_shutdown(void) {
     lichen_doom_quit_engine();
 }
+
+// Last in the file: below the #undef, fread is the file shims' own again
+#undef fread
+size_t lichen_doom_fread(void *buf, size_t size, size_t n, FILE *f) {
+    if (doom_load_cancelled()) {
+        return 0; // W_ReadLump calls I_Error on a short read: the engine task leaves through exit() (#525)
+    }
+    return fread(buf, size, n, f);
+}
