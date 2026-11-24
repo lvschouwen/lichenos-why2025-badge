@@ -209,7 +209,29 @@ build_sdapps() {
             echo "sdapps/$id: the app opens files on the card but its manifest does not declare caps=SD" >&2
             return 1
         fi
-        IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" reconfigure
+        # The firmware's FreeRTOS config, set and unset lines (#540): an app's pdMS_TO_TICKS and the other FreeRTOS
+        # macros must count the firmware's ticks (1000 Hz, the IDF maximum). A change regenerates the app's sdkconfig,
+        # whose own values would otherwise win over the defaults.
+        local rtos="$out/sdkconfig.fw-freertos" defaults
+        mkdir -p "$out"
+        grep -E '^(# )?CONFIG_FREERTOS_' "$sdkconfig" > "$rtos.new"
+        if cmp -s "$rtos.new" "$rtos"; then
+            rm -f "$rtos.new"
+        else
+            mv -f "$rtos.new" "$rtos"
+            rm -f "$out/sdkconfig"
+        fi
+        defaults=$rtos
+        [ -f "$app/sdkconfig.defaults" ] && defaults="$app/sdkconfig.defaults;$rtos"
+        IDF_TARGET=esp32p4 idf.py -C "$app" -B "$out" -DSDKCONFIG="$out/sdkconfig" -DSDKCONFIG_DEFAULTS="$defaults" reconfigure
+        # Skipped, kernel-only (no header an app compiles uses them) and held back by an app's own config:
+        # TASK_CREATE_ALLOW_EXT_MEM needs CONFIG_SPIRAM, TASK_FUNCTION_WRAPPER debug optimisation or the coredump
+        local skip='^(# )?CONFIG_FREERTOS_(TASK_CREATE_ALLOW_EXT_MEM|TASK_FUNCTION_WRAPPER)[= ]'
+        if ! diff <(grep -E '^(# )?CONFIG_FREERTOS_' "$sdkconfig" | grep -Ev "$skip") \
+            <(grep -E '^(# )?CONFIG_FREERTOS_' "$out/sdkconfig" | grep -Ev "$skip") >&2; then
+            echo "sdapps/$id: its FreeRTOS config differs from the firmware's (above: < firmware, > app; #540)" >&2
+            return 1
+        fi
         cmake --build "$out" --target elf
         # The app's LVGL structs must be the firmware's (sdapps/sdapp.cmake forces the firmware's CONFIG_LV_* values)
         python3 -I "$repo/tools/check_lv_layout.py" --fw "$bdir/compile_commands.json" --app "$out/compile_commands.json"

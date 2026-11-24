@@ -331,6 +331,11 @@ manifest and builds its `lichen_app_t`, every hook of which is an OS trampoline.
 `lichen_sd_app_hooks(&hooks)` (`lichen_sd_app.h`: `open` on the LVGL task, `stop` on the loader's task), once, and returns
 or goes on as a task of the app. Build one in `sdapps/<id>/` (`sdapps/hello` is the smallest).
 
+`firmware/build.sh` builds every `sdapps/<id>` after the firmware, and its build gates hold for all of them:
+- **LVGL config:** the app gets the firmware's `CONFIG_LV_*` values.
+- **FreeRTOS config (#540):** it gets the firmware's `CONFIG_FREERTOS_*` values, so the tick rate is 1000 Hz, the IDF maximum. An app's `pdMS_TO_TICKS` then counts the ticks the firmware counts. The firmware's values win over an app's own `sdkconfig.defaults`, and the build fails when any of them cannot apply.
+- **SD cap (#539):** an app that calls `fopen`, `opendir` or `lichen_fs_sd_*` must declare `caps=SD`.
+
 ### Trust: read this first
 
 The PSRAM is RWX today (#530 brings W^X back before release), so an SD app is **trusted code with no memory isolation**:

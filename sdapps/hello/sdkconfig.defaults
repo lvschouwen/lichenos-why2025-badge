@@ -1,4 +1,4 @@
-# Nothing of the firmware's configuration matters to an app that only links against the OS's export table; this keeps
-# the app's own configure small and quiet.
+# The app links only against the OS's export table, so little of the firmware's configuration matters to it; the
+# exception is FreeRTOS (tick rate and friends), which firmware/build.sh copies from the firmware's sdkconfig (#540).
 CONFIG_IDF_TARGET="esp32p4"
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
