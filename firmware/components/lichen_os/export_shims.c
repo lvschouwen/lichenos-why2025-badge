@@ -38,11 +38,10 @@ void *lichen_exp_calloc(size_t n, size_t size) {
 }
 
 void lichen_exp_free(void *ptr) {
-    lichen_ctx_t ctx = lichen_ctx_self();
     if (ptr) {
-        sd_app_block_forget(ctx, ptr); // before the heap can hand the address out again
+        sd_app_block_forget(ptr); // before the heap can hand the address out again
     }
-    lichen_free(ctx, ptr);
+    lichen_free(lichen_ctx_self(), ptr);
 }
 
 void *lichen_exp_realloc(void *ptr, size_t size) {

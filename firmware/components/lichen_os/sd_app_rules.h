@@ -124,20 +124,6 @@ int sd_progress_pct(size_t done, size_t total);
 bool sd_progress_due(sd_progress_t const *p, size_t done, size_t total, uint32_t now_ms, int *pct);
 void sd_progress_sent(sd_progress_t *p, int pct, uint32_t now_ms);
 
-// ---- the app's malloc blocks (#536) ------------------------------------------------------------------------------------
-
-typedef struct {
-    uint32_t ctx;
-    bool     gone; // lichen_unregister_app was called (the card went): its ctx is stale until the record is freed
-} sd_blk_rec_t;
-#define SD_BLK_RECS_MAX 16 // one bit per record in the mask; SD_APPS_MAX is 12, and the lookup sits on the app's own stack
-// Which records' block sets a malloc (add) or a free of a block under ctx touches, a bit per index of recs (n <= SD_BLK_RECS_MAX).
-// A malloc goes to the set of the record whose ctx it is (a live one over a gone one), none when no record has it: an app that
-// mallocs in a delete callback after its record is gone runs as the OS (the stale ctx resolves to it) and is not tracked. A free
-// goes to the same record AND to every gone record: its ctx is stale then too, so the free arrives as the OS's, and the block
-// must still leave its set, or the sweep at the unload frees it a second time.
-uint32_t sd_blk_targets(sd_blk_rec_t const *recs, size_t n, uint32_t ctx, bool add);
-
 // ---- exit (#533) --------------------------------------------------------------------------------------------------
 
 // What the OS does for an app that called exit(), a bit set (SD_EXIT_NONE: nothing, the app is already leaving or not running)

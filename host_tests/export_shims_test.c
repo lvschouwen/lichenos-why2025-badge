@@ -63,8 +63,8 @@ void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
         noted[n_noted++] = ptr;
     }
 }
-void sd_app_block_forget(lichen_ctx_t ctx, void *ptr) {
-    if (ctx == CTX && n_forgotten < 16) {
+void sd_app_block_forget(void *ptr) {
+    if (n_forgotten < 16) {
         forgotten[n_forgotten++] = ptr;
     }
 }

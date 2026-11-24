@@ -2956,12 +2956,12 @@ target_compile_options(export_table_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME export_table_test COMMAND export_table_test)
 add_test(NAME gen_export_table_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/gen_export_table_test.py)
 
-# The SD apps' live blocks (#536): the set the loader drains at unload
-add_executable(ptr_set_test ${CMAKE_CURRENT_SOURCE_DIR}/ptr_set_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ptr_set.c)
-target_include_directories(ptr_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
-target_compile_options(ptr_set_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME ptr_set_test COMMAND ptr_set_test)
+# The SD apps' live blocks (#536): the map the loader sweeps at unload
+add_executable(ptr_map_test ${CMAKE_CURRENT_SOURCE_DIR}/ptr_map_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ptr_map.c)
+target_include_directories(ptr_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+target_compile_options(ptr_map_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ptr_map_test COMMAND ptr_map_test)
 
 # The SD apps' malloc family (#519): export_shims.c over recorded fakes of the memory book
 add_executable(export_shims_test ${CMAKE_CURRENT_SOURCE_DIR}/export_shims_test.c
