@@ -51,9 +51,11 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-24)
-- Merged and pushed, in flash fw-3729e96f: #546, #547 (fw mem diff), #548 (reopened, bench owed), #526 (DOOM video/keys; push the doom ELF + manifest with `tools/badge.sh sdapp-push`).
-- impl-541 (Opus) in wt-1 (fix/541-late-unload): 582c63a5 under review by rev-541 (Opus; contract: no app code after free_image, per-owner UI cancel). Then #536 -> #538 in wt-1.
-- Bench for fw-3729e96f (remote): Esc on Loading (awake and dimmed; "closed before the load"), the load bar (`fw ui` during the doom read), the #547 `fw mem diff` steps (on #547), the #544 text (close after), #526 steps (on #526 comments: WAD bar, picture, fps label, Esc menu, hold-Esc, card pull).
-- NEEDS-LUCAS at the badge: the #546 physical Esc test, the #549 decision, #126 two-DM stack, #525 item 6, #523 steps 3/7, #545 decisions; #526 fps gate (LVGL refresh 33 ms caps at ~30 Hz: lower it for DOOM?).
-- The port ideas are #542.
+## Live (2026-11-24, before a /clear)
+- Badge runs fw-3729e96f (ota_0 valid) + DOOM ELF/manifest from main cde1a5e4 on the card. Unexplained SW reset (reason 3) around 17:47Z, no panic: asked the owner whether he restarted it; if not, open an issue.
+- Merged since the flash (next flash): #541 (late unload), #550 (import gate), #552 (manifest gate). Bench owed on the next flash: #541 (stop overrun -> "unloaded late"), #548 bar (screen awake: wake it first), #536.
+- impl-541 (Opus) in wt-1 on #536 (fix/536-free-leftover-blocks), Refs #536, Opus reviewer pass after. Then #538, then #553 (manifest rescan on push), same loader files, in sequence.
+- impl-547 (Opus) in wt-3 (fix/547-sd0-stream-free): 824aebcc tag ring "by <task>" in fw mem diff; review asked: ring to PSRAM (internal DMA margin is 146 B with DOOM), exact ptr match. Then merge, flash, bench: mark, sdapp-push doom, `fw mem diff 4096`, send the task name to impl-547 for the fix.
+- #527 due (DOOM 15 fps, not full screen); points on #527. #551 (file-push hint text) open.
+- NEEDS-LUCAS: #546 physical Esc (bright/dimmed), #549 decision, DOOM in hand (hold-Esc, WAD bar, card pull, feel), #527 scaling/refresh decision, #126 two-DM stack, #525 item 6, #523 steps 3/7, #545.
+- Bench helper: scratchpad fw.sh copy at ~/.config path IP (see Bench); remount after a manifest push (#553).
