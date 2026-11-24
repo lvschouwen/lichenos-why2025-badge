@@ -51,13 +51,15 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-24, wave bench fw-5084772f)
-- Badge runs fw-5084772f (ota_1 valid). Wave bench done: #538 #536 #548 #553 closed; #551 file half pass.
-- Agents running: impl-547 wt-1 fix/547-owner-tag-poison (diff walker vs hook ptr: poison offset), impl-549 wt-2
-  feat/549-esc-loading-wake, impl-554 wt-3 fix/554-doom-hint-pad, impl-541 wt-4 test/541-benchtest-slow-stop
-  (bench tool for the "unloaded late" proof). Review 549 (raw-key path) before merge; then merge, flash, bench.
-- Owed on the next flash: #541 (benchtest slowstop flag -> "unloaded late"), #547 tag names the 6144/7680 B holders
-  (7680 = sdio_read), #549, #554 screenshot, #551 firmware half (a stopped ota-firmware, needs Lucas `!`).
-- NEEDS-LUCAS: #126 launch the MeshCore peer session (Heltec DMs, main drives the badge); #523 step 3 (glance at
-  the yellow flash) and step 7 (`owner-onair.sh sync` / `off` around a hello open); #391, #281, #237 (older).
+## Live (2026-11-24, wave bench fw-5084772f done; next wave building)
+- Badge runs fw-5084772f (ota_1 valid). Closed by the bench: #538 #548 #553. #536 reopened (sweep never ran).
+- Merged since the flash: #547 tag fix 87aff2d3.
+- Agents: impl-555 (Opus) wt-1 fix/555-sdio-rx-release-idle (esp_hosted fork: fetch its fork branch, push the fork
+  BEFORE main; Opus review), impl-549 wt-2 feat/549-esc-loading-wake (review: raw-key path), impl-554 wt-3
+  fix/554-doom-hint-pad, impl-541 wt-4 test/541-benchtest-slow-stop (benchtest flags slowstop + leak).
+- Next flash bench: #541 (slowstop -> "unloaded late"), #536 (leak -> "freed N leftover blocks"), #547 tag
+  ("by sdio_read" expected), #555 (7 pushes, DMA back within 1 KB of boot; 8 MB push vs 29 s baseline), #549, #554
+  screenshot, #551 firmware half (stopped ota-firmware: Lucas `!`).
+- NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance) and 7 (`owner-onair.sh
+  sync`/`off`); #391, #281, #237.
 - #527 next after this wave: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
