@@ -297,7 +297,49 @@ static void test_progress_read_order(void) {
     CHECK(shown == 5 && last == 95); // the tiny header reads show 0 once; none at 100
 }
 
+static sd_app_t unloading_app(void) {
+    sd_app_t a = {.state = SD_APP_LOADED, .closing = true};
+    CHECK(sd_app_unload_begin(&a));
+    return a;
+}
+
+// #541: a stop hook or task wait that overran is resumed when the last task ends; later faults never are
+static void test_late_unload(void) {
+    sd_app_t a = unloading_app();
+    sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
+    CHECK(a.state == SD_APP_FAULTED && a.late);
+    CHECK(!sd_app_late_begin(&a, 1)); // a task of the app still runs: nothing is freed
+    CHECK(a.state == SD_APP_FAULTED && a.late);
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_FAULTED); // closed while it waits
+    CHECK(sd_app_late_begin(&a, 0) && a.state == SD_APP_UNLOADING);
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_BUSY); // a reopen meanwhile waits
+    CHECK(!sd_app_late_begin(&a, 0)); // once
+    sd_app_unload_done(&a, true);
+    CHECK(a.state == SD_APP_TILE && !a.late);
+
+    a = unloading_app(); // the stop hook failed
+    sd_app_unload_fault(&a, SD_UNLOAD_STOP);
+    CHECK(sd_app_late_begin(&a, 0));
+
+    a = unloading_app(); // timers/UI failed: callbacks into the image may be queued
+    sd_app_unload_fault(&a, SD_UNLOAD_UI);
+    CHECK(a.state == SD_APP_FAULTED && !a.late && !sd_app_late_begin(&a, 0));
+
+    a = unloading_app(); // holdings could not be released (unload_done false)
+    sd_app_unload_done(&a, false);
+    CHECK(a.state == SD_APP_FAULTED && !sd_app_late_begin(&a, 0));
+
+    a = unloading_app(); // a screen of the app still exists (removal): the free waits for its delete event
+    a.screens = 1;
+    sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
+    CHECK(!sd_app_late_begin(&a, 0));
+
+    sd_app_t t = {.state = SD_APP_TILE, .late = true}; // never from another state
+    CHECK(!sd_app_late_begin(&t, 0));
+}
+
 int main(void) {
+    test_late_unload();
     test_scan();
     test_open();
     test_failed_load();

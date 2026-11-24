@@ -226,7 +226,13 @@ void lichen_fs_sd_release_ctx(uint32_t ctx) {
         return;
     }
     if (act == GATE_REL_OTHER_TASK) {
-        ESP_LOGE(TAG, "%s: leaving while another task holds its SD batch: the card stays locked until that task ends it or a restart", sd_holder ? sd_holder : "?");
+        // The holder is another task of the same app: while it still runs (an engine task in a per-call read) it ends the batch
+        // a moment later, so that is only news (#541); with no task of the app left nobody will, so it is a warning
+        if (lichen_os_task_count(ctx) > 0) {
+            ESP_LOGI(TAG, "%s: leaving while its own task holds its SD batch: it ends it when that call returns", sd_holder ? sd_holder : "?");
+        } else {
+            ESP_LOGW(TAG, "%s: leaving while another task holds its SD batch: the card stays locked until that task ends it or a restart", sd_holder ? sd_holder : "?");
+        }
         return;
     }
     ESP_LOGW(TAG, "%s: left with the SD batch open: ended", sd_holder ? sd_holder : "?");

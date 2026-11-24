@@ -159,7 +159,24 @@ bool sd_app_may_unregister(sd_app_t const *a, size_t tasks_left) {
 void sd_app_unload_done(sd_app_t *a, bool clean) {
     if (a->state == SD_APP_UNLOADING) {
         a->state = clean ? SD_APP_TILE : SD_APP_FAULTED;
+        a->late  = false;
     }
+}
+
+void sd_app_unload_fault(sd_app_t *a, sd_unload_step_t at) {
+    if (a->state == SD_APP_UNLOADING) {
+        a->state = SD_APP_FAULTED;
+        a->late  = at == SD_UNLOAD_STOP || at == SD_UNLOAD_TASKS;
+    }
+}
+
+bool sd_app_late_begin(sd_app_t *a, size_t tasks_left) {
+    if (a->state != SD_APP_FAULTED || !a->late || tasks_left != 0 || a->screens != 0) {
+        return false;
+    }
+    a->state = SD_APP_UNLOADING;
+    a->late  = false;
+    return true;
 }
 
 bool sd_app_remove(sd_app_t *a) {

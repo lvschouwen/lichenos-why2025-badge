@@ -40,6 +40,26 @@ static void park(int slot) {
     }
 }
 
+static void (*end_cb)(lichen_ctx_t ctx);
+
+void lichen_os_task_end_notify(void (*cb)(lichen_ctx_t ctx)) {
+    end_cb = cb;
+}
+
+// The task of ctx left the book: tell the observer when it was the context's last (the count excludes the caller, which is out)
+static void task_left(lichen_ctx_t ctx) {
+    void (*cb)(lichen_ctx_t) = end_cb;
+    if (!cb) {
+        return;
+    }
+    portENTER_CRITICAL(&book_mux);
+    size_t left = task_book_count(&book, ctx, xTaskGetCurrentTaskHandle());
+    portEXIT_CRITICAL(&book_mux);
+    if (!left) {
+        cb(ctx);
+    }
+}
+
 static void book_take(void) {
     portENTER_CRITICAL(&book_mux);
 }
@@ -66,6 +86,7 @@ static void trampoline(void *arg) {
     portENTER_CRITICAL(&book_mux);
     task_book_remove(&book, slot);
     portEXIT_CRITICAL(&book_mux);
+    task_left(ctx);
     vTaskDelete(NULL);
 }
 
@@ -230,6 +251,7 @@ bool lichen_os_task_end_self(void) {
     portENTER_CRITICAL(&book_mux);
     task_book_remove(&book, slot);
     portEXIT_CRITICAL(&book_mux);
+    task_left((lichen_ctx_t)ctx);
     vTaskDelete(NULL);
     return true; // not reached
 }

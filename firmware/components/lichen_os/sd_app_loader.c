@@ -59,17 +59,18 @@ static char const TAG[] = "sdapps";
 #define UNREG_TRIES        20
 #define STACK_KIB_DEFAULT  4
 
-typedef enum { MSG_CARD, MSG_LOAD, MSG_CLOSED, MSG_FREE } msg_kind_t;
+typedef enum { MSG_CARD, MSG_LOAD, MSG_CLOSED, MSG_FREE, MSG_LATE } msg_kind_t;
 typedef struct {
     msg_kind_t    kind;
     sd_app_rec_t *rec;
+    lichen_ctx_t  ctx; // MSG_LATE: by ctx, the record may be gone by the time it is read
 } msg_t;
 
 static SemaphoreHandle_t g_mu;
 static SemaphoreHandle_t g_hooks_sem; // main() gave its hooks, or returned
 static SemaphoreHandle_t g_ui_sem;    // the barrier call ran
 static QueueHandle_t     g_queue;
-#define QUEUE_LEN (2 * SD_APPS_MAX + 4 + 4) // per app a load, a close and a free, plus the card events
+#define QUEUE_LEN (3 * SD_APPS_MAX + 4 + 4) // per app a load, a close, a free and a late unload, plus the card events
 static sd_app_rec_t     *g_recs; // the loader task adds and removes; others read under g_mu
 static _Atomic bool      g_started;
 
@@ -123,7 +124,7 @@ static void unlink_rec(sd_app_rec_t *rec) {
 }
 
 static bool post(msg_kind_t kind, sd_app_rec_t *rec) {
-    msg_t m = {kind, rec};
+    msg_t m = {kind, rec, LICHEN_CTX_NONE};
     return g_queue && xQueueSend(g_queue, &m, 0) == pdTRUE; // never waits: callers hold locks or are the LVGL task
 }
 
@@ -454,22 +455,47 @@ static void free_image(sd_app_rec_t *rec) {
     sd_app_unlock();
 }
 
-// The app's state is UNLOADING: the steps in order. With free_now the image goes at the end (state TILE); without it the
-// caller frees it later (a card's removal, after the screens are closed). False: a step failed, the image stays and the
-// app is FAULTED; the leak is logged.
-static bool unload(sd_app_rec_t *rec, bool free_now) {
-    sd_unload_step_t step = SD_UNLOAD_STOP;
+// An unload gave up at a step that only missed a deadline (the stop hook, the tasks): the loader finishes it when the app's
+// last task has ended (#541). Called with the app FAULTED; a task that ended before the flag was set is caught here.
+static void late_arm(sd_app_rec_t *rec) {
+    sd_app_lock();
+    bool late = rec->sda.state == SD_APP_FAULTED && rec->sda.late;
+    sd_app_unlock();
+    if (late && lichen_os_task_count(rec->ctx) == 0) {
+        msg_t m = {MSG_LATE, NULL, rec->ctx};
+        if (!g_queue || xQueueSend(g_queue, &m, 0) != pdTRUE) {
+            ESP_LOGE(TAG, "%s: late unload not queued", rec->m.id);
+        }
+    }
+}
+
+// A task of any context ended and its context has none left (lichen_task.c, on the ending task: no waiting, nothing freed
+// here). Only a message to the loader, and only for an app that gave its unload up.
+static void task_ended(lichen_ctx_t ctx) {
+    sd_app_rec_t *rec = sd_app_find(ctx);
+    if (rec) {
+        late_arm(rec);
+    }
+}
+
+// The app's state is UNLOADING: the steps in order from `from` (SD_UNLOAD_STOP, or SD_UNLOAD_TASKS for a late unload, the
+// stop hook having been called once). With free_now the image goes at the end (state TILE); without it the caller frees it
+// later (a card's removal, after the screens are closed). False: a step failed, the image stays and the app is FAULTED
+// (resumed by late_arm when it was the stop hook or the tasks); the leak is logged.
+static bool unload(sd_app_rec_t *rec, sd_unload_step_t from, bool free_now) {
+    sd_unload_step_t step = from;
     while (step != SD_UNLOAD_FREE && step != SD_UNLOAD_FAULT) {
         bool ok = unload_step(rec, step);
         if (!ok) {
             ESP_LOGE(TAG, "%s: unload failed at step %d (0 stop hook, 1 tasks, 2 timers/UI): image and tile kept", rec->m.id, (int)step);
+            sd_app_lock();
+            sd_app_unload_fault(&rec->sda, step);
+            sd_app_unlock();
         }
         step = sd_unload_next(step, ok);
     }
     if (step == SD_UNLOAD_FAULT) {
-        sd_app_lock();
-        sd_app_unload_done(&rec->sda, false);
-        sd_app_unlock();
+        late_arm(rec);
         return false;
     }
     if (free_now && !release_app_holdings(rec)) {
@@ -581,7 +607,7 @@ static void abort_after_image(sd_app_rec_t *rec, char const *why) {
     sd_app_lock();
     sd_app_load_abort(&rec->sda); // LOADING to UNLOADING: the Loading screen that waits is the OS's
     sd_app_unlock();
-    unload(rec, true);
+    unload(rec, SD_UNLOAD_STOP, true);
     fail_load(rec, why);
 }
 
@@ -692,7 +718,7 @@ static bool closed_try(sd_app_rec_t *rec) {
         return true; // opened again
     }
     heap_snap_t before = heap_now();
-    if (unload(rec, free_now) && free_now) {
+    if (unload(rec, SD_UNLOAD_STOP, free_now) && free_now) {
         heap_snap_t after = heap_now();
         ESP_LOGI(TAG, "%s: unloaded %+d B %+d B", rec->m.id, (int)(after.psram - before.psram),
                  (int)(after.internal - before.internal));
@@ -703,6 +729,33 @@ static bool closed_try(sd_app_rec_t *rec) {
 static void do_closed(sd_app_rec_t *rec) {
     if (!closed_try(rec)) {
         retry_add(rec->ctx);
+    }
+}
+
+// The loader finishes an unload it gave up on, now that no task of the app is left (#541). The app is FAULTED: opens were
+// refused meanwhile, and the state is UNLOADING for the rest, so a reopen is told to wait. Nothing is freed unless
+// sd_app_late_begin saw no task and no screen; the same steps run as after a normal close (timers and UI, holdings, image).
+static void do_late(lichen_ctx_t ctx) {
+    sd_app_rec_t *rec = sd_app_find(ctx);
+    if (!rec) {
+        return;
+    }
+    size_t left = lichen_os_task_count(ctx);
+    sd_app_lock();
+    bool begin    = sd_app_late_begin(&rec->sda, left);
+    bool removing = rec->sda.removing;
+    sd_app_unlock();
+    if (!begin) {
+        return; // a task is back, a screen is left, or an earlier message did it
+    }
+    heap_snap_t before = heap_now();
+    if (unload(rec, SD_UNLOAD_TASKS, true)) {
+        heap_snap_t after = heap_now();
+        ESP_LOGI(TAG, "%s: unloaded late, its last task has ended: %+d B %+d B", rec->m.id,
+                 (int)(after.psram - before.psram), (int)(after.internal - before.internal));
+        if (removing) {
+            post(MSG_CARD, NULL); // the card went while it ran: the removal that gave up can finish now
+        }
     }
 }
 
@@ -762,7 +815,7 @@ static void remove_one(sd_app_rec_t *rec) {
     bool bad   = rec->sda.state == SD_APP_FAULTED;
     sd_app_unlock();
     if (begin) {
-        bad = !unload(rec, false); // the image is freed after the screens are closed (do_free)
+        bad = !unload(rec, SD_UNLOAD_STOP, false); // the image is freed after the screens are closed (do_free)
     }
     bad = !release_app_holdings(rec) || bad; // the card is gone or changed: files and raw keys go while the context is still valid
     sd_app_lock();
@@ -872,6 +925,9 @@ static void loader_task(void *arg) {
         case MSG_FREE:
             do_free(m.rec);
             break;
+        case MSG_LATE:
+            do_late(m.ctx);
+            break;
         }
     }
 }
@@ -920,6 +976,7 @@ void sd_apps_boot(void) {
         ESP_LOGE(TAG, "loader task failed");
         return;
     }
+    lichen_os_task_end_notify(task_ended);
     sd_observe(card_changed);
     if (sd_mounted()) { // no event for a card that mounted before the observer
         post(MSG_CARD, NULL);

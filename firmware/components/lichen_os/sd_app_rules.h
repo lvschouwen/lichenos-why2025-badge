@@ -49,6 +49,7 @@ typedef struct {
     int            screens;  // the app's screens that exist (opened, not yet deleted by LVGL)
     bool           closing;  // the last screen was deleted: unload once nothing reopened it (cleared by an open)
     bool           removing; // the card went: nothing opens or loads from now on
+    bool           late;     // FAULTED at the stop hook or the tasks (#541): the unload resumes when no task of the app is left
 } sd_app_t;
 
 typedef enum {
@@ -146,6 +147,17 @@ typedef enum {
 } sd_unload_step_t;
 // The step after cur, given whether cur went well. Never skips a step and never reaches FREE after a failure.
 sd_unload_step_t sd_unload_next(sd_unload_step_t cur, bool ok);
+
+// ---- the late unload (#541) --------------------------------------------------------------------------------------
+// An unload that gave up at the stop hook or at the tasks missed only a deadline: the image is untouched and nothing was
+// dropped, so it may resume when the app's last task has ended. A fault at a later step (timers/UI, holdings) may have left
+// callbacks into the image: no resume.
+
+// UNLOADING became FAULTED at step `at` (the first step that failed). Marks it resumable for STOP and TASKS only.
+void sd_app_unload_fault(sd_app_t *a, sd_unload_step_t at);
+// FAULTED and resumable, no task of the app left and no screen of it: UNLOADING again and true; the caller resumes at
+// SD_UNLOAD_TASKS (the stop hook has been called once and is never called again). False leaves the state as it was.
+bool sd_app_late_begin(sd_app_t *a, size_t tasks_left);
 
 #ifdef __cplusplus
 }
