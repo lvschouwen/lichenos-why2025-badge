@@ -111,7 +111,36 @@ static void test_no_memory(void) {
     CHECK(tables == 0);
 }
 
+// The sweep's order (#536 review): a block the app frees itself, also after the card went and the record was marked gone
+// (its screens' delete callbacks still free), leaves the set first, so the drain frees each block exactly once
+static int frees_of[8];
+static uint32_t count_free(void *user, void *p) {
+    (void)user;
+    uintptr_t i = ((uintptr_t)p - 0x3c000000u) / 16u;
+    if (i < 8) {
+        frees_of[i]++;
+    }
+    return 100;
+}
+
+static void test_drain_once(void) {
+    ptr_set_t s = {0};
+    for (uintptr_t i = 1; i <= 4; i++) {
+        CHECK(ptr_set_add(&s, &env, fake(i)));
+    }
+    CHECK(ptr_set_remove(&s, fake(2))); // freed by the app while the card went (a delete callback)
+    CHECK(ptr_set_add(&s, &env, fake(5))); // and one it made there
+    CHECK(ptr_set_remove(&s, fake(1)));
+    uint32_t bytes = 0;
+    CHECK(ptr_set_drain(&s, count_free, NULL, &bytes) == 3 && bytes == 300);
+    CHECK(frees_of[3] == 1 && frees_of[4] == 1 && frees_of[5] == 1 && frees_of[1] == 0 && frees_of[2] == 0);
+    CHECK(ptr_set_drain(&s, count_free, NULL, &bytes) == 0 && bytes == 0); // drained: nothing twice
+    ptr_set_release(&s, &env);
+    CHECK(tables == 0);
+}
+
 int main(void) {
+    test_drain_once();
     test_basic();
     test_grow_and_drain();
     test_churn();

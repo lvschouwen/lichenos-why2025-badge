@@ -38,6 +38,7 @@ typedef struct sd_app_rec {
     bool               free_pending; // unregister is done but a screen still exists: the last delete event posts the free
     bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's); the stop task is booked under the app, so the unload waits for it
     ptr_set_t          blocks;   // the app's live malloc blocks (export_blocks.h), under g_blk_mu; drained at the image's free
+    uint32_t           untracked; // blocks the set had no room for (g_blk_mu): freed by nobody if the app leaves them
     uint32_t           fault_ms; // lichen_sys_life_now_ms when a resumable unload gave up (sd_app_lock)
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live

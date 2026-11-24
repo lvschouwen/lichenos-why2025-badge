@@ -98,6 +98,16 @@ void *ptr_set_pop(ptr_set_t *s) {
     return NULL;
 }
 
+size_t ptr_set_drain(ptr_set_t *s, uint32_t (*release)(void *user, void *p), void *user, uint32_t *bytes) {
+    size_t n = 0;
+    *bytes   = 0;
+    for (void *p = ptr_set_pop(s); p; p = ptr_set_pop(s)) {
+        *bytes += release(user, p);
+        n++;
+    }
+    return n;
+}
+
 void ptr_set_release(ptr_set_t *s, ptr_set_env_t const *env) {
     if (s->slot) {
         env->release(s->slot);

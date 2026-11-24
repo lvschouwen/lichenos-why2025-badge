@@ -411,6 +411,9 @@ an API change.
 - **Tasks.** The OS starts the `main()` task; a task the app starts itself needs BACKGROUND in the manifest's caps. Every
   task ends after `stop`.
 - **Its widgets live on its own screens.** The OS watches the app's screens only; a widget on a layer above them (the top layer, the system layer) is not tracked and would still hold callbacks into the ELF after it is freed.
+- **Leftover blocks.** What the app still holds from `malloc` (and `calloc`, `realloc`, `strdup`) when it unloads is freed by
+  the OS after its screens, tasks, timers and queued UI calls are gone, with one log line. Never leave an object outside your
+  own screens (on `lv_layer_sys`, say) pointing at such a buffer.
 - **What the app must do.** It frees its `lichen_alloc` and `malloc` blocks; it never keeps a pointer into the OS across a
   load.
 

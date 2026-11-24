@@ -463,54 +463,81 @@ static void *table_alloc(size_t bytes) {
 }
 static ptr_set_env_t const blk_env = {table_alloc, heap_caps_free};
 
-// The shims' side (any task of the app, or a callback running as it): the record is alive while the app has code running.
-// A block the set has no room for stays unnoted: it is the app's to free, and counted as leaked if it does not.
-void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
-    sd_app_rec_t *rec = g_blk_mu ? sd_app_find(ctx) : NULL;
-    if (rec) {
-        xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-        ptr_set_add(&rec->blocks, &blk_env, ptr);
-        xSemaphoreGive(g_blk_mu);
+// The record of the app's blocks: also a record that is gone (the card went, lichen_unregister_app was called) until do_free
+// unlinks it. The app's screens are deleted after that, and a delete callback may free() or malloc(): a lookup that skipped
+// the gone record would leave a freed block in the set for the sweep to free again. A record is only freed by do_free,
+// which runs after those callbacks (sd_app_may_free), and a context number is never reused while its record is listed (it
+// carries a generation), so a match is the app's own; a live record is preferred all the same.
+static sd_app_rec_t *rec_for_blocks(lichen_ctx_t ctx) {
+    if (!g_mu || ctx == LICHEN_CTX_NONE) {
+        return NULL;
     }
+    sd_app_rec_t *found = NULL;
+    sd_app_lock();
+    for (sd_app_rec_t *r = g_recs; r; r = r->next) {
+        if (r->ctx == ctx && (!found || found->gone)) {
+            found = r;
+        }
+    }
+    sd_app_unlock();
+    return found;
+}
+
+// The shims' side, one helper (any task of the app, or a callback running as it): note a block the app now holds, or forget
+// one it frees itself. Not from an interrupt or a critical section (the mutexes), as lichen_alloc's book. A block the set has no
+// room for is counted: it is the app's to free, and shows in the unload's log line.
+static void block_op(lichen_ctx_t ctx, void *ptr, bool add) {
+    sd_app_rec_t *rec = g_blk_mu && xPortCanYield() ? rec_for_blocks(ctx) : NULL;
+    if (!rec) {
+        return;
+    }
+    xSemaphoreTake(g_blk_mu, portMAX_DELAY);
+    if (!add) {
+        ptr_set_remove(&rec->blocks, ptr);
+    } else if (!ptr_set_add(&rec->blocks, &blk_env, ptr)) {
+        rec->untracked++;
+    }
+    xSemaphoreGive(g_blk_mu);
+}
+
+void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
+    block_op(ctx, ptr, true);
 }
 
 void sd_app_block_forget(lichen_ctx_t ctx, void *ptr) {
-    sd_app_rec_t *rec = g_blk_mu ? sd_app_find(ctx) : NULL;
-    if (rec) {
-        xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-        ptr_set_remove(&rec->blocks, ptr);
-        xSemaphoreGive(g_blk_mu);
-    }
+    block_op(ctx, ptr, false);
 }
 
-// What the app left (an exit() or a fault never runs its own free): freed under its context so its row in the book goes down
-// too, or straight to the heap when the context is stale (unregistered: its row is gone and was logged as leaked). Only called
-// where the image is freed: no task, timer, queued call or screen of the app is left, so nothing can still use a block of it
-static void sweep_blocks(sd_app_rec_t *rec) {
-    uint32_t n = 0, bytes = 0;
-    for (;;) {
-        xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-        void *p = ptr_set_pop(&rec->blocks);
-        xSemaphoreGive(g_blk_mu);
-        if (!p) {
-            break;
-        }
-        n++;
-        bytes += (uint32_t)heap_caps_get_allocated_size(p);
-        sd_app_lock();
-        bool stale = rec->gone;
-        sd_app_unlock();
-        if (stale) {
-            heap_caps_free(p);
-        } else {
-            lichen_free(rec->ctx, p);
-        }
+static uint32_t release_block(void *user, void *p) {
+    sd_app_rec_t *rec   = user;
+    uint32_t      bytes = (uint32_t)heap_caps_get_allocated_size(p);
+    sd_app_lock();
+    bool stale = rec->gone;
+    sd_app_unlock();
+    if (stale) {
+        heap_caps_free(p); // the context is stale (unregistered): its row is gone and was logged as leaked
+    } else {
+        lichen_free(rec->ctx, p); // under its context, so its row in the book goes down too
     }
+    return bytes;
+}
+
+// What the app left (an exit() or a fault never runs its own free). Only called where the image is freed: no task, timer, queued
+// call or screen of the app is left, so nothing can still call malloc or free for it and the set is drained without its lock
+static void sweep_blocks(sd_app_rec_t *rec) {
+    uint32_t bytes = 0;
+    size_t   n     = ptr_set_drain(&rec->blocks, release_block, rec, &bytes);
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
     ptr_set_release(&rec->blocks, &blk_env);
+    uint32_t untracked = rec->untracked;
+    rec->untracked     = 0;
     xSemaphoreGive(g_blk_mu);
     if (n) {
         ESP_LOGW(TAG, "%s: freed %u leftover blocks (%u B)", rec->m.id, (unsigned)n, (unsigned)bytes);
+    }
+    if (untracked) {
+        ESP_LOGW(TAG, "%s: %u blocks could not be tracked (no memory for the set): not freed, leaked", rec->m.id,
+                 (unsigned)untracked);
     }
 }
 

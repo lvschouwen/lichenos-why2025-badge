@@ -29,5 +29,8 @@ bool ptr_set_add(ptr_set_t *s, ptr_set_env_t const *env, void *p);
 bool ptr_set_remove(ptr_set_t *s, void *p);
 // Takes any one pointer out of the set; NULL when empty. Draining the set visits every pointer once.
 void *ptr_set_pop(ptr_set_t *s);
+// Drains the set: release(user, p) is called once for every pointer in it and answers the bytes it freed. Returns how many
+// pointers there were, the bytes summed in *bytes. A pointer removed before (the app freed it itself) is not visited.
+size_t ptr_set_drain(ptr_set_t *s, uint32_t (*release)(void *user, void *p), void *user, uint32_t *bytes);
 // Gives the table back and empties the set (call once it is drained).
 void ptr_set_release(ptr_set_t *s, ptr_set_env_t const *env);
