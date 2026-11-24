@@ -58,20 +58,16 @@ bool sd_app_known(char const *id);
 // Adds a made, registered record to the list.
 void sd_app_link(sd_app_rec_t *rec);
 
-// A manifest landed while the app's limits were in use (#553): remembered, reparsed at its unload (loader task).
-void sd_app_rescan_mark(char const *id);
-// What the record of id is, for sd_app_push_action.
-sd_push_rec_t sd_app_push_rec(char const *id);
-// The tile of id takes the caps and budgets of m (its name stays: the shell holds a pointer to it). False: it is no tile
-// any more (a load began meanwhile), so the rescan was marked for its unload instead.
-bool sd_app_apply_manifest(char const *id, lichen_manifest_t const *m);
-// One app with a rescan marked that is a tile again: its id into out (cleared from the mark). False: none.
+// One app with a rescan marked that is a tile again (#553): its id into out, the mark cleared. False: none.
 bool sd_app_rescan_due(char *out, size_t cap);
-// A file landed in an app's directory (#553): the scan's side of the rescan (loader task)
-void sd_app_rescan(char const *id, bool manifest);
+// The tile of id takes the caps and budgets of m (its name stays: the shell holds a pointer to it). False: a load began
+// meanwhile, so it is marked for its unload instead.
+bool sd_app_apply_manifest(char const *id, lichen_manifest_t const *m);
 
 // The scan (loader task): registers the tile of every app that passes, refuses and notifies the others.
 void sd_app_scan(void);
+// Reads the manifest of the tile id again (#553), loader task
+void sd_app_rescan(char const *id);
 // The trampolines of lichen_app_t (sd_app_loader.c)
 void sd_app_tramp_open(lv_obj_t *screen);
 bool sd_app_tramp_stop(void);

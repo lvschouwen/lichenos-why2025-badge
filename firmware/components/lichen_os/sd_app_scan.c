@@ -147,7 +147,8 @@ static void register_one(lichen_manifest_t const *m) {
     ESP_LOGI(TAG, "%s: tile (api %u.%u)", m->id, (unsigned)m->api_major, (unsigned)m->api_minor);
 }
 
-static void scan_one(char const *dir, char *buf) {
+// again (#553): the app is a tile already and takes the new caps and budgets; a refused manifest leaves the old ones
+static void scan_one(char const *dir, char *buf, bool again) {
     size_t len = 0;
     switch (read_manifest(dir, buf, &len)) {
     case READ_NONE:
@@ -162,16 +163,20 @@ static void scan_one(char const *dir, char *buf) {
     default:
         break;
     }
-    if (sd_app_known(dir)) {
+    if (!again && sd_app_known(dir)) {
         return; // still here (an app that did not stop stays until the badge restarts): neither shown twice nor refused
     }
     lichen_manifest_t     m;
     lichen_manifest_err_t err = lichen_manifest_parse(buf, len, dir, &m, NULL);
-    bool                  taken = err == LICHEN_MANIFEST_OK && lichen_app_by_id(m.id) != NULL;
+    bool                  taken = !again && err == LICHEN_MANIFEST_OK && lichen_app_by_id(m.id) != NULL;
     bool                  entry = err == LICHEN_MANIFEST_OK && entry_exists(&m);
     sd_app_scan_t         v     = sd_app_scan_verdict(err, &m, taken, entry);
     if (v == SD_APP_SCAN_OK) {
-        register_one(&m);
+        if (!again) {
+            register_one(&m);
+        } else if (sd_app_apply_manifest(dir, &m)) {
+            ESP_LOGI(TAG, "%s: manifest read again", dir);
+        }
         return;
     }
     char why[SD_APP_MSG_LEN];
@@ -185,61 +190,17 @@ void sd_app_scan(void) {
     size_t n                               = 0;
     if (names && buf && list_dirs(names, &n)) {
         for (size_t i = 0; i < n; i++) {
-            scan_one(names[i], buf);
+            scan_one(names[i], buf, false);
         }
     }
     heap_caps_free(names);
     heap_caps_free(buf);
 }
 
-// #553: a manifest that landed for a tile. The record keeps what it has when the new one is refused: a bad push never takes
-// an app away, the notification says which line is wrong.
-static void rescan_tile(char const *id, char *buf) {
-    size_t len = 0;
-    read_t got = read_manifest(id, buf, &len);
-    if (got != READ_OK) {
-        ESP_LOGW(TAG, "%s: the manifest is not readable now, the old one stays", id);
-        return;
-    }
-    lichen_manifest_t     m;
-    lichen_manifest_err_t err = lichen_manifest_parse(buf, len, id, &m, NULL);
-    sd_app_scan_t         v   = sd_app_scan_verdict(err, &m, false, err == LICHEN_MANIFEST_OK && entry_exists(&m));
-    if (v != SD_APP_SCAN_OK) {
-        char why[SD_APP_MSG_LEN];
-        sd_app_scan_reason(v, err, &m, id, why, sizeof(why));
-        refuse(why);
-        return;
-    }
-    if (sd_app_apply_manifest(id, &m)) {
-        ESP_LOGI(TAG, "%s: manifest read again (caps 0x%x, internal %u KiB, psram %u KiB)", id, (unsigned)m.caps,
-                 (unsigned)m.internal_ram_kib, (unsigned)m.psram_kib);
-    } else {
-        ESP_LOGI(TAG, "%s: it started meanwhile, the new manifest is read at its unload", id);
-    }
-}
-
-void sd_app_rescan(char const *id, bool manifest) {
-    sd_push_action_t act = sd_app_push_action(manifest, sd_app_push_rec(id));
-    if (act == SD_PUSH_IGNORE) {
-        return;
-    }
-    if (act == SD_PUSH_DEFER) {
-        sd_app_rescan_mark(id);
-        ESP_LOGI(TAG, "%s: manifest landed while it runs, read at its unload", id);
-        return;
-    }
-    if (act == SD_PUSH_KEEP) {
-        ESP_LOGW(TAG, "%s: manifest landed for an app that cannot change now, the next mount reads it", id);
-        return;
-    }
+void sd_app_rescan(char const *id) {
     char *buf = heap_caps_malloc(MANIFEST_MAX + 1, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        return;
-    }
-    if (act == SD_PUSH_RESCAN) {
-        rescan_tile(id, buf);
-    } else {
-        scan_one(id, buf); // a new app: the same checks as at a mount
+    if (buf) {
+        scan_one(id, buf, true);
     }
     heap_caps_free(buf);
 }

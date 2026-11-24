@@ -82,15 +82,7 @@ static _Atomic bool      g_started;
 static _Atomic int  g_late_apps;  // apps FAULTED and resumable: the task-exit hook does nothing while it is 0
 static _Atomic bool g_late_retry; // a MSG_LATE did not fit the queue
 
-// #553: files that landed in an app's directory, between the update server's task and the loader's. One slot per app (a
-// manifest then an ELF is one rescan), so a burst of pushes is never more than a few entries and one queued message.
-#define PUSH_SLOTS 4
-static struct {
-    char id[LICHEN_MANIFEST_ID_MAX];
-    bool manifest;
-    bool used;
-} g_push[PUSH_SLOTS]; // under sd_app_lock
-static _Atomic bool g_rescan_queued;
+static _Atomic bool g_rescan_queued; // #553: a manifest landed and the loader has not looked yet
 
 void sd_app_lock(void) {
     xSemaphoreTake(g_mu, portMAX_DELAY);
@@ -1083,99 +1075,53 @@ static void remove_all(void) {
     }
 }
 
-// ---- a file landed in an app's directory (#553) ---------------------------------------------------------------------------
-
-static bool push_slot_add(char const *id, bool manifest) {
-    bool ok = false;
-    sd_app_lock();
-    for (int pass = 0; pass < 2 && !ok; pass++) { // an entry of the same app first, then a free one
-        for (size_t i = 0; i < PUSH_SLOTS && !ok; i++) {
-            if (pass == 0 ? (g_push[i].used && strcmp(g_push[i].id, id) == 0) : !g_push[i].used) {
-                strlcpy(g_push[i].id, id, sizeof(g_push[i].id));
-                g_push[i].manifest = (pass == 0 && g_push[i].manifest) || manifest;
-                g_push[i].used     = true;
-                ok                 = true;
-            }
-        }
-    }
-    sd_app_unlock();
-    return ok;
-}
+// ---- a manifest landed in an app's directory (#553) -----------------------------------------------------------------------
 
 // The update server's task (sd_observe_files): only the path is looked at and one message queued, the card is not touched
 static void file_landed(char const *path) {
-    char id[LICHEN_MANIFEST_ID_MAX];
-    bool manifest = false;
-    if (!sd_app_push_target(SD_APPS_DIR, path, id, sizeof(id), &manifest)) {
-        return;
-    }
-    if (!push_slot_add(id, manifest)) {
-        ESP_LOGW(TAG, "%s: a file landed but the rescan list is full, the next mount reads it", id);
-        return;
-    }
-    if (!atomic_exchange(&g_rescan_queued, true) && !post(MSG_RESCAN, NULL)) {
+    if (sd_app_push_is_manifest(SD_APPS_DIR, path) && !atomic_exchange(&g_rescan_queued, true) && !post(MSG_RESCAN, NULL)) {
         atomic_store(&g_rescan_queued, false);
-        ESP_LOGW(TAG, "%s: rescan not queued, the next mount reads it", id);
+        ESP_LOGW(TAG, "rescan not queued, the next mount reads the manifest");
     }
 }
 
-sd_push_rec_t sd_app_push_rec(char const *id) {
-    sd_push_rec_t out = SD_PUSH_NONE;
+// Which app it was is not known (one flag, no table): every app that can take it is marked and read again, see rescan_deferred
+static void do_rescan(void) {
+    atomic_store(&g_rescan_queued, false); // a push from here on queues the next message
     sd_app_lock();
-    for (sd_app_rec_t const *r = g_recs; r; r = r->next) {
-        if (r->gone || strcmp(r->m.id, id) != 0) {
-            continue;
-        }
-        if (r->sda.removing || r->sda.state == SD_APP_FAULTED) {
-            out = SD_PUSH_DEAD;
-        } else {
-            out = r->sda.state == SD_APP_TILE ? SD_PUSH_TILE : SD_PUSH_BUSY;
-        }
-        break;
-    }
-    sd_app_unlock();
-    return out;
-}
-
-static sd_app_rec_t *find_live(char const *id) { // sd_app_lock held
     for (sd_app_rec_t *r = g_recs; r; r = r->next) {
-        if (!r->gone && strcmp(r->m.id, id) == 0) {
-            return r;
-        }
-    }
-    return NULL;
-}
-
-void sd_app_rescan_mark(char const *id) {
-    sd_app_lock();
-    sd_app_rec_t *r = find_live(id);
-    if (r) {
-        r->rescan_pending = true;
+        bool dead = r->gone || r->sda.removing || r->sda.state == SD_APP_FAULTED;
+        r->rescan_pending = sd_app_push_marks(dead ? SD_PUSH_DEAD : r->sda.state == SD_APP_TILE ? SD_PUSH_TILE : SD_PUSH_BUSY);
     }
     sd_app_unlock();
 }
 
-// The record is the loader's own to free, so it stays while this runs; a started load (any task may open the tile) is the
-// one thing that can change under it, and is answered by marking the rescan for the unload.
+// The tile of id takes the manifest m. The record is the loader's own to free, so it stays while this runs; a started load
+// (any task may open the tile) is the one thing that can change under it, and is answered by marking it for the unload.
 bool sd_app_apply_manifest(char const *id, lichen_manifest_t const *m) {
     sd_app_lock();
-    sd_app_rec_t *r = find_live(id);
+    sd_app_rec_t *r = g_recs;
+    while (r && (r->gone || strcmp(r->m.id, id) != 0)) {
+        r = r->next;
+    }
     if (!r || r->sda.state != SD_APP_TILE || r->sda.removing) {
-        if (r && r->sda.state != SD_APP_FAULTED) {
+        if (r) {
             r->rescan_pending = true;
         }
         sd_app_unlock();
         return false;
     }
-    char name[LICHEN_MANIFEST_NAME_MAX];
-    memcpy(name, r->m.name, sizeof(name));
-    r->m = *m;
-    memcpy(r->m.name, name, sizeof(name));
-    r->app.caps             = r->m.caps;
-    r->app.internal_ram_kib = r->m.internal_ram_kib;
-    r->app.psram_kib        = r->m.psram_kib;
-    r->rescan_pending       = false;
-    lichen_ctx_t ctx        = r->ctx;
+    // The name stays (the shell reads it without this lock); the rest is only read by the loader or by caps checks
+    memcpy(r->m.entry, m->entry, sizeof(r->m.entry));
+    memcpy(r->m.icon, m->icon, sizeof(r->m.icon));
+    r->m.api_major = m->api_major;
+    r->m.api_minor = m->api_minor;
+    r->m.stack_kib = m->stack_kib;
+    r->app.caps = r->m.caps = m->caps;
+    r->app.internal_ram_kib = r->m.internal_ram_kib = m->internal_ram_kib;
+    r->app.psram_kib = r->m.psram_kib = m->psram_kib;
+    r->rescan_pending = false;
+    lichen_ctx_t ctx  = r->ctx;
     sd_app_unlock();
     lichen_sys_mem_quota_set(ctx, m->psram_kib);
     return true;
@@ -1195,35 +1141,11 @@ bool sd_app_rescan_due(char *out, size_t cap) {
     return found;
 }
 
-static bool push_pop(char *id, size_t cap, bool *manifest) {
-    bool found = false;
-    sd_app_lock();
-    for (size_t i = 0; i < PUSH_SLOTS && !found; i++) {
-        if (g_push[i].used) {
-            strlcpy(id, g_push[i].id, cap);
-            *manifest        = g_push[i].manifest;
-            g_push[i].used   = false;
-            found            = true;
-        }
-    }
-    sd_app_unlock();
-    return found;
-}
-
-static void do_rescan(void) {
-    char id[LICHEN_MANIFEST_ID_MAX];
-    bool manifest;
-    atomic_store(&g_rescan_queued, false); // a push from here on queues the next message
-    while (push_pop(id, sizeof(id), &manifest)) {
-        sd_app_rescan(id, manifest);
-    }
-}
-
-// An unload ended (any road back to a tile): the manifests that landed meanwhile are read now
+// After every message: the apps marked that are tiles now (also an unload that just ended) are read again
 static void rescan_deferred(void) {
     char id[LICHEN_MANIFEST_ID_MAX];
     while (sd_app_rescan_due(id, sizeof(id))) {
-        sd_app_rescan(id, true);
+        sd_app_rescan(id);
     }
 }
 
