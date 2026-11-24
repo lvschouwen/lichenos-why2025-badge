@@ -149,6 +149,10 @@ bool sd_app_load_skip(sd_app_t *a) {
     return true;
 }
 
+bool sd_app_screen_loading(sd_app_t const *a, bool gone) {
+    return a->state == SD_APP_LOADING && a->screens > 0 && !gone;
+}
+
 bool sd_app_load_abort(sd_app_t *a) {
     if (a->state != SD_APP_LOADING) {
         return false;

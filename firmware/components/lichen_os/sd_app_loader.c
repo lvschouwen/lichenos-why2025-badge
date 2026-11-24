@@ -83,18 +83,16 @@ static _Atomic int  g_late_apps;  // apps FAULTED and resumable: the task-exit h
 static _Atomic bool g_late_retry; // a MSG_LATE did not fit the queue
 
 static _Atomic bool g_rescan_queued; // #553: a manifest landed and the loader has not looked yet
+static _Atomic bool g_loading;       // #549: a Loading screen is up; set at every unlock, read lock-free by the keyboard's wake hook
 
 void sd_app_lock(void) {
     xSemaphoreTake(g_mu, portMAX_DELAY);
 }
-// Is an app's Loading screen up? Written at every unlock (each state change is made under the lock), read lock-free by
-// the keyboard task's wake hook (#549)
-static _Atomic bool g_loading;
-
 void sd_app_unlock(void) {
     bool any = false;
+    // At most SD_APPS_MAX records (the scan stops at that many app folders), so the walk is short
     for (sd_app_rec_t const *r = g_recs; r && !any; r = r->next) {
-        any = r->sda.state == SD_APP_LOADING && r->sda.screens > 0 && !r->gone;
+        any = sd_app_screen_loading(&r->sda, r->gone);
     }
     atomic_store_explicit(&g_loading, any, memory_order_relaxed);
     xSemaphoreGive(g_mu);

@@ -51,7 +51,7 @@ static atomic_int     chip_ok = -1; // fw soak (#409): -1 not started, 1 the las
 static atomic_uint    chip_resets;  // readbacks that found the chip reset
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
-static bool (*_Atomic wake_hook)(uint8_t key);        // the screen timeout (#43)
+static bool (*_Atomic wake_hook)(uint8_t key);               // the screen timeout (#43)
 static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key lock (#190)
 static void (*_Atomic gate_reset_hook)(void);                // ... told when every key was released
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either

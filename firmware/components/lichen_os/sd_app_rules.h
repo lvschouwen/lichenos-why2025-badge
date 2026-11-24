@@ -101,6 +101,9 @@ bool sd_app_load_abort(sd_app_t *a);
 // The loader is about to read the file (#546): when the screen was closed meanwhile (closing, not a removal) there is nobody
 // to open for, so the load is dropped: LOADING goes back to TILE and true is returned. Nothing was loaded, nothing to unload.
 bool sd_app_load_skip(sd_app_t *a);
+
+// Is a Loading screen of this app up (#549)? LOADING, with a screen that exists, and the app not gone.
+bool sd_app_screen_loading(sd_app_t const *a, bool gone);
 // One of the app's screens was deleted (LVGL's delete event, on the LVGL task). True when it was the last one and the app
 // is LOADED, so the loader should plan the unload; a load under way remembers it and load_done answers UNLOAD. This is
 // the only thing that lets an unload free the image: a screen that is still there may hold callbacks into it.

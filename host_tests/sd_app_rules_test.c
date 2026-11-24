@@ -391,6 +391,18 @@ static void test_push_rules(void) {
     CHECK(!sd_app_push_target(dir, "/storage/doom/manifest", id, sizeof(id), &man));
     CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/manifest", id, 4, &man)); // does not fit the caller's buffer
 
+    {
+        sd_app_t l = {.state = SD_APP_LOADING, .screens = 1};
+        CHECK(sd_app_screen_loading(&l, false));
+        CHECK(!sd_app_screen_loading(&l, true));
+        l.screens = 0;
+        CHECK(!sd_app_screen_loading(&l, false));
+        l.screens = 1;
+        l.state   = SD_APP_FAULTED;
+        CHECK(!sd_app_screen_loading(&l, false));
+        l.state = SD_APP_UNLOADING;
+        CHECK(!sd_app_screen_loading(&l, false));
+    }
     CHECK(sd_app_rescan_wanted(true, SD_APP_TILE, false, false));
     CHECK(sd_app_rescan_wanted(true, SD_APP_LOADED, false, false)); // read at its unload
     CHECK(sd_app_rescan_wanted(true, SD_APP_LOADING, false, false));

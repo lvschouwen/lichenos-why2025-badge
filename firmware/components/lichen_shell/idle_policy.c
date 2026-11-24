@@ -64,7 +64,7 @@ bool idle_key_swallowed(idle_stage_t shown) {
 }
 
 bool idle_wake_swallowed(idle_stage_t shown, bool is_esc, bool loading) {
-    return idle_key_swallowed(shown) && !(is_esc && loading);
+    return idle_key_swallowed(shown) && !(is_esc && loading && !shown.lock);
 }
 
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s) {

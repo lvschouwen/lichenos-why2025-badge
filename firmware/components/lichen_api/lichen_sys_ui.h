@@ -17,8 +17,8 @@ bool lichen_sys_ui_lock(uint32_t timeout_ms);
 bool lichen_sys_ui_lock_held(void);
 // Gives back one lichen_sys_ui_lock. Any task (the one that took it).
 void lichen_sys_ui_unlock(void);
-// True while an SD app's "Loading..." screen is up (#549): the keyboard's wake hook lets Esc through to close it. A lock-free
-// read of one flag, so any task, including the keyboard task.
+// True while an SD app's "Loading..." screen is up (#549): the keyboard's wake hook lets Esc through to close it. A
+// lock-free read of one flag, so any task, including the keyboard task.
 bool lichen_sys_screen_loading(void);
 // Runs fn(arg) on the LVGL task, soon, as lichen_ui_call does, but waits for the lock up to timeout_ms (0 = forever,
 // as lvgl_port_lock) instead of lichen_ui_call's 2 s. False when the lock was not free in time or there was no memory:

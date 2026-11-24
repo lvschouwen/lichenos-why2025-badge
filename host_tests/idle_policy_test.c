@@ -136,8 +136,9 @@ int main(void) {
     CHECK(idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), true, false));
     CHECK(!idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), true, true));
     CHECK(idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), false, true));
-    CHECK(!idle_wake_swallowed(idle_stage(IDLE_DIM, true, true, false), true, true));
+    CHECK(!idle_wake_swallowed(idle_stage(IDLE_DIM, true, false, false), true, true));
     CHECK(idle_wake_swallowed(idle_stage(IDLE_DIM, true, false, false), false, true));
+    CHECK(idle_wake_swallowed(idle_stage(IDLE_OFF, true, true, false), true, true)); // the lock screen keeps the swallow
     CHECK(!idle_wake_swallowed(idle_stage(IDLE_BRIGHT, false, false, false), false, false));
 
     // The screensaver is the dim stage when it is on (#75); off is still off

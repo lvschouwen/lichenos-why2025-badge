@@ -72,7 +72,7 @@ bool idle_key_swallowed(idle_stage_t shown);
 
 // The same for one physical key (#549): while a screen is loading (an SD app's "Loading...") Esc is not swallowed, so one
 // press closes it instead of waking the screen and letting the app open anyway. Every other key, and Esc at any other
-// time, follows idle_key_swallowed.
+// time, follows idle_key_swallowed. Not while the pocket lock is engaged: its screen is up, Esc only wakes it.
 bool idle_wake_swallowed(idle_stage_t shown, bool is_esc, bool loading);
 
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s);

@@ -20,8 +20,8 @@ bool lichen_sys_keys_hook_add(key_raw_fn fn, void *arg);
 // removes without waiting. Outside a hook add and remove may sleep (a mutex, a one-tick wait): never from an ISR, a
 // critical section or with the scheduler suspended.
 void lichen_sys_keys_hook_remove(key_raw_fn fn, void *arg);
-// Called first for every key press, with its TCA8418 code (key_matrix.h): true = the press only woke the screen (nothing else sees it, nor its release).
-// Keyboard task, keep it short; NULL removes it. Any task to set.
+// Called first for every key press, with its TCA8418 code (key_matrix.h): true = the press only woke the screen (nothing
+// else sees it, nor its release). Keyboard task, keep it short; NULL removes it. Any task to set.
 void lichen_sys_keys_set_wake(bool (*fn)(uint8_t key));
 // The remote key lock: called for every key event before everything else, true drops it. reset is told when the chip
 // was reset and every key counts as released. Keyboard task, keep both short; NULL removes them. Any task to set.
