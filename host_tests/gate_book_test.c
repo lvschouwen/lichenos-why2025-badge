@@ -162,7 +162,45 @@ static void test_task(void) {
     CHECK(ran_as == MESH_CTX);
 }
 
+// #538: an SD app's limits (stack cap, internal RAM budget) as the gate applies them
+static void test_limits(void) {
+    static task_book_t b;
+    memset(&b, 0, sizeof(b));
+    reset();
+    int          token = 1;
+    gate_owner_t who;
+    task_spec_t  spec = {.name = "t", .stack = 4096, .cls = TASK_CLASS_JOB, .mem = TASK_STACK_INTERNAL, .fn = task_fn,
+                         .arg = &token, .stack_max = 16384, .budget = 24576};
+    int          main_slot = gate_task_add(&g, &b, MESH_CTX, &spec, &who); // 4 KiB main
+    CHECK(main_slot >= 0);
+    spec.stack = 16385; // over the cap
+    CHECK(gate_task_add(&g, &b, MESH_CTX, &spec, &who) == TASK_GATE_STACK);
+    spec.stack = 16384; // 4 + 16 = 20 KiB fits
+    int eng = gate_task_add(&g, &b, MESH_CTX, &spec, &who);
+    CHECK(eng >= 0);
+    spec.stack = 4096; // 24 KiB, exactly the budget (DOOM: main 4 + engine 16 + stop 4)
+    int stop = gate_task_add(&g, &b, MESH_CTX, &spec, &who);
+    CHECK(stop >= 0);
+    spec.stack = 1024; // one byte over is refused, nothing booked
+    CHECK(gate_task_add(&g, &b, MESH_CTX, &spec, &who) == TASK_GATE_BUDGET);
+    CHECK(task_book_count(&b, MESH_CTX, NULL) == 3);
+    spec.mem = TASK_STACK_PSRAM; // a PSRAM stack takes none of the internal budget
+    CHECK(gate_task_add(&g, &b, MESH_CTX, &spec, &who) >= 0);
+    spec.mem = TASK_STACK_INTERNAL;
+    task_book_remove(&b, eng); // the sum drops when a task ends
+    CHECK(gate_task_add(&g, &b, MESH_CTX, &spec, &who) >= 0);
+    // No limits (a built-in app or the OS): any stack
+    spec.stack_max = spec.budget = 0;
+    spec.stack = 64 * 1024;
+    CHECK(gate_task_add(&g, &b, OS_CTX, &spec, &who) >= 0);
+    // A budget of 0 with a cap: only the cap applies
+    spec.stack_max = 16384;
+    spec.stack     = 8192;
+    CHECK(gate_task_add(&g, &b, NOID_CTX, &spec, &who) >= 0);
+}
+
 int main(void) {
+    test_limits();
     test_owner();
     test_mem();
     test_task();

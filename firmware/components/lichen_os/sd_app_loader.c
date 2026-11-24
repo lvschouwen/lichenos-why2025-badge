@@ -112,6 +112,18 @@ sd_app_rec_t *sd_app_find(lichen_ctx_t ctx) {
     return r;
 }
 
+// #538: the limits of the tasks an SD app's context starts (lichen_os_task_limits). internal_ram_kib = 0 declares no
+// budget, so only the per-stack cap applies
+static bool task_limits(lichen_ctx_t ctx, uint32_t *stack_max, uint32_t *budget) {
+    sd_app_rec_t *rec = sd_app_find(ctx);
+    if (!rec) {
+        return false;
+    }
+    *stack_max = SD_APP_STACK_KIB_MAX * 1024u;
+    *budget    = (uint32_t)rec->m.internal_ram_kib * 1024u;
+    return true;
+}
+
 void sd_app_link(sd_app_rec_t *rec) {
     sd_app_lock();
     rec->next = g_recs;
@@ -1134,6 +1146,7 @@ void sd_apps_boot(void) {
         return;
     }
     lichen_os_task_end_notify(task_ended);
+    lichen_os_task_limits(task_limits);
     sd_observe(card_changed);
     if (sd_mounted()) { // no event for a card that mounted before the observer
         post(MSG_CARD, NULL);

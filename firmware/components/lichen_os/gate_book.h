@@ -54,9 +54,13 @@ typedef struct {
     task_stack_t mem;
     void (*fn)(void *arg);
     void *arg;
+    uint32_t stack_max; // #538: an SD app's limits, 0 = none (task_limit)
+    uint32_t budget;
 } task_spec_t;
 
 #define TASK_GATE_REFUSED (-2) // ctx refused: the book is untouched, nothing may start
+#define TASK_GATE_STACK   (-3) // the stack is above spec->stack_max (#538)
+#define TASK_GATE_BUDGET  (-4) // the ctx's internal stacks would pass spec->budget (#538)
 
 // lichen_task_start's booking: resolves ctx, then books spec under it with the lock held. The slot, -1 when the book
 // is full or spec is invalid, TASK_GATE_REFUSED. *who is the owner the task runs and is counted for.

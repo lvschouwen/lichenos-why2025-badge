@@ -356,7 +356,7 @@ repeated key or an unknown key refuses the file):
 | `entry` | the ELF, default `app.elf`, a file in the same folder |
 | `icon` | optional file in the same folder |
 | `caps` | optional `CAP_` names (not SYSTEM), separated by spaces or commas |
-| `internal_ram_kib`, `psram_kib` | declared budgets, like a built-in app's (0 = none declared) |
+| `internal_ram_kib`, `psram_kib` | declared budgets, like a built-in app's (0 = none declared). `internal_ram_kib` is enforced for stacks (#538): the internal stacks of `main()`, the stop hook and the app's own tasks, live at the same time, add up to at most that, else the task start is refused with a log line. 0 = no stack budget; the 16 KiB cap per task stack applies either way. Size it as main + stop + the tasks' stacks (DOOM: 4 + 4 + 16 = 24) |
 | `stack_kib` | stack of the app's `main()` task; at most 16, default 4 |
 
 - **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.2). An app of another major

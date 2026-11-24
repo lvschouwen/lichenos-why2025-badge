@@ -41,12 +41,36 @@ mem_release_t gate_mem_release(gate_env_t const *g, mem_book_t *b, uint32_t ctx,
     return rel;
 }
 
+// #538: an SD app's limits. stack_max is the most one stack may be, budget the most the ctx's internal stacks may add up to
+// (bytes, 0 = none). Only internal stacks count: the budget is the manifest's internal_ram_kib.
+static int task_limit(task_book_t const *b, uint32_t ctx, task_spec_t const *spec) {
+    if (spec->stack_max && spec->stack > spec->stack_max) {
+        return TASK_GATE_STACK;
+    }
+    if (!spec->budget || spec->mem != TASK_STACK_INTERNAL) {
+        return 0;
+    }
+    uint64_t sum = spec->stack;
+    for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
+        task_slot_t const *s = &b->slot[i];
+        if (s->used && s->ctx == ctx && s->mem == TASK_STACK_INTERNAL) {
+            sum += s->stack;
+        }
+    }
+    return sum > spec->budget ? TASK_GATE_BUDGET : 0;
+}
+
 int gate_task_add(gate_env_t const *g, task_book_t *b, uint32_t ctx, task_spec_t const *spec, gate_owner_t *who) {
     if (!gate_owner(g, ctx, "lichen_task_start", who)) {
         return TASK_GATE_REFUSED;
     }
     task_owner_t owner = {.ctx = who->ctx, .label = who->label};
     g->take();
+    int lim = task_limit(b, who->ctx, spec);
+    if (lim) { // under the same lock as the add: two starts cannot both pass
+        g->give();
+        return lim;
+    }
     int slot = task_book_add(b, owner, spec->name, spec->stack, spec->cls, spec->mem, spec->fn, spec->arg);
     g->give();
     return slot;

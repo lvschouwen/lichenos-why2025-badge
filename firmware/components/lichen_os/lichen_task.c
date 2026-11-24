@@ -41,6 +41,11 @@ static void park(int slot) {
 }
 
 static void (*end_cb)(lichen_ctx_t ctx);
+static bool (*limits_cb)(lichen_ctx_t ctx, uint32_t *stack_max, uint32_t *budget);
+
+void lichen_os_task_limits(bool (*cb)(lichen_ctx_t ctx, uint32_t *stack_max, uint32_t *budget)) {
+    limits_cb = cb;
+}
 
 void lichen_os_task_end_notify(void (*cb)(lichen_ctx_t ctx)) {
     end_cb = cb;
@@ -164,12 +169,21 @@ bool lichen_os_task_start_for(lichen_ctx_t ctx, char const *name, void (*fn)(voi
     task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
     task_spec_t  spec   = {.name = fitted, .stack = stack_bytes, .cls = (task_class_t)prio, .mem = placed, .fn = fn,
                            .arg = arg};
+    if (limits_cb && !limits_cb(ctx, &spec.stack_max, &spec.budget)) {
+        spec.stack_max = spec.budget = 0;
+    }
     gate_owner_t who;
     int          slot = gate_task_add(&env, &book, ctx, &spec, &who);
     if (slot == TASK_GATE_REFUSED) {
         return false; // logged and counted by the context table
     }
     char const *owner = who.label ? who.label : TASK_BOOK_OS;
+    if (slot == TASK_GATE_STACK || slot == TASK_GATE_BUDGET) {
+        ESP_LOGE(TAG, "%s: task %s not started: %u B of stack is over the app's %s of %u B", owner, fitted,
+                 (unsigned)stack_bytes, slot == TASK_GATE_STACK ? "stack cap" : "internal RAM budget",
+                 (unsigned)(slot == TASK_GATE_STACK ? spec.stack_max : spec.budget));
+        return false;
+    }
     if (cut) {
         ESP_LOGW(TAG, "%s: task name \"%s\" cut to \"%s\"", owner, name, fitted);
     }

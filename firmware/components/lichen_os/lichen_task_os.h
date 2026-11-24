@@ -15,3 +15,8 @@ bool lichen_os_task_end_self(void);
 // ending task, after it left the book and outside the book's lock, right before it is deleted: it may take a leaf mutex or post
 // to a queue, never wait. Set once at boot.
 void lichen_os_task_end_notify(void (*cb)(lichen_ctx_t ctx));
+
+// The limits of an SD app's tasks (#538): true and the most one stack may be and the most all the context's
+// internal stacks may add up to (bytes, 0 = none) for an SD app's context, false for any other. Called before the book's
+// lock, on the starting task. Set once at boot.
+void lichen_os_task_limits(bool (*cb)(lichen_ctx_t ctx, uint32_t *stack_max, uint32_t *budget));
