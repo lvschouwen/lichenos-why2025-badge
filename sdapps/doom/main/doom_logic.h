@@ -31,8 +31,10 @@
 uint8_t doom_key_for_code(uint8_t code);
 
 // One producer (the LVGL task's key callback), one consumer (the engine task's DG_GetKey): a ring that never blocks either.
-// A key arriving while it is full is dropped (the engine drains it every tick, 32 events are about a second of typing).
+// A press arriving while it is nearly full is dropped, a release only when it is full (the engine drains it every tick, 32
+// events are about a second of typing).
 #define DOOM_KEYQ_SIZE 32
+#define DOOM_KEYQ_RELEASE_ROOM 8 // slots only a release may take
 typedef struct {
     uint16_t       ev[DOOM_KEYQ_SIZE]; // pressed << 8 | key
     volatile uint32_t head;            // written by the producer

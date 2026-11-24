@@ -7,15 +7,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// WAD size in bytes, for the loading bar's denominator (main(), before the engine starts)
-void doom_ui_set_wad_size(uint32_t bytes);
+// main(), before the engine task starts: the key ring and the WAD size in bytes (the loading bar's denominator)
+void doom_ui_init(uint32_t wad_bytes);
 // LVGL task (the open hook): builds the loading state and the hidden canvas, takes the raw keys. False when the picture's
 // memory is not there: the screen then says so and the engine runs without a picture.
 bool doom_ui_open(lv_obj_t *screen);
 // Engine task, from the file shim: n bytes of the WAD were read (the loading bar)
 void doom_ui_note_read(size_t n);
-// Engine task, DG_DrawFrame: expands the frame into the canvas's buffer and tells the screen (no LVGL call, no lock: the
-// screen's timer picks the frame up, so a render in progress never holds the engine)
+// Engine task, DG_DrawFrame: expands the frame into the buffer LVGL is not showing and tells the screen (no LVGL call, no
+// lock: the screen's timer swaps it in). Drops the frame when the screen has not taken the previous one.
 void doom_ui_present(void);
 // Engine task, DG_GetKey
 bool doom_ui_next_key(int *pressed, unsigned char *key);

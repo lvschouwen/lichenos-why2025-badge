@@ -121,7 +121,7 @@ int main(int argc, char *argv[]) {
     (void)argv;
     // the task first: open runs on the LVGL task as soon as the hooks are in and reads engine_started
     uint32_t size = wad_size();
-    doom_ui_set_wad_size(size);
+    doom_ui_init(size);
     if (size) {
         start_state = lichen_task_start(lichen_ctx_self(), "doom", engine_task, NULL, STACK_BYTES, LICHEN_PRIO_BACKGROUND, NULL)
                           ? START_OK

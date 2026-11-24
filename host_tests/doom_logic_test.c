@@ -50,14 +50,22 @@ static void keys_queue(void) {
     CHECK(doom_keyq_pop(&q, &p, &k) && p && k == DOOM_KEY_FIRE);
     CHECK(doom_keyq_pop(&q, &p, &k) && !p && k == DOOM_KEY_FIRE);
     CHECK(!doom_keyq_pop(&q, &p, &k));
-    // full: the 33rd event is dropped, the 32 before it survive in order, and it wraps
+    // presses stop at the release reserve, releases fill it, and it wraps
+    int const presses = DOOM_KEYQ_SIZE - DOOM_KEYQ_RELEASE_ROOM;
     for (int round = 0; round < 3; round++) {
-        for (int i = 0; i < DOOM_KEYQ_SIZE; i++) {
+        for (int i = 0; i < presses; i++) {
             CHECK(doom_keyq_push(&q, true, (uint8_t)(i + 1)));
         }
-        CHECK(!doom_keyq_push(&q, true, 0x55));
-        for (int i = 0; i < DOOM_KEYQ_SIZE; i++) {
+        CHECK(!doom_keyq_push(&q, true, 0x55)); // a press that would take a release's slot
+        for (int i = 0; i < DOOM_KEYQ_RELEASE_ROOM; i++) {
+            CHECK(doom_keyq_push(&q, false, (uint8_t)(i + 1))); // the releases of the first keys still fit
+        }
+        CHECK(!doom_keyq_push(&q, false, 0x55)); // truly full
+        for (int i = 0; i < presses; i++) {
             CHECK(doom_keyq_pop(&q, &p, &k) && p && k == i + 1);
+        }
+        for (int i = 0; i < DOOM_KEYQ_RELEASE_ROOM; i++) {
+            CHECK(doom_keyq_pop(&q, &p, &k) && !p && k == i + 1);
         }
         CHECK(!doom_keyq_pop(&q, &p, &k));
     }

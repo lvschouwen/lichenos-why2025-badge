@@ -1,11 +1,14 @@
 // The DOOM app's screen (#526), see doom_ui.h. Video: the engine's 8-bit 320x200 frame is doubled to 640x400 on the engine
 // task into the canvas's own buffer, and LVGL draws that canvas. Two formats, one switch (-DDOOM_VIDEO_RGB565):
-//   I8 (default, 256 KB): the indexes stay indexes and LVGL holds the palette (lv_canvas_set_palette, 256 calls when the
-//     engine changes it). LVGL's software renderer cannot blend an indexed image directly: with LV_BIN_DECODER_RAM_LOAD off
+//   I8 (default, 2 x 256 KB): the indexes stay indexes and the palette sits in front of them in the buffer (LVGL's layout of
+//     an indexed buffer: 256 x BGRA, the engine task copies it in with every frame). LVGL's software renderer cannot blend an indexed image directly: with LV_BIN_DECODER_RAM_LOAD off
 //     (the firmware's config) lv_bin_decoder.c decodes it line by line to ARGB8888 while drawing, so it is the slower of the
 //     two per refresh. It was not measured (no bench in a build-only run): the first bench measures it.
-//   RGB565 (512 KB): the engine task looks the palette up while doubling, LVGL copies the canvas straight into its render
+//   RGB565 (2 x 512 KB): the engine task looks the palette up while doubling, LVGL copies the canvas straight into its render
 //     buffer. The fallback when I8 does not reach 30 fps.
+// Two buffers: the engine only writes the one LVGL is not showing, and LVGL takes a finished one on its own task between
+// renders (lv_canvas_set_buffer), so a frame never tears. When LVGL has not taken the last frame yet the engine drops its
+// next one rather than touch a buffer that may be drawn.
 // GPL-3.0-or-later, like the app as a whole.
 #include "doom_ui.h"
 
@@ -52,25 +55,24 @@ static struct {
     bool        picture;     // the first frame has come: the canvas shows, the loading widgets are gone
     bool        fps_shown;
     bool        draw_due;    // a new frame was invalidated and no draw of it has been counted yet
-    uint32_t    shown_seq;
     uint32_t    shown_pct;
     uint32_t    label_windows;
     uint32_t    load_kib;    // KiB of the WAD read when the first frame came
-    uint32_t    pal_seq;     // the palette applied to the canvas
     doom_fps_t  fps;
     hold_exit_t hold;        // Esc held leaves: raw keys take the OS's own Esc away
     char        summary[112]; // the exit notice's text (a notice body holds 120), written by detach_cb
 } ui; // the LVGL task's, and doom_ui_summary after the detach
 
-static void               *video_mem;   // PSRAM block of the picture (and its palette)
-static _Atomic(uint8_t *)  video_pix;   // the pixels, NULL until open and again after detach
-static _Atomic uint32_t    frame_seq;   // frames the engine finished
-static _Atomic uint32_t    pal_seq;     // palettes the engine published (I8)
+static void               *video_mem;   // PSRAM block of both pictures (and their palettes)
+static uint8_t            *bufs[2];     // each: PIC_PREFIX bytes of palette, then the pixels; set in open, before the engine draws
+static atomic_bool         present_on;  // the engine may draw: open built the buffers, detach has not started
+static atomic_bool         ready;       // the engine published bufs[last] and LVGL has not taken it yet
+static int                 last = 1;    // the buffer published last; the canvas shows it once ready is false
 static _Atomic uint32_t    wad_size;
 static _Atomic uint32_t    bytes_read;
 static atomic_bool         detached;
 static doom_keyq_t         keyq;
-static uint32_t            pal32[256];  // 0xAARRGGBB, written by the engine task before pal_seq moves (I8)
+static uint32_t            pal32[256];  // engine task only: 0xAARRGGBB, which is LVGL's BGRA bytes on this little-endian core (I8)
 static uint16_t            pal565[256]; // engine task only (RGB565)
 static bool                pal_ready;
 
@@ -106,22 +108,6 @@ static void show_load_progress(void) {
     lichen_label_set(ui.pct, text);
 }
 
-#ifndef DOOM_VIDEO_RGB565
-// The engine changed its palette: LVGL's copy follows before the frame that uses it is invalidated
-static void apply_palette(void) {
-    uint32_t seq = atomic_load_explicit(&pal_seq, memory_order_acquire);
-    if (seq == ui.pal_seq) {
-        return;
-    }
-    ui.pal_seq = seq;
-    for (int i = 0; i < 256; i++) {
-        uint32_t c = pal32[i];
-        lv_color32_t col = {.blue = (uint8_t)c, .green = (uint8_t)(c >> 8), .red = (uint8_t)(c >> 16), .alpha = 0xff};
-        lv_canvas_set_palette(ui.canvas, (uint8_t)i, col);
-    }
-}
-#endif
-
 // What the glass shows: counted when LVGL draws the canvas for a frame this screen invalidated, not when the engine made
 // it (the engine runs at 35 Hz, LVGL refreshes at its own period; a strip-wise render calls this per strip, once counts)
 static void on_canvas_draw(lv_event_t *e) {
@@ -130,6 +116,14 @@ static void on_canvas_draw(lv_event_t *e) {
         ui.draw_due = false;
         doom_fps_frame(&ui.fps, lv_tick_get());
     }
+}
+
+// LVGL task: shows the buffer the engine finished
+static void take_frame(void) {
+    lv_canvas_set_buffer(ui.canvas, bufs[last], PIC_W, PIC_H, PIC_CF); // between renders: this task is the renderer
+    ui.draw_due = true;
+    lv_obj_invalidate(ui.canvas);
+    atomic_store_explicit(&ready, false, memory_order_release); // the other buffer is the engine's again
 }
 
 static void screen_tick(lv_timer_t *t) {
@@ -142,21 +136,16 @@ static void screen_tick(lv_timer_t *t) {
         shell_back(); // Esc held: out of DOOM (a short Esc is the game's menu)
         return;
     }
-    uint32_t seq = atomic_load_explicit(&frame_seq, memory_order_acquire);
+    bool frame = atomic_load_explicit(&ready, memory_order_acquire);
     if (!ui.picture) {
-        if (seq == 0) {
+        if (!frame) {
             show_load_progress();
             return;
         }
         switch_to_picture();
     }
-    if (seq != ui.shown_seq) {
-        ui.shown_seq = seq;
-#ifndef DOOM_VIDEO_RGB565
-        apply_palette();
-#endif
-        ui.draw_due = true;
-        lv_obj_invalidate(ui.canvas);
+    if (frame) {
+        take_frame();
     } else if (ui.fps.started) {
         doom_fps_advance(&ui.fps, now); // a stalled engine or display shows as seconds of 0 fps
     }
@@ -212,17 +201,19 @@ static void on_screen_delete(lv_event_t *e) {
 }
 
 static bool build_picture(lv_obj_t *screen) {
+    size_t one = PIC_PREFIX + PIC_BYTES; // a multiple of 64 in both formats: the second buffer stays aligned
     // 64: a cache line of the P4 apart from the neighbours; PSRAM, the engine writes it and LVGL's render reads it
-    video_mem = lichen_alloc_aligned(lichen_ctx_self(), 64, PIC_PREFIX + PIC_BYTES, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    video_mem = lichen_alloc_aligned(lichen_ctx_self(), 64, 2 * one, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!video_mem) {
         return false;
     }
+    bufs[0]   = video_mem;
+    bufs[1]   = (uint8_t *)video_mem + one;
     ui.canvas = lv_canvas_create(screen);
-    lv_canvas_set_buffer(ui.canvas, video_mem, PIC_W, PIC_H, PIC_CF);
+    lv_canvas_set_buffer(ui.canvas, bufs[last], PIC_W, PIC_H, PIC_CF); // the engine starts on the other one
     lv_obj_align(ui.canvas, LV_ALIGN_CENTER, 0, THEME_STATUS_BAR_H / 2); // centred in what is left under the status bar
     lv_obj_set_hidden(ui.canvas, true);
     lichen_ui_event_add(ui.canvas, on_canvas_draw, LV_EVENT_DRAW_MAIN_BEGIN, NULL);
-    atomic_store(&video_pix, (uint8_t *)video_mem + PIC_PREFIX);
     return true;
 }
 
@@ -245,8 +236,17 @@ static void build_loading(lv_obj_t *screen) {
     lv_obj_align(ui.pct, LV_ALIGN_CENTER, 0, 50);
 }
 
+// The screen's way out is its own (raw keys take the OS's Esc away): the timer runs hold-Esc, so the keys are taken only
+// once it exists, and a screen that cannot have both leaves the keys alone
+static bool fail_open(char const *text) {
+    atomic_store(&present_on, false);
+    lv_label_set_text(ui.load_label, text);
+    lv_obj_set_hidden(ui.bar, true);
+    lv_obj_set_hidden(ui.pct, true);
+    return false;
+}
+
 bool doom_ui_open(lv_obj_t *screen) {
-    doom_keyq_init(&keyq);
     doom_fps_reset(&ui.fps);
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_style_pad_all(screen, 0, 0);
@@ -259,21 +259,25 @@ bool doom_ui_open(lv_obj_t *screen) {
     shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
     lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
     if (!build_picture(screen)) {
-        lv_label_set_text(ui.load_label, "DOOM has no memory for its picture. Close it and open it again.");
-        lv_obj_set_hidden(ui.bar, true);
-        lv_obj_set_hidden(ui.pct, true);
-        return false;
+        return fail_open("DOOM has no memory for its picture. Close it and open it again.");
     }
     ui.timer = lichen_ui_timer_create(screen_tick, TIMER_MS, NULL);
-    if (!lichen_keys_raw_take(on_key, NULL)) {
-        lv_label_set_text(ui.load_label, "The keys are in use by another app. Close it and open DOOM again.");
+    if (!ui.timer) {
+        return fail_open("DOOM has no memory for its screen. Close it and open it again.");
     }
+    if (!lichen_keys_raw_take(on_key, NULL)) {
+        lv_timer_delete(ui.timer);
+        ui.timer = NULL;
+        return fail_open("The keys are in use by another app. Close it and open DOOM again.");
+    }
+    atomic_store(&present_on, true);
     return true;
 }
 
 // ---- the engine's side ---------------------------------------------------------------------------------------------------
 
-void doom_ui_set_wad_size(uint32_t bytes) {
+void doom_ui_init(uint32_t bytes) {
+    doom_keyq_init(&keyq); // before the engine task starts: it reads the ring from its first tick
     atomic_store(&wad_size, bytes);
 }
 
@@ -286,27 +290,32 @@ void doom_ui_note_read(size_t n) {
 static void refresh_palette(void) {
     for (int i = 0; i < 256; i++) {
         pal565[i] = doom_rgb565((uint8_t)colors[i].r, (uint8_t)colors[i].g, (uint8_t)colors[i].b);
-        pal32[i]  = (uint32_t)colors[i].r << 16 | (uint32_t)colors[i].g << 8 | colors[i].b;
+        pal32[i]  = 0xff000000u | (uint32_t)colors[i].r << 16 | (uint32_t)colors[i].g << 8 | colors[i].b;
     }
     palette_changed = 0;
     pal_ready       = true;
-    atomic_fetch_add_explicit(&pal_seq, 1, memory_order_release);
 }
 
 void doom_ui_present(void) {
-    uint8_t *pix = atomic_load(&video_pix);
-    if (!pix || !DG_ScreenBuffer) {
+    if (!atomic_load(&present_on) || !DG_ScreenBuffer) {
         return;
+    }
+    if (atomic_load_explicit(&ready, memory_order_acquire)) {
+        return; // LVGL has not taken the last frame: it may be about to draw the buffer this one would go into
     }
     if (palette_changed || !pal_ready) {
         refresh_palette();
     }
+    int      b   = 1 - last;
+    uint8_t *pix = bufs[b] + PIC_PREFIX;
 #ifdef DOOM_VIDEO_RGB565
     doom_expand_2x(pix, DG_ScreenBuffer, pal565);
 #else
+    memcpy(bufs[b], pal32, sizeof(pal32)); // the palette in front of the pixels, with the frame it belongs to
     doom_expand_2x_i8(pix, DG_ScreenBuffer);
 #endif
-    atomic_fetch_add_explicit(&frame_seq, 1, memory_order_release);
+    last = b;
+    atomic_store_explicit(&ready, true, memory_order_release);
 }
 
 bool doom_ui_next_key(int *pressed, unsigned char *key) {
@@ -345,11 +354,13 @@ static void detach_cb(void *arg) {
     atomic_store(&detached, true);
 }
 
+// When this returns false the loader leaves the app faulted with its image kept (never unloaded under a live call), so a
+// detach_cb that still runs later finds its code and the buffers (nothing was freed) and only repeats what it did.
 bool doom_ui_detach(uint32_t wait_ms) {
     if (!video_mem) {
         return true;
     }
-    atomic_store(&video_pix, NULL);
+    atomic_store(&present_on, false);
     atomic_store(&detached, false);
     if (!lichen_ui_call(detach_cb, NULL)) {
         return false;

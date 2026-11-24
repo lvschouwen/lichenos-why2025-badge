@@ -392,7 +392,9 @@ an API change.
   `lichen_ui_call` (`lv_canvas_set_palette` also checks the canvas and the index).
 - **Raw keys (#534).** An app with `CAP_RAW_KEYS` takes the keyboard with `lichen_keys_raw_take` and gets press and
   release events (`lichen_keys.h`); the OS gives the keys back when the screen closes, or at unload or card removal
-  before the image is freed.
+  before the image is freed. While an app holds them Esc is a plain key too: there is no OS hold-exit, so the app
+  wires its own way out (`hold_exit.h`: feed it every event, check it on a timer, `shell_back()` when it fires) and
+  takes the keys only after that timer exists (sdapps/doom, app_keytest).
 
 ### Lifecycle
 

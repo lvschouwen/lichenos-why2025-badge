@@ -42,7 +42,9 @@ void doom_keyq_init(doom_keyq_t *q) {
 
 bool doom_keyq_push(doom_keyq_t *q, bool pressed, uint8_t key) {
     uint32_t head = q->head;
-    if (head - q->tail >= DOOM_KEYQ_SIZE) {
+    // the last DOOM_KEYQ_RELEASE_ROOM slots are for releases: a dropped release is a key stuck down in the game
+    uint32_t room = pressed ? DOOM_KEYQ_SIZE - DOOM_KEYQ_RELEASE_ROOM : DOOM_KEYQ_SIZE;
+    if (head - __atomic_load_n(&q->tail, __ATOMIC_ACQUIRE) >= room) {
         return false;
     }
     q->ev[head % DOOM_KEYQ_SIZE] = (uint16_t)((pressed ? 0x100 : 0) | key);
