@@ -109,7 +109,8 @@ static void show_load_progress(void) {
 }
 
 // What the glass shows: counted when LVGL draws the canvas for a frame this screen invalidated, not when the engine made
-// it (the engine runs at 35 Hz, LVGL refreshes at its own period; a strip-wise render calls this per strip, once counts)
+// it (the engine runs at 35 Hz, LVGL refreshes at its own period; a strip-wise render calls this per strip, once counts).
+// Two frames taken between two draws count once: the count is what the glass shows, so it reads low rather than high.
 static void on_canvas_draw(lv_event_t *e) {
     (void)e;
     if (ui.draw_due) {
