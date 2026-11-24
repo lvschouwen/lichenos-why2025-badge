@@ -52,10 +52,8 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-24)
-- impl-546 in wt-1 (fix/546-esc-on-loading): 7db3c9f3 reviewed (rev-546: clean, low #1 sent back = screens guard in sd_app_load_skip + test). On its follow-up commit: merge-one.sh, push. Then #548 in wt-1, then #541 -> #536 -> #538 in sequence (same loader files), each a reviewer pass.
-- impl-547 (Opus) in wt-3 (fix/547-sd0-stream-ram): attribution + dev-mode instrumentation, Refs #547, bench steps in its report.
-- impl-526 (Opus) in wt-4 (feat/526-doom-video-keys): canvas video, raw keys, fps, WAD bar. Reviewer pass (LVGL lock, DMA).
-- ONE flash with whatever is merged when the owner is at the badge (~18:30); the rest goes in the next flash. Bench: Esc on Loading (injected, awake + dimmed; expect "closed before the load", no "unloaded"), the bar, #544 text (close #544 after), #547 fw mem steps.
-- The badge runs fw-e4507b9c (valid), free for remote bench; key log is on.
-- NEEDS-LUCAS at the badge: the #546 physical Esc test (bright and dimmed), #126 the two-DM stack case with a real Heltec DM, #525 item 6 (card pull), #523 steps 3/7, #545 decisions (user profiles).
+- Merged and pushed, in flash fw-3729e96f: #546, #547 (fw mem diff), #548 (reopened, bench owed), #526 (DOOM video/keys; push the doom ELF + manifest with `tools/badge.sh sdapp-push`).
+- impl-541 (Opus) in wt-1 (fix/541-late-unload): 582c63a5 under review by rev-541 (Opus; contract: no app code after free_image, per-owner UI cancel). Then #536 -> #538 in wt-1.
+- Bench for fw-3729e96f (remote): Esc on Loading (awake and dimmed; "closed before the load"), the load bar (`fw ui` during the doom read), the #547 `fw mem diff` steps (on #547), the #544 text (close after), #526 steps (on #526 comments: WAD bar, picture, fps label, Esc menu, hold-Esc, card pull).
+- NEEDS-LUCAS at the badge: the #546 physical Esc test, the #549 decision, #126 two-DM stack, #525 item 6, #523 steps 3/7, #545 decisions; #526 fps gate (LVGL refresh 33 ms caps at ~30 Hz: lower it for DOOM?).
 - The port ideas are #542.
