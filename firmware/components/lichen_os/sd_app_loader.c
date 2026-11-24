@@ -472,8 +472,9 @@ static _Atomic bool g_forget_unsafe; // a free ran where the mutex cannot be tak
 // The shims' side. A malloc under the OS context (a delete callback after the card went) notes nothing: that block stays the
 // app's to free. Not from an interrupt or a critical section (an SD app's code never runs there): a note is then skipped
 // (the block is the app's to free), a free sets g_forget_unsafe, which makes the sweep leak instead of risking a double free.
+// (the shims skip the OS ctx, export_shims.c)
 void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
-    if (!g_blk_mu || ctx == LICHEN_CTX_NONE || !xPortCanYield()) {
+    if (!g_blk_mu || !xPortCanYield()) {
         return;
     }
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
