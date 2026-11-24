@@ -20,6 +20,7 @@ static console_sub_t const OS_REBOOT_RULES[] = {
 // release (fw_console answers "not in this build" there itself)
 static console_sub_t const OS_MEM_RULES[] = {
     {CON_DEV_WORD("window"), CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, 0},
+    {CON_DEV_WORD("diff"), CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, 0}, // #547
     CONSOLE_SUB_END,
 };
 

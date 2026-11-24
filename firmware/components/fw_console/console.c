@@ -1,6 +1,7 @@
 #include "secure_wipe.h"
 #include "fw_console.h"
 #include "fw_slot.h"
+#include "mem_diff_cmd.h"
 #include "mem_fmt.h"
 
 #include "assets.h"
@@ -394,6 +395,14 @@ static bool mem_subcommand(char const *args) {
         mem_blocks(args + 6 + (args[6] == ' '));
         return true;
     }
+    if (strncmp(args, "diff", 4) == 0 && (args[4] == '\0' || args[4] == ' ')) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+        mem_diff_command(args + 4 + (args[4] == ' '));
+#else
+        console_reply("mem diff: not in this build");
+#endif
+        return true;
+    }
     if (strncmp(args, "window", 6) != 0 || (args[6] != '\0' && args[6] != ' ')) {
         return false;
     }
@@ -409,7 +418,7 @@ static bool mem_subcommand(char const *args) {
 // neither lists it nor holds the words "developer mode" (#437)
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
 #define MEM_USAGE \
-    "mem [blocks [internal|dma|psram] [min bytes] | window [reset]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, sampled every 250 ms; shorter dips above the since-boot low can be missed, #410)"
+    "mem [blocks [internal|dma|psram] [min bytes] | window [reset] | diff [mark | min bytes]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, sampled every 250 ms; shorter dips above the since-boot low can be missed, #410; diff: the internal blocks that appeared or went since mark, #547)"
 #else
 #define MEM_USAGE "mem [blocks [internal|dma|psram] [min bytes]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap)"
 #endif
