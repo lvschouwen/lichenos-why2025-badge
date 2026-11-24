@@ -1,4 +1,6 @@
 # Manifest of the Bench test SD app (format: lichen_api/lichen_manifest.h): key=value lines, # starts a comment.
+# Slow stop (#541): push an empty file slowstop to SD0:[lichen.apps.benchtest] (ota-file) and main() outlives stop() by 8 s;
+# remove it with ota-rm. Leak (#536): an empty file leak there makes the app lichen_alloc 3 blocks it never frees.
 # A bench tool for the SD app APIs (#537): file shims, sandbox, open-file book, exit. Keys: r e m f q (see main/app.c).
 id=benchtest
 name=Bench test

@@ -50,6 +50,12 @@ def check(root):
     own, api = own_headers(root), api_headers(root)
     forbid = conf.forbid["L6"]
     problems = []
+    allow = {}  # source path -> symbol globs that one file may use (layers.conf sdapp-allow)
+    for src, syms in conf.sdapp_allow:
+        allow.setdefault(src, []).extend(syms)
+        app_dir = os.path.join(root, *src.split("/")[:2])
+        if os.path.isdir(app_dir) and not os.path.isfile(os.path.join(root, src)):  # other trees (the scaffold test) lack the app
+            problems.append("layers.conf: sdapp-allow names %s, which is not a file" % src)
     for path in sorted(sdapp_sources(root)):
         rel = os.path.relpath(path, root)
         for n, inc in cl.includes_of(path):
@@ -62,7 +68,8 @@ def check(root):
             if re.match(r"\s*#\s*include", line):
                 continue
             for sym in IDENT.findall(line):
-                if any(fnmatch.fnmatchcase(sym, g) for g in forbid):
+                if any(fnmatch.fnmatchcase(sym, g) for g in forbid) and not any(
+                        fnmatch.fnmatchcase(sym, g) for g in allow.get(rel, ())):
                     problems.append("%s:%d: %s is forbidden to apps (forbid L6)" % (rel, n, sym))
     return problems
 

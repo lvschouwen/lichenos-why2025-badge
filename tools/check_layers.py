@@ -83,6 +83,7 @@ class Conf:
         self.peer_headers = {}      # (component, peer) -> header globs it may include of that peer
         self.vendored = collections.defaultdict(list)  # component -> own-dir roots of third-party code (not scanned)
         self.forbid_except = []     # (component, object file name glob, [symbol globs]): upstream code built unchanged
+        self.sdapp_allow = []       # (source path relative to the repo, [symbol globs]): one SD-app file may use them (#536)
         self.caps = {}              # #229: capability name -> bit (lichen_caps.h CAP_<name>)
         self.cap_funcs = []         # (cap spec, [function globs]) first match wins; spec '-', 'A' or 'A|B' (either)
         self.cap_headers = []       # (cap spec, [header globs]) for the functions no cap-func line names
@@ -155,6 +156,10 @@ def apply_directive(conf, key, args):
         conf.peer_headers.setdefault((args[0], args[1]), []).extend(args[2:])
     elif key == "vendored":
         conf.vendored[args[0]].extend(args[1:])
+    elif key == "sdapp-allow":
+        if not args[1:]:
+            raise ValueError("sdapp-allow needs a source file and at least one symbol")
+        conf.sdapp_allow.append((args[0], args[1:]))
     elif key == "forbid-except":
         if not args[2:]:
             raise ValueError("forbid-except needs a component, an object and at least one symbol")

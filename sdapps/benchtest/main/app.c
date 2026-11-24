@@ -8,7 +8,20 @@
 //   m  open five files: the fifth must refuse                                    -> "MAX ok" / "MAX FAIL <n>"
 //   f  hold one file open (benchtest.hold): then close the app or "fw sd unmount" -> "HOLD open"
 //   q  exit(0) from this task: the app closes through the normal unload          -> (the screen goes)
+//
+// Slow stop (#541): when a file named slowstop exists in the app's own folder, main() keeps running SLOW_STOP_MS after stop() was
+// called, longer than the unload's stop deadline, so the loader gives the unload up and finishes it when the task ends ("unloaded
+// late, its last task has ended"). The file is looked for once, as main() starts. Without it nothing changes.
+//   switch on:  tools/badge.sh ota-file <ip> <any file> 'SD0:[lichen.apps.benchtest]slowstop'   (/sd/lichen/apps/benchtest/slowstop)
+//   switch off: tools/badge.sh ota-rm <ip> 'SD0:[lichen.apps.benchtest]slowstop'
+//
+// Leak (#536): when a file named leak exists in the app's own folder (/sd/lichen/apps/benchtest/leak, looked for once as main()
+// starts), the app takes LEAK_BLOCKS blocks of LEAK_BYTES with lichen_alloc and 2 more through malloc (leak.c, the one file the boundary check lets call it) and never frees them, so the OS's sweep at unload has something to free
+// and logs "freed 2 leftover blocks (8192 B)" for the malloc ones; the 3 lichen_alloc ones are the book's (fw mem). The pointers are kept in a
+// volatile array only so the compiler cannot drop the allocations. Same push and ota-rm as slowstop, with the name leak.
+#include "leak.h"
 #include "lichen_keys.h"
+#include "lichen_mem.h"
 #include "lichen_notify.h"
 #include "lichen_sd_app.h"
 #include "lichen_ui.h"
@@ -28,6 +41,11 @@
 #define CODE_F 0x23
 #define CODE_M 0x30
 
+#define SLOW_STOP_MS 8000 // past LIFE_DEADLINE_UNLOAD_MS (5000, app_life.h): the stop deadline
+
+#define LEAK_BLOCKS 3
+#define LEAK_BYTES  4096
+
 #define DATA     "benchtest-0123456789"
 #define DATA_LEN 20
 
@@ -36,6 +54,7 @@ static char      g_text[48] = "r e m f q";
 static _Atomic char g_pending;
 static atomic_bool  g_stopping;
 static FILE        *g_held;
+static void *volatile g_leaked[LEAK_BLOCKS]; // never freed on purpose (the leak switch)
 
 // ---- results ---------------------------------------------------------------------------------------------------------
 
@@ -198,6 +217,19 @@ int main(int argc, char *argv[]) {
     if (!lichen_sd_app_hooks(&hooks)) {
         return 1;
     }
+    FILE *flag = fopen("slowstop", "r"); // relative: the app's own folder
+    bool  slow = flag != NULL;
+    if (flag) {
+        fclose(flag);
+    }
+    FILE *leak = fopen("leak", "r");
+    if (leak) {
+        fclose(leak);
+        for (int i = 0; i < LEAK_BLOCKS; i++) {
+            g_leaked[i] = lichen_alloc(lichen_ctx_self(), LEAK_BYTES, LICHEN_MEM_BULK);
+        }
+        bench_leak_shim_blocks(); // and 2 through malloc (leak.c): the loader's block set
+    }
     // main() goes on as the app's one task (the unload waits for it: stop sets g_stopping)
     while (!atomic_load(&g_stopping)) {
         char c = atomic_exchange(&g_pending, 0);
@@ -205,6 +237,9 @@ int main(int argc, char *argv[]) {
             run(c);
         }
         vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (slow) {
+        vTaskDelay(pdMS_TO_TICKS(SLOW_STOP_MS)); // the stop hook answered at once: it is the task that overruns
     }
     if (g_held) {
         fclose(g_held);
