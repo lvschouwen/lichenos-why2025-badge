@@ -5,6 +5,7 @@
 #include "lichen_app.h"
 #include "lichen_manifest.h"
 #include "lichen_sd_app.h"
+#include "ptr_set.h"
 #include "sd_app_rules.h"
 
 #include "esp_elf.h"
@@ -36,6 +37,7 @@ typedef struct sd_app_rec {
     bool               stop_ok;     // what the stop hook answered (the stop task writes it before it gives stop_sem)
     bool               free_pending; // unregister is done but a screen still exists: the last delete event posts the free
     bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's); the stop task is booked under the app, so the unload waits for it
+    ptr_set_t          blocks;   // the app's live malloc blocks (export_blocks.h), under g_blk_mu; drained at the image's free
     uint32_t           fault_ms; // lichen_sys_life_now_ms when a resumable unload gave up (sd_app_lock)
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live

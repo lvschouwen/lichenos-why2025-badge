@@ -1,6 +1,7 @@
 // The malloc family an SD app gets (#519, export_shims.c): bulk memory through the OS's book under the caller's context.
 // lichen_alloc and friends are recorded fakes here; the book itself is tested elsewhere.
 #include "lichen_app.h"
+#include "export_blocks.h"
 #include "lichen_mem.h"
 
 #include <stdint.h>
@@ -54,6 +55,20 @@ size_t heap_caps_get_allocated_size(void *ptr) {
     return (size_t)((uint64_t *)ptr)[-1];
 }
 
+// The loader's view of the blocks (#536): what the shims tell it
+static void *noted[16], *forgotten[16];
+static int   n_noted, n_forgotten;
+void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
+    if (ctx == CTX && n_noted < 16) {
+        noted[n_noted++] = ptr;
+    }
+}
+void sd_app_block_forget(lichen_ctx_t ctx, void *ptr) {
+    if (ctx == CTX && n_forgotten < 16) {
+        forgotten[n_forgotten++] = ptr;
+    }
+}
+
 static int fails;
 
 static void check(int ok, char const *what) {
@@ -66,8 +81,15 @@ static void check(int ok, char const *what) {
 int main(void) {
     unsigned char *p = lichen_exp_malloc(16);
     check(p && last_ctx == CTX && last_flags == LICHEN_MEM_BULK, "malloc: bulk, under the caller's context");
+    check(n_noted == 1 && noted[0] == p, "malloc: the loader is told of the block");
     lichen_exp_free(p);
     check(free_ctx == CTX && frees == 1, "free: the caller's context");
+    check(n_forgotten == 1 && forgotten[0] == p, "free: the loader forgets the block");
+    lichen_exp_free(NULL);
+    check(n_forgotten == 1, "free(NULL) forgets nothing");
+    fail_alloc = 1;
+    check(lichen_exp_malloc(8) == NULL && n_noted == 1, "a failed malloc notes nothing");
+    fail_alloc = 0;
 
     p = lichen_exp_calloc(4, 8);
     check(p && (last_flags & LICHEN_MEM_ZERO) && p[31] == 0, "calloc: zeroed");
@@ -87,6 +109,8 @@ int main(void) {
     fail_alloc = 0;
     int before = frees;
     check(lichen_exp_realloc(p, 0) == NULL && frees == before + 1, "realloc(p, 0) frees");
+
+    check(n_noted == n_forgotten, "every block noted is forgotten by the end (realloc swaps old for new)");
 
     printf("export_shims_test: %d failure(s)\n", fails);
     return fails ? 1 : 0;
