@@ -426,12 +426,14 @@ lichen_sys_timer_kill	SYSTEM	any	lichen_sys_life.h
 lichen_sys_timer_revive	SYSTEM	any	lichen_sys_life.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_cancel_owner	SYSTEM	lvgl	lichen_sys_ui.h
 lichen_sys_ui_cb_mark	SYSTEM	lvgl	lichen_sys_app.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock_held	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_refused	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_timers_drop	SYSTEM	lvgl	lichen_sys_life.h
 lichen_sys_ui_unlock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_update_auto_closed	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_auto_off	SYSTEM	any	lichen_sys_update.h

@@ -347,6 +347,7 @@ static void barrier_cb(void *arg) {
     lichen_ctx_t ctx = (lichen_ctx_t)(uintptr_t)arg;
     if (ctx != LICHEN_CTX_NONE) {
         lichen_sys_timer_drop(ctx);
+        lichen_sys_ui_timers_drop(ctx); // also the app's unbooked timers: none ticks into the image after this
     }
     xSemaphoreGive(g_ui_sem);
 }
@@ -361,7 +362,13 @@ static bool ui_barrier(lichen_ctx_t ctx) {
     if (!lichen_sys_ui_call(barrier_cb, (void *)(uintptr_t)ctx, UI_WAIT_MS)) {
         return false;
     }
-    return xSemaphoreTake(g_ui_sem, pdMS_TO_TICKS(UI_WAIT_MS)) == pdTRUE;
+    if (xSemaphoreTake(g_ui_sem, pdMS_TO_TICKS(UI_WAIT_MS)) != pdTRUE) {
+        return false;
+    }
+    // The barrier only orders the calls queued before it: a timer callback that ran meanwhile, or a call past the queue's
+    // size (a call of its own to LVGL), may still be pending. The app has no task and no timer left, so after this cancel
+    // (under the LVGL lock, so a callback running has returned) no code of the app runs from the UI service (#541)
+    return ctx == LICHEN_CTX_NONE || lichen_sys_ui_cancel_owner(ctx, UI_WAIT_MS);
 }
 
 // The stop hook runs on a task of its own (the app's stack_kib, booked under the app), never on the loader's 6 KB or the

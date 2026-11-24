@@ -221,6 +221,26 @@ bool lichen_timer_stop(lichen_ctx_t ctx, lichen_timer_t timer) {
     return true;
 }
 
+void lichen_sys_ui_timers_drop(uint32_t ctx) {
+    size_t dropped = 0;
+    for (lv_timer_t *t = lv_timer_get_next(NULL), *next; t; t = next) {
+        next = lv_timer_get_next(t);
+        ui_cb_rec_t const *rec = t->ext_data.data;
+        if (t->timer_cb == timer_trampoline && t->ext_data.free_cb == rec_free && rec && rec->ctx == ctx) {
+            if (rec->fn.timer == booked_cb) {
+                uint32_t h = (uint32_t)(uintptr_t)t->user_data;
+                timer_book_remove(&s_timers, h); // a booked one: its claim goes with it
+            }
+            lv_timer_delete(t);
+            dropped++;
+        }
+    }
+    count_note(ctx);
+    if (dropped) {
+        ESP_LOGI(TIMER_TAG, "0x%08lx: %u timers dropped before its image goes", (unsigned long)ctx, (unsigned)dropped);
+    }
+}
+
 size_t lichen_sys_timer_count(uint32_t ctx) {
     app_state_t *st = lichen_sys_app_state(ctx);
     return st ? __atomic_load_n(&st->timer_count, __ATOMIC_RELAXED) : 0;

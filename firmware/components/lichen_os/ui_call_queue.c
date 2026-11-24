@@ -48,6 +48,18 @@ size_t ui_call_queue_cancel(ui_call_queue_t *q, ui_call_fn_t fn, void *arg) {
     return cancelled;
 }
 
+size_t ui_call_queue_cancel_owner(ui_call_queue_t *q, uint32_t owner) {
+    size_t cancelled = 0;
+    for (uint8_t i = 0; i < q->count; i++) {
+        ui_call_t *c = &q->slot[(q->head + i) % UI_CALL_QUEUE_CAP];
+        if (c->fn && c->owner == owner) {
+            c->fn = NULL;
+            cancelled++;
+        }
+    }
+    return cancelled;
+}
+
 void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t cancel_fallback) {
     if (!fn) {
         return;

@@ -146,6 +146,22 @@ static bool fake_raw_cancel(ui_call_fn_t fn, void *arg) {
     return any;
 }
 
+// #541: an app's image goes, so everything its context queued is taken back, and no other owner's call
+static void test_cancel_owner(void) {
+    ui_call_queue_t q = {0};
+    ui_call_queue_push(&q, note, (void *)1, 7);
+    ui_call_queue_push(&q, note, (void *)2, 8);
+    ui_call_queue_push(&q, requeue, (void *)3, 7);
+    CHECK(ui_call_queue_cancel_owner(&q, 7) == 2);
+    CHECK(ui_call_queue_cancel_owner(&q, 7) == 0); // once
+    CHECK(ui_call_queue_cancel_owner(&q, 9) == 0);
+    CHECK(q.count == 3); // slots stay: a running drain counted them
+    ui_call_t c;
+    CHECK(ui_call_queue_pop(&q, &c) && c.fn == NULL);
+    CHECK(ui_call_queue_pop(&q, &c) && c.fn == note && c.arg == (void *)2);
+    CHECK(ui_call_queue_pop(&q, &c) && c.fn == NULL);
+}
+
 static void test_cancel_overflow(void) {
     ui_call_queue_t q = {0};
     ran_n             = 0;
@@ -496,6 +512,7 @@ int main(void) {
     test_full_and_unpush();
     test_reentrant_push();
     test_cancel();
+    test_cancel_owner();
     test_cancel_overflow();
     test_schedule_failure();
     test_call_owner();

@@ -46,6 +46,9 @@ void lichen_sys_life_console(void);
 size_t lichen_sys_timer_count(uint32_t ctx);
 // Deletes every booked timer of ctx; stop(reason) queues it with lichen_sys_ui_call. LVGL task only.
 void   lichen_sys_timer_drop(uint32_t ctx);
+// Deletes every LVGL timer ctx made through lichen_ui_timer_create, booked or not (#541: before its image is freed, so
+// no timer of it can tick into it). LVGL task only.
+void   lichen_sys_ui_timers_drop(uint32_t ctx);
 // ctx's app stopped: its booked timers are dead from now on, whether or not the drop got onto the LVGL task (a busy
 // lock): each one deletes itself at its next tick, a start or a stop with a stale handle is refused. Any task (atomic).
 void   lichen_sys_timer_kill(uint32_t ctx);

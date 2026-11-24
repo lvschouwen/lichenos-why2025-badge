@@ -21,12 +21,15 @@
 #include "sdkconfig.h"
 
 #include <stdatomic.h>
+#include <stdlib.h>
 
 static char const TAG[] = "ui";
 
 #define UI_CALL_LOCK_MS 2000 // as the dialog: a render takes milliseconds, a lock held this long is a stuck LVGL task
 
 static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner);
+static bool fallback_call(ui_call_fn_t fn, void *arg);
+static bool fallback_cancel(ui_call_fn_t fn, void *arg);
 static ui_call_queue_t s_queue = {.run = run_as_owner}; // LVGL lock held
 static ui_lock_owner_t s_owner;     // also read by the lock-owner check (ui_lock_check.c)
 
@@ -104,6 +107,71 @@ static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner) {
     lichen_ctx_leave(previous);
 }
 
+// The burst past the queue's size (#541): an app's call that did not fit is one LVGL async call of its own, which a FIFO
+// barrier cannot order against, so it is booked here (LVGL lock held) with its owner and runs as it, and can be taken back by
+// owner before the app's image is freed. The OS's own calls (and an app's when no node can be made) stay plain async calls.
+typedef struct fb_call {
+    struct fb_call *next;
+    ui_call_fn_t    fn;
+    void           *arg;
+    uint32_t        owner;
+} fb_call_t;
+static fb_call_t *s_fb;
+static uint32_t   s_fb_owner; // the owner of the call being handed over (lichen_sys_ui_call, lock held)
+
+static void fb_unlink(fb_call_t *n) {
+    for (fb_call_t **pp = &s_fb; *pp; pp = &(*pp)->next) {
+        if (*pp == n) {
+            *pp = n->next;
+            return;
+        }
+    }
+}
+
+static void fb_run(void *node) { // LVGL task, lock held
+    fb_call_t *n = node;
+    fb_unlink(n);
+    ui_call_fn_t fn    = n->fn;
+    void        *arg   = n->arg;
+    uint32_t     owner = n->owner;
+    free(n);
+    run_as_owner(fn, arg, owner);
+}
+
+static bool fallback_call(ui_call_fn_t fn, void *arg) {
+    if (s_fb_owner == lichen_sys_ctx_os()) {
+        return async_call(fn, arg);
+    }
+    fb_call_t *n = malloc(sizeof(*n));
+    if (!n) {
+        return async_call(fn, arg);
+    }
+    *n = (fb_call_t){s_fb, fn, arg, s_fb_owner};
+    if (!async_call(fb_run, n)) {
+        free(n);
+        return false;
+    }
+    s_fb = n;
+    return true;
+}
+
+// Every fallback call of the pair (fn, arg) (or, with fn NULL, of owner) is taken back; the plain one too (fn, arg)
+static void fb_cancel_matching(ui_call_fn_t fn, void *arg, uint32_t owner) {
+    for (fb_call_t *n = s_fb, *next; n; n = next) {
+        next = n->next;
+        if (fn ? (n->fn == fn && n->arg == arg) : n->owner == owner) {
+            lv_async_call_cancel(fb_run, n);
+            fb_unlink(n);
+            free(n);
+        }
+    }
+}
+
+static bool fallback_cancel(ui_call_fn_t fn, void *arg) {
+    fb_cancel_matching(fn, arg, 0);
+    return async_cancel(fn, arg);
+}
+
 static atomic_uint s_refused, s_refused_wait_max; // any task writes: the max is a compare-and-swap
 
 void lichen_sys_ui_refused(uint32_t *count, uint32_t *longest_ms) {
@@ -128,7 +196,8 @@ bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
         ESP_LOGW(TAG, "ui call %p not queued: the LVGL lock was not free in %u ms", (void *)fn, (unsigned)timeout_ms);
         return false;
     }
-    bool ok = ui_call_queue_hand_over(&s_queue, fn, arg, owner, async_call, async_call);
+    s_fb_owner = owner;
+    bool ok    = ui_call_queue_hand_over(&s_queue, fn, arg, owner, async_call, fallback_call);
     lichen_sys_ui_unlock();
     if (!ok) {
         ESP_LOGE(TAG, "ui call %p not queued: out of memory", (void *)fn);
@@ -140,8 +209,18 @@ void lichen_sys_ui_cancel(void (*fn)(void *), void *arg) {
     if (!fn || !lichen_sys_ui_lock(0)) {
         return; // no display: nothing was queued
     }
-    ui_call_queue_cancel_all(&s_queue, fn, arg, async_cancel);
+    ui_call_queue_cancel_all(&s_queue, fn, arg, fallback_cancel);
     lichen_sys_ui_unlock();
+}
+
+bool lichen_sys_ui_cancel_owner(uint32_t ctx, uint32_t wait_ms) {
+    if (!lichen_sys_ui_lock(wait_ms)) {
+        return !port_allows_lock(); // no display: nothing was queued
+    }
+    ui_call_queue_cancel_owner(&s_queue, ctx);
+    fb_cancel_matching(NULL, NULL, ctx);
+    lichen_sys_ui_unlock();
+    return true;
 }
 
 bool lichen_ui_call(void (*fn)(void *), void *arg) {

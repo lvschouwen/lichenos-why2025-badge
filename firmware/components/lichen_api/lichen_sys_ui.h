@@ -24,6 +24,11 @@ bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms);
 // Takes back every fn(arg) queued with lichen_sys_ui_call or lichen_ui_call that has not started yet, as
 // lv_async_call_cancel did: for a widget's delete handler whose memory arg is. Any task (takes the lock).
 void lichen_sys_ui_cancel(void (*fn)(void *), void *arg);
+// Takes back everything the app ctx queued with lichen_ui_call / lichen_sys_ui_call that has not started, the burst past the
+// queue's size included (#541: its image is about to be freed). Waits for the LVGL lock up to wait_ms (0 = forever), so a
+// callback that is running has returned when this does; false when the lock was not free in time: nothing was cancelled and the
+// image must stay. Not for the LVGL task. Any other task.
+bool lichen_sys_ui_cancel_owner(uint32_t ctx, uint32_t wait_ms);
 // `fw ui lockcheck [reset]`: the lock-owner check's mode, whether it is armed, its hit count and the first call sites
 // (CONFIG_LICHEN_UI_LOCK_CHECK_MODE), or resets the counts. Any task (the console's; it replies with console_reply).
 void lichen_sys_ui_lockcheck_cmd(char const *args);

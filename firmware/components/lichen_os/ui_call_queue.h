@@ -53,6 +53,10 @@ bool ui_call_queue_pop(ui_call_queue_t *q, ui_call_t *out);
 // points to is about to go. Returns how many were cancelled.
 size_t ui_call_queue_cancel(ui_call_queue_t *q, ui_call_fn_t fn, void *arg);
 
+// Cancels every queued call whose owner is `owner` (#541: an app's image is about to go, whatever it queued must not run).
+// Same bookkeeping as ui_call_queue_cancel. Returns how many were cancelled. Not the fallback's: see lichen_ui_call.c.
+size_t ui_call_queue_cancel_owner(ui_call_queue_t *q, uint32_t owner);
+
 // An LVGL async call as the queue sees it (lv_async_call in lichen_ui_call.c, a fake in the host test): true when
 // fn(arg) will run on the LVGL task later.
 typedef bool (*ui_call_async_t)(ui_call_fn_t fn, void *arg);
