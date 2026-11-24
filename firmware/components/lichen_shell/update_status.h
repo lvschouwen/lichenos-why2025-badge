@@ -18,6 +18,8 @@ size_t update_line(upd_result_t r, char const *prev, char const *run, char *out,
 // After a rollback: when the newest restart-history line (restart_line_format: "<when> <version> up=<s>s <why>...") is
 // that rollback, writes "Update rolled back: no Wi-Fi within 5 min" and returns true; otherwise writes nothing, false
 bool update_rollback_line(char const *last_restart, char *out, size_t cap);
+// The failed-state status line: firmware keeps the install wording, a file push says it was not received (#544)
+char const *update_failed_text(bool firmware);
 // done of total as 0..100, or -1 while the total is unknown (0)
 int update_pct(uint32_t done, uint32_t total);
 

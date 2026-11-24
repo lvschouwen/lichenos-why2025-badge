@@ -51,6 +51,10 @@ int update_pct(uint32_t done, uint32_t total) {
     return (int)((uint64_t)done * 100 / total);
 }
 
+char const *update_failed_text(bool firmware) {
+    return firmware ? "Update failed: the new version did not install" : "Not received: the sender stopped";
+}
+
 uint32_t update_stall_limit_ms(bool firmware, uint32_t done, uint32_t total) {
     return firmware && total > 0 && done >= total ? 180000 : 30000;
 }

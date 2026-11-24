@@ -34,9 +34,16 @@ static void rollback_reason(void) {
     CHECK(line[0] == '\0'); // nothing written when it is not that rollback
 }
 
+// #544: a failed file push is not an "update failed ... new version" message
+static void failed_text(void) {
+    CHECK(strcmp(update_failed_text(true), "Update failed: the new version did not install") == 0);
+    CHECK(strcmp(update_failed_text(false), "Not received: the sender stopped") == 0);
+}
+
 int main(void) {
     char line[64];
     rollback_reason();
+    failed_text();
 
     CHECK(update_result(NULL, "fw-b", false) == UPD_NONE);
     CHECK(update_result("", "fw-b", false) == UPD_NONE);

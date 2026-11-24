@@ -262,7 +262,7 @@ static void render(state_t const *s) {
             color  = THEME_TEAL;
             break;
         case PH_FAILED:
-            status = "Update failed: the new version did not install";
+            status = update_failed_text(s->firmware);
             color  = THEME_RED;
             break;
         default:
