@@ -9,6 +9,16 @@
 
 extern uint8_t *DG_ScreenBuffer; // allocated by the engine at RESX*RESY*4
 
+// The palette (CMAP256, i_video.c): set by the engine whenever it changes, one entry per index
+struct doom_color {
+    uint32_t b : 8;
+    uint32_t g : 8;
+    uint32_t r : 8;
+    uint32_t a : 8;
+};
+extern struct doom_color colors[256];
+extern int               palette_changed; // the engine's `boolean`, an int-sized type
+
 void doomgeneric_Create(int argc, char **argv);
 void doomgeneric_Tick(void);
 

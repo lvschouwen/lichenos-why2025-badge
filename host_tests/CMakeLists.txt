@@ -2982,3 +2982,12 @@ add_executable(panic_ring_test
 target_include_directories(panic_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(panic_ring_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME panic_ring_test COMMAND panic_ring_test)
+
+# The DOOM app's key map, key ring, fps windows, WAD percent and 2x picture (#526)
+add_executable(doom_logic_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/doom_logic_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/doom/main/doom_logic.c
+)
+target_include_directories(doom_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/doom/main)
+target_compile_options(doom_logic_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME doom_logic_test COMMAND doom_logic_test)

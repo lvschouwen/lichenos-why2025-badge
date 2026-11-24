@@ -1,7 +1,8 @@
-// The Lichen backend of doomgeneric (#525) and the libc the engine gets from doom_shim.h. Video and keys are a stub here
-// (#526): the engine runs, draws into DG_ScreenBuffer and nothing shows it. GPL-3.0-or-later, like the app as a whole.
+// The Lichen backend of doomgeneric (#525) and the libc the engine gets from doom_shim.h. The picture and the keys are
+// doom_ui.c's (#526). GPL-3.0-or-later, like the app as a whole.
 #include "doom_app.h"
 #include "doom_engine.h"
+#include "doom_ui.h"
 
 #include "lichen_mem.h"
 #include "lichen_app.h"
@@ -187,7 +188,7 @@ void DG_Init(void) {
 }
 
 void DG_DrawFrame(void) {
-    // #526: the frame in DG_ScreenBuffer and the palette go to a canvas here
+    doom_ui_present();
 }
 
 void DG_SleepMs(uint32_t ms) {
@@ -200,9 +201,7 @@ uint32_t DG_GetTicksMs(void) {
 }
 
 int DG_GetKey(int *pressed, unsigned char *key) {
-    (void)pressed;
-    (void)key;
-    return 0; // #526
+    return doom_ui_next_key(pressed, key);
 }
 
 void DG_SetWindowTitle(char const *title) {
@@ -233,5 +232,7 @@ size_t lichen_doom_fread(void *buf, size_t size, size_t n, FILE *f) {
     if (doom_load_cancelled()) {
         return 0; // W_ReadLump calls I_Error on a short read: the engine task leaves through exit() (#525)
     }
-    return fread(buf, size, n, f);
+    size_t got = fread(buf, size, n, f);
+    doom_ui_note_read(got * size); // the loading bar
+    return got;
 }

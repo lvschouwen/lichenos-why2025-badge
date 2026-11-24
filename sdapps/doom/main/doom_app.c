@@ -1,13 +1,15 @@
 // DOOM as an SD-card app (#525): main() checks for the WAD, hands the OS its hooks and starts the engine on a task of its
-// own; stop ends that task and frees everything the engine still holds. The skeleton reaches the title loop: video and keys
-// are #526. GPL-3.0-or-later (the engine is GPL-2.0-or-later, sha1.c GPL-3.0-or-later).
+// own; stop ends that task and frees everything the engine still holds. The picture, the keys and the loading bar
+// are doom_ui.c's (#526). GPL-3.0-or-later (the engine is GPL-2.0-or-later, sha1.c GPL-3.0-or-later).
 #include "lichen_app.h"
+#include "lichen_notify.h"
 #include "lichen_sd_app.h"
 #include "lichen_task.h"
 #include "theme.h"
 
 #include "doom_app.h"
 #include "doom_engine.h"
+#include "doom_ui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,27 +51,38 @@ bool doom_load_cancelled(void) {
     return loading && stop_req;
 }
 
-static bool wad_present(void) {
+// The WAD's size in bytes, 0 when it is not there (or empty: the engine would only say so)
+static uint32_t wad_size(void) {
     FILE *f = fopen(WAD_NAME, "rb");
     if (!f) {
-        return false;
+        return 0;
     }
+    long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : 0;
     fclose(f);
-    return true;
+    return size > 0 ? (uint32_t)size : 0;
 }
 
-static void open_screen(lv_obj_t *screen) {
-    lv_obj_set_style_pad_all(screen, THEME_PAD, 0);
+// a text screen below the status bar (R7), for what is not the game: no WAD, no memory
+static void message_screen(lv_obj_t *screen, char const *text) {
+    lv_obj_set_style_pad_hor(screen, THEME_PAD, 0);
+    lv_obj_set_style_pad_top(screen, THEME_STATUS_BAR_H + THEME_PAD, 0);
     lv_obj_t *label = lv_label_create(screen);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_text(label, text);
+}
+
+static void open_screen(lv_obj_t *screen) {
     if (start_state == START_OK) {
-        lv_label_set_text(label, "DOOM is loading. The picture and the keys come in a later update.");
+        if (!doom_ui_open(screen)) {
+            // the engine is running but has nowhere to draw; the screen says so and the user closes it
+            return;
+        }
     } else if (start_state == START_FAILED) {
-        lv_label_set_text(label, "DOOM could not start (not enough memory). Close it and open it again.");
+        message_screen(screen, "DOOM could not start (not enough memory). Close it and open it again.");
     } else {
         // R11: what is missing and how to get it
-        lv_label_set_text(label, "No game files yet. Put " WAD_NAME " in /lichen/apps/doom on the SD card and open DOOM again.");
+        message_screen(screen, "No game files yet. Put " WAD_NAME " in /lichen/apps/doom on the SD card and open DOOM again.");
     }
 }
 
@@ -88,6 +101,14 @@ static bool doom_stop(void) {
     if (started && !engine_gone()) {
         return false; // the engine task is stuck: the loader reports it, nothing is freed under a running task
     }
+    if (!doom_ui_detach()) {
+        return false; // the LVGL task still has the picture's memory: nothing is freed under it
+    }
+    char summary[128];
+    doom_ui_summary(summary, sizeof(summary));
+    if (summary[0]) {
+        lichen_notify(lichen_ctx_self(), LN_INFO, "DOOM", summary, 0); // the fps average of the run (#526)
+    }
     doom_free_all();
     return true;
 }
@@ -96,7 +117,9 @@ int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     // the task first: open runs on the LVGL task as soon as the hooks are in and reads engine_started
-    if (wad_present()) {
+    uint32_t size = wad_size();
+    doom_ui_set_wad_size(size);
+    if (size) {
         start_state = lichen_task_start(lichen_ctx_self(), "doom", engine_task, NULL, STACK_BYTES, LICHEN_PRIO_BACKGROUND, NULL)
                           ? START_OK
                           : START_FAILED;
