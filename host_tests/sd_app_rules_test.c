@@ -239,6 +239,19 @@ static void test_exit(void) {
     CHECK(sd_app_free_enters(false) && !sd_app_free_enters(true));
 }
 
+// #546: a close before the read starts drops the load; a removal or an open screen does not
+static void test_load_skip(void) {
+    sd_app_t a = {.state = SD_APP_LOADING, .screens = 0, .closing = true};
+    CHECK(sd_app_load_skip(&a) && a.state == SD_APP_TILE && !a.closing);
+    sd_app_t open = {.state = SD_APP_LOADING, .screens = 1};
+    CHECK(!sd_app_load_skip(&open) && open.state == SD_APP_LOADING);
+    sd_app_t rm = {.state = SD_APP_LOADING, .closing = true, .removing = true};
+    CHECK(!sd_app_load_skip(&rm) && rm.state == SD_APP_LOADING);
+    sd_app_t l = {.state = SD_APP_LOADED, .closing = true};
+    CHECK(!sd_app_load_skip(&l));
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_LOAD); // a reopen after the skip loads again
+}
+
 int main(void) {
     test_scan();
     test_open();
@@ -252,6 +265,7 @@ int main(void) {
     test_removal();
     test_unload_order();
     test_exit();
+    test_load_skip();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

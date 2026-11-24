@@ -507,8 +507,13 @@ static void do_load(sd_app_rec_t *rec) {
     vTaskDelay(pdMS_TO_TICKS(OPEN_SETTLE_MS));
     char const *hold = console_usb_hold_why(); // checked again right before the read: the hold may have come on since
     sd_app_lock();
-    bool go = rec->sda.state == SD_APP_LOADING && !rec->sda.removing;
+    bool skip = sd_app_load_skip(&rec->sda); // Esc on the Loading screen closed it: read nothing (#546)
+    bool go   = rec->sda.state == SD_APP_LOADING && !rec->sda.removing;
     sd_app_unlock();
+    if (skip) {
+        ESP_LOGI(TAG, "%s: closed before the load", rec->m.id);
+        return;
+    }
     char const *why = !go ? "The card is going" : hold ? "Not while the on-air hold is on" : NULL;
     if (!why) {
         heap_snap_t before = heap_now();

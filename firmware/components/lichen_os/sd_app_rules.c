@@ -110,6 +110,15 @@ sd_next_t sd_app_load_done(sd_app_t *a, bool ok) {
     return (a->closing || a->removing) ? SD_NEXT_UNLOAD : SD_NEXT_OPEN;
 }
 
+bool sd_app_load_skip(sd_app_t *a) {
+    if (a->state != SD_APP_LOADING || !a->closing || a->removing) {
+        return false;
+    }
+    a->state   = SD_APP_TILE;
+    a->closing = false;
+    return true;
+}
+
 bool sd_app_load_abort(sd_app_t *a) {
     if (a->state != SD_APP_LOADING) {
         return false;

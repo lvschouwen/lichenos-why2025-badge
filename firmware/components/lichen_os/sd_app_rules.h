@@ -77,6 +77,9 @@ sd_next_t sd_app_load_done(sd_app_t *a, bool ok);
 // (sd_app_unload_done) lands. The app's own "Loading" screen may still exist: it is the OS's, holds nothing of the ELF, and
 // its delete event finds the tile. False when the app is not LOADING.
 bool sd_app_load_abort(sd_app_t *a);
+// The loader is about to read the file (#546): when the screen was closed meanwhile (closing, not a removal) there is nobody
+// to open for, so the load is dropped: LOADING goes back to TILE and true is returned. Nothing was loaded, nothing to unload.
+bool sd_app_load_skip(sd_app_t *a);
 // One of the app's screens was deleted (LVGL's delete event, on the LVGL task). True when it was the last one and the app
 // is LOADED, so the loader should plan the unload; a load under way remembers it and load_done answers UNLOAD. This is
 // the only thing that lets an unload free the image: a screen that is still there may hold callbacks into it.
