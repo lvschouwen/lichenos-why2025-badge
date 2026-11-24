@@ -23,6 +23,7 @@
 
 #include <stdatomic.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #if !CONFIG_HEAP_USE_HOOKS
 #error "the DMA low-water watch needs CONFIG_HEAP_USE_HOOKS (firmware/sdkconfig.defaults)"
@@ -48,6 +49,48 @@ static struct {
     char             task[DMA_LOW_TASK_CAP];
 } big;
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// "fw mem diff" (#547) names who made a block: the last OWNER_RING internal allocations of OWNER_MIN bytes or more, with
+// the allocating task. Written by the hook (any task, or an ISR), read by the console task; an entry torn by a write
+// during a read can name a wrong task, which a developer-mode diagnostic accepts. ~700 B internal .bss, dev images only.
+#define OWNER_MIN  4096
+#define OWNER_RING 24
+static struct {
+    _Atomic uint32_t ptr; // 0 while being written
+    uint32_t         size;
+    uint32_t         seq;
+    char             task[DMA_LOW_TASK_CAP];
+} owners[OWNER_RING];
+static _Atomic uint32_t owner_seq;
+
+static void owner_note(void *ptr, size_t size) {
+    uint32_t seq = atomic_fetch_add_explicit(&owner_seq, 1, memory_order_relaxed) + 1;
+    typeof(owners[0]) *e = &owners[seq % OWNER_RING];
+    atomic_store_explicit(&e->ptr, 0, memory_order_relaxed);
+    e->size = size > UINT32_MAX ? UINT32_MAX : (uint32_t)size;
+    e->seq  = seq;
+    StaticTask_t *tcb = pxCurrentTCBs[esp_cpu_get_core_id()];
+    for (int i = 0; i < DMA_LOW_TASK_CAP; i++) {
+        e->task[i] = tcb ? (char)tcb->ucDummy7[i] : '\0';
+    }
+    atomic_store_explicit(&e->ptr, (uint32_t)(uintptr_t)ptr, memory_order_release);
+}
+
+bool dma_watch_owner(uint32_t addr, uint32_t size, char *task, size_t cap) {
+    uint32_t best = 0;
+    bool     hit  = false;
+    for (int i = 0; i < OWNER_RING && cap; i++) {
+        uint32_t p = atomic_load_explicit(&owners[i].ptr, memory_order_acquire);
+        if (p >= addr && p - addr < size && owners[i].seq > best) {
+            best = owners[i].seq;
+            hit  = true;
+            snprintf(task, cap, "%.*s", (int)(DMA_LOW_TASK_CAP - 1), owners[i].task);
+        }
+    }
+    return hit;
+}
+#endif
+
 // Every successful heap allocation passes here: two compares for nearly all of them (size, address); a new largest
 // internal one adds a load, a CAS and a 16-byte copy. No calls, no locks, no heap. Placed with the heap through
 // esp_heap_caps.h's declaration (HEAP_IRAM_ATTR: PSRAM-XIP since #267, CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH; a second
@@ -58,6 +101,11 @@ void esp_heap_trace_alloc_hook(void *ptr, size_t size, uint32_t caps) {
     if (size < DMA_BIG_MIN || a < SOC_MEM_INTERNAL_LOW || a >= SOC_MEM_INTERNAL_HIGH) {
         return;
     }
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    if (size >= OWNER_MIN) {
+        owner_note(ptr, size);
+    }
+#endif
     uint32_t want = size > UINT32_MAX ? UINT32_MAX : (uint32_t)size;
     uint32_t cur  = atomic_load_explicit(&big.size, memory_order_relaxed);
     if (want <= cur) {

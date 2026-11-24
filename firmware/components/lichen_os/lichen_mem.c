@@ -11,6 +11,7 @@
 #include "lichen_os.h"
 
 #include "dma_watch.h"
+#include "mem_diff_cmd.h"
 #include "mem_window_watch.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -248,6 +249,9 @@ void lichen_sys_mem_start(void) {
 
 void lichen_mem_console_register(void) {
     console_set_mem_report(mem_report);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_set_mem_owner(dma_watch_owner);
+#endif
     mem_window_watch_register();
     dma_watch_start(); // its first sample also starts the mem window
 }

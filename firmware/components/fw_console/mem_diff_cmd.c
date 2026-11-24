@@ -11,6 +11,7 @@
 #include "fw_console.h"
 #include "mem_diff.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,11 @@ typedef struct {
 } snap_t;
 
 static snap_t mark;
+static bool (*owner_of)(uint32_t addr, uint32_t size, char *task, size_t cap);
+
+void console_set_mem_owner(bool (*owner)(uint32_t addr, uint32_t size, char *task, size_t cap)) {
+    owner_of = owner;
+}
 
 static bool snap_cb(walker_heap_into_t heap, walker_block_info_t b, void *user) {
     (void)heap;
@@ -68,11 +74,18 @@ static void print_one(mem_diff_kind_t kind, mem_blk_t const *was, mem_blk_t cons
         return;
     }
     p->listed++;
+    char by[24] = "";
+    if (kind != MEM_DIFF_REMOVED && owner_of) {
+        char task[16];
+        if (owner_of(now->addr, now->size, task, sizeof(task))) {
+            snprintf(by, sizeof(by), " by %s", task);
+        }
+    }
     if (kind == MEM_DIFF_RESIZED) {
-        console_reply("mem diff resized %08x %u -> %u B", (unsigned)was->addr, (unsigned)was->size, (unsigned)now->size);
+        console_reply("mem diff resized %08x %u -> %u B%s", (unsigned)was->addr, (unsigned)was->size, (unsigned)now->size, by);
     } else {
-        console_reply("mem diff %s %08x %u B", kind == MEM_DIFF_ADDED ? "added" : "removed",
-                      (unsigned)(kind == MEM_DIFF_ADDED ? now->addr : was->addr), (unsigned)size);
+        console_reply("mem diff %s %08x %u B%s", kind == MEM_DIFF_ADDED ? "added" : "removed",
+                      (unsigned)(kind == MEM_DIFF_ADDED ? now->addr : was->addr), (unsigned)size, by);
     }
 }
 
