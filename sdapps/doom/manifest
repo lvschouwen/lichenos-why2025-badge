@@ -4,7 +4,7 @@ name=DOOM
 api=2.2
 entry=app.elf
 caps=SD,BACKGROUND,RAW_KEYS,NOTIFY
-# PSRAM: 6 MiB zone + 256 KB engine screen + 512 KB picture (doom_ui.c, #526) + the engine's own heap
+# PSRAM: 6 MiB zone + 256 KB engine screen + 256 KB picture (doom_ui.c, I8; 512 KB with -DDOOM_VIDEO_RGB565, #526) + the engine heap
 # internal RAM: 16 KiB engine task stack + 4 KiB main task (stack_kib) + 4 KiB for the loader-run stop (the file calls)
 internal_ram_kib=24
 psram_kib=7936

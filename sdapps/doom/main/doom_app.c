@@ -17,7 +17,8 @@
 #define WAD_NAME    "freedoom1.wad"
 #define ZONE_MIB    "6"
 #define STACK_BYTES (16 * 1024)
-#define STOP_WAIT   4000 // ms the engine task gets to see the stop flag (it checks once per tick)
+#define STOP_WAIT   3000 // ms the engine task gets to see the stop flag (it checks once per tick)
+#define STOP_TOTAL  4500 // the loader gives stop 5 s: the engine's wait and the LVGL task's detach share this
 
 typedef enum { START_NO_WAD, START_FAILED, START_OK } start_t;
 
@@ -94,6 +95,7 @@ static bool engine_gone(void) {
 
 static bool doom_stop(void) {
     stop_req = true;
+    TickType_t begin = xTaskGetTickCount();
     bool started = start_state == START_OK;
     for (int waited = 0; started && !engine_gone() && waited < STOP_WAIT; waited += 50) {
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -101,7 +103,8 @@ static bool doom_stop(void) {
     if (started && !engine_gone()) {
         return false; // the engine task is stuck: the loader reports it, nothing is freed under a running task
     }
-    if (!doom_ui_detach()) {
+    uint32_t spent = (uint32_t)(xTaskGetTickCount() - begin) * portTICK_PERIOD_MS;
+    if (!doom_ui_detach(spent < STOP_TOTAL ? STOP_TOTAL - spent : 200)) {
         return false; // the LVGL task still has the picture's memory: nothing is freed under it
     }
     char summary[128];

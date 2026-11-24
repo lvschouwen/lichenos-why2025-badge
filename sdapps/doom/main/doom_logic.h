@@ -79,3 +79,6 @@ uint16_t doom_rgb565(uint8_t r, uint8_t g, uint8_t b);
 // The 320x200 8-bit frame (palette indexes) as a 640x400 RGB565 picture, every pixel twice across and down. dst (640x400
 // RGB565, no padding between lines) must be 4-byte aligned; pal is the 256 RGB565 colours.
 void     doom_expand_2x(void *dst, uint8_t const *src, uint16_t const pal[256]);
+// The same for an I8 canvas: palette indexes stay indexes, 640x400 bytes with no padding between lines (the palette is LVGL's,
+// 1 KB before the pixels). dst must be 4-byte aligned.
+void     doom_expand_2x_i8(void *dst, uint8_t const *src);

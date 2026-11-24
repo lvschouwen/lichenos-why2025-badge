@@ -135,6 +135,26 @@ static void picture(void) {
     CHECK(bad == 0);
 }
 
+static void picture_i8(void) {
+    static uint8_t src[DOOM_SRC_W * DOOM_SRC_H];
+    static uint8_t dst[DOOM_SRC_W * 2 * DOOM_SRC_H * 2 + 8];
+    for (int i = 0; i < DOOM_SRC_W * DOOM_SRC_H; i++) {
+        src[i] = (uint8_t)(i * 13 + 5);
+    }
+    memset(dst, 0xee, sizeof(dst));
+    doom_expand_2x_i8(dst, src);
+    int bad = 0;
+    for (int y = 0; y < DOOM_SRC_H * 2; y++) {
+        for (int x = 0; x < DOOM_SRC_W * 2; x++) {
+            if (dst[y * DOOM_SRC_W * 2 + x] != src[(y / 2) * DOOM_SRC_W + x / 2]) {
+                bad++;
+            }
+        }
+    }
+    CHECK(bad == 0);
+    CHECK(dst[DOOM_SRC_W * 2 * DOOM_SRC_H * 2] == 0xee); // nothing written past the picture
+}
+
 int main(void) {
     keys_map();
     keys_queue();
@@ -142,6 +162,7 @@ int main(void) {
     fps_stall_and_min();
     load_percent();
     picture();
+    picture_i8();
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

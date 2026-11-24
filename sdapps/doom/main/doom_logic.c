@@ -133,3 +133,16 @@ void doom_expand_2x(void *dst, uint8_t const *src, uint16_t const pal[256]) {
         src += DOOM_SRC_W;
     }
 }
+
+void doom_expand_2x_i8(void *dst, uint8_t const *src) {
+    uint32_t *row = dst;
+    for (int y = 0; y < DOOM_SRC_H; y++) {
+        for (int x = 0; x < DOOM_SRC_W; x += 2) {
+            uint32_t a = src[x], b = src[x + 1];
+            row[x / 2] = a | (a << 8) | (b << 16) | (b << 24);
+        }
+        memcpy(row + DOOM_SRC_W / 2, row, DOOM_SRC_W * 2); // the second line of the pair
+        row += DOOM_SRC_W;                                 // two lines of 640 bytes = 320 words
+        src += DOOM_SRC_W;
+    }
+}

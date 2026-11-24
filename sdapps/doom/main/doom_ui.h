@@ -20,7 +20,7 @@ void doom_ui_present(void);
 // Engine task, DG_GetKey
 bool doom_ui_next_key(int *pressed, unsigned char *key);
 // The loader's stop, after the engine task has ended: takes the keys and the canvas off the LVGL task, then frees the
-// picture's memory. False (nothing freed) when the LVGL task did not do it in time.
-bool doom_ui_detach(void);
+// picture's memory. False (nothing freed) when the LVGL task did not do it within wait_ms.
+bool doom_ui_detach(uint32_t wait_ms);
 // The final line for the exit notification, "" when no second was played. After doom_ui_detach.
 void doom_ui_summary(char *out, size_t cap);
