@@ -142,11 +142,6 @@ static void say(lv_obj_t *screen, char const *text) {
 }
 
 static void late_arm(sd_app_rec_t *rec);
-static void late_screen(sd_app_rec_t *rec) {
-    if (atomic_load(&g_late_apps) != 0) {
-        late_arm(rec);
-    }
-}
 
 // One of the app's screens is being deleted (LVGL's delete event, LVGL task): the record forgets a screen that waited for
 // its hooks, and when it was the last one the loader is told. The event comes before the widgets go, so the loader's barrier
@@ -166,7 +161,7 @@ static void screen_deleted(lv_event_t *e) {
     if (plan && !post(MSG_CLOSED, rec)) {
         ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
     }
-    late_screen(rec); // a faulted app whose last screen just left may be ready for its late unload
+    late_arm(rec); // a faulted app whose last screen just left may be ready for its late unload
 }
 
 // The bar and its text are forgotten when LVGL deletes them (the app's open cleans the screen): a queued update then finds NULL
@@ -498,7 +493,7 @@ static void late_queue(sd_app_rec_t *rec) {
 }
 
 static void late_arm(sd_app_rec_t *rec) {
-    if (lichen_os_task_count(rec->ctx) == 0) {
+    if (atomic_load(&g_late_apps) != 0 && lichen_os_task_count(rec->ctx) == 0) {
         late_queue(rec);
     }
 }

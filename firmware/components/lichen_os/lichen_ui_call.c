@@ -117,7 +117,8 @@ typedef struct fb_call {
     uint32_t        owner;
 } fb_call_t;
 static fb_call_t *s_fb;
-static uint32_t   s_fb_owner; // the owner of the call being handed over (lichen_sys_ui_call, lock held)
+static uint32_t   s_fb_owner; // the owner of the call being handed over: written by lichen_sys_ui_call, and fallback_call is
+                                // only valid inside its hand_over, both under the LVGL lock
 
 static void fb_unlink(fb_call_t *n) {
     for (fb_call_t **pp = &s_fb; *pp; pp = &(*pp)->next) {
