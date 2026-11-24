@@ -52,10 +52,10 @@ static struct {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
 // "fw mem diff" (#547) names who made a block: the last OWNER_RING internal allocations of OWNER_MIN bytes or more, with
 // the allocating task. Written by the hook (any task, or an ISR), read by the console task; an entry torn by a write
-// during a read can name a wrong task, which a developer-mode diagnostic accepts. ~700 B internal .bss, dev images only.
+// during a read can name a wrong task, which a developer-mode diagnostic accepts. ~700 B of PSRAM .bss (internal .bss grows by the 4-byte counter only), dev images only.
 #define OWNER_MIN  4096
 #define OWNER_RING 24
-static struct {
+EXT_RAM_BSS_ATTR static struct { // PSRAM .bss: the ring must not take from the internal RAM the DMA gate watches
     _Atomic uint32_t ptr; // 0 while being written
     uint32_t         size;
     uint32_t         seq;
@@ -63,7 +63,8 @@ static struct {
 } owners[OWNER_RING];
 static _Atomic uint32_t owner_seq;
 
-static void owner_note(void *ptr, size_t size) {
+// Always inline: it must stay in the hook's own section (the heap code, flash/XIP), never a function of its own
+static inline __attribute__((always_inline)) void owner_note(void *ptr, size_t size) {
     uint32_t seq = atomic_fetch_add_explicit(&owner_seq, 1, memory_order_relaxed) + 1;
     typeof(owners[0]) *e = &owners[seq % OWNER_RING];
     atomic_store_explicit(&e->ptr, 0, memory_order_relaxed);
@@ -81,7 +82,7 @@ bool dma_watch_owner(uint32_t addr, uint32_t size, char *task, size_t cap) {
     bool     hit  = false;
     for (int i = 0; i < OWNER_RING && cap; i++) {
         uint32_t p = atomic_load_explicit(&owners[i].ptr, memory_order_acquire);
-        if (p >= addr && p - addr < size && owners[i].seq > best) {
+        if (p == addr && owners[i].size <= size && owners[i].seq > best) {
             best = owners[i].seq;
             hit  = true;
             snprintf(task, cap, "%.*s", (int)(DMA_LOW_TASK_CAP - 1), owners[i].task);
