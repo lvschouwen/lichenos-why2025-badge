@@ -52,8 +52,10 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-24)
-- impl-546 RUNNING in wt-1 (fix/546-esc-on-loading): the read skip when closing + host test, local commit `Refs #546`; it may report the wake-hook swallow as the cause. State on #546 (latest comment). On its report: a reviewer pass (lichen-reviewer), merge-one.sh, push. wt-2..6 free.
-- Then #548 (loading bar on the Loading screen, same loader file, owner: right after #546), then ONE flash for #546+#548, bench: Esc on Loading (awake and dimmed, injected), the bar, plus the owed #544 screen text (a sender-cut file push shows "Not received: the sender stopped"; close #544 after).
+- impl-546 in wt-1 (fix/546-esc-on-loading): 7db3c9f3 reviewed (rev-546: clean, low #1 sent back = screens guard in sd_app_load_skip + test). On its follow-up commit: merge-one.sh, push. Then #548 in wt-1, then #541 -> #536 -> #538 in sequence (same loader files), each a reviewer pass.
+- impl-547 (Opus) in wt-3 (fix/547-sd0-stream-ram): attribution + dev-mode instrumentation, Refs #547, bench steps in its report.
+- impl-526 (Opus) in wt-4 (feat/526-doom-video-keys): canvas video, raw keys, fps, WAD bar. Reviewer pass (LVGL lock, DMA).
+- ONE flash with whatever is merged when the owner is at the badge (~18:30); the rest goes in the next flash. Bench: Esc on Loading (injected, awake + dimmed; expect "closed before the load", no "unloaded"), the bar, #544 text (close #544 after), #547 fw mem steps.
 - The badge runs fw-e4507b9c (valid), free for remote bench; key log is on.
-- NEEDS-LUCAS: the #546 physical Esc test (awake and dimmed), #525 item 6 (card pull), #523 steps 3/7, #545 decisions (user profiles).
-- Then wave 3: #547 (RAM at the first SD0: stream), #541 (late unload, a reviewer pass), #536 and #538 (same loader files: in sequence), #526 (DOOM video, keys, a WAD loading bar). The port ideas are #542.
+- NEEDS-LUCAS at the badge: the #546 physical Esc test (bright and dimmed), #126 the two-DM stack case with a real Heltec DM, #525 item 6 (card pull), #523 steps 3/7, #545 decisions (user profiles).
+- The port ideas are #542.
