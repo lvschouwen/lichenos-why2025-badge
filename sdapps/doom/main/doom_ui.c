@@ -121,7 +121,10 @@ static void on_canvas_draw(lv_event_t *e) {
 
 // LVGL task: shows the buffer the engine finished
 static void take_frame(void) {
-    lv_canvas_set_buffer(ui.canvas, bufs[last], PIC_W, PIC_H, PIC_CF); // between renders: this task is the renderer
+    // Alternating the canvas's buffer is safe only because LVGL's image cache is off (CONFIG_LV_CACHE_DEF_SIZE=0, a cached
+    // decode of the old pointer would show stale) and no async draw unit (PPA, a draw thread) reads the canvas after the
+    // refresh returns; this task is the renderer, so a swap here is between renders. Revisit if either changes.
+    lv_canvas_set_buffer(ui.canvas, bufs[last], PIC_W, PIC_H, PIC_CF);
     ui.draw_due = true;
     lv_obj_invalidate(ui.canvas);
     atomic_store_explicit(&ready, false, memory_order_release); // the other buffer is the engine's again
@@ -257,7 +260,6 @@ bool doom_ui_open(lv_obj_t *screen) {
     lv_obj_set_style_text_color(ui.fps_label, lv_color_hex(THEME_AMBER), 0);
     lv_obj_align(ui.fps_label, LV_ALIGN_TOP_LEFT, THEME_PAD, THEME_STATUS_BAR_H + 8); // below the status bar
     lv_obj_set_hidden(ui.fps_label, true);
-    shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
     lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
     if (!build_picture(screen)) {
         return fail_open("DOOM has no memory for its picture. Close it and open it again.");
@@ -271,6 +273,8 @@ bool doom_ui_open(lv_obj_t *screen) {
         ui.timer = NULL;
         return fail_open("The keys are in use by another app. Close it and open DOOM again.");
     }
+    // only with the keys held does Esc mean the game's menu; the failed screens above leave Esc as the OS's own
+    shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
     atomic_store(&present_on, true);
     return true;
 }
@@ -355,8 +359,8 @@ static void detach_cb(void *arg) {
     atomic_store(&detached, true);
 }
 
-// When this returns false the loader leaves the app faulted with its image kept (never unloaded under a live call), so a
-// detach_cb that still runs later finds its code and the buffers (nothing was freed) and only repeats what it did.
+// When the wait runs out, detach_cb may still be queued: the OS must cancel or drain the app's queued UI calls before it
+// unloads the image (#541). Nothing is freed here in that case, so a late run only repeats what it did.
 bool doom_ui_detach(uint32_t wait_ms) {
     if (!video_mem) {
         return true;
