@@ -53,6 +53,7 @@ static char const TAG[] = "sdapps";
 #define OPEN_SETTLE_MS     450  // the ELF loads after the open animation: its cache flush is the #31 window
 #define HOOKS_WAIT_MS      5000 // main() has this long to call lichen_sd_app_hooks
 #define TASKS_WAIT_MS      3000 // after the stop hook, the app's tasks have this long to return
+#define PROGRESS_LOCK_MS   5    // a bar update never holds the loader up (0 would wait for ever)
 #define UI_WAIT_MS         3000 // the barrier call through the LVGL task
 #define SD_WAIT_MS         2000
 #define UNREG_TRIES        20
@@ -177,8 +178,12 @@ static void add_bar(sd_app_rec_t *rec, lv_obj_t *screen) {
     sd_app_lock();
     rec->bar   = bar;
     rec->label = label;
-    rec->pct   = 0;
+    int pct    = rec->pct; // a screen opened mid-load starts where the load is
     sd_app_unlock();
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+    if (pct >= 100) {
+        lv_label_set_text(label, "Starting...");
+    }
     lv_obj_add_event_cb(bar, obj_deleted, LV_EVENT_DELETE, &rec->bar);
     lv_obj_add_event_cb(label, obj_deleted, LV_EVENT_DELETE, &rec->label);
 }
@@ -199,17 +204,25 @@ static void progress_cb(void *arg) {
     }
 }
 
-// Loader task, on every read of the file: never LVGL itself, only a queued call, and one that finds the lock busy is dropped
-static void read_progress(void *arg, size_t high, size_t total) {
+// Loader task, on every read of the file: never LVGL itself, only a queued call. It waits at most a few ms for the lock;
+// an update that finds it busy is dropped and offered again by the next read. Booked under the OS, not the app whose context
+// the read runs in: the bar is the OS's.
+static void read_progress(void *arg, size_t done, size_t total) {
     sd_app_rec_t *rec = arg;
+    uint32_t      now = (uint32_t)(esp_timer_get_time() / 1000);
     int           pct;
-    if (!sd_progress_due(&rec->prog, high, total, (uint32_t)(esp_timer_get_time() / 1000), &pct)) {
+    if (!sd_progress_due(&rec->prog, done, total, now, &pct)) {
         return;
     }
     sd_app_lock();
     rec->pct = pct;
     sd_app_unlock();
-    lichen_sys_ui_call(progress_cb, rec, 0);
+    lichen_ctx_t prev = lichen_ctx_enter(lichen_sys_ctx_os());
+    bool         sent = lichen_sys_ui_call(progress_cb, rec, PROGRESS_LOCK_MS);
+    lichen_ctx_leave(prev);
+    if (sent) {
+        sd_progress_sent(&rec->prog, pct, now);
+    }
 }
 
 static void refused_say(sd_app_rec_t *rec, char const *why) {
@@ -229,6 +242,9 @@ void sd_app_tramp_open(lv_obj_t *screen) {
     sd_open_t v = sd_app_open(&rec->sda, hold);
     if (v == SD_OPEN_LOAD || v == SD_OPEN_WAIT) {
         rec->screen = screen;
+        if (v == SD_OPEN_LOAD) {
+            rec->pct = 0;
+        }
     } else if (v == SD_OPEN_NOW && rec->hooks_set) {
         h = rec->hooks;
     }
@@ -792,6 +808,7 @@ static void do_free(sd_app_rec_t *rec) {
         return;
     }
     ui_barrier(LICHEN_CTX_NONE); // the deletions are complete, and whatever LVGL still had queued for the app has run
+    lichen_sys_ui_cancel(progress_cb, rec); // a call the full queue handed to lv_async_call may have passed the barrier
     // A faulted app is never unregistered (remove_one), so this one stopped cleanly
     if (!release_app_holdings(rec)) {
         return; // image and record stay: nothing is freed under what may still be called

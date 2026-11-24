@@ -19,9 +19,7 @@ static int src_read(void *ctx, size_t off, void *buf, size_t len) {
         got += (size_t)n;
     }
     if (s->on_read) {
-        if (off + len > s->high) {
-            s->high = off + len;
-        }
+        s->high += len; // bytes taken, not the furthest offset: the section table at the file's end is read early
         s->on_read(s->arg, s->high, s->size);
     }
     return 0;

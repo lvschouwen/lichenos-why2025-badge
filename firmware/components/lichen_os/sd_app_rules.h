@@ -114,9 +114,12 @@ typedef struct {
 
 // Percent (0..100) of total that done is; total 0 is 0, done past total is 100.
 int sd_progress_pct(size_t done, size_t total);
-// Whether the bar is told now: the percent moved and SD_PROGRESS_MIN_MS passed since the last update, or it reached 100
-// (the last step is never held back). On true *pct is the value and the state is updated. Loader task only.
-bool sd_progress_due(sd_progress_t *p, size_t done, size_t total, uint32_t now_ms, int *pct);
+// Whether the bar is told now: the percent moved and SD_PROGRESS_MIN_MS passed since the last update. Never 100: the
+// bytes counted are those the reader took, which can reach the file's size before the loader is done, so the full bar is the
+// loader's own word (read_image returned). Changes nothing: sd_progress_sent says the update went out, so one that was dropped
+// is offered again. Loader task only.
+bool sd_progress_due(sd_progress_t const *p, size_t done, size_t total, uint32_t now_ms, int *pct);
+void sd_progress_sent(sd_progress_t *p, int pct, uint32_t now_ms);
 
 // ---- exit (#533) --------------------------------------------------------------------------------------------------
 

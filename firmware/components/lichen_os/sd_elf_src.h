@@ -10,11 +10,11 @@
 typedef struct {
     int    fd;
     size_t size;
-    // Told after every read with the furthest byte read so far (the loader's progress bar, #548); NULL for none. Runs on the
+    // Told after every read with the bytes read so far (a cumulative sum, may pass size) (the loader's progress bar, #548); NULL for none. Runs on the
     // reading task: it must not touch LVGL.
     void (*on_read)(void *arg, size_t high, size_t total);
     void  *arg;
-    size_t high;
+    size_t high; // bytes read so far
 } sd_elf_file_t;
 
 // Opens path read-only: false with errno set (an empty file or a non-file is refused). On true the loader owns the

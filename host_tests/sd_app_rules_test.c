@@ -254,7 +254,7 @@ static void test_load_skip(void) {
     CHECK(sd_app_open(&a, NULL) == SD_OPEN_LOAD); // a reopen after the skip loads again
 }
 
-// #548: the bar's percent and its throttle (about 10 updates a second, the end always shown)
+// #548: the bar's percent and its throttle (about 10 updates a second; never 100 from the reader's bytes)
 static void test_progress(void) {
     CHECK(sd_progress_pct(0, 0) == 0 && sd_progress_pct(0, 1000) == 0 && sd_progress_pct(500, 1000) == 50);
     CHECK(sd_progress_pct(999, 1000) == 99 && sd_progress_pct(1000, 1000) == 100 && sd_progress_pct(2000, 1000) == 100);
@@ -262,15 +262,39 @@ static void test_progress(void) {
     sd_progress_t p = {0};
     int           v = -1;
     CHECK(sd_progress_due(&p, 0, 1000, 5000, &v) && v == 0); // the first update is always handed out
+    sd_progress_sent(&p, v, 5000);
     CHECK(!sd_progress_due(&p, 100, 1000, 5050, &v));        // 50 ms: too soon
     CHECK(sd_progress_due(&p, 100, 1000, 5100, &v) && v == 10);
+    CHECK(sd_progress_due(&p, 100, 1000, 5200, &v) && v == 10); // not sent (the lock was busy): offered again
+    sd_progress_sent(&p, v, 5200);
     CHECK(!sd_progress_due(&p, 105, 1000, 5400, &v));        // same percent: nothing to draw
     CHECK(!sd_progress_due(&p, 50, 1000, 5500, &v));         // never backwards
-    CHECK(sd_progress_due(&p, 1000, 1000, 5101, &v) && v == 100); // the end is not held back
-    CHECK(!sd_progress_due(&p, 1000, 1000, 9000, &v));       // and not repeated
-    CHECK(sd_progress_due(&p, 400, 1000, 9000 + 0xFFFFFF00u, &v) == false); // 100 stays 100
+    CHECK(sd_progress_due(&p, 5000, 1000, 5600, &v) && v == 99); // bytes past the size never show a full bar
+    // the clock wrapped: 0x80 is 144 ms after 0xFFFFFFF0
     sd_progress_t w = {.any = true, .last_pct = 10, .last_ms = 0xFFFFFFF0u};
-    CHECK(sd_progress_due(&w, 200, 1000, 0x80u, &v) && v == 20); // the millisecond clock wrapped
+    CHECK(!sd_progress_due(&w, 200, 1000, 0x10u, &v));       // 32 ms later, across the wrap
+    CHECK(sd_progress_due(&w, 200, 1000, 0x80u, &v) && v == 20);
+}
+
+// The real read order of esp_elf_relocate_source: the ELF header, the section table at the file's end, then the segments
+// ascending. Counting bytes taken (not the furthest offset) the bar climbs instead of jumping to the end at once.
+static void test_progress_read_order(void) {
+    size_t const total = 100000, reads[] = {64, 40 * 12, 20000, 30000, 25000, 20000}; // sums to 95 kB: the rest is unread
+    sd_progress_t p = {0};
+    size_t        done = 0;
+    uint32_t      now  = 1000;
+    int           v, shown = 0, last = -1;
+    for (size_t i = 0; i < sizeof(reads) / sizeof(reads[0]); i++) {
+        done += reads[i];
+        now += 150;
+        if (sd_progress_due(&p, done, total, now, &v)) {
+            CHECK(v > last && v < 100);
+            last = v;
+            shown++;
+            sd_progress_sent(&p, v, now);
+        }
+    }
+    CHECK(shown == 5 && last == 95); // the tiny header reads show 0 once; none at 100
 }
 
 int main(void) {
@@ -288,6 +312,7 @@ int main(void) {
     test_exit();
     test_load_skip();
     test_progress();
+    test_progress_read_order();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

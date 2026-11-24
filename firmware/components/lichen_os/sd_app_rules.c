@@ -205,14 +205,20 @@ int sd_progress_pct(size_t done, size_t total) {
     return done >= total ? 100 : (int)((uint64_t)done * 100 / total);
 }
 
-bool sd_progress_due(sd_progress_t *p, size_t done, size_t total, uint32_t now_ms, int *pct) {
+bool sd_progress_due(sd_progress_t const *p, size_t done, size_t total, uint32_t now_ms, int *pct) {
     int v = sd_progress_pct(done, total);
-    if (p->any && (v <= p->last_pct || (v < 100 && now_ms - p->last_ms < SD_PROGRESS_MIN_MS))) {
+    if (v > 99) {
+        v = 99;
+    }
+    if (p->any && (v <= p->last_pct || now_ms - p->last_ms < SD_PROGRESS_MIN_MS)) {
         return false;
     }
-    p->any      = true;
-    p->last_pct = v;
-    p->last_ms  = now_ms;
-    *pct        = v;
+    *pct = v;
     return true;
+}
+
+void sd_progress_sent(sd_progress_t *p, int pct, uint32_t now_ms) {
+    p->any      = true;
+    p->last_pct = pct;
+    p->last_ms  = now_ms;
 }
