@@ -47,19 +47,10 @@ void sd_app_scan_reason(sd_app_scan_t v, lichen_manifest_err_t err, lichen_manif
 
 // ---- a manifest pushed into an app's directory (#553) -------------------------------------------------------------
 
-// Is path (a /sd path of a file that landed) the manifest of an app: <apps_dir>/<id>/manifest, directly in the app's
-// directory? Other names, the app's data below it and everything outside the apps folder are not.
-bool sd_app_push_is_manifest(char const *apps_dir, char const *path);
-
-typedef enum {
-    SD_PUSH_TILE, // a tile, nothing loaded
-    SD_PUSH_BUSY, // loading, loaded or unloading: its limits are in use
-    SD_PUSH_DEAD, // faulted, or leaving with the card
-} sd_push_rec_t;
-
-// Does a landed manifest ask this app to be read again? A tile: now. A busy one: when it is a tile again (marked). A dead
-// one keeps what it has until the next mount.
-bool sd_app_push_marks(sd_push_rec_t rec);
+// Which app a file that landed on the card belongs to: path is its /sd path, apps_dir the apps folder (SD_APPS_DIR). True
+// when it is a file directly in <apps_dir>/<id>/ (id into id_out, cap bytes; manifest says whether it is the manifest).
+// Files deeper down (the app's data) and everything outside the apps folder are not an app's definition: false.
+bool sd_app_push_target(char const *apps_dir, char const *path, char *id_out, size_t cap, bool *manifest);
 
 // ---- one app ------------------------------------------------------------------------------------------------------
 
@@ -74,6 +65,11 @@ typedef struct {
     bool           late_stale;  // FAULTED and resumable, but for so long that it answers as a dead app again (sd_app_late_expire)
     bool           late;     // FAULTED at the stop hook or the tasks (#541): the unload resumes when no task of the app is left
 } sd_app_t;
+
+// Does a landed file ask this app to read its manifest again? Only the manifest, for an app that is neither gone nor leaving
+// with the card nor faulted (a faulted one keeps its image and limits until the badge restarts). A tile reads it at once, a
+// loading, loaded or unloading one when it is a tile again.
+bool sd_app_rescan_wanted(bool is_manifest, sd_app_state_t state, bool gone, bool removing);
 
 typedef enum {
     SD_OPEN_LOAD,    // TILE: the caller starts a load (the state is LOADING now)

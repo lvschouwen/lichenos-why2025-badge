@@ -1077,23 +1077,26 @@ static void remove_all(void) {
 
 // ---- a manifest landed in an app's directory (#553) -----------------------------------------------------------------------
 
-// The update server's task (sd_observe_files): only the path is looked at and one message queued, the card is not touched
+// The update server's task (sd_observe_files): only the path is looked at, the app marked and one message queued, the card is
+// not touched. An id with no record (a new app) is left to the next mount.
 static void file_landed(char const *path) {
-    if (sd_app_push_is_manifest(SD_APPS_DIR, path) && !atomic_exchange(&g_rescan_queued, true) && !post(MSG_RESCAN, NULL)) {
-        atomic_store(&g_rescan_queued, false);
-        ESP_LOGW(TAG, "rescan not queued, the next mount reads the manifest");
+    char id[LICHEN_MANIFEST_ID_MAX];
+    bool manifest = false;
+    if (!sd_app_push_target(SD_APPS_DIR, path, id, sizeof(id), &manifest) || !manifest) {
+        return;
     }
-}
-
-// Which app it was is not known (one flag, no table): every app that can take it is marked and read again, see rescan_deferred
-static void do_rescan(void) {
-    atomic_store(&g_rescan_queued, false); // a push from here on queues the next message
+    bool marked = false;
     sd_app_lock();
-    for (sd_app_rec_t *r = g_recs; r; r = r->next) {
-        bool dead = r->gone || r->sda.removing || r->sda.state == SD_APP_FAULTED;
-        r->rescan_pending = sd_app_push_marks(dead ? SD_PUSH_DEAD : r->sda.state == SD_APP_TILE ? SD_PUSH_TILE : SD_PUSH_BUSY);
+    for (sd_app_rec_t *r = g_recs; r && !marked; r = r->next) {
+        if (!r->gone && strcmp(r->m.id, id) == 0) {
+            marked = sd_app_rescan_wanted(manifest, r->sda.state, r->gone, r->sda.removing);
+            r->rescan_pending |= marked;
+        }
     }
     sd_app_unlock();
+    if (marked && !atomic_exchange(&g_rescan_queued, true) && !post(MSG_RESCAN, NULL)) {
+        atomic_store(&g_rescan_queued, false); // the mark stays: the next message of any kind reads it
+    }
 }
 
 // The tile of id takes the manifest m. The record is the loader's own to free, so it stays while this runs; a started load
@@ -1185,7 +1188,7 @@ static void loader_task(void *arg) {
             do_late(m.ctx);
             break;
         case MSG_RESCAN:
-            do_rescan();
+            atomic_store(&g_rescan_queued, false); // the marks are read below; a push from here on queues the next message
             break;
         }
         rescan_deferred();

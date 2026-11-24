@@ -22,19 +22,30 @@ sd_app_scan_t sd_app_scan_verdict(lichen_manifest_err_t err, lichen_manifest_t c
     return entry_ok ? SD_APP_SCAN_OK : SD_APP_SCAN_NO_ENTRY;
 }
 
-bool sd_app_push_is_manifest(char const *apps_dir, char const *path) {
+bool sd_app_push_target(char const *apps_dir, char const *path, char *id_out, size_t cap, bool *manifest) {
     size_t n = strlen(apps_dir);
-    if (!path || strncmp(path, apps_dir, n) != 0 || path[n] != '/') {
+    if (!path || !id_out || !cap || strncmp(path, apps_dir, n) != 0 || path[n] != '/') {
         return false;
     }
     char const *id  = path + n + 1;
     char const *end = strchr(id, '/');
-    size_t      len = end ? (size_t)(end - id) : 0;
-    return end && len > 0 && len < LICHEN_MANIFEST_ID_MAX && id[0] != '.' && strcmp(end + 1, "manifest") == 0;
+    if (!end || end == id || (size_t)(end - id) >= LICHEN_MANIFEST_ID_MAX || (size_t)(end - id) >= cap || id[0] == '.') {
+        return false;
+    }
+    char const *file = end + 1;
+    if (!*file || strchr(file, '/')) {
+        return false; // the directory itself, or the app's own data below it
+    }
+    memcpy(id_out, id, (size_t)(end - id));
+    id_out[end - id] = '\0';
+    if (manifest) {
+        *manifest = strcmp(file, "manifest") == 0;
+    }
+    return true;
 }
 
-bool sd_app_push_marks(sd_push_rec_t rec) {
-    return rec != SD_PUSH_DEAD;
+bool sd_app_rescan_wanted(bool is_manifest, sd_app_state_t state, bool gone, bool removing) {
+    return is_manifest && !gone && !removing && state != SD_APP_FAULTED;
 }
 
 uint32_t sd_app_task_budget(uint16_t internal_ram_kib) {

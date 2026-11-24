@@ -62,12 +62,12 @@ void sd_app_link(sd_app_rec_t *rec);
 bool sd_app_rescan_due(char *out, size_t cap);
 // The tile of id takes the caps and budgets of m (its name stays: the shell holds a pointer to it). False: a load began
 // meanwhile, so it is marked for its unload instead.
+void sd_app_rescan(char const *id); // loader task: the tile's manifest again
 bool sd_app_apply_manifest(char const *id, lichen_manifest_t const *m);
 
 // The scan (loader task): registers the tile of every app that passes, refuses and notifies the others.
 void sd_app_scan(void);
-// Reads the manifest of the tile id again (#553), loader task
-void sd_app_rescan(char const *id);
+
 // The trampolines of lichen_app_t (sd_app_loader.c)
 void sd_app_tramp_open(lv_obj_t *screen);
 bool sd_app_tramp_stop(void);

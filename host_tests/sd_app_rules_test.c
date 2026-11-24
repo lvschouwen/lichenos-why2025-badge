@@ -374,25 +374,31 @@ static void test_late_unload(void) {
     CHECK(!sd_app_late_begin(&t, 0));
 }
 
-// #553: which landed file asks for a rescan, and which apps take it
+// #553: which landed file is an app's manifest, and which apps read it
 static void test_push_rules(void) {
+    char id[LICHEN_MANIFEST_ID_MAX];
+    bool man = false;
     char const *dir = "/sd/lichen/apps";
-    CHECK(sd_app_push_is_manifest(dir, "/sd/lichen/apps/doom/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/doom/doom.elf")); // the ELF is read on the next open
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/doom/manifest.bak"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/doom/save/manifest")); // the app's data
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps//manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/.hid/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/apps/averyveryverylongid/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/appsx/doom/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/sd/lichen/messages/doom/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, "/storage/doom/manifest"));
-    CHECK(!sd_app_push_is_manifest(dir, NULL));
+    CHECK(sd_app_push_target(dir, "/sd/lichen/apps/doom/manifest", id, sizeof(id), &man) && !strcmp(id, "doom") && man);
+    CHECK(sd_app_push_target(dir, "/sd/lichen/apps/doom/doom.elf", id, sizeof(id), &man) && !strcmp(id, "doom") && !man);
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/save/manifest", id, sizeof(id), &man)); // the app's data
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps//manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/.hid/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/averyveryverylongid/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/appsx/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/messages/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/storage/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/manifest", id, 4, &man)); // does not fit the caller's buffer
 
-    CHECK(sd_app_push_marks(SD_PUSH_TILE));
-    CHECK(sd_app_push_marks(SD_PUSH_BUSY)); // loaded: read at its unload
-    CHECK(!sd_app_push_marks(SD_PUSH_DEAD));
+    CHECK(sd_app_rescan_wanted(true, SD_APP_TILE, false, false));
+    CHECK(sd_app_rescan_wanted(true, SD_APP_LOADED, false, false)); // read at its unload
+    CHECK(sd_app_rescan_wanted(true, SD_APP_LOADING, false, false));
+    CHECK(sd_app_rescan_wanted(true, SD_APP_UNLOADING, false, false));
+    CHECK(!sd_app_rescan_wanted(false, SD_APP_TILE, false, false)); // the ELF is read on the next open
+    CHECK(!sd_app_rescan_wanted(true, SD_APP_FAULTED, false, false));
+    CHECK(!sd_app_rescan_wanted(true, SD_APP_TILE, true, false));
+    CHECK(!sd_app_rescan_wanted(true, SD_APP_TILE, false, true));
 }
 
 int main(void) {
