@@ -51,6 +51,7 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-23)
-- Wave 1 (#529, #534, #533) merged at 13e90fce; its bench waits for #537 (exit-park fix + sdapps/benchtest, impl-533 in wt-2). Bench plan: from the bench-prep agent (21 steps); NEEDS-LUCAS: interrupted push, card pull, panel dim, #523 steps 3/7.
-- Wave 2 building, merges held until the wave-1 bench: #525 impl-525 in wt-1, #524 impl-524 in wt-3. #536 (loader frees app leftovers) runs after #537 (same file).
+## Live (2026-11-24)
+- No agents and no claimed slots (wt-1..6 free). The badge runs fw-2d1f1e1e (valid). The card holds DOOM from ac1e7554, freedoom1.wad (Freedoom 0.13.0) and hello. main == origin/main.
+- Next: the wave-1 bench (#529, #533, #534, #537, plus the #523 rest) with sdapps/benchtest, one script, then close the wave. NEEDS-LUCAS: #525 item 6 (card pull, checklist on the issue), #523 steps 3/7.
+- Then wave 3 of the SD apps: #541 (late unload, a reviewer pass), #536 and #538 (same loader files: run them in sequence), #526 (DOOM video and keys). The port ideas are #542.
