@@ -45,6 +45,32 @@ sd_app_scan_t sd_app_scan_verdict(lichen_manifest_err_t err, lichen_manifest_t c
 void sd_app_scan_reason(sd_app_scan_t v, lichen_manifest_err_t err, lichen_manifest_t const *m, char const *dir_id,
                         char *out, size_t cap);
 
+// ---- a file pushed into an app's directory (#553) ----------------------------------------------------------------
+
+// Which app a file that landed on the card belongs to: path is its /sd path, apps_dir the apps folder (SD_APPS_DIR). True
+// when it is a file directly in <apps_dir>/<id>/ (id into id_out, cap bytes; manifest says whether it is the manifest). Files
+// deeper down (the app's data) and everything outside the apps folder are not an app's definition: false.
+bool sd_app_push_target(char const *apps_dir, char const *path, char *id_out, size_t cap, bool *manifest);
+
+typedef enum {
+    SD_PUSH_NONE,      // no record yet (a new app, or a card with a bad one earlier)
+    SD_PUSH_TILE,      // a tile, nothing loaded
+    SD_PUSH_BUSY,      // loading, loaded or unloading: its limits are in use
+    SD_PUSH_DEAD,      // faulted, gone or leaving with the card
+} sd_push_rec_t;
+
+typedef enum {
+    SD_PUSH_IGNORE, // nothing to do (the ELF is read on the next open anyway)
+    SD_PUSH_SCAN,   // scan the directory as at a mount: it may become a tile
+    SD_PUSH_RESCAN, // reparse the manifest of the tile and take its caps and budgets
+    SD_PUSH_DEFER,  // the same, at the app's unload
+    SD_PUSH_KEEP,   // cannot change: a faulted app keeps its image and limits until the badge restarts
+} sd_push_action_t;
+
+// What a landed file does, from whether it is the manifest and the state of the app's record. A new app is tried by any file
+// (the entry may be what was missing), an existing one only by its manifest.
+sd_push_action_t sd_app_push_action(bool manifest, sd_push_rec_t rec);
+
 // ---- one app ------------------------------------------------------------------------------------------------------
 
 typedef enum { SD_APP_TILE, SD_APP_LOADING, SD_APP_LOADED, SD_APP_UNLOADING, SD_APP_FAULTED } sd_app_state_t;

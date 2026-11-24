@@ -37,6 +37,7 @@ typedef struct sd_app_rec {
     bool               free_pending; // unregister is done but a screen still exists: the last delete event posts the free
     bool               stop_called;   // the stop hook was called for this load (an update's stop, or the unload's); the stop task is booked under the app, so the unload waits for it
     uint32_t           fault_ms; // lichen_sys_life_now_ms when a resumable unload gave up (sd_app_lock)
+    bool               rescan_pending; // a manifest landed while the app ran (#553): reparsed when it is a tile again (sd_app_lock)
     bool               gone;     // lichen_unregister_app was called
     lichen_sd_hooks_t  hooks;    // a copy, valid while hooks_set; called only while sd_app_hooks_live
     void              *screen;   // lv_obj_t: the screen waiting for the hooks' open; LVGL task only
@@ -56,6 +57,18 @@ sd_app_rec_t *sd_app_find(lichen_ctx_t ctx);
 bool sd_app_known(char const *id);
 // Adds a made, registered record to the list.
 void sd_app_link(sd_app_rec_t *rec);
+
+// A manifest landed while the app's limits were in use (#553): remembered, reparsed at its unload (loader task).
+void sd_app_rescan_mark(char const *id);
+// What the record of id is, for sd_app_push_action.
+sd_push_rec_t sd_app_push_rec(char const *id);
+// The tile of id takes the caps and budgets of m (its name stays: the shell holds a pointer to it). False: it is no tile
+// any more (a load began meanwhile), so the rescan was marked for its unload instead.
+bool sd_app_apply_manifest(char const *id, lichen_manifest_t const *m);
+// One app with a rescan marked that is a tile again: its id into out (cleared from the mark). False: none.
+bool sd_app_rescan_due(char *out, size_t cap);
+// A file landed in an app's directory (#553): the scan's side of the rescan (loader task)
+void sd_app_rescan(char const *id, bool manifest);
 
 // The scan (loader task): registers the tile of every app that passes, refuses and notifies the others.
 void sd_app_scan(void);

@@ -401,6 +401,13 @@ an API change.
 - **Tile without code.** The mount scan reads manifests only; the tile (an initial in a square) is on Home while the
   card is in. A refused app (bad manifest, API newer than the OS or of another major, an id that a built-in has, no
   entry file) gets one notification and one log line per scan.
+- **A manifest pushed later (#553).** When a file lands in `/sd/lichen/apps/<id>/` through the update server, the loader
+  reads that app again on its own task. A new `manifest` for a tile replaces its caps, internal RAM and PSRAM budgets
+  (and the PSRAM quota) at once; its name stays until the next mount. A bad new manifest is refused with one
+  notification and the old one stays. While the app is loading, loaded or unloading the new manifest is read when it is
+  a tile again. A faulted app keeps its limits until the badge restarts. A file in a directory with no tile (a new app)
+  makes the loader try it like a mount scan would; any other file of an existing app (the ELF) needs nothing, it is read
+  at the next open. Files below the app's directory (its data) are not looked at.
 - **Load on open, unload on close.** Opening the tile shows "Loading..." and, after the open animation, the OS loads the
   ELF, runs `main()` on its own task and calls `open` into the screen. Under the on-air hold the open is refused with a
   message. When the app's last screen closes the OS calls `stop`, waits for the app's tasks (main() included) to return,

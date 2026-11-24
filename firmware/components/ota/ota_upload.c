@@ -166,6 +166,7 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
         return false;
     }
     ESP_LOGI(TAG, "wrote %s (%zu bytes)", n->path, len);
+    sd_file_landed(n->path); // #553: the SD apps' loader rescans a manifest that landed (the card's lock is given by now)
     ota_respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
     return true;
 }

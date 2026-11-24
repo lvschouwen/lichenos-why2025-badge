@@ -479,6 +479,19 @@ void sd_observe(void (*fn)(sd_state_t state)) {
     atomic_store(&observer, fn);
 }
 
+static void (*_Atomic file_observer)(char const *);
+
+void sd_observe_files(void (*fn)(char const *path)) {
+    atomic_store(&file_observer, fn);
+}
+
+void sd_file_landed(char const *path) {
+    void (*fn)(char const *) = atomic_load(&file_observer);
+    if (fn && path) {
+        fn(path);
+    }
+}
+
 // After the batch mutex is given: a mount or an unmount is told once, outside every lock the card holds
 static void tell(sd_state_t state) {
     void (*fn)(sd_state_t) = atomic_load(&observer);

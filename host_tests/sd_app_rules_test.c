@@ -374,7 +374,36 @@ static void test_late_unload(void) {
     CHECK(!sd_app_late_begin(&t, 0));
 }
 
+// #553: which landed file asks for which rescan
+static void test_push_rules(void) {
+    char id[LICHEN_MANIFEST_ID_MAX];
+    bool man = false;
+    char const *dir = "/sd/lichen/apps";
+    CHECK(sd_app_push_target(dir, "/sd/lichen/apps/doom/manifest", id, sizeof(id), &man) && !strcmp(id, "doom") && man);
+    CHECK(sd_app_push_target(dir, "/sd/lichen/apps/doom/doom.elf", id, sizeof(id), &man) && !strcmp(id, "doom") && !man);
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/save/manifest", id, sizeof(id), &man)); // the app's data
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps//manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/.hid/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/averyveryverylongid/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/appsx/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/messages/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/storage/doom/manifest", id, sizeof(id), &man));
+    CHECK(!sd_app_push_target(dir, "/sd/lichen/apps/doom/manifest", id, 4, &man)); // does not fit the caller's buffer
+
+    CHECK(sd_app_push_action(true, SD_PUSH_TILE) == SD_PUSH_RESCAN);
+    CHECK(sd_app_push_action(false, SD_PUSH_TILE) == SD_PUSH_IGNORE); // the ELF is read on the next open
+    CHECK(sd_app_push_action(true, SD_PUSH_BUSY) == SD_PUSH_DEFER);   // loaded: at its unload
+    CHECK(sd_app_push_action(false, SD_PUSH_BUSY) == SD_PUSH_IGNORE);
+    CHECK(sd_app_push_action(true, SD_PUSH_NONE) == SD_PUSH_SCAN);    // a new app
+    CHECK(sd_app_push_action(false, SD_PUSH_NONE) == SD_PUSH_SCAN);   // its entry may have been the missing piece
+    CHECK(sd_app_push_action(true, SD_PUSH_DEAD) == SD_PUSH_KEEP);
+    CHECK(sd_app_push_action(false, SD_PUSH_DEAD) == SD_PUSH_IGNORE);
+}
+
 int main(void) {
+    test_push_rules();
     test_budget();
     test_late_unload();
     test_scan();

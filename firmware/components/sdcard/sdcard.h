@@ -48,6 +48,12 @@ void sd_end(sd_io_t result);
 // (a format reports the mount again). Any task.
 void sd_observe(void (*fn)(sd_state_t state));
 
+// A file landed on the card (the update server swapped it into place, #553): fn(path) with its /sd path, after the card's
+// batch lock is given. One observer (the SD apps' loader); NULL takes it away. fn runs on the writer's task and only posts.
+// Written by whoever puts a file there with a name the user chose (sd_file_landed); the temp files never come here.
+void sd_observe_files(void (*fn)(char const *path));
+void sd_file_landed(char const *path);
+
 // Cached state, sizes and card details; never touches the card, safe from LVGL. Free space is refreshed at mount,
 // after every sd_end and by "fw sd".
 void sd_info(sd_info_t *out);
