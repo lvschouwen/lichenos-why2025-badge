@@ -22,6 +22,11 @@ extern "C" {
 
 // The most stack an app's main() task may ask for in its manifest (KiB); 0 means the default
 #define SD_APP_STACK_KIB_MAX 16
+// The internal stack budget (KiB) of an app that declares no internal_ram_kib (#538): main + stop + one task at the cap
+#define SD_APP_RAM_KIB_DEFAULT 24
+
+// The budget in bytes for the tasks of an app with this internal_ram_kib: the declared value, the default for 0
+uint32_t sd_app_task_budget(uint16_t internal_ram_kib);
 
 typedef enum {
     SD_APP_SCAN_OK,

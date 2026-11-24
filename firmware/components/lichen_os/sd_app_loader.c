@@ -112,15 +112,26 @@ sd_app_rec_t *sd_app_find(lichen_ctx_t ctx) {
     return r;
 }
 
-// #538: the limits of the tasks an SD app's context starts (lichen_os_task_limits). internal_ram_kib = 0 declares no
-// budget, so only the per-stack cap applies
+// #538: the limits of the tasks an SD app's context starts (lichen_os_task_limits). Also for a record that is gone (a start
+// from a delete callback after the card left), so that start is not unlimited. internal_ram_kib = 0 gets the default budget
 static bool task_limits(lichen_ctx_t ctx, uint32_t *stack_max, uint32_t *budget) {
-    sd_app_rec_t *rec = sd_app_find(ctx);
-    if (!rec) {
+    if (!g_mu || ctx == LICHEN_CTX_NONE) {
+        return false;
+    }
+    sd_app_lock();
+    sd_app_rec_t const *found = NULL;
+    for (sd_app_rec_t const *r = g_recs; r; r = r->next) {
+        if (r->ctx == ctx && (!found || found->gone)) {
+            found = r; // a live record wins over a gone one
+        }
+    }
+    uint16_t kib = found ? found->m.internal_ram_kib : 0;
+    sd_app_unlock();
+    if (!found) {
         return false;
     }
     *stack_max = SD_APP_STACK_KIB_MAX * 1024u;
-    *budget    = (uint32_t)rec->m.internal_ram_kib * 1024u;
+    *budget    = sd_app_task_budget(kib);
     return true;
 }
 

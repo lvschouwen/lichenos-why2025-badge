@@ -28,6 +28,13 @@ static lichen_manifest_t good(void) {
     return m;
 }
 
+static void test_budget(void) {
+    CHECK(sd_app_task_budget(0) == 24u * 1024u); // not declared: main 4 + stop 4 + one 16 KiB task
+    CHECK(sd_app_task_budget(24) == 24u * 1024u);
+    CHECK(sd_app_task_budget(8) == 8u * 1024u); // declared: as is, even below the default
+    CHECK(sd_app_task_budget(48) == 48u * 1024u);
+}
+
 static void test_scan(void) {
     lichen_manifest_t m = good();
     char              why[96];
@@ -368,6 +375,7 @@ static void test_late_unload(void) {
 }
 
 int main(void) {
+    test_budget();
     test_late_unload();
     test_scan();
     test_open();

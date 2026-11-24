@@ -22,6 +22,10 @@ sd_app_scan_t sd_app_scan_verdict(lichen_manifest_err_t err, lichen_manifest_t c
     return entry_ok ? SD_APP_SCAN_OK : SD_APP_SCAN_NO_ENTRY;
 }
 
+uint32_t sd_app_task_budget(uint16_t internal_ram_kib) {
+    return (internal_ram_kib ? internal_ram_kib : SD_APP_RAM_KIB_DEFAULT) * 1024u;
+}
+
 void sd_app_scan_reason(sd_app_scan_t v, lichen_manifest_err_t err, lichen_manifest_t const *m, char const *dir_id,
                         char *out, size_t cap) {
     if (!out || !cap) {
