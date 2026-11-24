@@ -52,7 +52,7 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-24)
-- Agents: impl-543 in wt-1 (fix/543-sd-stream-card-gone, then a reviewer pass), impl-544 in wt-2 (fix/544-file-push-failed-text). wt-3..6 free. The badge runs fw-2d1f1e1e (valid). The card holds DOOM, freedoom1.wad, hello and benchtest (1000 Hz builds). main == origin/main.
+- No agents and no claimed slots (wt-1..6 free). The badge runs fw-2d1f1e1e (valid). The card holds DOOM, freedoom1.wad, hello and benchtest (1000 Hz builds). main == origin/main.
 - Wave 1 is benched and closed. NEEDS-LUCAS: #525 item 6 (card pull, checklist on the issue), #523 steps 3/7.
-- Before wave 3: the bench bugs #543 (DMA lost on a mid-stream unmount; the stream outlives the card) and #544 (wrong failed text for a file push).
+- #543 (a) and #544 merged at e4507b9c, relabelled, NOT flashed yet (the Wi-Fi flash was refused by the permission check: owner flashes or allows). Bench after the flash: mid-stream unmount -> one W `SD card went`, no 409 after it, `fw mem` before/after (the 1544 B, #543 b); a sender-cut file push shows `Not received: the sender stopped`. Then close #544, and #543 or split (b).
 - Then wave 3 of the SD apps: #541 (late unload, a reviewer pass), #536 and #538 (same loader files: run them in sequence), #526 (DOOM video and keys). The port ideas are #542.
