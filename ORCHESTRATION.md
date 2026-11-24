@@ -52,10 +52,11 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-24, before a /clear)
-- Badge runs fw-3729e96f (ota_0 valid) + DOOM ELF/manifest from main cde1a5e4 on the card. Unexplained SW reset (reason 3) around 17:47Z, no panic: asked the owner whether he restarted it; if not, open an issue.
+- Badge runs fw-3729e96f (ota_0 valid) + DOOM ELF/manifest from main cde1a5e4 on the card.
 - Merged since the flash (next flash): #541 (late unload), #550 (import gate), #552 (manifest gate). Bench owed on the next flash: #541 (stop overrun -> "unloaded late"), #548 bar (screen awake: wake it first), #536.
-- #536 built: ce7fc19e in wt-1 (fix/536-free-leftover-blocks, impl-541 idle); NEXT: Opus lichen-reviewer pass, then merge-one.sh. Then #538, then #553 (manifest rescan on push), same loader files, in sequence.
+- #536 built: ce7fc19e in wt-1 (fix/536-free-leftover-blocks, impl-541 idle); reviewed (H1 double free on card pull, M1-M3); impl-541 FIXING in wt-1; then delta re-review, merge-one.sh. Then #538, then #553 (manifest rescan on push), same loader files, in sequence.
 - #547 "by <task>" tag in fw mem diff MERGED (ring in PSRAM, exact ptr match). On the next flash, bench: mark, sdapp-push doom, `fw mem diff 4096`, send the task name to impl-547 for the fix.
-- #527 due (DOOM 15 fps, not full screen); points on #527. #551 (file-push hint text) open.
+- #551 RUNNING: impl-551 (Sonnet) in wt-2, fix/551-file-push-hint.
+- #527 due (DOOM 15 fps, not full screen); points on #527.
 - NEEDS-LUCAS: #546 physical Esc (bright/dimmed), #549 decision, DOOM in hand (hold-Esc, WAD bar, card pull, feel), #527 scaling/refresh decision, #126 two-DM stack, #525 item 6, #523 steps 3/7, #545.
 - Bench helper: scratchpad fw.sh copy at ~/.config path IP (see Bench); remount after a manifest push (#553).
