@@ -111,7 +111,7 @@ sd_next_t sd_app_load_done(sd_app_t *a, bool ok) {
 }
 
 bool sd_app_load_skip(sd_app_t *a) {
-    if (a->state != SD_APP_LOADING || !a->closing || a->removing) {
+    if (a->state != SD_APP_LOADING || !a->closing || a->screens > 0 || a->removing) {
         return false;
     }
     a->state   = SD_APP_TILE;

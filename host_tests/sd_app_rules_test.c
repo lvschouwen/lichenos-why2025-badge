@@ -245,6 +245,8 @@ static void test_load_skip(void) {
     CHECK(sd_app_load_skip(&a) && a.state == SD_APP_TILE && !a.closing);
     sd_app_t open = {.state = SD_APP_LOADING, .screens = 1};
     CHECK(!sd_app_load_skip(&open) && open.state == SD_APP_LOADING);
+    sd_app_t shown = {.state = SD_APP_LOADING, .screens = 1, .closing = true}; // closing alone is not enough
+    CHECK(!sd_app_load_skip(&shown) && shown.state == SD_APP_LOADING);
     sd_app_t rm = {.state = SD_APP_LOADING, .closing = true, .removing = true};
     CHECK(!sd_app_load_skip(&rm) && rm.state == SD_APP_LOADING);
     sd_app_t l = {.state = SD_APP_LOADED, .closing = true};
