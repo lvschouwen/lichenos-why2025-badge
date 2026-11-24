@@ -238,6 +238,8 @@ build_sdapps() {
         cp "$out/$id.app.elf" "$out/app.elf"
         cp "$app/manifest" "$out/manifest"
     done
+    # Every symbol an app's ELF imports must be in the export table, or the loader refuses it on the badge (#550)
+    python3 -I "$repo/tools/check_sdapp_imports.py" "$here"/build/sdapps/*/app.elf
 }
 
 if [ "$building" = 1 ] && [ "$release" = 1 ]; then

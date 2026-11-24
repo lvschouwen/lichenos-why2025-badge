@@ -2991,3 +2991,5 @@ add_executable(doom_logic_test
 target_include_directories(doom_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/doom/main)
 target_compile_options(doom_logic_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME doom_logic_test COMMAND doom_logic_test)
+
+add_test(NAME check_sdapp_imports_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_sdapp_imports_test.py)
