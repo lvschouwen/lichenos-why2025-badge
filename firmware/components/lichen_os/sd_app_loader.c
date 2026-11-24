@@ -538,10 +538,9 @@ static void sweep_blocks(sd_app_rec_t *rec) {
     sweep_lock(NULL);
     ptr_map_trim(&g_blocks, &blk_env);
     sweep_unlock(NULL);
-    if (n && sw.unsafe) {
-        ESP_LOGE(TAG, "%s: %u leftover blocks leaked (a free ran where they could not be tracked)", rec->m.id, (unsigned)n);
-    } else if (n) {
-        ESP_LOGW(TAG, "%s: freed %u leftover blocks (%u B)", rec->m.id, (unsigned)n, (unsigned)sw.bytes);
+    if (n) { // a leaked block (a free ran where it could not be tracked) shows as 0 B
+        ESP_LOGW(TAG, "%s: freed %u leftover blocks (%u B)%s", rec->m.id, (unsigned)n, (unsigned)sw.bytes,
+                 sw.unsafe ? ", not freed: untracked frees" : "");
     }
 }
 
