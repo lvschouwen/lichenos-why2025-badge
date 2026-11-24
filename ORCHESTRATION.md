@@ -53,8 +53,8 @@ when the run ends. The old wave logs are in git history (before #483).
 
 ## Live (2026-11-24, before a /clear)
 - Badge runs fw-3729e96f (ota_0 valid) + DOOM ELF/manifest from main cde1a5e4 on the card.
-- Merged since the flash (next flash): #541 (late unload), #550 (import gate), #552 (manifest gate), #551 (file hint), #536 (block map). Bench owed on the next flash: #541 (stop overrun -> "unloaded late"), #548 bar (screen awake: wake it first), #536, #551 (stopped file push + failed fw: hint wraps, ui overflow 0).
-- #538 RUNNING: impl-538 (Opus) in wt-1, feat/538-sd-app-stack-cap; then review, merge; then #553; same loader files, in sequence.
+- Merged since the flash (next flash): #541 (late unload), #550 (import gate), #552 (manifest gate), #551 (file hint), #536 (block map), #538 (stack cap). Bench owed on the next flash: #541 (stop overrun -> "unloaded late"), #548 bar (screen awake: wake it first), #536, #538 (DOOM launches, no "over the app's" line, DMA gate), #551 (stopped file push + failed fw: hint wraps, ui overflow 0).
+- #553 RUNNING: impl-553 (Opus) in wt-1, fix/553-manifest-rescan; then review, merge.
 - #547 "by <task>" tag in fw mem diff MERGED (ring in PSRAM, exact ptr match). On the next flash, bench: mark, sdapp-push doom, `fw mem diff 4096`, send the task name to impl-547 for the fix.
 - #527 due (DOOM 15 fps, not full screen); points on #527.
 - NEEDS-LUCAS: #546 physical Esc (bright/dimmed), #549 decision, DOOM in hand (hold-Esc, WAD bar, card pull, feel), #527 scaling/refresh decision, #126 two-DM stack, #525 item 6, #523 steps 3/7, #545.
