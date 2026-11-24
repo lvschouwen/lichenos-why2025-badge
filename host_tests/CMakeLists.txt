@@ -2993,3 +2993,19 @@ target_compile_options(doom_logic_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME doom_logic_test COMMAND doom_logic_test)
 
 add_test(NAME check_sdapp_imports_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_sdapp_imports_test.py)
+
+# Every sdapps/<id>/manifest through the real parser (#552); the glob is re-run when an app is added
+file(GLOB SDAPP_MANIFESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/*/manifest)
+add_executable(sdapp_manifests_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sdapp_manifests_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_manifest.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_caps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
+)
+target_include_directories(sdapp_manifests_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(sdapp_manifests_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sdapp_manifests_test COMMAND sdapp_manifests_test ${SDAPP_MANIFESTS})

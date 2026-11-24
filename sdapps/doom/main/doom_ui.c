@@ -271,7 +271,7 @@ bool doom_ui_open(lv_obj_t *screen) {
     if (!lichen_keys_raw_take(on_key, NULL)) {
         lv_timer_delete(ui.timer);
         ui.timer = NULL;
-        return fail_open("The keys are in use by another app. Close it and open DOOM again.");
+        return fail_open("DOOM could not take the keyboard (another app may hold it). Close it and open DOOM again.");
     }
     // only with the keys held does Esc mean the game's menu; the failed screens above leave Esc as the OS's own
     shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
