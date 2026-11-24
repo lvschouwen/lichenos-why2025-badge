@@ -51,11 +51,13 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-24, before a /clear)
-- Badge runs fw-3729e96f (ota_0 valid) + DOOM ELF/manifest from main cde1a5e4 on the card.
-- Merged since the flash (next flash): #541 (late unload), #550 (import gate), #552 (manifest gate), #551 (file hint), #536 (block map), #538 (stack cap), #553 (manifest rescan). Bench owed on the next flash: #541 (stop overrun -> "unloaded late"), #548 bar (screen awake: wake it first), #536, #538 (DOOM launches, no "over the app's" line, DMA gate), #553 (push a manifest: fw app caps, while DOOM runs, bad one, ELF only), #551 (stopped file push + failed fw: hint wraps, ui overflow 0).
-- Loader chain done (#536, #538, #553 merged). NEXT: relabel build, flash the wave, bench script from the issues' bench steps.
-- #547 "by <task>" tag in fw mem diff MERGED (ring in PSRAM, exact ptr match). On the next flash, bench: mark, sdapp-push doom, `fw mem diff 4096`, send the task name to impl-547 for the fix.
-- #527 DECIDED (latest comment): 4:3 720x540 via PPA + direct-panel foreground path now. NEXT after the wave bench: Plan agent (Opus, risk areas), plan on #527, owner go.
-- NEEDS-LUCAS: #549 decision, DOOM in hand (hold-Esc, WAD bar, card pull; feel = good), #126 two-DM stack, #525 item 6, #523 steps 3/7, #545.
-- Bench helper: scratchpad fw.sh copy at ~/.config path IP (see Bench).
+## Live (2026-11-24, wave bench fw-5084772f)
+- Badge runs fw-5084772f (ota_1 valid). Wave bench done: #538 #536 #548 #553 closed; #551 file half pass.
+- Agents running: impl-547 wt-1 fix/547-owner-tag-poison (diff walker vs hook ptr: poison offset), impl-549 wt-2
+  feat/549-esc-loading-wake, impl-554 wt-3 fix/554-doom-hint-pad, impl-541 wt-4 test/541-benchtest-slow-stop
+  (bench tool for the "unloaded late" proof). Review 549 (raw-key path) before merge; then merge, flash, bench.
+- Owed on the next flash: #541 (benchtest slowstop flag -> "unloaded late"), #547 tag names the 6144/7680 B holders
+  (7680 = sdio_read), #549, #554 screenshot, #551 firmware half (a stopped ota-firmware, needs Lucas `!`).
+- NEEDS-LUCAS: #126 launch the MeshCore peer session (Heltec DMs, main drives the badge); #523 step 3 (glance at
+  the yellow flash) and step 7 (`owner-onair.sh sync` / `off` around a hello open); #391, #281, #237 (older).
+- #527 next after this wave: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
