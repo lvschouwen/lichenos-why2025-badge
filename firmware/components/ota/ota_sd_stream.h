@@ -55,3 +55,8 @@ bool ota_sd_stream_accept(ota_sd_stream_t *s, size_t len);
 
 // SHA-256 of everything accepted, only once it is the whole file; false before that
 bool ota_sd_stream_final(ota_sd_stream_t const *s, uint8_t digest[SHA256_DIGEST_LEN]);
+
+// The card an SD0: stream writes to went away (unmounted by hand or pulled) or was mounted again since the stream began
+// (generation grows on every mount, a re-inserted card may not be the same one): the stream ends at once instead of
+// answering 409 to everyone until the idle drop (#543)
+bool ota_sd_stream_card_gone(bool mounted, uint32_t generation_now, uint32_t generation_at_begin);

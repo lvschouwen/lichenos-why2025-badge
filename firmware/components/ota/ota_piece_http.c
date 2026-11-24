@@ -50,6 +50,7 @@ static struct {
 } staged;
 
 static ota_sd_stream_t sd_stream;
+static uint32_t        sd_generation; // the card's mount generation when the stream began (#543)
 
 #define SD_WAIT_MS        2000
 #define SD_FINISH_WAIT_MS 10000 // the swap is the last step: waiting is cheaper than losing the whole upload
@@ -76,9 +77,20 @@ static void orphan_sweep(void) {
     }
 }
 
+// An SD0: stream whose card went: ended at once (the temp file is left to the next push's sweep, sd_abandon notes it)
+static bool sd_stream_card_gone(void) {
+    if (!staged.active || !staged.sd) {
+        return false;
+    }
+    sd_info_t info;
+    sd_info(&info);
+    return ota_sd_stream_card_gone(sd_mounted(), info.generation, sd_generation);
+}
+
 static void sd_abandon(void) {
     if (staged.temp_live) {
-        if (sd_begin(SD_WAIT_MS)) {
+        // A card that went (or came back as a new mount) is not unlinked on: the next sweep decides, by name
+        if (!sd_stream_card_gone() && sd_begin(SD_WAIT_MS)) {
             unlink(staged.temp);
             sd_end(SD_IO_NEUTRAL);
         } else {
@@ -106,8 +118,13 @@ static void staged_reset(void) {
 
 void ota_piece_expire(bool now) {
     orphan_sweep();
-    if (staged.active && (now || ota_now_s() - staged.last_s > PIECE_IDLE_S)) {
-        ESP_LOGW(TAG, "upload in pieces abandoned at %zu of %zu bytes: dropped", staged.got, staged.total);
+    bool gone = sd_stream_card_gone();
+    if (staged.active && (now || gone || ota_now_s() - staged.last_s > PIECE_IDLE_S)) {
+        if (gone) {
+            ESP_LOGW(TAG, "SD card went during an upload at %zu of %zu bytes: dropped", staged.got, staged.total);
+        } else {
+            ESP_LOGW(TAG, "upload in pieces abandoned at %zu of %zu bytes: dropped", staged.got, staged.total);
+        }
         hook_end(false, false);
         staged_reset();
     }
@@ -284,6 +301,9 @@ static bool sd_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     }
     int err = f ? 0 : errno;
     bool ok = f && fclose(f) == 0;
+    sd_info_t info;
+    sd_info(&info); // inside the lock: no remount can slip in between the open and this reading
+    sd_generation = info.generation;
     sd_end(ok || dir ? SD_IO_OK : sd_io_from_errno(err));
     if (!ok) {
         ota_change_end(false);
@@ -665,6 +685,10 @@ bool ota_piece_staged_is(ota_request_t const *req, bool held_file, char const *p
 // A request that would end or disturb the SD0: upload under way is answered 409 (and its body dropped); true = refused
 bool ota_piece_sd_refused(int fd, ota_request_t const *req, size_t pre_len) {
     if (!staged.active || !staged.sd) {
+        return false;
+    }
+    if (sd_stream_card_gone()) {
+        ota_piece_expire(false); // ends the stream: this request then meets none
         return false;
     }
     bool same = req->has_path && strcmp(req->path, staged.path) == 0;

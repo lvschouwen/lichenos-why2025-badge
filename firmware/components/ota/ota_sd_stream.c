@@ -31,6 +31,10 @@ bool ota_sd_piece_ok(long long len) {
     return len > 0 && len <= OTA_SD_PIECE_MAX;
 }
 
+bool ota_sd_stream_card_gone(bool mounted, uint32_t generation_now, uint32_t generation_at_begin) {
+    return !mounted || generation_now != generation_at_begin;
+}
+
 void ota_sd_stream_begin(ota_sd_stream_t *s, size_t total) {
     sha256_init(&s->run);
     s->cand  = s->run;

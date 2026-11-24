@@ -107,6 +107,12 @@ int main(void) {
     CHECK(piece(&s, data, 500, 500, true));
     CHECK(ota_sd_stream_final(&s, got) && memcmp(got, want, 32) != 0);
 
+    // The card going ends the stream: unmounted, or mounted again since it began (#543)
+    CHECK(!ota_sd_stream_card_gone(true, 4, 4));
+    CHECK(ota_sd_stream_card_gone(false, 4, 4));
+    CHECK(ota_sd_stream_card_gone(true, 5, 4));
+    CHECK(ota_sd_stream_card_gone(false, 5, 4));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
