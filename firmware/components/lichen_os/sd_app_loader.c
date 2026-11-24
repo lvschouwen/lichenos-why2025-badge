@@ -87,8 +87,21 @@ static _Atomic bool g_rescan_queued; // #553: a manifest landed and the loader h
 void sd_app_lock(void) {
     xSemaphoreTake(g_mu, portMAX_DELAY);
 }
+// Is an app's Loading screen up? Written at every unlock (each state change is made under the lock), read lock-free by
+// the keyboard task's wake hook (#549)
+static _Atomic bool g_loading;
+
 void sd_app_unlock(void) {
+    bool any = false;
+    for (sd_app_rec_t const *r = g_recs; r && !any; r = r->next) {
+        any = r->sda.state == SD_APP_LOADING && r->sda.screens > 0 && !r->gone;
+    }
+    atomic_store_explicit(&g_loading, any, memory_order_relaxed);
     xSemaphoreGive(g_mu);
+}
+
+bool lichen_sys_screen_loading(void) {
+    return atomic_load_explicit(&g_loading, memory_order_relaxed);
 }
 
 // Is there an app with this id that is not gone (a faulted one stays registered until the badge restarts)?

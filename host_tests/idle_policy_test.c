@@ -132,6 +132,14 @@ int main(void) {
     CHECK(idle_key_swallowed(idle_stage(IDLE_DIM, true, false, false)));
     CHECK(idle_key_swallowed(idle_stage(IDLE_OFF, true, false, false)));
 
+    // Esc bypasses the wake swallow only while a screen is loading (#549)
+    CHECK(idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), true, false));
+    CHECK(!idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), true, true));
+    CHECK(idle_wake_swallowed(idle_stage(IDLE_OFF, false, false, false), false, true));
+    CHECK(!idle_wake_swallowed(idle_stage(IDLE_DIM, true, true, false), true, true));
+    CHECK(idle_wake_swallowed(idle_stage(IDLE_DIM, true, false, false), false, true));
+    CHECK(!idle_wake_swallowed(idle_stage(IDLE_BRIGHT, false, false, false), false, false));
+
     // The screensaver is the dim stage when it is on (#75); off is still off
     idle_stage_t st = idle_stage(IDLE_BRIGHT, true, true, false);
     CHECK(st.level == IDLE_BRIGHT && !st.saver && !st.lock);

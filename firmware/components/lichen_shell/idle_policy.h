@@ -70,6 +70,11 @@ unsigned idle_card_count(unsigned count, int delta);
 // plain dimmed screen is still readable: its key is delivered.
 bool idle_key_swallowed(idle_stage_t shown);
 
+// The same for one physical key (#549): while a screen is loading (an SD app's "Loading...") Esc is not swallowed, so one
+// press closes it instead of waking the screen and letting the app open anyway. Every other key, and Esc at any other
+// time, follows idle_key_swallowed.
+bool idle_wake_swallowed(idle_stage_t shown, bool is_esc, bool loading);
+
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s);
 
 // The choices a Settings row cycles through (Enter): the next one after current, wrapping; a value not in the list

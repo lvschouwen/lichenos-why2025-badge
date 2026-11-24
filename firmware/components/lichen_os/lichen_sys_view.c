@@ -130,7 +130,7 @@ void lichen_sys_keys_hook_remove(key_raw_fn fn, void *arg) {
     keyboard_raw_remove(fn, arg);
 }
 
-void lichen_sys_keys_set_wake(bool (*fn)(void)) {
+void lichen_sys_keys_set_wake(bool (*fn)(uint8_t key)) {
     keyboard_set_wake_hook(fn);
 }
 

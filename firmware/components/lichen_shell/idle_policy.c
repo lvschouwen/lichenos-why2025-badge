@@ -63,6 +63,10 @@ bool idle_key_swallowed(idle_stage_t shown) {
     return shown.level == IDLE_OFF || shown.saver;
 }
 
+bool idle_wake_swallowed(idle_stage_t shown, bool is_esc, bool loading) {
+    return idle_key_swallowed(shown) && !(is_esc && loading);
+}
+
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s) {
     return (idle_times_t){.dim_s = dim_10s * 10u, .off_s = off_10s * 10u};
 }

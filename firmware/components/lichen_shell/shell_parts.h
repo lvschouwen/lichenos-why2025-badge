@@ -130,6 +130,7 @@ void screen_idle_start(void); // once the keyboard is attached: the key hook and
 // A key press reached the badge (the keyboard task's wake hook, "fw keys send" included, #375): restarts the idle clock and
 // lights the screen. True when the key only woke a dark screen and must not act.
 bool screen_idle_key(void);
+bool screen_idle_wake(uint8_t code); // the keyboard's wake hook: Esc while a screen loads is not swallowed (#549)
 // Settings > Display changed the times, or the screensaver / lock switches (#75)
 void screen_idle_reload(void);
 // "fw screensaver test" (#75): the saver now, as if the dim time had come, until the next key

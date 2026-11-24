@@ -18,7 +18,7 @@ void keyboard_set_reset_hook(void (*fn)(void));
 
 // Screen timeout (#43): called first for every key press, before the raw hooks. True = the press only woke the screen:
 // no raw hook and not LVGL sees it, nor its release. Keyboard task, keep it short; NULL removes it.
-void keyboard_set_wake_hook(bool (*fn)(void));
+void keyboard_set_wake_hook(bool (*fn)(uint8_t key));
 
 // The remote key lock (#190): called for every key event before everything else (the wake hook included). True = the
 // event is dropped: nothing sees it, so the screen does not even wake. The gate must drop the release of every press

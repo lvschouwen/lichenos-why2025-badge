@@ -13,7 +13,9 @@
 #include "idle_policy.h"
 #include "shell_cmd_rules.h"
 #include "lichen_sys_display.h"
+#include "key_matrix.h"
 #include "lichen_sys_keys.h"
+#include "lichen_sys_ui.h"
 #include "lvgl.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -55,14 +57,23 @@ bool screen_idle_lit(void) {
     return lit;
 }
 
-bool screen_idle_key(void) {
+static bool key_seen(bool is_esc, bool loading) {
     portENTER_CRITICAL(&lock);
-    bool swallow = started && idle_key_swallowed(shown);
+    bool swallow = started && idle_wake_swallowed(shown, is_esc, loading);
     last_key_us  = now_us();
     shown        = (idle_stage_t){.level = IDLE_BRIGHT};
     forced       = false;
     portEXIT_CRITICAL(&lock);
     return swallow;
+}
+
+bool screen_idle_key(void) {
+    return key_seen(false, false);
+}
+
+// The keyboard's wake hook: the matrix code is told, so Esc can close a Loading screen at once (#549)
+bool screen_idle_wake(uint8_t code) {
+    return key_seen(code == KEY_MATRIX_ESC_CODE, lichen_sys_screen_loading());
 }
 
 
@@ -231,5 +242,5 @@ void screen_idle_start(void) {
     portENTER_CRITICAL(&lock);
     started = true;
     portEXIT_CRITICAL(&lock);
-    lichen_sys_keys_set_wake(screen_idle_key); // presses only: the keyboard drops the release of a swallowed one
+    lichen_sys_keys_set_wake(screen_idle_wake); // presses only: the keyboard drops the release of a swallowed one
 }

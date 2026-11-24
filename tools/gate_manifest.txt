@@ -405,6 +405,7 @@ lichen_sys_psram_tuning_text	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_radio_held_by	SYSTEM	any	lichen_sys_radio.h
 lichen_sys_radio_hold	SYSTEM	any	lichen_sys_radio.h
 lichen_sys_radio_release	SYSTEM	any	lichen_sys_radio.h
+lichen_sys_screen_loading	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_sd_begin	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_end	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_fmt_size	SYSTEM	any	lichen_sys_storage.h
