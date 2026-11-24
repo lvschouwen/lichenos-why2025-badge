@@ -71,3 +71,7 @@ size_t dma_low_line(dma_low_t const *l, unsigned i, char *out, size_t cap) {
     snprintf(what, sizeof(what), "drop %u/%u", (unsigned)nth, (unsigned)l->drops);
     return put(&l->mark[(nth - 1) % DMA_LOW_KEEP], out, cap, what);
 }
+
+bool dma_owner_in_block(uint32_t blk_addr, uint32_t blk_size, uint32_t ptr, uint32_t asked) {
+    return ptr >= blk_addr && ptr - blk_addr < blk_size && asked <= blk_size;
+}

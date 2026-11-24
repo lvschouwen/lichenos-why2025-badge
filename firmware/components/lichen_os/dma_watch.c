@@ -82,7 +82,7 @@ bool dma_watch_owner(uint32_t addr, uint32_t size, char *task, size_t cap) {
     bool     hit  = false;
     for (int i = 0; i < OWNER_RING && cap; i++) {
         uint32_t p = atomic_load_explicit(&owners[i].ptr, memory_order_acquire);
-        if (p == addr && owners[i].size <= size && owners[i].seq > best) {
+        if (p && dma_owner_in_block(addr, size, p, owners[i].size) && owners[i].seq > best) {
             best = owners[i].seq;
             hit  = true;
             snprintf(task, cap, "%.*s", (int)(DMA_LOW_TASK_CAP - 1), owners[i].task);

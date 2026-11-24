@@ -117,6 +117,13 @@ int main(void) {
     ring_wraps();
     small_falls_add_up();
     long_task_name_and_short_buffer();
+    // #547: the walk's raw block starts at the poison head, the heap hook's pointer is the user pointer 8 B later
+    CHECK(dma_owner_in_block(0x4ff70bf8, 6156, 0x4ff70bf8 + 8, 6144)); // fails with an exact address match
+    CHECK(dma_owner_in_block(0x4ff70bf8, 6156, 0x4ff70bf8, 6144));
+    CHECK(!dma_owner_in_block(0x4ff70bf8, 6156, 0x4ff70bf8 + 6156, 16)); // the next block
+    CHECK(!dma_owner_in_block(0x4ff70bf8, 6156, 0x4ff70bf8 - 8, 16)); // the one before
+    CHECK(!dma_owner_in_block(0x4ff70bf8, 6156, 0x4ff70bf8 + 8, 7000)); // asked more than the block holds: a stale entry
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

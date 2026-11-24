@@ -40,3 +40,8 @@ bool dma_low_feed(dma_low_t *l, uint32_t min, uint32_t free_now, uint64_t at_ms,
 // "mem dma_low first min 90000 fell 0 at 12.345s free 99000 big 0 task -"
 // "mem dma_low drop 3/7 min 68423 fell 21577 at 3600.250s free 70000 big 1556 task ota"
 size_t dma_low_line(dma_low_t const *l, unsigned i, char *out, size_t cap);
+
+// "fw mem diff" (#547): does a ring entry (the pointer the heap hook was given, the size asked) belong to the block the heap
+// walk reported at blk_addr, blk_size bytes? The walk gives the raw block (poison head included, CONFIG_HEAP_POISONING_LIGHT
+// puts the user pointer 8 B later), so the pointer only has to lie inside the block; no poison offset is assumed.
+bool dma_owner_in_block(uint32_t blk_addr, uint32_t blk_size, uint32_t ptr, uint32_t asked);
