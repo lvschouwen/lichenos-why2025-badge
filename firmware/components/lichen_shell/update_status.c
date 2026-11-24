@@ -55,6 +55,11 @@ char const *update_failed_text(bool firmware) {
     return firmware ? "Update failed: the new version did not install" : "Not received: the sender stopped";
 }
 
+char const *update_failed_hint(bool firmware) {
+    return firmware ? "The badge still runs the old version. Start the update again from your computer."
+                    : "Send the file again from your computer.";
+}
+
 uint32_t update_stall_limit_ms(bool firmware, uint32_t done, uint32_t total) {
     return firmware && total > 0 && done >= total ? 180000 : 30000;
 }

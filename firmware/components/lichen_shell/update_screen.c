@@ -238,6 +238,10 @@ static lv_obj_t *build(void) {
     status_label = add_label(screen, "", THEME_AMBER, NULL);
     hint_label  = add_label(screen, "Don't turn off the badge", THEME_DIM, NULL);
     lv_obj_set_style_margin_top(hint_label, 24, 0);
+    // The failed and held hints are longer than the panel (#551, UI rule 12): wrap inside the margin
+    lv_label_set_long_mode(hint_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(hint_label, LV_PCT(90));
+    lv_obj_set_style_text_align(hint_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
@@ -284,7 +288,7 @@ static void render(state_t const *s) {
     bool busy = s->phase == PH_RECEIVING || s->phase == PH_RESTARTING;
     bool failed = s->phase == PH_FAILED;
     char const *hint = restart_held ? "Waiting for this version to be confirmed, then the badge restarts"
-                       : failed     ? "The badge still runs the old version. Start the update again from your computer."
+                       : failed     ? update_failed_hint(s->firmware)
                                     : "Don't turn off the badge";
     lichen_label_set(hint_label, hint);
     lv_obj_set_hidden(hint_label, !(busy || failed || restart_held));

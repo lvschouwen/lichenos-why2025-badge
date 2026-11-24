@@ -38,6 +38,9 @@ static void rollback_reason(void) {
 static void failed_text(void) {
     CHECK(strcmp(update_failed_text(true), "Update failed: the new version did not install") == 0);
     CHECK(strcmp(update_failed_text(false), "Not received: the sender stopped") == 0);
+    // #551: the hint under it names the file for a push, the old version for firmware
+    CHECK(strcmp(update_failed_hint(false), "Send the file again from your computer.") == 0);
+    CHECK(strstr(update_failed_hint(true), "old version") != NULL);
 }
 
 int main(void) {
