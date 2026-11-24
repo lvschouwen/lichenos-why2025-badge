@@ -107,3 +107,21 @@ void ptr_map_trim(ptr_map_t *m, ptr_map_env_t const *env) {
         *m = (ptr_map_t){0};
     }
 }
+
+size_t ptr_map_sweep(ptr_map_t *m, uint32_t owner, ptr_map_sweep_env_t const *env) {
+    size_t   n      = 0;
+    uint32_t cursor = 0;
+    for (;;) {
+        uint32_t start = cursor;
+        void    *p;
+        env->lock(env->user);
+        bool got = ptr_map_take(m, owner, &cursor, &p);
+        env->unlock(env->user);
+        if (got) {
+            env->free_block(env->user, p);
+            n++;
+        } else if (start == 0) {
+            return n;
+        }
+    }
+}

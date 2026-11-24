@@ -35,3 +35,13 @@ bool ptr_map_forget(ptr_map_t *m, void *p);
 bool ptr_map_take(ptr_map_t *m, uint32_t owner, uint32_t *cursor, void **p);
 // Gives the table back when no pointer is left.
 void ptr_map_trim(ptr_map_t *m, ptr_map_env_t const *env);
+
+// A sweep of one owner's pointers, the loop the loader runs: lock, take one, unlock, free_block(user, p) outside the lock, until a
+// pass that started at 0 finds none (others' notes and forgets move entries meanwhile). Returns how many it freed.
+typedef struct {
+    void *user;
+    void (*lock)(void *user);
+    void (*unlock)(void *user);
+    void (*free_block)(void *user, void *p);
+} ptr_map_sweep_env_t;
+size_t ptr_map_sweep(ptr_map_t *m, uint32_t owner, ptr_map_sweep_env_t const *env);

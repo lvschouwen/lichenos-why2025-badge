@@ -37,26 +37,21 @@ static void *fake(uintptr_t i) {
     return (void *)(0x3c000000u + i * 16u);
 }
 
-// The sweep as the loader runs it: round again until a pass from 0 finds none. Returns how many it took, counts per index.
+// The loader's sweep, ptr_map_sweep, with a free that counts per index
 static int swept[4096];
-static unsigned sweep(ptr_map_t *m, uint32_t owner) {
-    unsigned n = 0;
-    uint32_t cursor = 0;
-    void    *p;
-    for (;;) {
-        uint32_t start = cursor;
-        if (!ptr_map_take(m, owner, &cursor, &p)) {
-            if (start == 0) {
-                return n;
-            }
-            continue;
-        }
-        uintptr_t i = ((uintptr_t)p - 0x3c000000u) / 16u;
-        if (i < 4096) {
-            swept[i]++;
-        }
-        n++;
+static void nolock(void *u) {
+    (void)u;
+}
+static void count_free(void *u, void *p) {
+    (void)u;
+    uintptr_t i = ((uintptr_t)p - 0x3c000000u) / 16u;
+    if (i < 4096) {
+        swept[i]++;
     }
+}
+static ptr_map_sweep_env_t const senv = {NULL, nolock, nolock, count_free};
+static unsigned sweep(ptr_map_t *m, uint32_t owner) {
+    return (unsigned)ptr_map_sweep(m, owner, &senv);
 }
 
 static void test_basic(void) {
@@ -137,33 +132,26 @@ static void test_churn_and_shift(void) {
 }
 
 // Others' blocks coming and going while a sweep runs (the mutex is let go between two takes): every one of X's still goes once
+static ptr_map_t   *churn_map;
+static uintptr_t    other;
+static void churn_unlock(void *u) {
+    (void)u;
+    ptr_map_note(churn_map, &env, fake(other), Y); // another app mallocs, and frees an older one
+    if (other > 1000) {
+        ptr_map_forget(churn_map, fake(other - 1));
+    }
+    other++;
+}
 static void test_sweep_with_churn(void) {
     ptr_map_t m = {0};
     memset(swept, 0, sizeof swept);
     for (uintptr_t i = 1; i <= 500; i++) {
         CHECK(ptr_map_note(&m, &env, fake(i), X));
     }
-    uint32_t cursor = 0;
-    void    *p;
-    unsigned n = 0;
-    uintptr_t other = 1000;
-    for (;;) {
-        uint32_t start = cursor;
-        if (!ptr_map_take(&m, X, &cursor, &p)) {
-            if (start == 0) {
-                break;
-            }
-            continue;
-        }
-        swept[((uintptr_t)p - 0x3c000000u) / 16u]++;
-        n++;
-        CHECK(ptr_map_note(&m, &env, fake(other), Y)); // another app mallocs, and frees an older one
-        if (other > 1000) {
-            CHECK(ptr_map_forget(&m, fake(other - 1)));
-        }
-        other++;
-    }
-    CHECK(n == 500);
+    churn_map = &m;
+    other     = 1000;
+    ptr_map_sweep_env_t const e = {NULL, nolock, churn_unlock, count_free};
+    CHECK(ptr_map_sweep(&m, X, &e) == 500);
     for (uintptr_t i = 1; i <= 500; i++) {
         CHECK(swept[i] == 1);
     }

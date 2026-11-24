@@ -11,3 +11,5 @@
 
 void sd_app_block_note(lichen_ctx_t ctx, void *ptr);   // a block the app now holds
 void sd_app_block_forget(void *ptr);                   // the app frees it itself (by pointer, under whatever context)
+// An OS API that takes ownership of a block an app malloc'd must call sd_app_block_forget first, or the app's unload sweeps
+// a block the OS still uses.

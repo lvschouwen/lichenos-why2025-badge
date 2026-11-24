@@ -468,7 +468,6 @@ static ptr_map_env_t const blk_env = {table_alloc, heap_caps_free};
 // (slot and generation), so a block is the app's whatever context frees it, and a slot reused later is another owner.
 static ptr_map_t g_blocks;
 static _Atomic bool g_forget_unsafe; // a free ran where the mutex cannot be taken: the map may keep a stale entry
-static _Atomic bool g_note_full;     // the "no memory" line was logged
 
 // The shims' side. A malloc under the OS context (a delete callback after the card went) notes nothing: that block stays the
 // app's to free. Not from an interrupt or a critical section (an SD app's code never runs there): a note is then skipped
@@ -478,11 +477,8 @@ void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
         return;
     }
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-    bool ok = ptr_map_note(&g_blocks, &blk_env, ptr, ctx);
+    ptr_map_note(&g_blocks, &blk_env, ptr, ctx); // no memory for the table: the block stays the app's to free
     xSemaphoreGive(g_blk_mu);
-    if (!ok && !atomic_exchange(&g_note_full, true)) {
-        ESP_LOGW(TAG, "no memory to track an SD app's blocks: those are the app's to free"); // logged once
-    }
 }
 
 void sd_app_block_forget(void *ptr) {
@@ -511,40 +507,41 @@ static uint32_t release_block(sd_app_rec_t *rec, void *p) {
     return bytes;
 }
 
-static bool take_block(sd_app_rec_t *rec, uint32_t *cursor, void **p) {
+typedef struct {
+    sd_app_rec_t *rec;
+    uint32_t      bytes;
+    bool          unsafe;
+} sweep_t;
+
+static void sweep_lock(void *u) {
+    (void)u;
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-    bool got = ptr_map_take(&g_blocks, rec->ctx, cursor, p);
+}
+static void sweep_unlock(void *u) {
+    (void)u;
     xSemaphoreGive(g_blk_mu);
-    return got;
+}
+static void sweep_free(void *u, void *p) {
+    sweep_t *sw = u;
+    if (!sw->unsafe) { // an entry may be stale if a free ran where the mutex was out of reach: leak it then
+        sw->bytes += release_block(sw->rec, p);
+    }
 }
 
 // What the app left (an exit() or a fault never runs its own free). Only called where the image is freed: no task, timer, queued
 // call or screen of the app is left, so nothing of it can still call malloc or free. One entry at a time under the mutex, the
-// free outside it. Others' mallocs and frees run meanwhile and move entries, so it goes round again until a pass from 0 is empty.
+// free outside it (ptr_map_sweep).
 static void sweep_blocks(sd_app_rec_t *rec) {
-    uint32_t bytes = 0, n = 0, cursor = 0;
-    bool     unsafe = atomic_load(&g_forget_unsafe);
-    void    *p;
-    for (;;) {
-        uint32_t start = cursor;
-        if (!take_block(rec, &cursor, &p)) {
-            if (start == 0) {
-                break;
-            }
-            continue;
-        }
-        n++;
-        if (!unsafe) {
-            bytes += release_block(rec, p); // an entry may be stale if a free ran where the mutex was out of reach: leak it then
-        }
-    }
-    xSemaphoreTake(g_blk_mu, portMAX_DELAY);
+    sweep_t                   sw  = {rec, 0, atomic_load(&g_forget_unsafe)};
+    ptr_map_sweep_env_t const env = {&sw, sweep_lock, sweep_unlock, sweep_free};
+    uint32_t                  n   = (uint32_t)ptr_map_sweep(&g_blocks, rec->ctx, &env);
+    sweep_lock(NULL);
     ptr_map_trim(&g_blocks, &blk_env);
-    xSemaphoreGive(g_blk_mu);
-    if (n && unsafe) {
-        ESP_LOGE(TAG, "%s: %u leftover blocks not freed (a free ran where they could not be tracked)", rec->m.id, (unsigned)n);
+    sweep_unlock(NULL);
+    if (n && sw.unsafe) {
+        ESP_LOGE(TAG, "%s: %u leftover blocks leaked (a free ran where they could not be tracked)", rec->m.id, (unsigned)n);
     } else if (n) {
-        ESP_LOGW(TAG, "%s: freed %u leftover blocks (%u B)", rec->m.id, (unsigned)n, (unsigned)bytes);
+        ESP_LOGW(TAG, "%s: freed %u leftover blocks (%u B)", rec->m.id, (unsigned)n, (unsigned)sw.bytes);
     }
 }
 

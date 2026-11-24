@@ -19,8 +19,13 @@ static uint32_t           last_flags;
 static lichen_ctx_t       last_ctx, free_ctx;
 static int                frees, fail_alloc;
 
+static lichen_ctx_t const OS_CTX = (lichen_ctx_t)0x1;
+static lichen_ctx_t       self_ctx = CTX;
 lichen_ctx_t lichen_ctx_self(void) {
-    return CTX;
+    return self_ctx;
+}
+lichen_ctx_t lichen_sys_ctx_os(void) {
+    return OS_CTX;
 }
 
 // 8 bytes in front hold the size, as heap_caps_get_allocated_size would answer
@@ -59,7 +64,8 @@ size_t heap_caps_get_allocated_size(void *ptr) {
 static void *noted[16], *forgotten[16];
 static int   n_noted, n_forgotten;
 void sd_app_block_note(lichen_ctx_t ctx, void *ptr) {
-    if (ctx == CTX && n_noted < 16) {
+    (void)ctx;
+    if (n_noted < 16) {
         noted[n_noted++] = ptr;
     }
 }
@@ -90,6 +96,12 @@ int main(void) {
     fail_alloc = 1;
     check(lichen_exp_malloc(8) == NULL && n_noted == 1, "a failed malloc notes nothing");
     fail_alloc = 0;
+    self_ctx = OS_CTX; // a malloc as the OS (a delete callback after a card pull): the block is the app's, nothing is noted
+    p = lichen_exp_malloc(8);
+    check(p && n_noted == 1, "malloc as the OS context notes nothing");
+    lichen_exp_free(p);
+    self_ctx = CTX;
+    n_forgotten--; // the forget above is the free's, kept out of the balance below
 
     p = lichen_exp_calloc(4, 8);
     check(p && (last_flags & LICHEN_MEM_ZERO) && p[31] == 0, "calloc: zeroed");
