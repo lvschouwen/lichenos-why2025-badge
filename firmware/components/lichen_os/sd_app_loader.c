@@ -73,6 +73,8 @@ static QueueHandle_t     g_queue;
 #define QUEUE_LEN (3 * SD_APPS_MAX + 4 + 4) // per app a load, a close, a free and a late unload, plus the card events
 static sd_app_rec_t     *g_recs; // the loader task adds and removes; others read under g_mu
 static _Atomic bool      g_started;
+static _Atomic int  g_late_apps;  // apps FAULTED and resumable: the task-exit hook does nothing while it is 0
+static _Atomic bool g_late_retry; // a MSG_LATE did not fit the queue
 
 void sd_app_lock(void) {
     xSemaphoreTake(g_mu, portMAX_DELAY);
@@ -138,6 +140,13 @@ static void say(lv_obj_t *screen, char const *text) {
     lv_label_set_text(l, text);
 }
 
+static void late_arm(sd_app_rec_t *rec);
+static void late_screen(sd_app_rec_t *rec) {
+    if (atomic_load(&g_late_apps) != 0) {
+        late_arm(rec);
+    }
+}
+
 // One of the app's screens is being deleted (LVGL's delete event, LVGL task): the record forgets a screen that waited for
 // its hooks, and when it was the last one the loader is told. The event comes before the widgets go, so the loader's barrier
 // call (queued behind this deletion) is what says they are gone; only then may the image be freed (#523).
@@ -156,6 +165,7 @@ static void screen_deleted(lv_event_t *e) {
     if (plan && !post(MSG_CLOSED, rec)) {
         ESP_LOGE(TAG, "%s: queue full, stays loaded", rec->m.id);
     }
+    late_screen(rec); // a faulted app whose last screen just left may be ready for its late unload
 }
 
 // The bar and its text are forgotten when LVGL deletes them (the app's open cleans the screen): a queued update then finds NULL
@@ -463,25 +473,62 @@ static void free_image(sd_app_rec_t *rec) {
 }
 
 // An unload gave up at a step that only missed a deadline (the stop hook, the tasks): the loader finishes it when the app's
-// last task has ended (#541). Called with the app FAULTED; a task that ended before the flag was set is caught here.
-static void late_arm(sd_app_rec_t *rec) {
+// last task has ended (#541). Any task, never waits: the claim (sd_app_late_claim) lets one message through between the
+// task-exit hook, the unload's own check and a screen's delete event. A message that could not be queued is retried by the
+// loader (g_late_retry).
+
+static void late_queue(sd_app_rec_t *rec) {
     sd_app_lock();
-    bool late = rec->sda.state == SD_APP_FAULTED && rec->sda.late;
+    bool claim = sd_app_late_claim(&rec->sda);
     sd_app_unlock();
-    if (late && lichen_os_task_count(rec->ctx) == 0) {
-        msg_t m = {MSG_LATE, NULL, rec->ctx};
-        if (!g_queue || xQueueSend(g_queue, &m, 0) != pdTRUE) {
-            ESP_LOGE(TAG, "%s: late unload not queued", rec->m.id);
+    if (!claim) {
+        return;
+    }
+    msg_t m = {MSG_LATE, NULL, rec->ctx};
+    if (!g_queue || xQueueSend(g_queue, &m, 0) != pdTRUE) {
+        sd_app_lock();
+        sd_app_late_unclaim(&rec->sda);
+        sd_app_unlock();
+        atomic_store(&g_late_retry, true);
+    }
+}
+
+static void late_arm(sd_app_rec_t *rec) {
+    if (lichen_os_task_count(rec->ctx) == 0) {
+        late_queue(rec);
+    }
+}
+
+// The retry of a failed post, on the loader: every resumable app with no task left is asked again
+static void late_sweep(void) {
+    atomic_store(&g_late_retry, false);
+    sd_app_lock();
+    lichen_ctx_t ctxs[SD_APPS_MAX];
+    size_t       n = 0;
+    for (sd_app_rec_t *r = g_recs; r && n < SD_APPS_MAX; r = r->next) {
+        if (r->sda.state == SD_APP_FAULTED && r->sda.late && !r->gone) {
+            ctxs[n++] = r->ctx;
+        }
+    }
+    sd_app_unlock();
+    for (size_t i = 0; i < n; i++) {
+        sd_app_rec_t *rec = sd_app_find(ctxs[i]);
+        if (rec) {
+            late_arm(rec);
         }
     }
 }
 
 // A task of any context ended and its context has none left (lichen_task.c, on the ending task: no waiting, nothing freed
-// here). Only a message to the loader, and only for an app that gave its unload up.
+// here). Only a message to the loader, and only for an app that gave its unload up; every other context returns at once, with
+// no lock taken.
 static void task_ended(lichen_ctx_t ctx) {
+    if (atomic_load(&g_late_apps) == 0) {
+        return;
+    }
     sd_app_rec_t *rec = sd_app_find(ctx);
     if (rec) {
-        late_arm(rec);
+        late_queue(rec); // the book says no task of ctx is left
     }
 }
 
@@ -497,7 +544,11 @@ static bool unload(sd_app_rec_t *rec, sd_unload_step_t from, bool free_now) {
             ESP_LOGE(TAG, "%s: unload failed at step %d (0 stop hook, 1 tasks, 2 timers/UI): image and tile kept", rec->m.id, (int)step);
             sd_app_lock();
             sd_app_unload_fault(&rec->sda, step);
+            bool late = rec->sda.late;
             sd_app_unlock();
+            if (late) {
+                atomic_fetch_add(&g_late_apps, 1);
+            }
         }
         step = sd_unload_next(step, ok);
     }
@@ -753,8 +804,9 @@ static void do_late(lichen_ctx_t ctx) {
     bool removing = rec->sda.removing;
     sd_app_unlock();
     if (!begin) {
-        return; // a task is back, a screen is left, or an earlier message did it
+        return; // a task is back (its end asks again), a screen is left (its delete asks again), or an earlier message did it
     }
+    atomic_fetch_sub(&g_late_apps, 1);
     heap_snap_t before = heap_now();
     if (unload(rec, SD_UNLOAD_TASKS, true)) {
         heap_snap_t after = heap_now();
@@ -915,8 +967,12 @@ static void loader_task(void *arg) {
     (void)arg;
     for (;;) {
         msg_t m;
-        if (xQueueReceive(g_queue, &m, retry_pending() ? pdMS_TO_TICKS(RETRY_MS) : portMAX_DELAY) != pdTRUE) {
+        bool again = retry_pending() || atomic_load(&g_late_retry);
+        if (xQueueReceive(g_queue, &m, again ? pdMS_TO_TICKS(RETRY_MS) : portMAX_DELAY) != pdTRUE) {
             retry_run();
+            if (atomic_load(&g_late_retry)) {
+                late_sweep();
+            }
             continue;
         }
         switch (m.kind) {

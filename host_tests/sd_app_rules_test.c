@@ -310,7 +310,7 @@ static void test_late_unload(void) {
     CHECK(a.state == SD_APP_FAULTED && a.late);
     CHECK(!sd_app_late_begin(&a, 1)); // a task of the app still runs: nothing is freed
     CHECK(a.state == SD_APP_FAULTED && a.late);
-    CHECK(sd_app_open(&a, NULL) == SD_OPEN_FAULTED); // closed while it waits
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_BUSY); // a slow close, not a dead app: try again
     CHECK(sd_app_late_begin(&a, 0) && a.state == SD_APP_UNLOADING);
     CHECK(sd_app_open(&a, NULL) == SD_OPEN_BUSY); // a reopen meanwhile waits
     CHECK(!sd_app_late_begin(&a, 0)); // once
@@ -333,6 +333,26 @@ static void test_late_unload(void) {
     a.screens = 1;
     sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
     CHECK(!sd_app_late_begin(&a, 0));
+
+    // #541 review: one message between the three askers, and a screen that left later asks again
+    a = unloading_app();
+    a.screens = 1; // a removal's screen still animating out
+    sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
+    CHECK(!sd_app_late_claim(&a));
+    CHECK(!sd_app_screen_deleted(&a) && a.screens == 0); // not an unload to plan: it is faulted
+    CHECK(sd_app_late_claim(&a) && !sd_app_late_claim(&a)); // once
+    sd_app_late_unclaim(&a); // the post failed: asked again later
+    CHECK(sd_app_late_claim(&a));
+    CHECK(!sd_app_late_begin(&a, 1) && !a.late_queued && a.late); // consumed with a task back: a new ask follows its end
+    CHECK(sd_app_late_claim(&a) && sd_app_late_begin(&a, 0));
+    CHECK(!sd_app_late_claim(&a));
+    sd_app_unload_done(&a, true);
+    CHECK(!sd_app_late_claim(&a));
+
+    a = unloading_app(); // a later fault clears a stale claim
+    sd_app_unload_fault(&a, SD_UNLOAD_TASKS);
+    CHECK(sd_app_late_claim(&a) && !sd_app_late_begin(&a, 1));
+    CHECK(sd_app_open(&a, NULL) == SD_OPEN_BUSY);
 
     sd_app_t t = {.state = SD_APP_TILE, .late = true}; // never from another state
     CHECK(!sd_app_late_begin(&t, 0));

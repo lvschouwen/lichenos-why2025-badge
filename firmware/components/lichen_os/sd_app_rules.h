@@ -49,6 +49,7 @@ typedef struct {
     int            screens;  // the app's screens that exist (opened, not yet deleted by LVGL)
     bool           closing;  // the last screen was deleted: unload once nothing reopened it (cleared by an open)
     bool           removing; // the card went: nothing opens or loads from now on
+    bool           late_queued; // a MSG_LATE for it is on its way (sd_app_late_claim): duplicates collapse into one
     bool           late;     // FAULTED at the stop hook or the tasks (#541): the unload resumes when no task of the app is left
 } sd_app_t;
 
@@ -58,7 +59,7 @@ typedef enum {
     SD_OPEN_NOW,     // LOADED: call the hooks' open
     SD_OPEN_HELD,    // the on-air hold is on (#289, #420): refused, hold_why says what holds
     SD_OPEN_BUSY,    // UNLOADING: still closing, try again in a moment
-    SD_OPEN_FAULTED, // an earlier unload failed: the app stays closed until the card is out
+    SD_OPEN_FAULTED, // an earlier unload failed: the app stays closed until the card is out; a resumable fault (a late unload pending) answers BUSY
     SD_OPEN_REMOVED, // the card is going
 } sd_open_t;
 
@@ -155,6 +156,12 @@ sd_unload_step_t sd_unload_next(sd_unload_step_t cur, bool ok);
 
 // UNLOADING became FAULTED at step `at` (the first step that failed). Marks it resumable for STOP and TASKS only.
 void sd_app_unload_fault(sd_app_t *a, sd_unload_step_t at);
+// Whether the loader should be told to try the late unload (the screens are gone and it is resumable): true once until the
+// message is consumed (sd_app_late_begin), so the task-exit hook, the unload's own check and a screen's delete event queue one
+// message between them. The caller still checks that no task is left. A false return after a failed post is undone by
+// sd_app_late_unclaim.
+bool sd_app_late_claim(sd_app_t *a);
+void sd_app_late_unclaim(sd_app_t *a);
 // FAULTED and resumable, no task of the app left and no screen of it: UNLOADING again and true; the caller resumes at
 // SD_UNLOAD_TASKS (the stop hook has been called once and is never called again). False leaves the state as it was.
 bool sd_app_late_begin(sd_app_t *a, size_t tasks_left);

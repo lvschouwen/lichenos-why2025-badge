@@ -58,7 +58,7 @@ sd_open_t sd_app_open(sd_app_t *a, char const *hold_why) {
     }
     switch (a->state) {
     case SD_APP_FAULTED:
-        return SD_OPEN_FAULTED;
+        return a->late ? SD_OPEN_BUSY : SD_OPEN_FAULTED; // a resumable fault is a slow close, not a dead app
     case SD_APP_UNLOADING:
         return SD_OPEN_BUSY;
     case SD_APP_LOADING:
@@ -133,7 +133,7 @@ bool sd_app_screen_deleted(sd_app_t *a) {
         a->screens--;
     }
     if (a->screens > 0 || (a->state != SD_APP_LOADED && a->state != SD_APP_LOADING)) {
-        return false;
+        return false; // a FAULTED app's last screen: the loader's late unload is claimed apart (sd_app_late_claim)
     }
     a->closing = true;
     return a->state == SD_APP_LOADED;
@@ -167,10 +167,24 @@ void sd_app_unload_fault(sd_app_t *a, sd_unload_step_t at) {
     if (a->state == SD_APP_UNLOADING) {
         a->state = SD_APP_FAULTED;
         a->late  = at == SD_UNLOAD_STOP || at == SD_UNLOAD_TASKS;
+        a->late_queued = false;
     }
 }
 
+bool sd_app_late_claim(sd_app_t *a) {
+    if (a->state != SD_APP_FAULTED || !a->late || a->screens != 0 || a->late_queued) {
+        return false;
+    }
+    a->late_queued = true;
+    return true;
+}
+
+void sd_app_late_unclaim(sd_app_t *a) {
+    a->late_queued = false;
+}
+
 bool sd_app_late_begin(sd_app_t *a, size_t tasks_left) {
+    a->late_queued = false; // the message that asked is consumed, whatever the answer
     if (a->state != SD_APP_FAULTED || !a->late || tasks_left != 0 || a->screens != 0) {
         return false;
     }
