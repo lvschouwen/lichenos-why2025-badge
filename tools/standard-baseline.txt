@@ -37,7 +37,7 @@ size	libeh_host_feat_system.a	1192
 size	libeh_host_feat_wifi.a	14178
 size	libeh_host_feat_wifi_ext_ent.a	2524
 size	libeh_host_feat_wifi_ext_itwt.a	994
-size	libeh_host_mcu_transport.a	23183
+size	libeh_host_mcu_transport.a	23271
 size	libeh_host_mcu_vserial.a	1040
 size	libeh_host_port_idf.a	6251
 size	libeh_proto_v2.a	80331
@@ -111,7 +111,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
 size	liblichen_notify.a	13414
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	102119
+size	liblichen_os.a	102123
 size	liblichen_random.a	63
 size	liblichen_shell.a	198434
 size	liblog.a	2726
