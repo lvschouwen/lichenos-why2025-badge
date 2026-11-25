@@ -62,4 +62,5 @@ when the run ends. The old wave logs are in git history (before #483).
   `ota-firmware` needs the sender killed mid-pieces (a 10 s timeout stops in /prepare).
 - NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance), 7 (`owner-onair.sh sync`/`off`);
   stray `stash@{0}` from impl-549 (duplicate, drop it); #391, #281, #237.
+- RUNNING: impl-556 (wt-1, fix/556-sdapp-stop-budget), impl-557 (wt-2, fix/557-sdapp-free-booked-blocks), plan-527 (read-only).
 - NEXT: #556 + #557 (small wave), then #527: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
