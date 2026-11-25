@@ -7,6 +7,7 @@ name=Bench test
 api=2.2
 entry=app.elf
 caps=SD,RAW_KEYS,NOTIFY
-internal_ram_kib=8
+# internal RAM: 6 KiB main task (stack_kib) + 6 KiB for the loader-run stop (#556: both must fit).
+internal_ram_kib=12
 psram_kib=0
 stack_kib=6

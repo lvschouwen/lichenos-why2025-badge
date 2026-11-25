@@ -4,6 +4,7 @@ name=Hello
 api=2.1
 entry=app.elf
 caps=NOTIFY
+# internal RAM: 4 KiB main task (stack_kib) + 4 KiB for the loader-run stop.
 internal_ram_kib=8
 psram_kib=0
 stack_kib=4

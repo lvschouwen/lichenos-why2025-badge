@@ -5,6 +5,7 @@ name=@NAME_C@
 api=@API@
 entry=app.elf
 caps=
+# internal RAM: the main task (stack_kib) plus the same again for the loader-run stop, plus any task of your own.
 internal_ram_kib=8
 psram_kib=0
 stack_kib=4

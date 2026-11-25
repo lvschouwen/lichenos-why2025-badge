@@ -7,6 +7,7 @@
 //   e  escapes: "../x", another app's dir (absolute) and "FLASH0:x" must each refuse -> "ESC ok" / "ESC FAIL <which>"
 //   m  open five files: the fifth must refuse                                    -> "MAX ok" / "MAX FAIL <n>"
 //   f  hold one file open (benchtest.hold): then close the app or "fw sd unmount" -> "HOLD open"
+//   Esc  closes the screen like a normal Esc (shell_back): the unload runs on the normal close path (#556)
 //   q  exit(0) from this task: the app closes through the normal unload          -> (the screen goes)
 //
 // Slow stop (#541): when a file named slowstop exists in the app's own folder, main() keeps running SLOW_STOP_MS after stop() was
@@ -35,6 +36,7 @@
 #include <string.h>
 
 // TCA8418 codes (board/tca8418_keymap.h)
+#define CODE_ESC 0x01
 #define CODE_Q 0x16
 #define CODE_E 0x18
 #define CODE_R 0x19
@@ -163,6 +165,9 @@ static void run(char c) {
     case 'f':
         test_hold();
         break;
+    case 'x':
+        shell_back(); // the normal screen close: the last screen goes, the loader stops the app (#556)
+        break;
     case 'q':
         report("EXIT", true, "0");
         exit(0); // from this task, never from an LVGL callback
@@ -180,7 +185,7 @@ static void on_key(lichen_raw_key_t const *key, void *arg) {
         return;
     }
     char c = key->code == CODE_R ? 'r' : key->code == CODE_E ? 'e' : key->code == CODE_M ? 'm'
-           : key->code == CODE_F ? 'f' : key->code == CODE_Q ? 'q' : 0;
+           : key->code == CODE_F ? 'f' : key->code == CODE_Q ? 'q' : key->code == CODE_ESC ? 'x' : 0;
     char none = 0;
     if (c) {
         atomic_compare_exchange_strong(&g_pending, &none, c); // a key while one runs is dropped

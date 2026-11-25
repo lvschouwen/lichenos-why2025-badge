@@ -51,11 +51,33 @@ static void test_scan(void) {
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, false) == SD_APP_SCAN_NO_ENTRY);
     m = good();
     m.stack_kib = SD_APP_STACK_KIB_MAX;
+    m.internal_ram_kib = 2 * SD_APP_STACK_KIB_MAX; // main + stop
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
     m.stack_kib = SD_APP_STACK_KIB_MAX + 1;
     CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_STACK);
     sd_app_scan_reason(SD_APP_SCAN_STACK, LICHEN_MANIFEST_OK, &m, "hello", why, sizeof(why));
     CHECK(strstr(why, "17 KiB") && strstr(why, "16"));
+    // the stop task's budget (#556): benchtest's old 6/8 never stops, 6/12, DOOM's 4/24 and hello's 4/8 do
+    m = good();
+    m.stack_kib = 6;
+    m.internal_ram_kib = 8;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_BUDGET);
+    sd_app_scan_reason(SD_APP_SCAN_BUDGET, LICHEN_MANIFEST_OK, &m, "benchtest", why, sizeof(why));
+    CHECK(strstr(why, "8 KiB") && strstr(why, "12"));
+    m.internal_ram_kib = 12;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
+    m.stack_kib = 4;
+    m.internal_ram_kib = 24;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
+    m.internal_ram_kib = 8;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
+    m.internal_ram_kib = 7;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_BUDGET);
+    m.stack_kib = 0; // defaults: 4 KiB stack, 24 KiB budget
+    m.internal_ram_kib = 0;
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_OK);
+    m.stack_kib = 16; // main 16 + stop 16 does not fit the default 24
+    CHECK(sd_app_scan_verdict(LICHEN_MANIFEST_OK, &m, false, true) == SD_APP_SCAN_BUDGET);
     m = good();
     // the order: an API refusal names the API even when the id is also taken
     m.api_major = 9;

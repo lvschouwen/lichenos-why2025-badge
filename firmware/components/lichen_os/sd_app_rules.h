@@ -24,6 +24,8 @@ extern "C" {
 #define SD_APP_STACK_KIB_MAX 16
 // The internal stack budget (KiB) of an app that declares no internal_ram_kib (#538): main + stop + one task at the cap
 #define SD_APP_RAM_KIB_DEFAULT 24
+// The main task's stack when a manifest declares none (KiB); the stop task is sized the same
+#define SD_APP_STACK_KIB_DEFAULT 4
 
 // The budget in bytes for the tasks of an app with this internal_ram_kib: the declared value, the default for 0
 uint32_t sd_app_task_budget(uint16_t internal_ram_kib);
@@ -35,6 +37,7 @@ typedef enum {
     SD_APP_SCAN_SHADOW,       // the id is a registered app's id or alias, or one the OS keeps
     SD_APP_SCAN_NO_ENTRY,     // the entry file next to the manifest is missing
     SD_APP_SCAN_STACK,        // stack_kib is above SD_APP_STACK_KIB_MAX
+    SD_APP_SCAN_BUDGET,       // internal_ram_kib cannot hold the main task and the loader-run stop task (#556)
 } sd_app_scan_t;
 
 // The verdict for one directory of the apps folder: err is the parser's answer (m is valid only for OK), id_taken
