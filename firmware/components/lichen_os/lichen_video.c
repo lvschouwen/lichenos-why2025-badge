@@ -5,6 +5,8 @@
 #include "lichen_video_rules.h"
 #include "video_owner.h"
 
+#include "esp_log.h"
+
 static lichen_video_t s_video; // one holder at a time, like the surface
 
 static bool cap_ok(void) {
@@ -13,6 +15,14 @@ static bool cap_ok(void) {
 
 static uint32_t self(void) {
     return lichen_ctx_self();
+}
+
+static void refuse(char const *what) {
+    static uint32_t n;
+    uint32_t        c = __atomic_fetch_add(&n, 1u, __ATOMIC_RELAXED);
+    if ((c & 0xFFu) == 0) { // per frame calls: the first, then every 256th
+        ESP_LOGW("video", "%s refused: the screen is another app's (%lu so far)", what, (unsigned long)c + 1u);
+    }
 }
 
 static bool holds(uint32_t ctx) {
@@ -25,6 +35,7 @@ static lichen_video_ops_t const OPS = {
     .acquire = video_owner_acquire,
     .present = video_owner_present,
     .release = video_owner_release,
+    .refuse  = refuse,
     .holds   = holds,
 };
 

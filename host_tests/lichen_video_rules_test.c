@@ -22,8 +22,11 @@ static struct {
     char     a[16], b[16];
 } f;
 
+static uint32_t me = 0x1234u;
+static unsigned refusals;
 static bool     cap_ok(void) { return f.cap; }
-static uint32_t self(void) { return 0x1234u; }
+static uint32_t self(void) { return me; }
+static void     refuse(char const *what) { (void)what; refusals++; }
 static display_video_refusal_t acquire(uint32_t ctx, uint32_t w, uint32_t h, uint32_t sx, uint32_t sy,
                                        void (*cb)(void *, display_video_reclaim_t), void *arg, void *src[2]) {
     (void)cb; (void)arg;
@@ -37,7 +40,7 @@ static bool present(uint32_t ctx, unsigned idx) { (void)ctx; f.presents++; f.las
 static bool release(uint32_t ctx) { (void)ctx; f.releases++; if (f.release_ok) { f.holds = false; } return f.release_ok; }
 static bool holds(uint32_t ctx) { return f.holds && ctx == 0x1234u; }
 
-static lichen_video_ops_t const OPS = {cap_ok, self, acquire, present, release, holds};
+static lichen_video_ops_t const OPS = {cap_ok, self, acquire, present, release, refuse, holds};
 
 static unsigned reclaimed_why;
 static void on_reclaim(void *arg, lichen_video_reclaim_t why) { (void)arg; reclaimed_why = (unsigned)why; }
@@ -47,6 +50,8 @@ static lichen_video_cfg_t const CFG = {.src_w = 320, .src_h = 200, .on_reclaim =
 
 static void reset(void) {
     memset(&f, 0, sizeof(f));
+    me = 0x1234u;
+    refusals = 0;
     f.cap = f.present_ok = f.release_ok = true;
     reclaimed_why = 0;
 }
@@ -111,6 +116,20 @@ static void test_stale_and_release(void) {
     CHECK(lichen_video_do_release(&v, &OPS));
 }
 
+static void test_other_app_refused(void) {
+    reset();
+    lichen_video_t v = {0};
+    CHECK(lichen_video_do_acquire(&v, &OPS, &CFG, owner_cb)); // app A (0x1234) holds
+    me = 0x5678u;                                              // app B, also with VIDEO
+    CHECK(lichen_video_do_back(&v, &OPS) == NULL && refusals == 1);
+    CHECK(!lichen_video_do_present(&v, &OPS) && f.presents == 0 && refusals == 2);
+    CHECK(lichen_video_do_release(&v, &OPS) && f.releases == 0 && refusals == 3); // a no-op
+    CHECK(f.holds && v.src[0]);                                                  // A's record is untouched
+    me = 0x1234u;
+    CHECK((char *)lichen_video_do_back(&v, &OPS) == f.b && lichen_video_do_present(&v, &OPS));
+    CHECK(lichen_video_do_release(&v, &OPS) && f.releases == 1);
+}
+
 static void test_reclaim_forward(void) {
     reset();
     lichen_video_t v = {0};
@@ -128,6 +147,7 @@ int main(void) {
     test_acquire();
     test_cycle();
     test_stale_and_release();
+    test_other_app_refused();
     test_reclaim_forward();
     if (failures) {
         printf("lichen_video_rules_test: %d failed\n", failures);

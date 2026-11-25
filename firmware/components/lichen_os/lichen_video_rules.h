@@ -26,6 +26,7 @@ typedef struct {
                                        void (*on_reclaim)(void *, display_video_reclaim_t), void *arg, void *src[2]);
     bool (*present)(uint32_t ctx, unsigned idx);
     bool (*release)(uint32_t ctx);
+    void (*refuse)(char const *what); // counts and logs (rate-limited) a call on another app's record
     bool (*holds)(uint32_t ctx); // the owner record is still this ctx's (not released, not swept by an unload)
 } lichen_video_ops_t;
 

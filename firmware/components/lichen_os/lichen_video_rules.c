@@ -4,8 +4,20 @@
 
 // An app's call needs VIDEO and, but for acquire, a record that is still the owner's: an unload sweep frees the sources
 // without telling this record, so a stale pointer must never reach a later VIDEO app.
-static bool live(lichen_video_t const *v, lichen_video_ops_t const *ops) {
-    return ops->cap_ok() && v->src[0] && ops->holds(v->ctx);
+// Only the holder acts on the record: another app with VIDEO is refused (counted), not served.
+static bool mine(lichen_video_t const *v, lichen_video_ops_t const *ops, char const *what) {
+    if (!v->src[0]) {
+        return false;
+    }
+    if (v->ctx != ops->self()) {
+        ops->refuse(what);
+        return false;
+    }
+    return true;
+}
+
+static bool live(lichen_video_t const *v, lichen_video_ops_t const *ops, char const *what) {
+    return ops->cap_ok() && mine(v, ops, what) && ops->holds(v->ctx);
 }
 
 bool lichen_video_do_acquire(lichen_video_t *v, lichen_video_ops_t const *ops, lichen_video_cfg_t const *cfg,
@@ -25,11 +37,11 @@ bool lichen_video_do_acquire(lichen_video_t *v, lichen_video_ops_t const *ops, l
 }
 
 uint16_t *lichen_video_do_back(lichen_video_t *v, lichen_video_ops_t const *ops) {
-    return live(v, ops) ? (uint16_t *)v->src[v->back] : NULL;
+    return live(v, ops, "lichen_video_back") ? (uint16_t *)v->src[v->back] : NULL;
 }
 
 bool lichen_video_do_present(lichen_video_t *v, lichen_video_ops_t const *ops) {
-    if (!live(v, ops) || !ops->present(v->ctx, v->back)) {
+    if (!live(v, ops, "lichen_video_present") || !ops->present(v->ctx, v->back)) {
         return false; // dropped: the other source is the pending one, so the same back buffer is free to rewrite
     }
     v->back ^= 1u;
@@ -40,8 +52,14 @@ bool lichen_video_do_release(lichen_video_t *v, lichen_video_ops_t const *ops) {
     if (!ops->cap_ok()) {
         return false;
     }
-    if (!v->src[0] || !ops->release(v->ctx)) {
-        return v->src[0] == NULL; // nothing held counts as done; a lock timeout keeps the record for the retry
+    if (!v->src[0]) {
+        return true; // nothing held counts as done
+    }
+    if (!mine(v, ops, "lichen_video_release")) {
+        return true; // another app's record: a no-op, as if there were nothing of the caller's to release
+    }
+    if (!ops->release(v->ctx)) {
+        return false; // a lock timeout keeps the record for the retry
     }
     memset(v, 0, sizeof(*v));
     return true;
