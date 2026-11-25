@@ -29,6 +29,8 @@ static lichen_manifest_t good(void) {
 }
 
 static void test_budget(void) {
+    CHECK(sd_app_stack_bytes(0) == 4u * 1024u); // not declared: the default, as the loader's tasks use it
+    CHECK(sd_app_stack_bytes(6) == 6u * 1024u);
     CHECK(sd_app_task_budget(0) == 24u * 1024u); // not declared: main 4 + stop 4 + one 16 KiB task
     CHECK(sd_app_task_budget(24) == 24u * 1024u);
     CHECK(sd_app_task_budget(8) == 8u * 1024u); // declared: as is, even below the default

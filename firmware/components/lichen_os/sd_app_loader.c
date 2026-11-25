@@ -62,7 +62,6 @@ static char const TAG[] = "sdapps";
 #define UI_WAIT_MS         3000 // the barrier call through the LVGL task
 #define SD_WAIT_MS         2000
 #define UNREG_TRIES        20
-#define STACK_KIB_DEFAULT  4
 
 typedef enum { MSG_CARD, MSG_LOAD, MSG_CLOSED, MSG_FREE, MSG_LATE, MSG_RESCAN } msg_kind_t;
 typedef struct {
@@ -425,7 +424,7 @@ static bool ui_barrier(lichen_ctx_t ctx) {
 // OTA task's stack, and the caller waits for it up to the unload deadline: a hook that hangs faults the app instead of the
 // loader. Once per load: the update's stop and the unload may both ask, the second finds it called.
 static uint32_t stack_bytes_of(sd_app_rec_t const *rec) {
-    return (rec->m.stack_kib ? rec->m.stack_kib : STACK_KIB_DEFAULT) * 1024u;
+    return sd_app_stack_bytes(rec->m.stack_kib);
 }
 
 static void stop_task(void *arg) {

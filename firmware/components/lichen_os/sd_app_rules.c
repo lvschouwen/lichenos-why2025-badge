@@ -18,8 +18,7 @@ sd_app_scan_t sd_app_scan_verdict(lichen_manifest_err_t err, lichen_manifest_t c
     }
     // The stop hook runs on a task of the same size as main(), both booked under the app: a budget below two of them can
     // never stop (#556). Extra tasks of the app (DOOM's engine) are the manifest's own business.
-    uint32_t stack_kib = m->stack_kib ? m->stack_kib : SD_APP_STACK_KIB_DEFAULT;
-    if (sd_app_task_budget(m->internal_ram_kib) < 2u * stack_kib * 1024u) {
+    if (sd_app_task_budget(m->internal_ram_kib) < 2u * sd_app_stack_bytes(m->stack_kib)) {
         return SD_APP_SCAN_BUDGET;
     }
     if (id_taken) {
@@ -54,6 +53,10 @@ bool sd_app_rescan_wanted(bool is_manifest, sd_app_state_t state, bool gone, boo
     return is_manifest && !gone && !removing && state != SD_APP_FAULTED;
 }
 
+uint32_t sd_app_stack_bytes(uint16_t stack_kib) {
+    return (stack_kib ? stack_kib : SD_APP_STACK_KIB_DEFAULT) * 1024u;
+}
+
 uint32_t sd_app_task_budget(uint16_t internal_ram_kib) {
     return (internal_ram_kib ? internal_ram_kib : SD_APP_RAM_KIB_DEFAULT) * 1024u;
 }
@@ -80,7 +83,7 @@ void sd_app_scan_reason(sd_app_scan_t v, lichen_manifest_err_t err, lichen_manif
         break;
     case SD_APP_SCAN_BUDGET:
         snprintf(out, cap, "%s: %u KiB RAM, needs %u (main + stop task)", id, (unsigned)(sd_app_task_budget(m->internal_ram_kib) / 1024u),
-                 (unsigned)(2u * (m->stack_kib ? m->stack_kib : SD_APP_STACK_KIB_DEFAULT)));
+                 (unsigned)(2u * sd_app_stack_bytes(m->stack_kib) / 1024u));
         break;
     case SD_APP_SCAN_NO_ENTRY:
         snprintf(out, cap, "%s: %s is missing", id, m ? m->entry : "?");

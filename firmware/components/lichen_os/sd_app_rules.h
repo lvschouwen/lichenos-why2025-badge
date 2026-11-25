@@ -27,6 +27,10 @@ extern "C" {
 // The main task's stack when a manifest declares none (KiB); the stop task is sized the same
 #define SD_APP_STACK_KIB_DEFAULT 4
 
+// The stack in bytes of the app's main task and of its stop task: the declared stack_kib, the default for 0. The loader sizes
+// the tasks with it and the budget rule counts them with it, so the two cannot drift apart (#556)
+uint32_t sd_app_stack_bytes(uint16_t stack_kib);
+
 // The budget in bytes for the tasks of an app with this internal_ram_kib: the declared value, the default for 0
 uint32_t sd_app_task_budget(uint16_t internal_ram_kib);
 
