@@ -144,6 +144,13 @@ void display_flip_drawn(display_flip_t *f, display_rect_t r) {
     }
 }
 
+void display_flip_drawn_nocarry(display_flip_t *f, display_rect_t r) {
+    (void)r;
+    if (f->swap_on) {
+        f->stats.uncarried++;
+    }
+}
+
 void display_flip_frame_end(display_flip_t *f) {
     if (!f->swap_on) {
         return;

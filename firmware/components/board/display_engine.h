@@ -1,6 +1,7 @@
 #pragma once
 
 #include "display_flip.h"
+#include "display_video_state.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -23,11 +24,28 @@ bool        display_engine_valid(uint32_t id);
 char const *display_engine_name(uint32_t id); // "?" for an unknown id
 
 // One strip as LVGL hands it over: the UI area, where it lands on the panel, the rendered pixels and their row pitch
+// A scaled strip (the video, #560) also has scale_x16/scale_y16 (1/16 steps, display_video_geom) and the source window
+// crop (inclusive source pixels) of a source src_h rows tall; ui is then the output area and px the source. All zero
+// = an ordinary 1:1 strip. Only the PPA draws a scaled strip: the CPU path refuses it.
 typedef struct {
     display_rect_t ui, blk;
     void const    *px;
     uint32_t       stride;
+    uint32_t       scale_x16, scale_y16;
+    uint32_t       src_h;
+    display_rect_t crop;
 } display_strip_t;
+
+bool display_strip_scaled(display_strip_t const *s);
+
+// The PPA SRM input and scale a strip needs (display.c fills the rest of the operation): the whole source picture, the
+// block of it that is read, and the scale factors. A 1:1 strip reads all of itself at 1.0.
+typedef struct {
+    uint32_t pic_w, pic_h, off_x, off_y, blk_w, blk_h;
+    float    scale_x, scale_y;
+} display_ppa_params_t;
+
+void display_strip_ppa_params(display_strip_t const *s, display_ppa_params_t *p);
 
 typedef enum {
     DISPLAY_FALLBACK_START,      // the driver refused the transfer
@@ -76,6 +94,7 @@ typedef struct {
     uint32_t               cpu_since_us;
     uint32_t               late_fallbacks, rearms; // per boot, kept across engine changes (stats are not)
     uint32_t               start_us;
+    bool                   refused;   // a scaled strip met the CPU path in this present: no picture was made
     unsigned               flight_fb; // where the transfer in flight writes, for the CPU redo after a timeout
     display_strip_t        flight;
     display_engine_stats_t stats;
@@ -115,3 +134,18 @@ void display_engine_settle(display_engine_t *e);
 // transfer before the switch is requested, so a refresh never ends with a transfer in flight. True = the strip is
 // done (call lv_display_flush_ready now); false = the done interrupt calls it.
 bool display_engine_flush(display_engine_t *e, display_flip_t *flip, display_strip_t const *s, bool last);
+
+typedef enum {
+    DISPLAY_PRESENT_OK,
+    DISPLAY_PRESENT_HELD,    // nothing to draw (no video ready): the band strips stay pending
+    DISPLAY_PRESENT_REFUSED, // not drawn: no owner, a refresh in progress, or the scaled strip cannot be turned (CPU)
+} display_present_t;
+
+// One video present (#560, the flip rule of #559): while the owner is ACTIVE, `n_bands` pending band strips and the
+// scaled `video` strip (NULL = no frame ready: HELD, nothing written) go into one frame, all synchronously, then one
+// swap request. The video rectangle is not carried into the other buffer (display_flip_drawn_nocarry); the bands are,
+// so the status bar never flickers between versions. Refused before anything is written when the engine is on the CPU;
+// when the PPA fails during it the frame is not requested (the bands stay dirty, the next present redraws all). Call
+// on the LVGL task between refreshes.
+display_present_t display_engine_present(display_engine_t *e, display_flip_t *flip, display_video_owner_t *owner,
+                                         display_strip_t const *bands, uint32_t n_bands, display_strip_t const *video);

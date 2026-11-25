@@ -264,12 +264,16 @@ static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool rea
     if (!ppa_srm) {
         return false; // the client could not be set up (logged by ppa_up)
     }
+    display_ppa_params_t pp;
+    display_strip_ppa_params(s, &pp);
     ppa_srm_oper_config_t const op = {
         .in.buffer          = s->px,
-        .in.pic_w           = s->stride / 2,
-        .in.pic_h           = s->ui.y2 - s->ui.y1 + 1,
-        .in.block_w         = s->ui.x2 - s->ui.x1 + 1,
-        .in.block_h         = s->ui.y2 - s->ui.y1 + 1,
+        .in.pic_w           = pp.pic_w,
+        .in.pic_h           = pp.pic_h,
+        .in.block_w         = pp.blk_w,
+        .in.block_h         = pp.blk_h,
+        .in.block_offset_x  = pp.off_x,
+        .in.block_offset_y  = pp.off_y,
         .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
         .out.buffer         = panel_fbs[fb],
         .out.buffer_size    = FB_BYTES,
@@ -279,8 +283,8 @@ static bool ppa_start(void *ctx, display_strip_t const *s, unsigned fb, bool rea
         .out.block_offset_y = s->blk.y1,
         .out.srm_cm         = PPA_SRM_COLOR_MODE_RGB565,
         .rotation_angle     = PPA_SRM_ROTATION_ANGLE_90, // counter-clockwise, as LV_DISPLAY_ROTATION_90 (the port maps them 1:1)
-        .scale_x            = 1.0f,
-        .scale_y            = 1.0f,
+        .scale_x            = pp.scale_x,
+        .scale_y            = pp.scale_y,
         .mode               = PPA_TRANS_MODE_NON_BLOCKING,
         .user_data          = (void *)(uintptr_t)gen,
     };

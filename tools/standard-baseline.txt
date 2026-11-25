@@ -18,7 +18,7 @@ size	<merged-strings>	319177
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
-size	libboard.a	19027
+size	libboard.a	19323
 size	libbootloader_support.a	5944
 size	libc.a	53890
 size	libc6link.a	33448

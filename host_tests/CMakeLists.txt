@@ -380,6 +380,7 @@ add_executable(display_engine_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_flip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_rot.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_video_state.c
 )
 target_include_directories(display_engine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
 target_compile_options(display_engine_test PRIVATE -Wall -Wextra -Werror)
@@ -392,6 +393,7 @@ add_executable(reg_disp_engine_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_flip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_rot.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_video_state.c
 )
 target_include_directories(reg_disp_engine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)

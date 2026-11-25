@@ -395,6 +395,36 @@ static void test_flip_off(void) {
     CHECK(fk.requests == 0 && fk.copies == 0 && fk.waits == 0 && f.dirty.n == 0);
 }
 
+// #560: an opaque video rectangle joins no dirty area; the bands drawn with it are carried as usual
+static void test_flip_nocarry(void) {
+    fake_t         fk;
+    display_flip_t f;
+    fake_setup(&fk, &f, true);
+    display_rect_t const band = {0, 0, 7, 0}, video = {0, 2, 7, 7};
+    for (int i = 0; i < 2; i++) {
+        unsigned const fb = display_flip_write_target(&f);
+        display_flip_drawn(&f, band);
+        display_flip_drawn_nocarry(&f, video);
+        (void)fb;
+        display_flip_frame_end(&f);
+    }
+    CHECK(fk.copies == 1); // the second write target carried the band of the first frame, once
+    CHECK(f.stats.uncarried == 2);
+    // the same frames with the rectangle in the dirty list copy it too
+    fake_setup(&fk, &f, true);
+    for (int i = 0; i < 2; i++) {
+        display_flip_write_target(&f);
+        display_flip_drawn(&f, band);
+        display_flip_drawn(&f, video);
+        display_flip_frame_end(&f);
+    }
+    CHECK(fk.copies == 2); // band and video as two areas
+    // swap off: nothing counted, nothing carried
+    fake_setup(&fk, &f, false);
+    display_flip_drawn_nocarry(&f, video);
+    CHECK(f.stats.uncarried == 0 && fk.copies == 0);
+}
+
 int main(void) {
     test_back_fb();
     test_full_frame_merges();
@@ -411,6 +441,7 @@ int main(void) {
     test_flip_timeout();
     test_flip_refused();
     test_flip_off();
+    test_flip_nocarry();
     if (failures) {
         printf("display_flip_test: %d failure(s)\n", failures);
         return 1;

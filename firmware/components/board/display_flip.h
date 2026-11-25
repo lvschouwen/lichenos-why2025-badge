@@ -58,6 +58,7 @@ typedef struct {
     uint32_t swaps;    // proven switches
     uint32_t timeouts; // a wait that ran out: no switch assumed, retried at the next frame end
     uint32_t refusals; // request refused: the frame was copied into the shown buffer instead
+    uint32_t uncarried; // opaque video rectangles drawn without a carry (display_flip_drawn_nocarry)
     uint32_t wait_max_us, copy_max_us;
     uint64_t wait_us, copy_us;
 } display_flip_stats_t;
@@ -84,6 +85,12 @@ unsigned display_flip_write_target(display_flip_t *f);
 
 // A strip landed in the buffer display_flip_write_target returned
 void display_flip_drawn(display_flip_t *f, display_rect_t r);
+
+// An opaque video rectangle landed in the buffer display_flip_write_target returned (#560): the next present
+// overwrites all of it, so it joins no dirty area and the other buffer never gets its ~777 KB copied (#558 spike: ~14 ms).
+// Whatever the dirty list already holds, the band strips of this present included, is carried as usual. Only for a
+// rectangle that the next frame redraws whole; anything else must use display_flip_drawn.
+void display_flip_drawn_nocarry(display_flip_t *f, display_rect_t r);
 
 // After the last strip of a refresh: request the switch and return at once (no wait). When the request is refused the
 // drawn areas are copied into the shown buffer now, torn but correct. An idle panel after this shows the new buffer

@@ -38,6 +38,7 @@ typedef struct {
     int      cpu_fb_last;                       // buffer of the last CPU turn
     display_strip_t cpu_last;
     uint32_t        gen_last; // tag of the last start
+    int64_t         copied_px; // pixels the copy-backs moved
 } fake_t;
 
 static void note(fake_t *fk, char c) {
@@ -133,7 +134,7 @@ static void flip_copy(void *ctx, unsigned dst, unsigned src, display_rect_t r) {
     fake_t *fk = ctx;
     (void)dst;
     (void)src;
-    (void)r;
+    fk->copied_px += (int64_t)(r.x2 - r.x1 + 1) * (r.y2 - r.y1 + 1);
     check_idle(fk);
     note(fk, 'K');
 }
@@ -158,7 +159,7 @@ static display_strip_t strip(int i) {
     return s;
 }
 
-#define STRIP(i) {{0, (i) * 80, 719, (i) * 80 + 79}, {(i) * 80, 0, (i) * 80 + 79, 719}, NULL, 1440}
+#define STRIP(i) {{0, (i) * 80, 719, (i) * 80 + 79}, {(i) * 80, 0, (i) * 80 + 79, 719}, NULL, 1440, 0, 0, 0, {0, 0, 0, 0}}
 static display_strip_t const S0 = STRIP(0), S1 = STRIP(1), S4 = STRIP(4);
 
 // One refresh of n strips as LVGL runs it: wait_for_flushing (flush_wait_cb = settle) before every strip but the
@@ -473,7 +474,104 @@ static void test_manual_cpu_stands(void) {
     CHECK(display_engine_active(&e) == DISPLAY_ENGINE_CPU && e.rearms == 0);
 }
 
+// The video present (#560): bands + a scaled strip in one frame, the video rectangle never carried
+static display_strip_t const BAND_L = {{0, 0, 719, 79}, {0, 0, 79, 719}, NULL, 1440, 0, 0, 0, {0, 0, 0, 0}};
+static display_strip_t const BAND_R = {{0, 640, 719, 719}, {640, 0, 719, 719}, NULL, 1440, 0, 0, 0, {0, 0, 0, 0}};
+static display_strip_t const VIDEO  = {{0, 91, 719, 627}, {91, 0, 627, 719}, NULL, 640, 36, 43, 200, {0, 0, 319, 199}};
+
+static void video_setup(fake_t *fk, display_engine_t *e, display_flip_t *f, display_video_owner_t *o) {
+    setup(fk, e, f);
+    display_engine_select(e, DISPLAY_ENGINE_PPA_ASYNC);
+    display_video_owner_init(o);
+    display_video_acquire(o);
+}
+
+static void test_strip_params(void) {
+    display_ppa_params_t p;
+    display_strip_ppa_params(&VIDEO, &p);
+    CHECK(display_strip_scaled(&VIDEO));
+    CHECK(p.pic_w == 320 && p.pic_h == 200 && p.blk_w == 320 && p.blk_h == 200 && p.off_x == 0 && p.off_y == 0);
+    CHECK(p.scale_x == 2.25f && p.scale_y == 2.6875f);
+    display_strip_t crop = VIDEO;
+    crop.crop            = (display_rect_t){10, 20, 309, 179};
+    display_strip_ppa_params(&crop, &p);
+    CHECK(p.off_x == 10 && p.off_y == 20 && p.blk_w == 300 && p.blk_h == 160 && p.pic_h == 200);
+    display_strip_ppa_params(&S1, &p); // the ordinary strip: what the PPA op always got
+    CHECK(!display_strip_scaled(&S1));
+    CHECK(p.pic_w == 720 && p.pic_h == 80 && p.blk_w == 720 && p.blk_h == 80 && p.off_x == 0 && p.off_y == 0);
+    CHECK(p.scale_x == 1.0f && p.scale_y == 1.0f);
+}
+
+static void test_present_order_and_carry(void) {
+    fake_t               fk;
+    display_engine_t     e;
+    display_flip_t       f;
+    display_video_owner_t o;
+    video_setup(&fk, &e, &f, &o);
+    display_strip_t const bands[2] = {BAND_L, BAND_R};
+    CHECK(display_engine_present(&e, &f, &o, bands, 2, &VIDEO) == DISPLAY_PRESENT_OK);
+    CHECK(strcmp(fk.log, "SWSWSWR") == 0 && fk.overlaps == 0);
+    CHECK(display_engine_present(&e, &f, &o, bands, 2, &VIDEO) == DISPLAY_PRESENT_OK);
+    CHECK(strcmp(fk.log, "SWSWSWRKKSWSWSWR") == 0); // the bands of the first present carried, band-only
+    CHECK(fk.copied_px == 2 * 80 * 720);            // never the 537 x 720 video rectangle
+    CHECK(f.stats.uncarried == 2);
+}
+
+static void test_present_held_and_refused(void) {
+    fake_t               fk;
+    display_engine_t     e;
+    display_flip_t       f;
+    display_video_owner_t o;
+    video_setup(&fk, &e, &f, &o);
+    CHECK(display_engine_present(&e, &f, &o, &BAND_L, 1, NULL) == DISPLAY_PRESENT_HELD);
+    CHECK(fk.log[0] == '\0'); // nothing written, nothing requested
+    display_video_release(&o);
+    CHECK(display_engine_present(&e, &f, &o, &BAND_L, 1, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(fk.log[0] == '\0');
+}
+
+// The CPU has no scaler: refused before anything is written, even at the bands
+static void test_present_cpu_refuses(void) {
+    fake_t               fk;
+    display_engine_t     e;
+    display_flip_t       f;
+    display_video_owner_t o;
+    setup(&fk, &e, &f); // the CPU engine
+    display_video_owner_init(&o);
+    display_video_acquire(&o);
+    CHECK(display_engine_present(&e, &f, &o, &BAND_L, 1, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(fk.log[0] == '\0' && fk.cpu_fb_last == -1);
+    // an ordinary strip still goes through the CPU
+    display_engine_t e2;
+    display_engine_init(&e2, &(display_engine_ops_t){fake_cpu, fake_start, fake_wait, fake_fell_back, fake_now, &fk});
+    CHECK(display_engine_flush(&e2, &f, &S0, true));
+    CHECK(fk.log[0] == 'C');
+}
+
+// The PPA refuses the video strip: the fallback must not draw it on the CPU, and no swap is requested
+static void test_present_ppa_failure(void) {
+    fake_t               fk;
+    display_engine_t     e;
+    display_flip_t       f;
+    display_video_owner_t o;
+    video_setup(&fk, &e, &f, &o);
+    fk.refuse_start = true;
+    CHECK(display_engine_present(&e, &f, &o, NULL, 0, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(strchr(fk.log, 'C') == NULL && strchr(fk.log, 'R') == NULL);
+    CHECK(fk.fell_back[DISPLAY_FALLBACK_START] == 1);
+    // a hung transfer: the redo on the CPU is skipped for the scaled strip as well
+    video_setup(&fk, &e, &f, &o);
+    fk.never_done = true;
+    CHECK(display_engine_present(&e, &f, &o, NULL, 0, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(strchr(fk.log, 'C') == NULL && strchr(fk.log, 'R') == NULL);
+}
+
 int main(void) {
+    test_strip_params();
+    test_present_order_and_carry();
+    test_present_held_and_refused();
+    test_present_cpu_refuses();
+    test_present_ppa_failure();
     test_gen();
     test_gen_per_transfer();
     test_hung_blocks_rearm();
