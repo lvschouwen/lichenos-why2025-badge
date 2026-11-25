@@ -232,7 +232,22 @@ static void say_state(void) {
                   s.parked ? ", sources parked (PPA busy)" : "");
 }
 
+static void let_go(void) {
+    if (g_have) {
+        g_have = !video_owner_release(LICHEN_CTX_NONE);
+    }
+}
+
 static bool take(void) {
+    video_owner_stats_t st;
+    video_owner_stats(&st);
+    if (display_video_console_stale(g_have, st.held, st.reclaimed)) {
+        let_go(); // a reclaim leaves the record set: hold must acquire again, not answer for a video that is gone (#567)
+        if (g_have) {
+            console_reply("video: reclaimed, the UI lock was not free, still held; release first");
+            return false;
+        }
+    }
     if (g_have) {
         return true;
     }
@@ -244,12 +259,6 @@ static bool take(void) {
     }
     g_have = true;
     return true;
-}
-
-static void let_go(void) {
-    if (g_have) {
-        g_have = !video_owner_release(LICHEN_CTX_NONE);
-    }
 }
 
 static void run(unsigned n, bool hold) {

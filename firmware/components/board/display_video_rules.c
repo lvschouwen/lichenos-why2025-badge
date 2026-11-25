@@ -34,3 +34,7 @@ int display_video_pump_pick(int pending, int last, uint32_t bands, uint32_t sinc
     }
     return since_last_us >= DISPLAY_VIDEO_KEEPALIVE_US ? last : -1;
 }
+
+bool display_video_console_stale(bool have, bool held, bool reclaimed) {
+    return have && (!held || reclaimed);
+}

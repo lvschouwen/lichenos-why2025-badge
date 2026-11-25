@@ -74,11 +74,20 @@ static void test_pick(void) {
     CHECK(display_video_pump_pick(-1, -1, 0, 0) == -1);
 }
 
+static void test_console_stale(void) {
+    CHECK(!display_video_console_stale(false, false, false)); // nothing held: acquire as usual
+    CHECK(!display_video_console_stale(true, true, false));   // live: reuse
+    CHECK(display_video_console_stale(true, true, true));     // reclaimed, not released: release and acquire again
+    CHECK(display_video_console_stale(true, false, false));   // the record is gone
+    CHECK(!display_video_console_stale(false, true, true));   // somebody else's record: the acquire refuses it
+}
+
 int main(void) {
     test_verdict();
     test_source_cap();
     test_verdict_order();
     test_pick();
+    test_console_stale();
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

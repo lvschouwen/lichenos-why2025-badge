@@ -45,3 +45,7 @@ char const             *display_video_refusal_name(display_video_refusal_t r);
 // last frame again once `since_last_us` reaches the keep-alive (at once when there was none yet: `last` < 0 means the
 // first, black, source 0). -1 = nothing to do.
 int display_video_pump_pick(int pending, int last, uint32_t bands, uint32_t since_last_us);
+
+// The developer console keeps its own "I hold it" flag; a reclaim leaves the owner record set until its owner releases.
+// True when that flag is stale (the record is gone, or reclaimed) and the console must release and acquire again (#567).
+bool display_video_console_stale(bool have, bool held, bool reclaimed);
