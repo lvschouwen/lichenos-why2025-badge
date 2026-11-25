@@ -11,12 +11,16 @@ typedef enum {
     DISPLAY_VIDEO_REFUSE_OWNED,  // another owner holds the surface (or it is being handed back)
     DISPLAY_VIDEO_REFUSE_ENGINE, // no PPA: the engine is on the CPU, hung, not set up, or there is no second frame buffer
     DISPLAY_VIDEO_REFUSE_PSRAM,  // PSRAM at 80 MHz: the PPA's reads and the panel's scan-out do not both fit
-    DISPLAY_VIDEO_REFUSE_GEOM,   // the source does not fit the panel at the wanted scale
+    DISPLAY_VIDEO_REFUSE_GEOM,   // the source does not fit the panel at the wanted scale, or is over the size cap
     DISPLAY_VIDEO_REFUSE_MEM,    // a buffer did not allocate
     DISPLAY_VIDEO_REFUSE_UI,     // the LVGL lock was not free in time (video_owner.c: nothing was tried)
 } display_video_refusal_t;
 
 #define DISPLAY_VIDEO_PSRAM_MIN_MHZ 120
+// The largest source: a side, and the bytes of one of the two buffers (RGB565). The geometry alone allows far more, and the
+// allocation happens under the UI lock.
+#define DISPLAY_VIDEO_SRC_SIDE_MAX  1024u
+#define DISPLAY_VIDEO_SRC_BYTES_MAX (1024u * 1024u)
 
 typedef struct {
     bool     owned;       // the surface is not IDLE
@@ -25,6 +29,7 @@ typedef struct {
     bool     swap_on;     // two frame buffers
     unsigned psram_mhz;
     bool     geom_ok;
+    uint32_t src_w, src_h; // the source asked for
     bool     mem_ok;
 } display_video_acquire_in_t;
 

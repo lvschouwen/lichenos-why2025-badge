@@ -10,7 +10,8 @@ display_video_refusal_t display_video_acquire_verdict(display_video_acquire_in_t
     if (in->psram_mhz < DISPLAY_VIDEO_PSRAM_MIN_MHZ) {
         return DISPLAY_VIDEO_REFUSE_PSRAM;
     }
-    if (!in->geom_ok) {
+    if (!in->geom_ok || in->src_w > DISPLAY_VIDEO_SRC_SIDE_MAX || in->src_h > DISPLAY_VIDEO_SRC_SIDE_MAX ||
+        (uint64_t)in->src_w * in->src_h * 2 > DISPLAY_VIDEO_SRC_BYTES_MAX) {
         return DISPLAY_VIDEO_REFUSE_GEOM;
     }
     return in->mem_ok ? DISPLAY_VIDEO_REFUSE_NONE : DISPLAY_VIDEO_REFUSE_MEM;

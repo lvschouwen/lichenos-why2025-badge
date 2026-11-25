@@ -381,6 +381,10 @@ static display_engine_ops_t const engine_ops = {cpu_turn, ppa_start, ppa_wait, e
 // wake alone runs nothing) draws the latest source frame, scaled by the PPA, together with the queued bands into the back
 // buffer and requests one swap (display_engine_present). The app's present() is lock-free: write-back, one mailbox slot,
 // wake. All panel writes are on the LVGL task or under the LVGL lock (acquire and release), never held across frames.
+// The band buffer is sized once for the worst case, the larger bar at the planned 537-row video (the bottom one, 92 rows: what
+// LVGL redraws there at once fits, so the status bar does not lag), plus two cache lines for the alignment of each copy
+#define BAND_ROWS_MAX    92
+#define BAND_BUF_BYTES   (LCD_H_RES * BAND_ROWS_MAX * 2 + 2 * DISPLAY_BAND_ALIGN)
 #define SLOT_WAIT_MS     100
 #define PUMP_IDLE_MS     10 // pump period while nothing is shown; 1 ms while frames stream (VSURF_STREAM_TICKS idle ticks)
 #define VSURF_STREAM_TICKS 20
@@ -404,7 +408,7 @@ typedef struct {
     int                      last;    // the source shown last, -1 = none yet
     uint32_t                 last_us;
     bool                     init_due; // the bars are painted and the swap resolved on the LVGL task, at the first tick
-    uint32_t                 band_cap, idle_ticks;
+    uint32_t                 idle_ticks;
     struct {
         uint32_t presented, frames_dropped, strips_dropped, bands_lost, present_max_us, reclaims;
     } st;
@@ -414,7 +418,7 @@ typedef struct {
 EXT_RAM_BSS_ATTR static vsurf_t vs; // acquire sets last
 // The app's finished source (0/1) or -1: the mailbox of present() (any task) and the pump. Atomic and 4 B of internal RAM on
 // purpose: a compare-and-swap target is better not in cached PSRAM.
-static int vsurf_pending = -1;
+static int vsurf_pending; // 0 = empty, else source + 1: zero, so .sbss and no flash copy
 
 // The rows of a part of an LVGL strip into the band buffer (the strip's own pixels are LVGL's again once flush_ready is out)
 static void vsurf_hold_part(display_rect_t whole, display_rect_t p, uint8_t const *px, uint32_t stride) {
@@ -511,7 +515,8 @@ static bool vsurf_engine_lost(void) {
 
 // A pump tick, LVGL task, lock held (a timer). The slot is freed after the draw, so the app never writes a source the PPA
 // still reads, and a frame that failed for real frees it too (no retry storm). The timer idles at PUMP_IDLE_MS and runs at
-// 1 ms only while frames stream; a present() wakes the LVGL task, and the tick is at most one idle period away.
+// 1 ms only while frames stream. A present() wakes the LVGL task but that does not make a 10 ms timer due: after an idle
+// gap the first frame can wait up to PUMP_IDLE_MS, and streaming then holds 1 ms (acceptable, no ready flag needed).
 static void vsurf_paint_bars(void);
 static void vsurf_pump(lv_timer_t *t) {
     if (vs.owner.state != DISPLAY_VIDEO_ACTIVE || engine.mid_frame) { // mid refresh: a transient, pending stays for the next tick
@@ -523,7 +528,7 @@ static void vsurf_pump(lv_timer_t *t) {
         vsurf_paint_bars();
     }
     uint32_t const t0   = (uint32_t)esp_timer_get_time();
-    int const      pend = __atomic_load_n(&vsurf_pending, __ATOMIC_ACQUIRE);
+    int const      pend = __atomic_load_n(&vsurf_pending, __ATOMIC_ACQUIRE) - 1;
     int const      idx  = display_video_pump_pick(pend, vs.last, display_band_q_count(&vs.bq), t0 - vs.last_us);
     if (idx < 0) {
         if (++vs.idle_ticks == VSURF_STREAM_TICKS) {
@@ -550,7 +555,7 @@ static void vsurf_pump(lv_timer_t *t) {
         VS_STAT(vs.st.frames_dropped += pend >= 0);
     }
     if (pend >= 0) {
-        __atomic_store_n(&vsurf_pending, -1, __ATOMIC_RELEASE);
+        __atomic_store_n(&vsurf_pending, 0, __ATOMIC_RELEASE);
     }
     if (r == DISPLAY_PRESENT_REFUSED && vsurf_engine_lost()) {
         display_vsurf_reclaim_locked(DISPLAY_VIDEO_RECLAIM_ENGINE);
@@ -563,7 +568,7 @@ static void vsurf_stop(void) {
         lv_timer_delete(vs.timer);
         vs.timer = NULL;
     }
-    __atomic_store_n(&vsurf_pending, -1, __ATOMIC_RELEASE); // the band queue is kept: vsurf_drain takes it
+    __atomic_store_n(&vsurf_pending, 0, __ATOMIC_RELEASE); // the band queue is kept: vsurf_drain takes it
     vs.last = -1;
 }
 
@@ -600,19 +605,10 @@ display_video_refusal_t display_vsurf_check_locked(uint32_t w, uint32_t h, uint3
         .swap_on     = flip.swap_on,
         .psram_mhz   = psram_mhz,
         .geom_ok     = display_video_geom_make(g, w, h, LCD_H_RES, LCD_V_RES, want_x_milli, want_y_milli),
+        .src_w       = w,
+        .src_h       = h,
         .mem_ok      = mem_ok};
     return display_video_acquire_verdict(&in);
-}
-
-// The band buffer holds the larger bar (the status bar's 91 rows, as the bottom one 92): what LVGL redraws there at once
-// fits, so the status bar does not lag. Two cache lines of slack for the alignment of each copy.
-static uint32_t vsurf_band_cap(display_video_geom_t const *g) {
-    int32_t rows = 1;
-    for (int i = 0; i < 2; i++) {
-        int32_t const r = g->bar[i].y2 - g->bar[i].y1 + 1;
-        rows            = g->bar_ok[i] && r > rows ? r : rows;
-    }
-    return display_band_bytes((display_rect_t){0, 0, LCD_H_RES - 1, rows - 1}) + 2 * DISPLAY_BAND_ALIGN;
 }
 
 display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_t w, uint32_t h, uint32_t want_x_milli,
@@ -625,9 +621,8 @@ display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_
         return verdict;
     }
     if (!vs.band_buf) { // else the queue of an earlier surface still holds strips in it: kept, drained or carried on
-        vs.band_cap = vsurf_band_cap(&g);
-        vs.band_buf = heap_caps_aligned_alloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE, vs.band_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        display_band_q_init(&vs.bq, vs.band_cap);
+        vs.band_buf = heap_caps_aligned_alloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE, BAND_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        display_band_q_init(&vs.bq, BAND_BUF_BYTES);
     }
     vs.timer = vs.band_buf ? lv_timer_create(vsurf_pump, PUMP_IDLE_MS, NULL) : NULL;
     if (!vs.timer || !display_video_acquire(&vs.owner)) {
@@ -650,7 +645,7 @@ display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_
     vs.last       = 0;
     vs.init_due   = true;
     vs.idle_ticks = 0;
-    __atomic_store_n(&vsurf_pending, -1, __ATOMIC_RELEASE);
+    __atomic_store_n(&vsurf_pending, 0, __ATOMIC_RELEASE);
     lv_obj_invalidate(lv_screen_active()); // the bars come back through the band queue
     return DISPLAY_VIDEO_REFUSE_NONE;
 }
@@ -690,11 +685,11 @@ bool display_vsurf_present(unsigned idx) {
     }
     esp_cache_msync(vs.src[idx], (size_t)vs.src_w * vs.src_h * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     for (int waited = 0;; waited++) {
-        int expect = -1;
+        int expect = 0;
         if (vs.owner.state != DISPLAY_VIDEO_ACTIVE) { // released or reclaimed while we wrote back or waited: do not post
             return false;
         }
-        if (__atomic_compare_exchange_n(&vsurf_pending, &expect, (int)idx, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (__atomic_compare_exchange_n(&vsurf_pending, &expect, (int)idx + 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
             break;
         }
         if (waited >= SLOT_WAIT_MS || vs.owner.state != DISPLAY_VIDEO_ACTIVE) {

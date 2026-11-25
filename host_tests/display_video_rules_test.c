@@ -16,7 +16,7 @@ static int failures = 0;
 
 static display_video_acquire_in_t good(void) {
     return (display_video_acquire_in_t){
-        .owned = false, .engine_ppa = true, .engine_hung = false, .swap_on = true, .psram_mhz = 120, .geom_ok = true, .mem_ok = true};
+        .owned = false, .engine_ppa = true, .engine_hung = false, .swap_on = true, .psram_mhz = 120, .geom_ok = true, .src_w = 320, .src_h = 200, .mem_ok = true};
 }
 
 static void test_verdict(void) {
@@ -38,6 +38,20 @@ static void test_verdict(void) {
     CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_GEOM);
     in = good(); in.mem_ok = false;
     CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_MEM);
+}
+
+static void test_source_cap(void) {
+    display_video_acquire_in_t in = good();
+    in.src_w = 1024; in.src_h = 512; // 1 MB exactly
+    CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_NONE);
+    in.src_h = 513;
+    CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_GEOM);
+    in = good(); in.src_w = 2000; in.src_h = 2000; // fits the panel at 0.36 per the geometry, 8 MB a buffer
+    CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_GEOM);
+    in = good(); in.src_w = 1025; in.src_h = 100;
+    CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_GEOM);
+    in = good(); in.src_w = 100; in.src_h = 1025;
+    CHECK(display_video_acquire_verdict(&in) == DISPLAY_VIDEO_REFUSE_GEOM);
 }
 
 static void test_verdict_order(void) {
@@ -62,6 +76,7 @@ static void test_pick(void) {
 
 int main(void) {
     test_verdict();
+    test_source_cap();
     test_verdict_order();
     test_pick();
     if (failures) {
