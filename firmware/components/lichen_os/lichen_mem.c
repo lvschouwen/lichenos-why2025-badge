@@ -3,6 +3,7 @@
 // PSRAM (#520), which no critical section may touch (#271). The owner is the caller's context (#230 E1b), checked before
 // anything is booked: no LVGL lock.
 #include "lichen_mem.h"
+#include "export_blocks.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
 #include "app_state.h"
@@ -136,6 +137,9 @@ static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
             mem_book_adjust(&book, ctx, internal, (uint32_t)(got - size)); // the free gives back what the heap says
         }
         book_give();
+        if (p && ctx != lichen_sys_ctx_os()) {
+            sd_app_booked_note(ctx, p); // an SD app's block is freed at its unload if it leaves it (#557)
+        }
     }
     return p;
 }
@@ -153,6 +157,7 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
         return;
     }
     if (!book_locking()) { // as the allocation: straight to the heap, the book untouched
+        sd_app_booked_forget(ptr);
         heap_caps_free(ptr);
         return;
     }
@@ -162,6 +167,7 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
     if (rel == MEM_GATE_RELEASE_REFUSED) {
         return; // refused (logged, counted) before ptr was looked at: the block, if it is one, stays allocated
     }
+    sd_app_booked_forget(ptr); // before the heap can hand the address out again
     char const *owner = label ? label : MEM_BOOK_OS;
     book_take();
     bool unbooked = went_unbooked;

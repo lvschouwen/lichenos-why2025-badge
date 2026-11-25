@@ -17,6 +17,7 @@
 #include "export_blocks.h"
 #include "export_file.h"
 #include "ptr_map.h"
+#include "booked_sweep.h"
 #include "lichen_exports.h"
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
@@ -531,6 +532,39 @@ void sd_app_block_forget(void *ptr) {
     xSemaphoreGive(g_blk_mu);
 }
 
+// The blocks an app took from lichen_alloc itself (#557), one map for every app, behind g_blk_mu like g_blocks. g_booked_used is
+// the map's count for the free path, which then skips the mutex when no SD app holds a block (a free of a block can only come
+// after its note, so a zero read is exact for that block).
+static ptr_map_t         g_booked;
+static _Atomic uint32_t  g_booked_used;
+static _Atomic bool      g_booked_unsafe; // a free ran where the mutex cannot be taken: an entry may be stale
+
+// lichen_alloc's side: only the context of an SD app that is loaded (a built-in app's or the OS's blocks are never swept).
+// Called outside the book's and the app lock: sd_app_find takes the leaf lock.
+void sd_app_booked_note(lichen_ctx_t ctx, void *ptr) {
+    if (!g_blk_mu || !xPortCanYield() || !sd_app_find(ctx)) {
+        return;
+    }
+    xSemaphoreTake(g_blk_mu, portMAX_DELAY);
+    ptr_map_note(&g_booked, &blk_env, ptr, ctx);
+    atomic_store(&g_booked_used, g_booked.used);
+    xSemaphoreGive(g_blk_mu);
+}
+
+void sd_app_booked_forget(void *ptr) {
+    if (!g_blk_mu || atomic_load(&g_booked_used) == 0) {
+        return;
+    }
+    if (!xPortCanYield()) {
+        atomic_store(&g_booked_unsafe, true); // no logging from here
+        return;
+    }
+    xSemaphoreTake(g_blk_mu, portMAX_DELAY);
+    ptr_map_forget(&g_booked, ptr);
+    atomic_store(&g_booked_used, g_booked.used);
+    xSemaphoreGive(g_blk_mu);
+}
+
 static uint32_t release_block(sd_app_rec_t *rec, void *p) {
     uint32_t bytes = (uint32_t)heap_caps_get_allocated_size(p);
     sd_app_lock();
@@ -581,8 +615,25 @@ static void sweep_blocks(sd_app_rec_t *rec) {
     }
 }
 
+// What the app took from lichen_alloc and left (#557), after the malloc sweep (which took its own blocks out of this map through
+// lichen_free). The free under its context takes the book's row down; the line says how many and how much.
+static void sweep_booked(sd_app_rec_t *rec) {
+    sweep_t                   sw  = {rec, 0, atomic_load(&g_booked_unsafe)};
+    ptr_map_sweep_env_t const env = {&sw, sweep_lock, sweep_unlock, sweep_free};
+    uint32_t                  n   = (uint32_t)ptr_map_sweep(&g_booked, rec->ctx, &env);
+    sweep_lock(NULL);
+    ptr_map_trim(&g_booked, &blk_env);
+    atomic_store(&g_booked_used, g_booked.used);
+    sweep_unlock(NULL);
+    char line[96];
+    if (booked_sweep_line(line, sizeof(line), rec->m.id, n, sw.bytes, sw.unsafe)) {
+        ESP_LOGW(TAG, "%s", line);
+    }
+}
+
 static void free_image(sd_app_rec_t *rec) {
     sweep_blocks(rec);
+    sweep_booked(rec);
     sd_app_lock();
     bool enter = sd_app_free_enters(rec->gone);
     sd_app_unlock();

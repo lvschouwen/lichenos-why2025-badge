@@ -2958,7 +2958,8 @@ add_test(NAME gen_export_table_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DI
 
 # The SD apps' live blocks (#536): the map the loader sweeps at unload
 add_executable(ptr_map_test ${CMAKE_CURRENT_SOURCE_DIR}/ptr_map_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ptr_map.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ptr_map.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/booked_sweep.c)
 target_include_directories(ptr_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(ptr_map_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ptr_map_test COMMAND ptr_map_test)

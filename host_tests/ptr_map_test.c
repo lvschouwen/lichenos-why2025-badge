@@ -1,6 +1,7 @@
 // Host test: the SD apps' live blocks (#536), pointer -> owner in one map, which the loader sweeps per owner when an app
 // unloads: note, forget by pointer alone, owners kept apart, address reuse, growth, a table that cannot be made, a sweep that
 // frees each block once while others' blocks come and go.
+#include "booked_sweep.h"
 #include "ptr_map.h"
 
 #include <stdio.h>
@@ -181,6 +182,26 @@ static void test_no_memory(void) {
     CHECK(tables == 0);
 }
 
+// #557: what lichen_alloc blocks an app left are freed and counted, the line says so; an empty book says nothing
+static void test_booked_line(void) {
+    ptr_map_t m = {0};
+    char      line[96] = "untouched";
+    CHECK(ptr_map_note(&m, &env, fake(1), X) && ptr_map_note(&m, &env, fake(2), X) && ptr_map_note(&m, &env, fake(3), X));
+    CHECK(ptr_map_note(&m, &env, fake(4), Y));
+    CHECK(ptr_map_forget(&m, fake(2))); // the app freed this one itself
+    memset(swept, 0, sizeof(swept));
+    unsigned n = sweep(&m, X);
+    CHECK(n == 2 && swept[1] == 1 && swept[3] == 1 && swept[2] == 0 && swept[4] == 0); // only X's, each once
+    CHECK(booked_sweep_line(line, sizeof(line), "benchtest", n, 8192, false));
+    CHECK(strcmp(line, "benchtest: freed 2 booked blocks (8192 B)") == 0);
+    CHECK(sweep(&m, X) == 0 && sweep(&m, Y) == 1); // the other app's block is still its own
+    strcpy(line, "untouched");
+    CHECK(!booked_sweep_line(line, sizeof(line), "benchtest", 0, 0, false) && strcmp(line, "untouched") == 0);
+    CHECK(booked_sweep_line(line, sizeof(line), "benchtest", 0, 0, true) && strstr(line, "not freed: untracked frees"));
+    ptr_map_trim(&m, &env);
+    CHECK(tables == 0);
+}
+
 int main(void) {
     test_basic();
     test_forget_foreign();
@@ -189,6 +210,7 @@ int main(void) {
     test_churn_and_shift();
     test_sweep_with_churn();
     test_no_memory();
+    test_booked_line();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
