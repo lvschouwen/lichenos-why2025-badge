@@ -244,7 +244,13 @@ int main(int argc, char *argv[]) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (slow) {
-        vTaskDelay(pdMS_TO_TICKS(SLOW_STOP_MS)); // the stop hook answered at once: it is the task that overruns
+        // The stop hook answered at once: it is the task that overruns. A stopping app's vTaskDelay returns after 1 s
+        // (docs/app-api.md), so one long delay would end inside the deadline: sleep in slices until SLOW_STOP_MS has
+        // really passed (lv_tick_elaps is wrap-safe, in ms).
+        uint32_t begin = lv_tick_get();
+        while (lv_tick_elaps(begin) < SLOW_STOP_MS) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
     }
     if (g_held) {
         fclose(g_held);
