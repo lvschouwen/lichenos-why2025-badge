@@ -21,8 +21,12 @@
 #define STOP_TOTAL  4500 // the loader gives stop 5 s: the engine's wait and the LVGL task's detach share this
 
 // #558 spike: DOOM_SPIKE 1 = engine alone on core 0 (LICHEN_PRIO_BACKGROUND, as shipped), 2 = on core 1
-// (LICHEN_PRIO_APP_LOOP, next to LVGL). The clock is lv_tick_get, 1 ms: the only one the export table has, so one frame
-// reads in whole ms and the average (from totals) is the number to quote; the max is good to +-1 ms.
+// (LICHEN_PRIO_APP_LOOP, next to LVGL). Clock: the CPU's cycle counter (the machine-mode performance CSR the IDF's own
+// esp_cpu_get_cycle_count reads; the export table has no microsecond clock), calibrated against lv_tick_get over 0.5 s
+// (the port ticks LVGL every 5 ms) so no CPU frequency is assumed. If the counter does not run, the unit falls back to
+// lv_tick_get ms (resolution 5 ms; the average from totals is still good, the max and the >33 counts are not).
+// Only frames of a level (demos included), both before and after the Tick, count: a title screen is cheaper than the
+// game, and the Tick that loads a level or runs the wipe is not a game frame.
 #if DOOM_SPIKE == 2
 #define ENGINE_PRIO LICHEN_PRIO_APP_LOOP
 #else
@@ -30,37 +34,76 @@
 #endif
 
 #if DOOM_SPIKE
+extern int gamestate; // the engine's: GS_LEVEL is 0 (doomdef.h)
+#define SPIKE_GS_LEVEL 0
+
 static struct {
-    uint32_t frames, over33, over50, max_ms, sleep_ms; // sleep_ms: waited inside the current frame's Tick
-    uint64_t work_ms;
-    uint32_t t_begin, t_end;
+    uint32_t unit_per_ms; // cycles per ms, or 1 when the unit is lv_tick ms
+    uint32_t frames, level_frames, over33, over50, max_units, sleep_units;
+    uint64_t work_units;
+    uint32_t t_begin, t_end; // lv_tick ms
 } spike;
 
-void doom_spike_note_sleep(uint32_t ms) {
-    spike.sleep_ms += ms;
+static uint32_t spike_now(void) {
+    uint32_t c;
+    __asm__ volatile("csrr %0, 0x7e2" : "=r"(c));
+    return spike.unit_per_ms > 1 ? c : lv_tick_get();
 }
 
-static void spike_frame(uint32_t tick_ms) {
-    uint32_t work = tick_ms > spike.sleep_ms ? tick_ms - spike.sleep_ms : 0;
-    spike.sleep_ms = 0;
+// A tick edge, bounded: the LVGL port may be stalled
+static uint32_t spike_tick_edge(void) {
+    uint32_t t = lv_tick_get();
+    for (int i = 0; i < 4000000 && lv_tick_get() == t; i++) {
+    }
+    return lv_tick_get();
+}
+
+static void spike_calibrate(void) {
+    uint32_t c0, c1;
+    uint32_t t0 = spike_tick_edge();
+    __asm__ volatile("csrr %0, 0x7e2" : "=r"(c0));
+    vTaskDelay(pdMS_TO_TICKS(500));
+    uint32_t t1 = spike_tick_edge();
+    __asm__ volatile("csrr %0, 0x7e2" : "=r"(c1));
+    uint32_t ms = t1 - t0, dc = c1 - c0;
+    spike.unit_per_ms = ms && dc > ms * 1000u ? dc / ms : 1;
+}
+
+void doom_spike_note_sleep(uint32_t units) {
+    spike.sleep_units += units;
+}
+
+uint32_t doom_spike_now(void) {
+    return spike_now();
+}
+
+static void spike_frame(uint32_t tick_units, bool level) {
+    uint32_t work = tick_units > spike.sleep_units ? tick_units - spike.sleep_units : 0;
+    spike.sleep_units = 0;
     spike.frames++;
-    spike.work_ms += work;
-    spike.over33 += work > 33;
-    spike.over50 += work > 50;
-    spike.max_ms = work > spike.max_ms ? work : spike.max_ms;
+    if (!level) {
+        return;
+    }
+    spike.level_frames++;
+    spike.work_units += work;
+    spike.over33 += work > 33 * spike.unit_per_ms;
+    spike.over50 += work > 50 * spike.unit_per_ms;
+    spike.max_units = work > spike.max_units ? work : spike.max_units;
 }
 
 static void spike_summary(char *out, size_t cap) {
-    if (!spike.frames) {
-        out[0] = '\0';
+    if (!spike.level_frames) {
+        snprintf(out, cap, "spike: no level frame in %u frames (start a game or wait for a demo)", (unsigned)spike.frames);
         return;
     }
-    uint32_t wall = spike.t_end - spike.t_begin;
-    uint32_t avg10 = (uint32_t)(spike.work_ms * 10 / spike.frames);
-    snprintf(out, cap, "spike core %d: work avg %u.%u max %u ms, >33 ms %u, >50 ms %u of %u frames, %u fps wall",
-             DOOM_SPIKE == 2 ? 1 : 0, (unsigned)(avg10 / 10), (unsigned)(avg10 % 10), (unsigned)spike.max_ms,
-             (unsigned)spike.over33, (unsigned)spike.over50, (unsigned)spike.frames,
-             (unsigned)(wall ? spike.frames * 1000 / wall : 0));
+    uint32_t upm   = spike.unit_per_ms;
+    uint32_t avg10 = (uint32_t)(spike.work_units * 10 / spike.level_frames / upm);
+    uint32_t max10 = (uint32_t)((uint64_t)spike.max_units * 10 / upm);
+    uint32_t wall  = spike.t_end - spike.t_begin;
+    snprintf(out, cap, "spike core %d %s: avg %u.%u max %u.%u ms, >33 ms %u, >50 ms %u of %u level frames, %u fps wall",
+             DOOM_SPIKE == 2 ? 1 : 0, upm > 1 ? "cyc" : "tick", (unsigned)(avg10 / 10), (unsigned)(avg10 % 10),
+             (unsigned)(max10 / 10), (unsigned)(max10 % 10), (unsigned)spike.over33, (unsigned)spike.over50,
+             (unsigned)spike.level_frames, (unsigned)(wall ? spike.frames * 1000 / wall : 0));
 }
 #endif
 
@@ -75,17 +118,22 @@ static void engine_task(void *arg) {
     (void)arg;
     // -iwad: the file in the app's folder (the file shims' relative path); -mb: the zone, in MiB (psram_kib of the manifest)
     char *argv[] = {(char *)"doom", (char *)"-iwad", (char *)WAD_NAME, (char *)"-mb", (char *)ZONE_MIB, NULL};
+#if DOOM_SPIKE
+    spike_calibrate();
+#endif
     loading = true;
     doomgeneric_Create(5, argv);
     loading = false;
 #if DOOM_SPIKE
-    spike.t_begin = lv_tick_get();
+    spike.sleep_units = 0; // the load's sleeps are not frame 1's
+    spike.t_begin     = lv_tick_get();
 #endif
     while (!stop_req) {
 #if DOOM_SPIKE
-        uint32_t t0 = lv_tick_get();
+        bool     was_level = gamestate == SPIKE_GS_LEVEL;
+        uint32_t t0        = spike_now();
         doomgeneric_Tick();
-        spike_frame(lv_tick_elaps(t0));
+        spike_frame(spike_now() - t0, was_level && gamestate == SPIKE_GS_LEVEL);
         spike.t_end = lv_tick_get(); // the wall clock stops at the last frame, not at the stop's wait
 #else
         doomgeneric_Tick();

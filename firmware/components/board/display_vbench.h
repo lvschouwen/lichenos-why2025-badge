@@ -1,6 +1,6 @@
 #pragma once
 // #558 spike, developer builds only: the PPA scale + rotate throughput of the planned DOOM video path (#527), measured
-// by "fw vbench". display_vbench.c is the command, display.c the one frame (it owns the PPA client and the flip state).
+// by "fw vbench" (lichen_os/vbench_cmd.c). display.c holds the one frame: it owns the PPA client and the flip state.
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,15 +29,10 @@ typedef struct {
     int32_t         x1, x2;   // its output window: panel columns x1..x2 (all 720 rows)
 } vbench_frame_t;
 
-// One scaled and rotated frame into the back buffer. The caller holds the LVGL lock and src is a 64-byte aligned PSRAM
+// One scaled and rotated frame into the back buffer. Called on the LVGL task (the PPA client's interrupts are on its
+// core, and a core-0 caller would be timed against SDIO and the mesh) and src is a 64-byte aligned PSRAM
 // block of VBENCH_SRC_W x VBENCH_SRC_H RGB565. Nothing is shown: no flip, no dirty rectangle, so the caller must
 // invalidate the whole screen afterwards.
 vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out);
 
-// display_start: registers "fw vbench"
-void display_vbench_register(void);
-
-#else
-static inline void display_vbench_register(void) {
-}
 #endif

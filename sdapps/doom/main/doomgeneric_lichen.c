@@ -200,7 +200,7 @@ void DG_SleepMs(uint32_t ms) {
     uint32_t ticks = ms / portTICK_PERIOD_MS;
     vTaskDelay(ticks ? ticks : 1);
 #if DOOM_SPIKE
-    doom_spike_note_sleep(lv_tick_elaps(t0));
+    doom_spike_note_sleep(doom_spike_now() - t0);
 #endif
 }
 

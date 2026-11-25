@@ -16,6 +16,7 @@
 #include "lichen_sys_display.h"
 #include "lichen_task.h"
 #include "psram_speed.h"
+#include "vbench_cmd.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -103,6 +104,7 @@ static void cmd_disp(char const *args) {
 }
 
 void disp_state_start(void) {
+    vbench_cmd_register(); // #558 spike: a developer build only
     console_register("disp", "disp [state] (the display fingerprint line, logged once 65 s after boot, #354)", cmd_disp);
     static esp_timer_handle_t     timer;
     esp_timer_create_args_t const args = {.callback = log_once, .name = "disp_state"};

@@ -19,5 +19,6 @@ bool   doom_load_cancelled(void);
 // #558 spike (build with DOOM_SPIKE=1 or 2, see CMakeLists.txt; absent otherwise): the engine's own work per frame with
 // no picture handed to the screen. DG_SleepMs reports the time it waited so the engine's pacing is not counted as work.
 #if DOOM_SPIKE
-void doom_spike_note_sleep(uint32_t ms);
+void     doom_spike_note_sleep(uint32_t units); // in the spike clock's unit (doom_spike_now)
+uint32_t doom_spike_now(void);
 #endif

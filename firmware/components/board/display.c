@@ -530,7 +530,6 @@ bool display_start(lv_display_t **out) {
 #endif
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);
     lvgl_port_unlock();
-    display_vbench_register();
     return true;
 }
 
@@ -579,7 +578,7 @@ bool display_engine_set(uint32_t id) {
 // centred in 720x720 (rows 91..627); the PPA's output block comes out 537 wide by 720 tall (ppa_srm.c new_block_w/h).
 // Same hand-over as a background strip (tag, done semaphore) but waited for here, so the engine is idle again at return.
 vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out) {
-    if (!direct_disp || !ppa_up()) {
+    if (!direct_disp || !ppa_up()) { // on the LVGL task: the DMA2D pool's interrupts go to its core
         return VBENCH_NO_PPA;
     }
     display_engine_ppa_done_seen(&engine, ppa_gen_last_done);
