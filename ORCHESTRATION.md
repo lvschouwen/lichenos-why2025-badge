@@ -51,19 +51,15 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-24, wave merged at 9fd59b59, NOT flashed yet)
-- Badge still runs fw-5084772f. Main 9fd59b59 = #547 tag fix, #554, #541+#536 benchtest flags, #549, #555 (fork
-  020fdea5 pushed). Image relabelled fw-9fd59b59; no C6 change. All slots free; no agents running.
+## Live (2026-11-25, badge on fw-9fd59b59, wave benched)
+- Wave 9fd59b59 benched and closed: #547 #549 #554 #536 #555 #551. #541 stays open (late path needs #556 item 4).
+- Found on the bench: #556 (SD app stop task over a small budget: never stoppable; benchtest Esc close), #557
+  (lichen_alloc blocks not freed at unload). Both `now`; they go before the next wave.
+- The card holds a hand-pushed benchtest manifest (internal_ram_kib=12) until #556 lands.
 - My ota-firmware is refused by the permission check: Lucas runs it with `!` via scratchpad fw.sh (recreate after a
   /clear: ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted).
-- NEXT: (1) #551 firmware half on fw-5084772f: start a background `fw ui` watcher (screenshot + `fw ui overflow`
-  when "old version"/"not received" shows), Lucas runs `timeout 10 fw.sh ota-firmware`. (2) Lucas flashes fw-9fd59b59.
-- Bench after 75 s: #555 (boot DMA free; 7 SD pushes; within 1 KB; 8 MB push <= 30.5 s vs 29 s; one "rx idle:
-  released" I line, no sdmmc_periph E; `fw mem diff` no sdio_read blocks); #547 ("by <task>" on diff lines);
-  `sdapp-push benchtest` + `sdapp-push doom`; #541 (`slowstop` flag in SD0:[lichen.apps.benchtest] -> "unloaded
-  late"); #536 (`leak` flag -> "freed 2 leftover blocks (8192 B)"; if benchtest psram stays 12288 after close, the
-  lichen_alloc blocks leak on a plain close: new issue); #549 (dim, open hello, one Esc -> Home; dim lock: wake only);
-  #554 (DOOM hint inset, screenshot). Keys: `fw keys send esc hold:2500` leaves DOOM (2000 ms rule).
+- Bench gotchas: `fw ui open` wakes the screen; a firmware update refuses /console and /screenshot (409); a stopped
+  `ota-firmware` needs the sender killed mid-pieces (a 10 s timeout stops in /prepare).
 - NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance), 7 (`owner-onair.sh sync`/`off`);
   stray `stash@{0}` from impl-549 (duplicate, drop it); #391, #281, #237.
-- #527 next after this wave: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
+- NEXT: #556 + #557 (small wave), then #527: Plan agent (Opus), plan on #527, owner go. #545 parked until #527 lands.
