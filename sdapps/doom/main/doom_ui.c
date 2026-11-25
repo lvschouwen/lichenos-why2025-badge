@@ -224,6 +224,8 @@ static void show_pause(bool on) {
     lv_obj_set_hidden(ui.pause_box, !on);
     if (on) {
         focus_pause_box();
+    } else if (lv_obj_get_group(ui.pause_box)) {
+        lv_group_remove_obj(ui.pause_box); // a hidden card must not hold the focus; focus_pause_box adds it again
     }
 }
 

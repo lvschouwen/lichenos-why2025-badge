@@ -196,8 +196,8 @@ static bool doom_stop(void) {
     }
     // task_done is the engine's last word, not its end: the task is still returning. Wait until the OS's book has no task of this
     // app left, so the unload never frees the image under it (bench #564: a paused engine stopped at once and was still booked).
-    for (int waited = 0; started && lichen_task_leftovers(lichen_ctx_self(), 0) != 0 && waited < STOP_END_WAIT; waited += 10) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+    if (started && lichen_task_leftovers(lichen_ctx_self(), STOP_END_WAIT) != 0) {
+        return false; // still booked after the wait: the loader reports it, nothing is freed under a running task
     }
     uint32_t spent = lv_tick_elaps(begin);
     if (!doom_ui_detach(spent < STOP_TOTAL ? STOP_TOTAL - spent : 200)) {
