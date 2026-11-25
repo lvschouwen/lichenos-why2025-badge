@@ -12,7 +12,7 @@ static bool rect_empty(display_rect_t r) {
 bool display_video_geom_make(display_video_geom_t *g, uint32_t src_w, uint32_t src_h, int32_t ui_w, int32_t ui_h,
                              uint32_t want_x_milli, uint32_t want_y_milli) {
     uint32_t const sx = display_video_scale16(want_x_milli), sy = display_video_scale16(want_y_milli);
-    if (src_w == 0 || src_h == 0 || sx == 0 || sy == 0 || ui_w <= 0 || ui_h <= 0 || src_w > 0xFFFFu ||
+    if (src_w == 0 || src_h == 0 || sx == 0 || sy == 0 || ui_w <= 0 || ui_h != ui_w || src_w > 0xFFFFu ||
         src_h > 0xFFFFu || sx > 0xFFFFu || sy > 0xFFFFu)
         return false;
     uint64_t const w = (uint64_t)src_w * sx / DISPLAY_VIDEO_SCALE_STEPS;

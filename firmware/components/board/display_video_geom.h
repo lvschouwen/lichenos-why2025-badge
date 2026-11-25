@@ -27,7 +27,7 @@ typedef struct {
 } display_video_geom_t;
 
 // Geometry for a src_w x src_h source at the wanted scales (thousandths), centred on a ui_w x ui_h UI. The output is
-// src * scale16 / 16 rounded down; the odd pixel of the leftover goes to the bottom/right bar. False when a size or
+// src * scale16 / 16 rounded down; the odd pixel of the leftover goes to the bottom/right bar. False when ui_w != ui_h (the rot90 mapping holds for a square panel only), a size or
 // scale is 0 or the output does not fit the UI. The bars span the full UI width.
 bool display_video_geom_make(display_video_geom_t *g, uint32_t src_w, uint32_t src_h, int32_t ui_w, int32_t ui_h,
                              uint32_t want_x_milli, uint32_t want_y_milli);

@@ -76,10 +76,11 @@ static void test_tiling(void) {
 static void test_odd_and_edges(void) {
     display_video_geom_t g;
     // Odd leftover: 7 px of UI height, 4 of video -> 1 above, 2 below (the odd pixel goes below)
-    CHECK(display_video_geom_make(&g, 4, 4, 10, 7, 1000, 1000));
-    CHECK(req(g.rect, 3, 1, 6, 4)); // (10-4)/2 = 3 left, (7-4)/2 = 1
-    CHECK(req(g.bar[0], 0, 0, 9, 0));
-    CHECK(req(g.bar[1], 0, 5, 9, 6));
+    CHECK(display_video_geom_make(&g, 4, 4, 7, 7, 1000, 1000));
+    CHECK(req(g.rect, 1, 1, 4, 4)); // (7-4)/2 = 1 on each axis
+    CHECK(req(g.bar[0], 0, 0, 6, 0));
+    CHECK(req(g.bar[1], 0, 5, 6, 6));
+    CHECK(!display_video_geom_make(&g, 4, 4, 10, 7, 1000, 1000)); // not square
     // Exactly fills the UI: no bars
     CHECK(display_video_geom_make(&g, 45, 45, 720, 720, 16000, 16000));
     CHECK(req(g.rect, 0, 0, 719, 719) && !g.bar_ok[0] && !g.bar_ok[1]);
