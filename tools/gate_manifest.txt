@@ -718,9 +718,14 @@ update_mode_restart_due	-	any	update_mode.h
 update_mode_run_stop_hook	-	unspecified	update_mode.h
 update_mode_set_stop_hook	-	unspecified	update_mode.h
 update_mode_tick	-	any	update_mode.h
+video_escape_retry	-	lvgl	video_notice.h
 video_escape_sample	-	lvgl	video_notice.h
 video_notice_active	-	any	video_notice.h
+video_notice_owner	-	any	video_notice.h
 video_notice_policy	-	any	video_notice.h
 video_notice_raise	-	any	video_notice.h
+video_notice_reclaimed	-	any	video_notice.h
 video_notice_set_active	-	any	video_notice.h
+video_notice_set_keys_release	-	any	video_notice.h
 video_notice_set_reclaim	-	any	video_notice.h
+video_notice_toast_may_show	-	lvgl	video_notice.h

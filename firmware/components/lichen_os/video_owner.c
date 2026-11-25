@@ -47,7 +47,7 @@ static void reap_parked(void) {
 
 static void on_reclaimed(void *arg, display_video_reclaim_t why) {
     (void)arg;
-    video_notice_set_active(false); // before the app's callback: a notice it raises there is no longer held
+    video_notice_reclaimed(); // before the app's callback: a notice it raises there is no longer held; the raw keys go back too
     o.reclaimed = true;
     o.reason    = why;
     if (o.cb) {
@@ -90,7 +90,7 @@ display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32
         }
         if (r == DISPLAY_VIDEO_REFUSE_NONE) {
             video_notice_set_reclaim(notice_reclaim);
-            video_notice_set_active(true);
+            video_notice_set_active(true, ctx);
             o      = (owner_t){.held = true, .ctx = ctx, .src = {s[0], s[1]}, .cb = on_reclaim, .arg = arg};
             src[0] = s[0];
             src[1] = s[1];
@@ -117,7 +117,7 @@ bool video_owner_holds(lichen_ctx_t ctx) {
 // Under the lock. The display side waits out a PPA transfer before it says the sources are free; if one may still run they
 // are parked, not freed (no tag-ignore): they are OS memory, so keeping them is safe, only late.
 static void release_locked(void) {
-    video_notice_set_active(false);
+    video_notice_set_active(false, 0);
     bool const idle = display_vsurf_release_locked();
     void      *s0 = o.src[0], *s1 = o.src[1];
     // The record goes first: a present or holds() racing on another task then finds nothing to read before the free

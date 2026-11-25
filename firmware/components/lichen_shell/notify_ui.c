@@ -134,8 +134,8 @@ static void drain(lv_timer_t *timer) {
     }
     // Not over the boot screen nor the update screen, nor a video owner (#563: the unread dot counts it, it shows on exit);
     // the queue waits
-    if (!s_showing.id && s_waiting.n && shell_home_shown() && !update_screen_busy() &&
-        video_notice_policy(VN_TOAST, video_notice_active()) != VN_HOLD) {
+    if (video_notice_toast_may_show(s_showing.id != 0, s_waiting.n, shell_home_shown(), update_screen_busy(),
+                                    video_notice_active())) {
         show_next();
     }
 }

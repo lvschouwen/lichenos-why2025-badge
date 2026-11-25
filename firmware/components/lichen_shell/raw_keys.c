@@ -8,6 +8,7 @@
 #include "lichen_sys_keys.h"
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_life.h"
 #include "lichen_sys_ui.h"
 #include "lvgl.h"
 #include "raw_owner.h"
@@ -217,17 +218,35 @@ bool raw_keys_release_ctx(lichen_ctx_t ctx) {
 // task itself, or holds the UI lock, can: then nothing here runs.
 #define ESC_SAMPLE_MS 100
 
+static video_escape_t esc; // the sampler's, LVGL task
+
+// What a reclaim hands back is the video owner's raw hold only (video_notice_reclaimed): another app's, or the Keyboard test's,
+// stays
+static void release_owner_keys(uint32_t ctx) {
+    (void)raw_keys_release_ctx(ctx);
+}
+
 static void leave_video_app(void) {
-    if (video_notice_raise(VN_ESCAPE)) {
-        free_keys(owner.ctx); // the hung app's raw hold must not outlive the screen: the keyboard would stay swallowed
-        shell_back_impl();    // the same leave as a short Esc on the app's screen
+    lichen_ctx_t ctx = video_notice_owner(); // before the reclaim clears it
+    if (!video_notice_raise(VN_ESCAPE)) {
+        video_escape_retry(&esc); // the lock was busy: a hold that goes on tries again
+        return;
+    }
+    // The same leave as a short Esc on the app's screen, only when that screen is still on top: the app's own on_reclaim may
+    // have left already, and another app's screen is never popped
+    app_life_t life;
+    if (ctx != LICHEN_CTX_NONE && lichen_sys_life_get(ctx, &life) && life.state == LIFE_OPEN) {
+        shell_back_impl();
     }
 }
 
 static void escape_tick(lv_timer_t *t) {
     (void)t;
-    static video_escape_t esc;
-    if (video_escape_sample(&esc, video_notice_active(), atomic_load(&esc_down), atomic_load(&esc_presses), lv_tick_get())) {
+    bool active = video_notice_active();
+    if (!active) {
+        atomic_store(&esc_down, false); // a release the keyboard path dropped must not stay "down" into the next owner
+    }
+    if (video_escape_sample(&esc, active, atomic_load(&esc_down), atomic_load(&esc_presses), lv_tick_get())) {
         leave_video_app();
     }
 }
@@ -240,5 +259,6 @@ void raw_keys_start_escape(void) {
     if (atomic_load(&active) == 0) {
         lv_timer_pause(timer);
     }
+    video_notice_set_keys_release(release_owner_keys);
     lv_timer_create(escape_tick, ESC_SAMPLE_MS, NULL);
 }

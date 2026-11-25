@@ -36,15 +36,15 @@ static void policy_table(void) {
 
 static void raise_calls_reclaim(void) {
     video_notice_set_reclaim(fake_reclaim);
-    video_notice_set_active(false);
+    video_notice_set_active(false, 0);
     CHECK(!video_notice_raise(VN_THERMAL) && reclaimed == 0); // no owner: nothing to take back
-    video_notice_set_active(true);
+    video_notice_set_active(true, 7);
     CHECK(!video_notice_raise(VN_TOAST) && reclaimed == 0);    // held, never reclaims
     CHECK(video_notice_raise(VN_DIALOG) && reclaimed == 1 && last_kind == VN_DIALOG);
     CHECK(video_notice_raise(VN_CARD) && reclaimed == 2 && last_kind == VN_CARD);
     video_notice_set_reclaim(NULL);
     CHECK(!video_notice_raise(VN_ESCAPE)); // no hook registered yet: no crash, nothing done
-    video_notice_set_active(false);
+    video_notice_set_active(false, 0);
 }
 
 static void escape_timing(void) {
@@ -85,7 +85,62 @@ static void escape_ignores_old_and_idle(void) {
     CHECK(video_escape_sample(&w, true, true, 1, 0xFFFFFC10u + 2000u));
 }
 
+static uint32_t released_ctx;
+static int      released;
+static void fake_keys_release(uint32_t ctx) {
+    released++;
+    released_ctx = ctx;
+}
+
+// Every reclaim hands back the video owner's raw keys, that context only, and ends the active state
+static void reclaim_releases_owner_keys(void) {
+    video_notice_set_keys_release(fake_keys_release);
+    video_notice_set_active(true, 42);
+    CHECK(video_notice_owner() == 42);
+    video_notice_reclaimed();
+    CHECK(released == 1 && released_ctx == 42);
+    CHECK(!video_notice_active() && video_notice_owner() == 0);
+    video_notice_reclaimed(); // no owner any more: nobody else's keys are touched
+    CHECK(released == 1);
+    video_notice_set_keys_release(NULL);
+    video_notice_set_active(true, 5);
+    video_notice_reclaimed(); // no hook: no crash
+    CHECK(!video_notice_active());
+}
+
+// The toast gate of notify_ui.c's drain(): held while a video owner is active, shown after it is gone however it went
+static void toast_gate(void) {
+    CHECK(video_notice_toast_may_show(false, 1, true, false, false));
+    CHECK(!video_notice_toast_may_show(false, 1, true, false, true));   // held: stays queued, so unread, so on the dot
+    CHECK(!video_notice_toast_may_show(false, 5, true, false, true));
+    video_notice_set_active(true, 3);
+    CHECK(!video_notice_toast_may_show(false, 1, true, false, video_notice_active()));
+    video_notice_set_active(false, 0); // released
+    CHECK(video_notice_toast_may_show(false, 1, true, false, video_notice_active()));
+    video_notice_set_active(true, 3);
+    video_notice_reclaimed(); // reclaimed
+    CHECK(video_notice_toast_may_show(false, 1, true, false, video_notice_active()));
+    CHECK(!video_notice_toast_may_show(true, 1, true, false, false));   // the other conditions still hold
+    CHECK(!video_notice_toast_may_show(false, 0, true, false, false));
+    CHECK(!video_notice_toast_may_show(false, 1, false, false, false));
+    CHECK(!video_notice_toast_may_show(false, 1, true, true, false));
+}
+
+// A reclaim that failed lets the hold try again; a hold that was over does not
+static void escape_retry(void) {
+    video_escape_t e = {0};
+    CHECK(!video_escape_sample(&e, true, false, 0, 0));
+    CHECK(!video_escape_sample(&e, true, true, 1, 100));
+    CHECK(video_escape_sample(&e, true, true, 1, 2100));
+    CHECK(!video_escape_sample(&e, true, true, 1, 2200));
+    video_escape_retry(&e);
+    CHECK(video_escape_sample(&e, true, true, 1, 2300));
+}
+
 int main(void) {
+    reclaim_releases_owner_keys();
+    toast_gate();
+    escape_retry();
     policy_table();
     raise_calls_reclaim();
     escape_timing();

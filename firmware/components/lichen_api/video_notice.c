@@ -3,6 +3,8 @@
 #include <stdatomic.h>
 
 static atomic_bool                 s_active;
+static atomic_uint                 s_owner;
+static _Atomic(void (*)(uint32_t)) s_keys_release;
 static _Atomic(bool (*)(vn_kind_t)) s_reclaim;
 
 vn_action_t video_notice_policy(vn_kind_t kind, bool owner_active) {
@@ -12,8 +14,34 @@ vn_action_t video_notice_policy(vn_kind_t kind, bool owner_active) {
     return kind == VN_TOAST ? VN_HOLD : VN_RECLAIM;
 }
 
-void video_notice_set_active(bool active) {
+void video_notice_set_active(bool active, uint32_t owner_ctx) {
+    atomic_store(&s_owner, active ? owner_ctx : 0);
     atomic_store(&s_active, active);
+}
+
+uint32_t video_notice_owner(void) {
+    return atomic_load(&s_active) ? atomic_load(&s_owner) : 0;
+}
+
+void video_notice_set_keys_release(void (*release)(uint32_t ctx)) {
+    atomic_store(&s_keys_release, release);
+}
+
+void video_notice_reclaimed(void) {
+    uint32_t ctx = video_notice_owner();
+    video_notice_set_active(false, 0);
+    void (*release)(uint32_t) = atomic_load(&s_keys_release);
+    if (ctx && release) {
+        release(ctx);
+    }
+}
+
+bool video_notice_toast_may_show(bool showing, unsigned waiting, bool home_shown, bool update_busy, bool owner_active) {
+    return !showing && waiting && home_shown && !update_busy && video_notice_policy(VN_TOAST, owner_active) != VN_HOLD;
+}
+
+void video_escape_retry(video_escape_t *e) {
+    e->fired = false;
 }
 
 void video_notice_set_reclaim(bool (*reclaim)(vn_kind_t kind)) {
