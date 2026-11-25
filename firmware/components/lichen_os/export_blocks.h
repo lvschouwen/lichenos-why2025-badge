@@ -19,3 +19,7 @@ void sd_app_block_forget(void *ptr);                   // the app frees it itsel
 // every block by pointer; the unload frees what is left, so the memory book goes back to 0 for that app.
 void sd_app_booked_note(lichen_ctx_t ctx, void *ptr);
 void sd_app_booked_forget(void *ptr);
+// Contract for OS code that takes over a block an SD app got from lichen_alloc (an OS buffer booked to an app, #527): free it
+// with lichen_free, or call sd_app_booked_disown before freeing or handing it on any other way. Otherwise the unload frees it
+// again (a double free) or frees a block the OS still uses.
+void sd_app_booked_disown(void *ptr);

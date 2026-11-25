@@ -537,18 +537,33 @@ void sd_app_block_forget(void *ptr) {
 // after its note, so a zero read is exact for that block).
 static ptr_map_t         g_booked;
 static _Atomic uint32_t  g_booked_used;
-static _Atomic bool      g_booked_unsafe; // a free ran where the mutex cannot be taken: an entry may be stale
+// A free ran where the mutex cannot be taken while the map held entries: one may be stale, so a sweep leaks instead of freeing.
+// Cleared when the map is empty (nothing left to be stale), so one such free does not stop the unloads for good.
+static _Atomic bool      g_booked_unsafe;
+static bool              g_booked_full_logged; // the map could not grow (logged once)
+
+static void booked_update(void) { // under g_blk_mu
+    atomic_store(&g_booked_used, g_booked.used);
+    if (g_booked.used == 0) {
+        atomic_store(&g_booked_unsafe, false);
+    }
+}
 
 // lichen_alloc's side: only the context of an SD app that is loaded (a built-in app's or the OS's blocks are never swept).
 // Called outside the book's and the app lock: sd_app_find takes the leaf lock.
 void sd_app_booked_note(lichen_ctx_t ctx, void *ptr) {
-    if (!g_blk_mu || !xPortCanYield() || !sd_app_find(ctx)) {
+    if (!g_blk_mu || !g_recs || !xPortCanYield() || !sd_app_find(ctx)) { // g_recs: no SD app is loaded, nothing to note
         return;
     }
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
-    ptr_map_note(&g_booked, &blk_env, ptr, ctx);
-    atomic_store(&g_booked_used, g_booked.used);
+    bool ok  = ptr_map_note(&g_booked, &blk_env, ptr, ctx);
+    bool log = !ok && !g_booked_full_logged;
+    g_booked_full_logged |= !ok;
+    booked_update();
     xSemaphoreGive(g_blk_mu);
+    if (log) {
+        ESP_LOGW(TAG, "no memory to track an app's lichen_alloc blocks: they are not freed at its unload");
+    }
 }
 
 void sd_app_booked_forget(void *ptr) {
@@ -561,8 +576,28 @@ void sd_app_booked_forget(void *ptr) {
     }
     xSemaphoreTake(g_blk_mu, portMAX_DELAY);
     ptr_map_forget(&g_booked, ptr);
-    atomic_store(&g_booked_used, g_booked.used);
+    booked_update();
     xSemaphoreGive(g_blk_mu);
+}
+
+void sd_app_booked_disown(void *ptr) {
+    sd_app_booked_forget(ptr);
+}
+
+static void release_forget_blocks(void *u, void *p) {
+    (void)u;
+    sd_app_block_forget(p);
+}
+static void release_forget_booked(void *u, void *p) {
+    (void)u;
+    sd_app_booked_forget(p);
+}
+static void release_free_stale(void *u, void *p) {
+    (void)u;
+    heap_caps_free(p); // the context is stale (unregistered): its row is gone and was logged as leaked
+}
+static void release_free_owned(void *u, void *p) {
+    lichen_free(((sd_app_rec_t *)u)->ctx, p); // under its context, so its row in the book goes down too
 }
 
 static uint32_t release_block(sd_app_rec_t *rec, void *p) {
@@ -570,11 +605,9 @@ static uint32_t release_block(sd_app_rec_t *rec, void *p) {
     sd_app_lock();
     bool stale = rec->gone;
     sd_app_unlock();
-    if (stale) {
-        heap_caps_free(p); // the context is stale (unregistered): its row is gone and was logged as leaked
-    } else {
-        lichen_free(rec->ctx, p); // under its context, so its row in the book goes down too
-    }
+    // Both maps are forgotten first: a malloc block is in both and the other sweep must not free it again (#557)
+    booked_release_env_t const env = {rec, release_forget_blocks, release_forget_booked, release_free_stale, release_free_owned};
+    booked_release(&env, p, stale);
     return bytes;
 }
 
@@ -623,7 +656,7 @@ static void sweep_booked(sd_app_rec_t *rec) {
     uint32_t                  n   = (uint32_t)ptr_map_sweep(&g_booked, rec->ctx, &env);
     sweep_lock(NULL);
     ptr_map_trim(&g_booked, &blk_env);
-    atomic_store(&g_booked_used, g_booked.used);
+    booked_update();
     sweep_unlock(NULL);
     char line[96];
     if (booked_sweep_line(line, sizeof(line), rec->m.id, n, sw.bytes, sw.unsafe)) {

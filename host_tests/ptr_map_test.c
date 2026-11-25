@@ -202,6 +202,47 @@ static void test_booked_line(void) {
     CHECK(tables == 0);
 }
 
+// #557 review: a shim block is in both maps; the card-removal unload (stale context) frees it straight to the heap. Both maps
+// forget it first, so the second sweep finds nothing and the heap sees one free
+static ptr_map_t rel_blocks, rel_booked;
+static int       heap_frees, owned_frees;
+static void rf_blocks(void *u, void *p) {
+    (void)u;
+    ptr_map_forget(&rel_blocks, p);
+}
+static void rf_booked(void *u, void *p) {
+    (void)u;
+    ptr_map_forget(&rel_booked, p);
+}
+static void rf_stale(void *u, void *p) {
+    (void)u, (void)p;
+    heap_frees++;
+}
+static void rf_owned(void *u, void *p) {
+    (void)u, (void)p;
+    owned_frees++;
+}
+static void rel_free(void *u, void *p) {
+    (void)u;
+    booked_release_env_t const e = {NULL, rf_blocks, rf_booked, rf_stale, rf_owned};
+    booked_release(&e, p, *(bool const *)u);
+}
+static void test_release_once(void) {
+    for (int stale = 0; stale < 2; stale++) {
+        bool                 st = stale;
+        heap_frees = owned_frees = 0;
+        CHECK(ptr_map_note(&rel_blocks, &env, fake(1), X) && ptr_map_note(&rel_booked, &env, fake(1), X));
+        CHECK(ptr_map_note(&rel_booked, &env, fake(2), X)); // a direct lichen_alloc block: booked map only
+        ptr_map_sweep_env_t const se = {&st, nolock, nolock, rel_free};
+        CHECK(ptr_map_sweep(&rel_blocks, X, &se) == 1); // the malloc sweep
+        CHECK(ptr_map_sweep(&rel_booked, X, &se) == 1); // the booked sweep finds only the direct block
+        CHECK(heap_frees + owned_frees == 2 && (stale ? heap_frees : owned_frees) == 2);
+        ptr_map_trim(&rel_blocks, &env);
+        ptr_map_trim(&rel_booked, &env);
+    }
+    CHECK(tables == 0);
+}
+
 int main(void) {
     test_basic();
     test_forget_foreign();
@@ -211,6 +252,7 @@ int main(void) {
     test_sweep_with_churn();
     test_no_memory();
     test_booked_line();
+    test_release_once();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
