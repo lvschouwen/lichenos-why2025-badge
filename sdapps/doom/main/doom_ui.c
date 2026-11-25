@@ -159,27 +159,48 @@ static void on_reclaim(void *arg, lichen_video_reclaim_t why) {
 }
 
 // The picture's way is chosen once, when the first frame has come: the OS surface, else the #526 canvas
+static void show_pause_text(char const *text);
+
+// The picture could not be shown: the person is told where they are looking (the loading text, or the pause card on a resume)
+static void fail_picture(char const *text) {
+    ui.failed = true;
+    if (doom_path_get(&path) == DOOM_PATH_PAUSED) {
+        show_pause_text(text);
+        return;
+    }
+    lv_obj_set_hidden(ui.load_label, false);
+    lichen_label_set(ui.load_label, text);
+}
+
 static void begin_picture(void) {
     switch_to_picture();
+    doom_fps_reset(&ui.fps); // a resume starts a new segment: the pause is not a stalled second, the notice covers the last one
     lichen_video_cfg_t cfg = {.src_w = DOOM_SRC_W, .src_h = DOOM_SRC_H, .on_reclaim = on_reclaim, .arg = NULL};
     if (lichen_video_acquire(&cfg)) {
         atomic_store(&video_held, true);
         atomic_store(&parked, false);
-        doom_fps_reset(&ui.fps); // the engine counts the frames it presents
         doom_path_chosen(&path, true);
         return;
     }
     if (!build_picture(ui.screen)) {
-        lv_obj_set_hidden(ui.load_label, false);
-        lichen_label_set(ui.load_label, "DOOM has no memory for its picture. Close it and open it again.");
-        ui.failed = true;
+        fail_picture("DOOM has no memory for its picture. Close it and open it again.");
         return;
     }
     lv_obj_set_hidden(ui.canvas, false);
     doom_path_chosen(&path, false);
 }
 
+static void show_pause_text(char const *text) {
+    ui.pause_shown = true;
+    lichen_label_set(ui.pause_label, text);
+    lv_obj_set_hidden(ui.pause_label, false);
+    lv_obj_set_hidden(ui.pause_box, false);
+}
+
 static void show_pause(bool on) {
+    if (on) {
+        lichen_label_set(ui.pause_label, "Paused. Press Enter to go back to the game.");
+    }
     ui.pause_shown = on;
     lv_obj_set_hidden(ui.pause_label, !on);
     lv_obj_set_hidden(ui.pause_box, !on);
@@ -191,7 +212,12 @@ static void show_pause(bool on) {
 // LVGL task: the OS had the screen (a dialog, the thermal warning). The engine waits; Enter takes the screen again.
 static void tick_paused(void) {
     if (doom_path_why(&path) == DOOM_RECLAIM_ESCAPE) {
-        return; // the OS's own escape is leaving the app
+        // The OS pops the app's screen itself (only while it is still on top, #563); if it does not, the app's own hold-Esc is
+        // not offered here either: the pause card stays and Esc held 2 s is the OS's again once the screen is closed
+        return;
+    }
+    if (ui.failed) {
+        return; // the card says why the game cannot come back
     }
     if (!ui.pause_shown) {
         show_pause(true);
@@ -206,8 +232,7 @@ static void tick_paused(void) {
     ui.resume_req = false;
     show_pause(false);
     if (!lichen_keys_raw_take(on_key, NULL)) { // the OS took the keys back with the screen
-        lichen_label_set(ui.pause_label, "DOOM could not take the keyboard. Close it and open DOOM again.");
-        lv_obj_set_hidden(ui.pause_label, false);
+        fail_picture("DOOM could not take the keyboard (another app may hold it). Close it and open DOOM again.");
         return;
     }
     begin_picture();
@@ -490,10 +515,24 @@ void doom_ui_present(void) {
     }
 }
 
+// Engine task only: the pause is taken out of the game's clock, or its tic loop would run the missed time in one burst
+static uint32_t pause_begin, paused_total;
+static bool     in_pause;
+
 bool doom_ui_engine_held(void) {
     bool held = doom_path_get(&path) == DOOM_PATH_PAUSED;
+    if (held && !in_pause) {
+        pause_begin = lv_tick_get();
+    } else if (!held && in_pause) {
+        paused_total += lv_tick_get() - pause_begin;
+    }
+    in_pause = held;
     atomic_store(&parked, held); // seen between two frames: the video buffers are not being written
     return held;
+}
+
+uint32_t doom_ui_game_ms(void) {
+    return lv_tick_get() - paused_total;
 }
 
 bool doom_ui_next_key(int *pressed, unsigned char *key) {

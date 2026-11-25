@@ -205,7 +205,7 @@ void DG_SleepMs(uint32_t ms) {
 }
 
 uint32_t DG_GetTicksMs(void) {
-    return lv_tick_get();
+    return doom_ui_game_ms();
 }
 
 int DG_GetKey(int *pressed, unsigned char *key) {

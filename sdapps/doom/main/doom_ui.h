@@ -20,6 +20,8 @@ void doom_ui_present(void);
 // Engine task, once per tick before doomgeneric_Tick: true while the OS has the screen back (a dialog, the thermal warning):
 // the engine waits and draws nothing, which is what lets the screen release the video buffers
 bool doom_ui_engine_held(void);
+// Engine task, DG_GetTicksMs: lv_tick ms without the time spent paused
+uint32_t doom_ui_game_ms(void);
 // Engine task, DG_GetKey
 bool doom_ui_next_key(int *pressed, unsigned char *key);
 // The loader's stop, after the engine task has ended: takes the keys and the canvas off the LVGL task, then frees the
