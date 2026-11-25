@@ -3000,6 +3000,14 @@ target_include_directories(doom_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(doom_logic_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME doom_logic_test COMMAND doom_logic_test)
 
+add_executable(doom_spike_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/doom_spike_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/doom/main/doom_spike.c
+)
+target_include_directories(doom_spike_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../sdapps/doom/main)
+target_compile_options(doom_spike_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME doom_spike_test COMMAND doom_spike_test)
+
 add_test(NAME check_sdapp_imports_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_sdapp_imports_test.py)
 
 # Every sdapps/<id>/manifest through the real parser (#552); the glob is re-run when an app is added

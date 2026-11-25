@@ -86,7 +86,7 @@ set(ENGINE
     z_zone.c)
 list(TRANSFORM ENGINE PREPEND "${DG}/")
 
-idf_component_register(SRCS doom_app.c doom_logic.c doom_ui.c doomgeneric_lichen.c ${ENGINE} INCLUDE_DIRS "${DG}")
+idf_component_register(SRCS doom_app.c doom_logic.c doom_spike.c doom_ui.c doomgeneric_lichen.c ${ENGINE} INCLUDE_DIRS "${DG}")
 
 # 8-bit frame plus palette (CMAP256), 320x200 (the zone and the 256 KB screen buffer are in PSRAM, through the OS's malloc;
 # the 512 KB RGB565 picture of doom_ui.c is the app's own PSRAM block, #526).

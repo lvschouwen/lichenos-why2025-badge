@@ -9,6 +9,7 @@
 
 #include "doom_app.h"
 #include "doom_engine.h"
+#include "doom_spike.h"
 #include "doom_ui.h"
 
 #include <stdio.h>
@@ -37,17 +38,18 @@
 extern int gamestate; // the engine's: GS_LEVEL is 0 (doomdef.h)
 #define SPIKE_GS_LEVEL 0
 
-static struct {
-    uint32_t unit_per_ms; // cycles per ms, or 1 when the unit is lv_tick ms
-    uint32_t frames, level_frames, over33, over50, max_units, sleep_units;
-    uint64_t work_units;
-    uint32_t t_begin, t_end; // lv_tick ms
-} spike;
+static doom_spike_t spike; // the arithmetic is doom_spike.c's (host-tested); one clock for every timestamp
+static bool         spike_cycles;
+static uint32_t     spike_t_begin, spike_t_end; // lv_tick ms, the wall clock of the fps
 
-static uint32_t spike_now(void) {
+static uint32_t now_tick(void) {
+    return lv_tick_get();
+}
+
+static uint32_t now_cycles(void) {
     uint32_t c;
     __asm__ volatile("csrr %0, 0x7e2" : "=r"(c));
-    return spike.unit_per_ms > 1 ? c : lv_tick_get();
+    return c;
 }
 
 // A tick edge, bounded: the LVGL port may be stalled
@@ -58,52 +60,32 @@ static uint32_t spike_tick_edge(void) {
     return lv_tick_get();
 }
 
+// Before the clock is chosen the spike runs on ticks, so a sleep during the load has a clock to read
 static void spike_calibrate(void) {
-    uint32_t c0, c1;
+    doom_spike_init(&spike, now_tick, 1);
     uint32_t t0 = spike_tick_edge();
-    __asm__ volatile("csrr %0, 0x7e2" : "=r"(c0));
+    uint32_t c0 = now_cycles();
     vTaskDelay(pdMS_TO_TICKS(500));
     uint32_t t1 = spike_tick_edge();
-    __asm__ volatile("csrr %0, 0x7e2" : "=r"(c1));
+    uint32_t c1 = now_cycles();
     uint32_t ms = t1 - t0, dc = c1 - c0;
-    spike.unit_per_ms = ms && dc > ms * 1000u ? dc / ms : 1;
-}
-
-void doom_spike_note_sleep(uint32_t units) {
-    spike.sleep_units += units;
-}
-
-uint32_t doom_spike_now(void) {
-    return spike_now();
-}
-
-static void spike_frame(uint32_t tick_units, bool level) {
-    uint32_t work = tick_units > spike.sleep_units ? tick_units - spike.sleep_units : 0;
-    spike.sleep_units = 0;
-    spike.frames++;
-    if (!level) {
-        return;
+    uint32_t upm = ms && dc > ms * 1000u ? dc / ms : 0;
+    spike_cycles = upm > 1;
+    if (spike_cycles) {
+        doom_spike_init(&spike, now_cycles, upm);
     }
-    spike.level_frames++;
-    spike.work_units += work;
-    spike.over33 += work > 33 * spike.unit_per_ms;
-    spike.over50 += work > 50 * spike.unit_per_ms;
-    spike.max_units = work > spike.max_units ? work : spike.max_units;
+}
+
+void doom_spike_sleep_enter(void) {
+    doom_spike_sleep_begin(&spike);
+}
+
+void doom_spike_sleep_leave(void) {
+    doom_spike_sleep_end(&spike);
 }
 
 static void spike_summary(char *out, size_t cap) {
-    if (!spike.level_frames) {
-        snprintf(out, cap, "spike: no level frame in %u frames (start a game or wait for a demo)", (unsigned)spike.frames);
-        return;
-    }
-    uint32_t upm   = spike.unit_per_ms;
-    uint32_t avg10 = (uint32_t)(spike.work_units * 10 / spike.level_frames / upm);
-    uint32_t max10 = (uint32_t)((uint64_t)spike.max_units * 10 / upm);
-    uint32_t wall  = spike.t_end - spike.t_begin;
-    snprintf(out, cap, "spike core %d %s: avg %u.%u max %u.%u ms, >33 ms %u, >50 ms %u of %u level frames, %u fps wall",
-             DOOM_SPIKE == 2 ? 1 : 0, upm > 1 ? "cyc" : "tick", (unsigned)(avg10 / 10), (unsigned)(avg10 % 10),
-             (unsigned)(max10 / 10), (unsigned)(max10 % 10), (unsigned)spike.over33, (unsigned)spike.over50,
-             (unsigned)spike.level_frames, (unsigned)(wall ? spike.frames * 1000 / wall : 0));
+    doom_spike_format(&spike, out, cap, DOOM_SPIKE == 2 ? 1 : 0, spike_cycles, spike_t_end - spike_t_begin);
 }
 #endif
 
@@ -125,16 +107,15 @@ static void engine_task(void *arg) {
     doomgeneric_Create(5, argv);
     loading = false;
 #if DOOM_SPIKE
-    spike.sleep_units = 0; // the load's sleeps are not frame 1's
-    spike.t_begin     = lv_tick_get();
+    spike_t_begin = lv_tick_get();
 #endif
     while (!stop_req) {
 #if DOOM_SPIKE
         bool     was_level = gamestate == SPIKE_GS_LEVEL;
-        uint32_t t0        = spike_now();
+        doom_spike_frame_begin(&spike);
         doomgeneric_Tick();
-        spike_frame(spike_now() - t0, was_level && gamestate == SPIKE_GS_LEVEL);
-        spike.t_end = lv_tick_get(); // the wall clock stops at the last frame, not at the stop's wait
+        doom_spike_frame_end(&spike, was_level && gamestate == SPIKE_GS_LEVEL);
+        spike_t_end = lv_tick_get(); // the wall clock stops at the last frame, not at the stop's wait
 #else
         doomgeneric_Tick();
 #endif

@@ -577,8 +577,11 @@ bool display_engine_set(uint32_t id) {
 // #558 spike: one scale + rotate frame of the planned video path into the back buffer, timed. The UI rectangle 720x537
 // centred in 720x720 (rows 91..627); the PPA's output block comes out 537 wide by 720 tall (ppa_srm.c new_block_w/h).
 // Same hand-over as a background strip (tag, done semaphore) but waited for here, so the engine is idle again at return.
-vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out) {
-    if (!direct_disp || !ppa_up()) { // on the LVGL task: the DMA2D pool's interrupts go to its core
+vbench_status_t display_vbench_frame(void const *src, bool show, vbench_frame_t *out) {
+    if (!direct_disp || !flip.swap_on) {
+        return VBENCH_NO_SWAP; // the write target would be the shown buffer: a visible tear
+    }
+    if (!ppa_up()) { // on the LVGL task: the DMA2D pool's interrupts go to its core
         return VBENCH_NO_PPA;
     }
     display_engine_ppa_done_seen(&engine, ppa_gen_last_done);
@@ -586,7 +589,9 @@ vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out) {
     if (display_engine_ppa_hung(&engine)) {
         return VBENCH_NO_PPA;
     }
+    uint32_t const       tw0 = (uint32_t)esp_timer_get_time();
     unsigned const       fb  = display_flip_write_target(&flip); // never front ^ 1: a pending swap makes that the shown one
+    out->target_us           = (uint32_t)esp_timer_get_time() - tw0;
     display_rect_t const ui  = {0, 91, LCD_H_RES - 1, 91 + 537 - 1};
     display_rect_t const blk = display_rot90_block(ui, LCD_V_RES);
     uint32_t const       gen = engine.gen = display_engine_gen_next(engine.gen);
@@ -633,6 +638,10 @@ vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out) {
     out->fb       = panel_fbs[fb];
     out->x1       = blk.x1;
     out->x2       = blk.x2;
+    if (show) {
+        display_flip_drawn(&flip, blk);
+        display_flip_frame_end(&flip); // the swap request: the next write target waits for it and copies the carry
+    }
     return VBENCH_OK;
 }
 #endif

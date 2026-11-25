@@ -17,6 +17,7 @@
 
 typedef enum {
     VBENCH_OK,
+    VBENCH_NO_SWAP, // one frame buffer (no swap): the PPA would write the shown buffer
     VBENCH_NO_PPA,  // no direct flush, the PPA client is not there, or an earlier transfer is still hung
     VBENCH_REFUSED, // the driver refused the transfer
     VBENCH_TIMEOUT, // no done: the engine is on the CPU now and the source must not be freed under a late transfer
@@ -25,14 +26,17 @@ typedef enum {
 typedef struct {
     uint32_t        call_us;  // before the driver call to its return: the source write-back and the output invalidate
     uint32_t        total_us; // before the driver call to the done interrupt
+    uint32_t        target_us; // display_flip_write_target: the wait for the last swap and the dirty carry it triggers
     uint16_t const *fb;       // the frame buffer written (the back one), 720 px per row
     int32_t         x1, x2;   // its output window: panel columns x1..x2 (all 720 rows)
 } vbench_frame_t;
 
-// One scaled and rotated frame into the back buffer. Called on the LVGL task (the PPA client's interrupts are on its
+// One scaled and rotated frame into the back buffer; show also hands the window to the flip logic as the real path would
+// (dirty rectangle, swap request), so the next frame pays the swap wait and the dirty carry. Called on the LVGL task (the PPA client's interrupts are on its
 // core, and a core-0 caller would be timed against SDIO and the mesh) and src is a 64-byte aligned PSRAM
 // block of VBENCH_SRC_W x VBENCH_SRC_H RGB565. Nothing is shown: no flip, no dirty rectangle, so the caller must
 // invalidate the whole screen afterwards.
-vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out);
+// Without show nothing is flipped, and the caller invalidates the whole screen afterwards either way.
+vbench_status_t display_vbench_frame(void const *src, bool show, vbench_frame_t *out);
 
 #endif

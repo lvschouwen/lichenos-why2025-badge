@@ -195,12 +195,12 @@ void DG_DrawFrame(void) {
 
 void DG_SleepMs(uint32_t ms) {
 #if DOOM_SPIKE
-    uint32_t t0 = lv_tick_get();
+    doom_spike_sleep_enter();
 #endif
     uint32_t ticks = ms / portTICK_PERIOD_MS;
     vTaskDelay(ticks ? ticks : 1);
 #if DOOM_SPIKE
-    doom_spike_note_sleep(doom_spike_now() - t0);
+    doom_spike_sleep_leave();
 #endif
 }
 
