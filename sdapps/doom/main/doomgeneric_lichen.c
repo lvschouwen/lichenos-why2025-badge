@@ -188,12 +188,20 @@ void DG_Init(void) {
 }
 
 void DG_DrawFrame(void) {
+#if !DOOM_SPIKE // the spike measures the engine alone: no expand, no hand-off to the screen (#558)
     doom_ui_present();
+#endif
 }
 
 void DG_SleepMs(uint32_t ms) {
+#if DOOM_SPIKE
+    uint32_t t0 = lv_tick_get();
+#endif
     uint32_t ticks = ms / portTICK_PERIOD_MS;
     vTaskDelay(ticks ? ticks : 1);
+#if DOOM_SPIKE
+    doom_spike_note_sleep(lv_tick_elaps(t0));
+#endif
 }
 
 uint32_t DG_GetTicksMs(void) {

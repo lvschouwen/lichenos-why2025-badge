@@ -201,6 +201,7 @@ static pin_t const PINS[] = {
     {"battery",                    "RRR", "DDD", "???", false},
     {"trial nowifi",               "RRR", "DDD", "???", false},
     {"soak",                       "RRR", "DDD", "???", false},
+    {"vbench 10",                  "RRR", "DDD", "???", false}, // #558 spike
     // no rule today: transmitting or restarting forms open from everywhere (#464 lists them for the owner)
     {"c6",                         "RRR", "RRR", "RRR", false},
     {"c6 reset",                   "ROO", "ROO", "ROO", false}, // USB console only (#466)
@@ -290,7 +291,7 @@ static cmd_t const CMDS[] = {
     {"token", REG_BOTH, 0},       {"factory-reset", REG_BOTH, 0}, {"nvs-enc", REG_BOTH, 0},
     {"nvs-down", REG_KCONFIG, 0}, {"nvs-slots", REG_BOTH, 0},    {"ui", REG_DEV, 0},
     {"keys", REG_DEV, 0},         {"battery", REG_DEV, 0},       {"trial", REG_DEV, 0},
-    {"soak", REG_DEV, 0},         {"c6", REG_BOTH, 0},           {"lora", REG_BOTH, 0},
+    {"soak", REG_DEV, 0},         {"vbench", REG_DEV, 0},       {"c6", REG_BOTH, 0},           {"lora", REG_BOTH, 0},
     {"airplane", REG_BOTH, 0},    {"poweroff", REG_BOTH, 0},     {"led", REG_BOTH, 0},
     {"wifi", REG_BOTH, 0},        {"net", REG_BOTH, 0},          {"clock", REG_BOTH, 0},
     {"home", REG_BOTH, 0},        {"uicheck", REG_BOTH, 0},      {"screensaver", REG_BOTH, 0},

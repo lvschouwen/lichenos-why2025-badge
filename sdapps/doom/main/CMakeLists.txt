@@ -97,3 +97,11 @@ set(ENGINE_FLAGS -w -DCMAP256 -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -Dma
 target_compile_options(${COMPONENT_LIB} PRIVATE ${ENGINE_FLAGS} -Os)
 # the quit entry of the engine is ours (it must end the app): i_system.c's I_Quit becomes lichen_doom_quit_engine
 set_source_files_properties("${DG}/i_system.c" PROPERTIES COMPILE_DEFINITIONS "I_Quit=lichen_doom_quit_engine")
+
+# #558 spike, default off: DOOM_SPIKE=1 (engine alone, no picture, core 0) or 2 (core 1) in the environment of
+# firmware/build.sh. A changed value recompiles the app (build_sdapps runs reconfigure each time).
+set(DOOM_SPIKE "$ENV{DOOM_SPIKE}")
+if(NOT DOOM_SPIKE MATCHES "^[12]$")
+    set(DOOM_SPIKE 0)
+endif()
+target_compile_definitions(${COMPONENT_LIB} PRIVATE DOOM_SPIKE=${DOOM_SPIKE})

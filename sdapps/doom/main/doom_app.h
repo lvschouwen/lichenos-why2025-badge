@@ -2,6 +2,7 @@
 // The seam between the app (doom_app.c) and the doomgeneric backend (doomgeneric_lichen.c).
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Frees every block the engine still holds (the zone, the screen buffer, the heap it grew): the engine task has ended.
 void   doom_free_all(void);
@@ -14,3 +15,9 @@ void   doom_engine_ending(void);
 void   doom_engine_shutdown(void);
 // A close came while the engine still loads the WAD: its reads then get nothing, so it leaves through I_Error at once.
 bool   doom_load_cancelled(void);
+
+// #558 spike (build with DOOM_SPIKE=1 or 2, see CMakeLists.txt; absent otherwise): the engine's own work per frame with
+// no picture handed to the screen. DG_SleepMs reports the time it waited so the engine's pacing is not counted as work.
+#if DOOM_SPIKE
+void doom_spike_note_sleep(uint32_t ms);
+#endif

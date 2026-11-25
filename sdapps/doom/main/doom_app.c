@@ -20,6 +20,50 @@
 #define STOP_WAIT   3000 // ms the engine task gets to see the stop flag (it checks once per tick)
 #define STOP_TOTAL  4500 // the loader gives stop 5 s: the engine's wait and the LVGL task's detach share this
 
+// #558 spike: DOOM_SPIKE 1 = engine alone on core 0 (LICHEN_PRIO_BACKGROUND, as shipped), 2 = on core 1
+// (LICHEN_PRIO_APP_LOOP, next to LVGL). The clock is lv_tick_get, 1 ms: the only one the export table has, so one frame
+// reads in whole ms and the average (from totals) is the number to quote; the max is good to +-1 ms.
+#if DOOM_SPIKE == 2
+#define ENGINE_PRIO LICHEN_PRIO_APP_LOOP
+#else
+#define ENGINE_PRIO LICHEN_PRIO_BACKGROUND
+#endif
+
+#if DOOM_SPIKE
+static struct {
+    uint32_t frames, over33, over50, max_ms, sleep_ms; // sleep_ms: waited inside the current frame's Tick
+    uint64_t work_ms;
+    uint32_t t_begin, t_end;
+} spike;
+
+void doom_spike_note_sleep(uint32_t ms) {
+    spike.sleep_ms += ms;
+}
+
+static void spike_frame(uint32_t tick_ms) {
+    uint32_t work = tick_ms > spike.sleep_ms ? tick_ms - spike.sleep_ms : 0;
+    spike.sleep_ms = 0;
+    spike.frames++;
+    spike.work_ms += work;
+    spike.over33 += work > 33;
+    spike.over50 += work > 50;
+    spike.max_ms = work > spike.max_ms ? work : spike.max_ms;
+}
+
+static void spike_summary(char *out, size_t cap) {
+    if (!spike.frames) {
+        out[0] = '\0';
+        return;
+    }
+    uint32_t wall = spike.t_end - spike.t_begin;
+    uint32_t avg10 = (uint32_t)(spike.work_ms * 10 / spike.frames);
+    snprintf(out, cap, "spike core %d: work avg %u.%u max %u ms, >33 ms %u, >50 ms %u of %u frames, %u fps wall",
+             DOOM_SPIKE == 2 ? 1 : 0, (unsigned)(avg10 / 10), (unsigned)(avg10 % 10), (unsigned)spike.max_ms,
+             (unsigned)spike.over33, (unsigned)spike.over50, (unsigned)spike.frames,
+             (unsigned)(wall ? spike.frames * 1000 / wall : 0));
+}
+#endif
+
 typedef enum { START_NO_WAD, START_FAILED, START_OK } start_t;
 
 static volatile bool stop_req;
@@ -34,8 +78,18 @@ static void engine_task(void *arg) {
     loading = true;
     doomgeneric_Create(5, argv);
     loading = false;
+#if DOOM_SPIKE
+    spike.t_begin = lv_tick_get();
+#endif
     while (!stop_req) {
+#if DOOM_SPIKE
+        uint32_t t0 = lv_tick_get();
         doomgeneric_Tick();
+        spike_frame(lv_tick_elaps(t0));
+        spike.t_end = lv_tick_get(); // the wall clock stops at the last frame, not at the stop's wait
+#else
+        doomgeneric_Tick();
+#endif
         vTaskDelay(1); // the engine paces itself with DG_SleepMs; this yields in a frame that waits for nothing
     }
     // closed by the user, not by the engine: its exit functions save the config and stop its subsystems (the engine is no
@@ -108,7 +162,11 @@ static bool doom_stop(void) {
         return false; // the LVGL task still has the picture's memory: nothing is freed under it
     }
     char summary[128];
+#if DOOM_SPIKE
+    spike_summary(summary, sizeof(summary));
+#else
     doom_ui_summary(summary, sizeof(summary));
+#endif
     if (summary[0]) {
         lichen_notify(lichen_ctx_self(), LN_INFO, "DOOM", summary, 0); // the fps average of the run (#526)
     }
@@ -123,7 +181,7 @@ int main(int argc, char *argv[]) {
     uint32_t size = wad_size();
     doom_ui_init(size);
     if (size) {
-        start_state = lichen_task_start(lichen_ctx_self(), "doom", engine_task, NULL, STACK_BYTES, LICHEN_PRIO_BACKGROUND, NULL)
+        start_state = lichen_task_start(lichen_ctx_self(), "doom", engine_task, NULL, STACK_BYTES, ENGINE_PRIO, NULL)
                           ? START_OK
                           : START_FAILED;
     }

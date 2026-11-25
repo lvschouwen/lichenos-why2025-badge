@@ -27,6 +27,7 @@
 #include "driver/ppa.h"
 #endif
 #include "display_info.h"
+#include "display_vbench.h"
 
 static char const TAG[] = "display";
 
@@ -529,6 +530,7 @@ bool display_start(lv_display_t **out) {
 #endif
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);
     lvgl_port_unlock();
+    display_vbench_register();
     return true;
 }
 
@@ -571,6 +573,70 @@ bool display_engine_set(uint32_t id) {
     return false;
 #endif
 }
+
+#if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH && CONFIG_LICHEN_DEV_COMMANDS
+// #558 spike: one scale + rotate frame of the planned video path into the back buffer, timed. The UI rectangle 720x537
+// centred in 720x720 (rows 91..627); the PPA's output block comes out 537 wide by 720 tall (ppa_srm.c new_block_w/h).
+// Same hand-over as a background strip (tag, done semaphore) but waited for here, so the engine is idle again at return.
+vbench_status_t display_vbench_frame(void const *src, vbench_frame_t *out) {
+    if (!direct_disp || !ppa_up()) {
+        return VBENCH_NO_PPA;
+    }
+    display_engine_ppa_done_seen(&engine, ppa_gen_last_done);
+    display_engine_settle(&engine);
+    if (display_engine_ppa_hung(&engine)) {
+        return VBENCH_NO_PPA;
+    }
+    unsigned const       fb  = display_flip_write_target(&flip); // never front ^ 1: a pending swap makes that the shown one
+    display_rect_t const ui  = {0, 91, LCD_H_RES - 1, 91 + 537 - 1};
+    display_rect_t const blk = display_rot90_block(ui, LCD_V_RES);
+    uint32_t const       gen = engine.gen = display_engine_gen_next(engine.gen);
+    ppa_srm_oper_config_t const op = {
+        .in.buffer          = src,
+        .in.pic_w           = VBENCH_SRC_W,
+        .in.pic_h           = VBENCH_SRC_H,
+        .in.block_w         = VBENCH_SRC_W,
+        .in.block_h         = VBENCH_SRC_H,
+        .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
+        .out.buffer         = panel_fbs[fb],
+        .out.buffer_size    = FB_BYTES,
+        .out.pic_w          = LCD_H_RES,
+        .out.pic_h          = LCD_V_RES,
+        .out.block_offset_x = blk.x1,
+        .out.block_offset_y = blk.y1,
+        .out.srm_cm         = PPA_SRM_COLOR_MODE_RGB565,
+        .rotation_angle     = PPA_SRM_ROTATION_ANGLE_90,
+        .scale_x            = VBENCH_SCALE_X,
+        .scale_y            = VBENCH_SCALE_Y,
+        .mode               = PPA_TRANS_MODE_NON_BLOCKING,
+        .user_data          = (void *)(uintptr_t)gen,
+    };
+    xSemaphoreTake(ppa_done, 0);
+    ppa_ready_in_isr = false;
+    ppa_gen_current  = gen;
+    uint32_t const t0 = (uint32_t)esp_timer_get_time();
+    if (ppa_do_scale_rotate_mirror(ppa_srm, &op) != ESP_OK) {
+        ppa_gen_current = 0;
+        return VBENCH_REFUSED;
+    }
+    out->call_us = (uint32_t)esp_timer_get_time() - t0;
+    uint32_t done_us = 0;
+    if (!ppa_wait(NULL, &done_us, false)) {
+        bool const late = ppa_wait(NULL, &done_us, true);
+        if (!late) {
+            engine.hung     = true; // as late_outcome: until its own done turns up
+            engine.hung_gen = gen;
+        }
+        display_engine_select(&engine, DISPLAY_ENGINE_CPU);
+        return VBENCH_TIMEOUT;
+    }
+    out->total_us = done_us - t0;
+    out->fb       = panel_fbs[fb];
+    out->x1       = blk.x1;
+    out->x2       = blk.x2;
+    return VBENCH_OK;
+}
+#endif
 
 void display_blank(void) {
     if (lcd_panel) {

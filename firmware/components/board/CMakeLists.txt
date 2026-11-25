@@ -3,7 +3,7 @@
 # display_flip.c is pure (host_tests/display_flip_test.c): the back-buffer and copy-back logic of the tear-free flush (#467).
 # display_engine.c is pure (host_tests/display_engine_test.c): the runtime rotation engine and its order with the swap (#468).
 # board_sdmmc.c is the lock around the SDMMC controller the C6 link and the SD card share (#60).
-idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "uart_lend.c" "r16_hold.c" "keyboard.c" "raw_hooks.c" "key_origin.c" "board_i2c.c" "board_sdmmc.c" "kbd_map.c" "lv_mem_psram.c" "display_rot.c" "display_timing.c" "display_flip.c" "display_engine.c" "display_video_geom.c" "display_video_state.c"
+idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "uart_lend.c" "r16_hold.c" "keyboard.c" "raw_hooks.c" "key_origin.c" "board_i2c.c" "board_sdmmc.c" "kbd_map.c" "lv_mem_psram.c" "display_rot.c" "display_timing.c" "display_flip.c" "display_engine.c" "display_vbench.c" "display_video_geom.c" "display_video_state.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl esp_lvgl_port fw_console
                        PRIV_REQUIRES esp_lcd esp_lcd_st7703 esp_driver_ppa esp_mm esp_tca8418 esp_hw_support esp_driver_uart
