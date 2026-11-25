@@ -397,7 +397,9 @@ an API change.
   wires its own way out (`hold_exit.h`: feed it every event, check it on a timer, `shell_back()` when it fires) and
   takes the keys only after that timer exists (sdapps/doom, app_keytest).
 
-- **Video (API 2.3, #562).** An app with `CAP_VIDEO` takes the screen with `lichen_video_acquire(&cfg)` from its open hook
+- **Video (API 2.3, #562).** Apps that need frame rate (games, emulators, animation) should use this path, not an LVGL canvas:
+  measured on the badge, DOOM at 320 x 200 runs about 53 fps here against 15 fps on the #526 canvas. Keep a canvas fallback, as
+  acquire can be refused. An app with `CAP_VIDEO` takes the screen with `lichen_video_acquire(&cfg)` from its open hook
   (`lichen_video.h`): the OS allocates two black RGB565 source buffers in PSRAM (the app does not free them), the app
   renders into `lichen_video_back()` and shows the frame with `lichen_video_present()`, which any task may call, never
   blocks and returns false for a dropped frame (render again into the same buffer). The OS scales and rotates the frame

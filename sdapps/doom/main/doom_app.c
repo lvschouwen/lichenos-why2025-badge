@@ -19,6 +19,7 @@
 #define ZONE_MIB    "6"
 #define STACK_BYTES (16 * 1024)
 #define STOP_WAIT   3000 // ms the engine task gets to see the stop flag (it checks once per tick)
+#define STOP_END_WAIT 500 // ms for the engine task to leave the OS's book after it said it was done
 #define STOP_TOTAL  4500 // the loader gives stop 5 s: the engine's wait and the LVGL task's detach share this
 
 // #558 spike: DOOM_SPIKE 1 = engine alone on core 0 (LICHEN_PRIO_BACKGROUND, as shipped), 2 = on core 1
@@ -192,6 +193,11 @@ static bool doom_stop(void) {
     }
     if (started && !engine_gone()) {
         return false; // the engine task is stuck: the loader reports it, nothing is freed under a running task
+    }
+    // task_done is the engine's last word, not its end: the task is still returning. Wait until the OS's book has no task of this
+    // app left, so the unload never frees the image under it (bench #564: a paused engine stopped at once and was still booked).
+    for (int waited = 0; started && lichen_task_leftovers(lichen_ctx_self(), 0) != 0 && waited < STOP_END_WAIT; waited += 10) {
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     uint32_t spent = lv_tick_elaps(begin);
     if (!doom_ui_detach(spent < STOP_TOTAL ? STOP_TOTAL - spent : 200)) {

@@ -190,11 +190,29 @@ static void begin_picture(void) {
     doom_path_chosen(&path, false);
 }
 
+// The card takes the focus so Enter reaches it (bench #564: the screen itself kept it). The group is the screen's own, whatever
+// the default group was while the open hook ran; the card joins it here if build_pause found none.
+static void focus_pause_box(void) {
+    lv_group_t *g = lv_obj_get_group(ui.pause_box);
+    if (!g) {
+        g = lv_obj_get_group(ui.screen);
+        if (!g) {
+            g = lv_group_get_default();
+        }
+        if (!g) {
+            return;
+        }
+        lv_group_add_obj(g, ui.pause_box);
+    }
+    lv_group_focus_obj(ui.pause_box);
+}
+
 static void show_pause_text(char const *text) {
     ui.pause_shown = true;
     lichen_label_set(ui.pause_label, text);
     lv_obj_set_hidden(ui.pause_label, false);
     lv_obj_set_hidden(ui.pause_box, false);
+    focus_pause_box();
 }
 
 static void show_pause(bool on) {
@@ -204,13 +222,16 @@ static void show_pause(bool on) {
     ui.pause_shown = on;
     lv_obj_set_hidden(ui.pause_label, !on);
     lv_obj_set_hidden(ui.pause_box, !on);
-    if (on && lv_obj_get_group(ui.pause_box)) {
-        lv_group_focus_obj(ui.pause_box);
+    if (on) {
+        focus_pause_box();
     }
 }
 
 // LVGL task: the OS had the screen (a dialog, the thermal warning). The engine waits; Enter takes the screen again.
 static void tick_paused(void) {
+    // The OS takes the raw keys back with the screen; this makes sure of it (a no-op when it did), so the person's Enter and Esc
+    // are the normal keys of the pause card and the OS's own Esc while paused.
+    lichen_keys_raw_release(on_key, NULL);
     if (doom_path_why(&path) == DOOM_RECLAIM_ESCAPE) {
         // no card is shown; the OS pops the screen itself (#563). If it does not, the screen stays blank until the person
         // leaves through the OS's normal Esc.
@@ -380,6 +401,11 @@ static bool fail_open(char const *text) {
     return false;
 }
 
+static void on_pause_click(lv_event_t *e) {
+    (void)e;
+    ui.resume_req = true;
+}
+
 static void on_pause_key(lv_event_t *e) {
     if (lv_event_get_key(e) == LV_KEY_ENTER) {
         ui.resume_req = true; // the tick resumes once the engine has stopped drawing
@@ -399,6 +425,7 @@ static void build_pause(lv_obj_t *screen) {
         lv_group_add_obj(g, ui.pause_box);
     }
     lichen_ui_event_add(ui.pause_box, on_pause_key, LV_EVENT_KEY, NULL);
+    lichen_ui_event_add(ui.pause_box, on_pause_click, LV_EVENT_CLICKED, NULL); // Enter on a focused object is a click in LVGL
     ui.pause_label = lv_label_create(ui.pause_box);
     lv_label_set_text(ui.pause_label, "Paused. Press Enter to go back to the game.");
     lv_label_set_long_mode(ui.pause_label, LV_LABEL_LONG_WRAP);
