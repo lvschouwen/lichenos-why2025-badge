@@ -54,7 +54,7 @@ when the run ends. The old wave logs are in git history (before #483).
 
 ## Live (2026-11-25, badge on fw-d270a186, wave E+F benched remotely)
 - #527 children: C #560 closed, D #561 + F #563 merged with hands checklists (needs-lucas), E #562 closed, G #564 next (carries the live app-API proof and the shell_back double-pop recheck), H #565. #567 (dev console hold after reclaim) small, can ride with G.
-- G #564 + #567 merged (e3206742, pushed). Next: Lucas flashes fw-e3206742, main pushes the DOOM SD app (sdapp-push doom), then scratchpad bench-g.sh; H #565 after.
+- Badge on fw-e3206742. #567 closed. G #564 bench found 2 bugs (pause card not focused, Enter cannot resume; engine task alive at unload): impl-564 fixing in wt-1 (fix/564-doom-pause-resume), then Opus review, merge, flash, sdapp-push doom, rerun scratchpad bench-g.sh (turn the ui lock off before hold-Esc phys steps: a 3 s phys Esc under the lock ends the lock).
 - Thermal `test warn` sheds Wi-Fi + LoRa for ~120 s: a bench script must wait for the badge to come back after it. `fw video hold` after a reclaim lies until #567 lands: release first.
 - Flash: Lucas runs `! <scratchpad>/fw.sh ota-firmware` (my ota-firmware is refused); fw.sh = ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted.
 - Bench gotchas: `fw ui open` wakes the screen and loads async (wait ~5 s before acting on the app); a firmware update refuses /console and /screenshot (409); the card-removal unload logs nothing on success; DOOM closes with `keys send esc hold:3000`; spike/variant SD apps: build with the env for the whole build.sh run, push with ota-file, rebuild normal and `sdapp-push` after.
