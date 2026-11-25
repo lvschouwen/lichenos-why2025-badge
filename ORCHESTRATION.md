@@ -25,6 +25,7 @@ when the run ends. The old wave logs are in git history (before #483).
   rewrite the size lines. `host_tests/CMakeLists.txt` and component source lists: union-merge.
 - `tools/gate_manifest.txt` is generated: on a conflict take the branch's side and run
   `tools/check_layers.sh --gen-manifest`. A new gate or console function needs a `cap-func` line in `tools/layers.conf`.
+- A branch whose own commits add then remove a source-list entry gets it back from the union merge (commit-by-commit rebase): the check fails with "Cannot find source file"; drop the line on main and re-run (#558).
 - After a submodule pointer moves on main, a rebased slot shows `meshcore` dirty:
   `git -C <slot> submodule update meshcore`, then `agent-wt done`.
 - After `cd` into a slot, prefix main's commands with `cd /home/lucas/coding/why2025-badge &&`.
