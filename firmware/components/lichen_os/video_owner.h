@@ -27,7 +27,8 @@ typedef struct {
 } video_owner_stats_t;
 
 // Takes the surface for ctx: allocates two w x h RGB565 sources (black, 64-byte aligned PSRAM) into src[0..1] and hands the
-// screen over. NONE or the refusal: owned, no PPA engine (cpu fallback, hung), PSRAM at 80 MHz, geometry, memory, UI lock.
+// screen over. The app writes its first frame into src[1]: src[0] is the black one the surface shows until the first
+// present, so nobody may write src[0] before the second present (then the two alternate). NONE or the refusal: owned, no PPA engine (cpu fallback, hung), PSRAM at 80 MHz, geometry, memory, UI lock.
 display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32_t h, uint32_t want_x_milli,
                                             uint32_t want_y_milli, video_reclaim_fn on_reclaim, void *arg, void *src[2]);
 // Source idx (0/1) is finished: show it. Lock-free. False when ctx does not hold the surface, it was reclaimed, or dropped.

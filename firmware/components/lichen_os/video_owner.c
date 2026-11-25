@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
+#include "esp_attr.h"
 #include "psram_speed.h"
 
 #include <string.h>
@@ -28,7 +29,7 @@ typedef struct {
     display_video_reclaim_t reason;
 } owner_t;
 
-static owner_t o; // under the UI lock (the lock-free present reads held / reclaimed / src, racy by design)
+EXT_RAM_BSS_ATTR static owner_t o; // under the UI lock (the lock-free present reads held / reclaimed / src, racy by design)
 
 static size_t src_bytes(uint32_t w, uint32_t h) {
     return ((size_t)w * h * 2 + LINE - 1) / LINE * LINE;
@@ -173,7 +174,7 @@ void video_owner_stats(video_owner_stats_t *out) {
 #define SCALE_X_MILLI 2250 // 320 -> 720 (36/16)
 #define SCALE_Y_MILLI 2700 // 200 -> 537 (43/16)
 
-static void *g_src[2]; // the console's own holding, valid while it holds the surface
+EXT_RAM_BSS_ATTR static void *g_src[2]; // the console's own holding, valid while it holds the surface
 static bool  g_have;
 
 // Vertical colour stripes that walk right and a white line that walks down: a torn frame breaks the line
@@ -232,8 +233,9 @@ static void run(unsigned n, bool hold) {
     int64_t const t0 = esp_timer_get_time();
     unsigned      sent = 0;
     for (unsigned i = 0; i < n; i++) {
-        paint(g_src[i & 1], i);
-        if (video_owner_present(LICHEN_CTX_NONE, i & 1)) {
+        unsigned const buf = (i + 1) & 1; // the first frame goes into source 1 (source 0 is the black one shown until then)
+        paint(g_src[buf], i);
+        if (video_owner_present(LICHEN_CTX_NONE, buf)) {
             sent++;
         } else {
             video_owner_stats_t s;
@@ -280,8 +282,9 @@ static void cmd_video(char const *args) {
     } else if (strcmp(args, "present") == 0) {
         if (take()) {
             static uint32_t frame;
-            paint(g_src[frame & 1], frame);
-            console_reply("video: present %s", video_owner_present(LICHEN_CTX_NONE, frame & 1) ? "ok" : "dropped");
+            unsigned const  buf = (frame + 1) & 1;
+            paint(g_src[buf], frame);
+            console_reply("video: present %s", video_owner_present(LICHEN_CTX_NONE, buf) ? "ok" : "dropped");
             frame++;
         }
     } else if (strcmp(args, "release") == 0) {
