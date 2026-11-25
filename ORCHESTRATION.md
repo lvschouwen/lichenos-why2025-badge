@@ -52,10 +52,10 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-25, badge on fw-a0661d87, wave benched)
-- Wave a0661d87 benched and closed: #556 #557 #558 #559. #541 open: benchtest's slow stop needs sliced sleeps (comment there).
-- #527 children: C #560, D #561, E #562, F #563, G #564, H #565. C done unreviewed: feat/560-video-engine-scaled-strip in wt-1 (04b976ef). Running: impl-561 (Opus, wt-3, feat/561-video-owner-service, on top of C); #541 merged 470fad92, bench at the next wave. Then one Opus reviewer over C+D, merge C then D, C+D wave bench (hands checks #391 #281 #523-3 bundled there).
-- My ota-firmware is refused by the permission check: Lucas runs it with `!` via scratchpad fw.sh (recreate after a /clear: ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted).
+## Live (2026-11-25, badge on fw-9fe3bc9f, wave C+D benched remotely)
+- #527 children: C #560 closed, D #561 merged (remote bench passed; hands checklist on #561, needs-lucas: video picture, #523-3, #391, #281), E #562, F #563, G #564, H #565.
+- Running: impl-562 (Sonnet, wt-1, feat/562-video-app-api), impl-563 (Opus, wt-2, feat/563-video-escape-notices). Then one Opus reviewer over F+G per the plan (E gets a Sonnet review), merge, wave bench; then G, then H.
+- Flash: Lucas runs `! <scratchpad>/fw.sh ota-firmware` (my ota-firmware is refused); fw.sh = ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted.
 - Bench gotchas: `fw ui open` wakes the screen and loads async (wait ~5 s before acting on the app); a firmware update refuses /console and /screenshot (409); the card-removal unload logs nothing on success; DOOM closes with `keys send esc hold:3000`; spike/variant SD apps: build with the env for the whole build.sh run, push with ota-file, rebuild normal and `sdapp-push` after.
-- NEEDS-LUCAS: #523 step 3 (yellow flash glance), 7 (`owner-onair.sh sync`/`off`); stashes: Lucas drops both (`git stash clear`); #391, #281, #237.
+- NEEDS-LUCAS: hands checklist on #561; #523 step 7 (`owner-onair.sh sync`/`off`); #237.
 - #545 parked until #527 lands.
