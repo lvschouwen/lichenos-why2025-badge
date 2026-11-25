@@ -148,3 +148,10 @@ void doom_expand_2x_i8(void *dst, uint8_t const *src) {
         src += DOOM_SRC_W;
     }
 }
+
+void doom_expand_1x(uint16_t *dst, uint8_t const *src, uint16_t const pal[256]) {
+    uint32_t *out = (uint32_t *)dst; // two pixels a store: the source is write-combined PSRAM
+    for (int i = 0; i < DOOM_SRC_W * DOOM_SRC_H / 2; i++) {
+        out[i] = (uint32_t)pal[src[2 * i]] | (uint32_t)pal[src[2 * i + 1]] << 16;
+    }
+}

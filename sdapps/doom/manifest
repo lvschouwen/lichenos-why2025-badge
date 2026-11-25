@@ -1,11 +1,12 @@
 # Manifest of the DOOM SD app (format: lichen_api/lichen_manifest.h). freedoom1.wad goes next to it on the card.
 id=doom
 name=DOOM
-api=2.2
+api=2.3
 entry=app.elf
-caps=SD,BACKGROUND,RAW_KEYS,NOTIFY
-# PSRAM: 6 MiB zone, 256 KB engine screen, 2 x 256 KB pictures (doom_ui.c, I8; 2 x 512 KB with
-# -DDOOM_VIDEO_RGB565, #526), and the engine heap (WAD directory, lump tables, the loader's blocks):
+caps=SD,BACKGROUND,RAW_KEYS,NOTIFY,VIDEO
+# PSRAM: 6 MiB zone, 256 KB engine screen, the engine heap (WAD directory, lump tables, the loader's blocks) and, only
+# when the OS refuses the video surface (#564), the canvas path's 2 x 256 KB pictures (doom_ui.c, I8; 2 x 512 KB with
+# -DDOOM_VIDEO_RGB565):
 # about 1 MiB of headroom, to be lowered once `fw mem` shows the peak.
 # internal RAM: 16 KiB engine task stack, 4 KiB main task (stack_kib), 4 KiB for the loader-run stop
 # (the file calls).

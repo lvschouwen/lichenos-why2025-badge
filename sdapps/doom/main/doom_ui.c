@@ -1,4 +1,6 @@
-// The DOOM app's screen (#526), see doom_ui.h. Video: the engine's 8-bit 320x200 frame is doubled to 640x400 on the engine
+// The DOOM app's screen (#526, #564), see doom_ui.h. Two paths, chosen when the first frame has come (doom_path.h): the OS
+// video surface (lichen_video.h: the engine task expands the 8-bit frame through a 256-entry RGB565 LUT into the OS's source
+// buffer and presents it, no LVGL involved) or, when the OS refuses it, the #526 canvas below. Video, canvas path: the engine's 8-bit 320x200 frame is doubled to 640x400 on the engine
 // task into the canvas's own buffer, and LVGL draws that canvas. Two formats, one switch (-DDOOM_VIDEO_RGB565):
 //   I8 (default, 2 x 256 KB): the indexes stay indexes and the palette sits in front of them in the buffer (LVGL's layout of
 //     an indexed buffer: 256 x BGRA, the engine task copies it in with every frame). LVGL's software renderer cannot blend an indexed image directly: with LV_BIN_DECODER_RAM_LOAD off
@@ -14,6 +16,7 @@
 
 #include "doom_engine.h"
 #include "doom_logic.h"
+#include "doom_path.h"
 
 #include "hold_exit.h"
 #include "lichen_app.h"
@@ -21,6 +24,7 @@
 #include "key_matrix.h"
 #include "lichen_mem.h"
 #include "lichen_ui.h"
+#include "lichen_video.h"
 #include "theme.h"
 
 #include "freertos/FreeRTOS.h"
@@ -51,7 +55,12 @@ static struct {
     lv_obj_t   *bar;
     lv_obj_t   *pct;
     lv_obj_t   *fps_label;
+    lv_obj_t   *pause_label;
+    lv_obj_t   *pause_box;   // the focusable card of the pause: Enter on it resumes
     lv_timer_t *timer;
+    bool        failed;      // the picture has no memory: the screen says so, nothing is retried
+    bool        pause_shown;
+    bool        resume_req;  // the person chose Resume
     bool        picture;     // the first frame has come: the canvas shows, the loading widgets are gone
     bool        fps_shown;
     bool        draw_due;    // a new frame was invalidated and no draw of it has been counted yet
@@ -63,7 +72,12 @@ static struct {
     char        summary[112]; // the exit notice's text (a notice body holds 120), written by detach_cb
 } ui; // the LVGL task's, and doom_ui_summary after the detach
 
-static void               *video_mem;   // PSRAM block of both pictures (and their palettes)
+static doom_path_t         path;        // which way the picture goes (the LVGL task writes, the engine reads)
+static atomic_bool         first_frame; // the engine finished a frame while the path was still undecided
+static atomic_bool         parked;      // the engine saw the pause and draws nothing: the video buffers are free to release
+static atomic_bool         opened;      // doom_ui_open built the screen: detach has the timer, keys and surface to give back
+static atomic_bool         video_held;  // lichen_video_acquire succeeded and release has not (detach gives it back)
+static void               *video_mem;   // PSRAM block of both canvas pictures (and their palettes); canvas path only
 static uint8_t            *bufs[2];     // each: PIC_PREFIX bytes of palette, then the pixels; set in open, before the engine draws
 static atomic_bool         present_on;  // the engine may draw: open built the buffers, detach has not started
 static atomic_bool         ready;       // the engine published bufs[last] and LVGL has not taken it yet
@@ -75,6 +89,9 @@ static doom_keyq_t         keyq;
 static uint32_t            pal32[256];  // engine task only: 0xAARRGGBB, which is LVGL's BGRA bytes on this little-endian core (I8)
 static uint16_t            pal565[256]; // engine task only (RGB565)
 static bool                pal_ready;
+
+static void on_key(lichen_raw_key_t const *key, void *arg);
+static bool build_picture(lv_obj_t *screen);
 
 // ---- the screen (LVGL task) ----------------------------------------------------------------------------------------------
 
@@ -93,7 +110,6 @@ static void switch_to_picture(void) {
     lv_obj_set_hidden(ui.load_label, true);
     lv_obj_set_hidden(ui.bar, true);
     lv_obj_set_hidden(ui.pct, true);
-    lv_obj_set_hidden(ui.canvas, false);
 }
 
 static void show_load_progress(void) {
@@ -130,25 +146,75 @@ static void take_frame(void) {
     atomic_store_explicit(&ready, false, memory_order_release); // the other buffer is the engine's again
 }
 
-static void screen_tick(lv_timer_t *t) {
-    (void)t;
-    if (!ui.screen) {
+_Static_assert(DOOM_RECLAIM_ESCAPE == (int)LICHEN_VIDEO_RECLAIM_ESCAPE, "doom_path.h follows lichen_video.h");
+
+// LVGL task, under the UI lock: the OS took the screen. Flags only (the contract): the tick shows the pause and releases.
+static void on_reclaim(void *arg, lichen_video_reclaim_t why) {
+    (void)arg;
+    if (doom_path_reclaimed(&path, (int)why)) {
+        ui.hold        = (hold_exit_t){0}; // the OS takes the raw keys back: an Esc-down never gets its release
+        ui.pause_shown = false;
+        ui.resume_req  = false;
+    }
+}
+
+// The picture's way is chosen once, when the first frame has come: the OS surface, else the #526 canvas
+static void begin_picture(void) {
+    switch_to_picture();
+    lichen_video_cfg_t cfg = {.src_w = DOOM_SRC_W, .src_h = DOOM_SRC_H, .on_reclaim = on_reclaim, .arg = NULL};
+    if (lichen_video_acquire(&cfg)) {
+        atomic_store(&video_held, true);
+        atomic_store(&parked, false);
+        doom_fps_reset(&ui.fps); // the engine counts the frames it presents
+        doom_path_chosen(&path, true);
         return;
     }
-    uint32_t now = lv_tick_get();
-    if (hold_exit_tick(&ui.hold, now)) {
-        shell_back(); // Esc held: out of DOOM (a short Esc is the game's menu)
+    if (!build_picture(ui.screen)) {
+        lv_obj_set_hidden(ui.load_label, false);
+        lichen_label_set(ui.load_label, "DOOM has no memory for its picture. Close it and open it again.");
+        ui.failed = true;
         return;
     }
-    bool frame = atomic_load_explicit(&ready, memory_order_acquire);
-    if (!ui.picture) {
-        if (!frame) {
-            show_load_progress();
-            return;
-        }
-        switch_to_picture();
+    lv_obj_set_hidden(ui.canvas, false);
+    doom_path_chosen(&path, false);
+}
+
+static void show_pause(bool on) {
+    ui.pause_shown = on;
+    lv_obj_set_hidden(ui.pause_label, !on);
+    lv_obj_set_hidden(ui.pause_box, !on);
+    if (on && lv_obj_get_group(ui.pause_box)) {
+        lv_group_focus_obj(ui.pause_box);
     }
-    if (frame) {
+}
+
+// LVGL task: the OS had the screen (a dialog, the thermal warning). The engine waits; Enter takes the screen again.
+static void tick_paused(void) {
+    if (doom_path_why(&path) == DOOM_RECLAIM_ESCAPE) {
+        return; // the OS's own escape is leaving the app
+    }
+    if (!ui.pause_shown) {
+        show_pause(true);
+    }
+    if (!ui.resume_req || !atomic_load(&parked)) {
+        return; // the engine may still be inside a frame: the buffers are released only once it stopped
+    }
+    if (!lichen_video_release()) {
+        return; // the UI lock was busy: the request stays
+    }
+    atomic_store(&video_held, false);
+    ui.resume_req = false;
+    show_pause(false);
+    if (!lichen_keys_raw_take(on_key, NULL)) { // the OS took the keys back with the screen
+        lichen_label_set(ui.pause_label, "DOOM could not take the keyboard. Close it and open DOOM again.");
+        lv_obj_set_hidden(ui.pause_label, false);
+        return;
+    }
+    begin_picture();
+}
+
+static void tick_canvas(uint32_t now) {
+    if (atomic_load_explicit(&ready, memory_order_acquire)) {
         take_frame();
     } else if (ui.fps.started) {
         doom_fps_advance(&ui.fps, now); // a stalled engine or display shows as seconds of 0 fps
@@ -156,6 +222,42 @@ static void screen_tick(lv_timer_t *t) {
     if (ui.fps_shown && ui.fps.windows != ui.label_windows) {
         ui.label_windows = ui.fps.windows;
         show_fps_label();
+    }
+}
+
+static void screen_tick(lv_timer_t *t) {
+    (void)t;
+    if (!ui.screen) {
+        return;
+    }
+    uint32_t now = lv_tick_get();
+    if (hold_exit_tick(&ui.hold, now)) {
+        // Esc held leaves (a short Esc is the game's menu), but while the OS surface is held, or was reclaimed for the OS's
+        // own hold-Esc, the OS pops this screen itself: a second shell_back would pop the screen below it (#563 review)
+        if (doom_path_own_back_ok(&path)) {
+            shell_back();
+        }
+        return;
+    }
+    switch (doom_path_get(&path)) {
+    case DOOM_PATH_PENDING:
+        if (ui.failed) {
+            break;
+        }
+        if (atomic_load(&first_frame)) {
+            begin_picture();
+        } else {
+            show_load_progress();
+        }
+        break;
+    case DOOM_PATH_VIDEO:
+        break; // LVGL has nothing to do: its strips under the picture are dropped by the OS, so the label and widgets stay off
+    case DOOM_PATH_PAUSED:
+        tick_paused();
+        break;
+    case DOOM_PATH_CANVAS:
+        tick_canvas(now);
+        break;
     }
 }
 
@@ -173,11 +275,12 @@ static void toggle_fps(void) {
 static void on_key(lichen_raw_key_t const *key, void *arg) {
     (void)arg;
     hold_exit_event(&ui.hold, key->code == KEY_MATRIX_ESC_CODE, key->pressed, lv_tick_get());
-    if (!ui.picture) {
-        return; // nothing to play yet: keys typed during the WAD load must not replay at the first frame
+    doom_path_state_t st = doom_path_get(&path);
+    if (st != DOOM_PATH_VIDEO && st != DOOM_PATH_CANVAS) {
+        return; // nothing to play yet (keys typed during the WAD load must not replay at the first frame) or paused
     }
     if (key->code == DOOM_CODE_FPS_TOGGLE) {
-        if (key->pressed) {
+        if (key->pressed && st == DOOM_PATH_CANVAS) { // the label is LVGL's: it has no place under the video
             toggle_fps();
         }
         return;
@@ -202,6 +305,8 @@ static void on_screen_delete(lv_event_t *e) {
     ui.bar        = NULL;
     ui.pct        = NULL;
     ui.fps_label  = NULL;
+    ui.pause_label = NULL;
+    ui.pause_box  = NULL;
 }
 
 static bool build_picture(lv_obj_t *screen) {
@@ -250,6 +355,34 @@ static bool fail_open(char const *text) {
     return false;
 }
 
+static void on_pause_key(lv_event_t *e) {
+    if (lv_event_get_key(e) == LV_KEY_ENTER) {
+        ui.resume_req = true; // the tick resumes once the engine has stopped drawing
+    }
+}
+
+// The pause card (hidden until the OS takes the screen): text, and a focusable box that takes Enter. Not a button: apps have none
+static void build_pause(lv_obj_t *screen) {
+    ui.pause_box = lv_obj_create(screen);
+    lv_obj_set_size(ui.pause_box, 560, 160);
+    lv_obj_set_style_bg_opa(ui.pause_box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ui.pause_box, 2, 0);
+    lv_obj_set_style_border_color(ui.pause_box, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_align(ui.pause_box, LV_ALIGN_CENTER, 0, 0);
+    lv_group_t *g = lv_group_get_default();
+    if (g) {
+        lv_group_add_obj(g, ui.pause_box);
+    }
+    lichen_ui_event_add(ui.pause_box, on_pause_key, LV_EVENT_KEY, NULL);
+    ui.pause_label = lv_label_create(ui.pause_box);
+    lv_label_set_text(ui.pause_label, "Paused. Press Enter to go back to the game.");
+    lv_label_set_long_mode(ui.pause_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(ui.pause_label, 500);
+    lv_obj_set_style_text_color(ui.pause_label, lv_color_hex(THEME_TEXT), 0);
+    lv_obj_center(ui.pause_label);
+    lv_obj_set_hidden(ui.pause_box, true);
+}
+
 bool doom_ui_open(lv_obj_t *screen) {
     doom_fps_reset(&ui.fps);
     lv_obj_set_scrollable(screen, false);
@@ -261,9 +394,7 @@ bool doom_ui_open(lv_obj_t *screen) {
     lv_obj_align(ui.fps_label, LV_ALIGN_TOP_LEFT, THEME_PAD, THEME_STATUS_BAR_H + 8); // below the status bar
     lv_obj_set_hidden(ui.fps_label, true);
     lichen_ui_event_add(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
-    if (!build_picture(screen)) {
-        return fail_open("DOOM has no memory for its picture. Close it and open it again.");
-    }
+    build_pause(screen);
     ui.timer = lichen_ui_timer_create(screen_tick, TIMER_MS, NULL);
     if (!ui.timer) {
         return fail_open("DOOM has no memory for its screen. Close it and open it again.");
@@ -278,6 +409,7 @@ bool doom_ui_open(lv_obj_t *screen) {
     lv_obj_t *hint = shell_page_hint(screen, "Esc", "menu", "hold Esc", "leave", NULL);
     lv_obj_set_style_pad_hor(hint, THEME_PAD, 0);
     atomic_store(&present_on, true);
+    atomic_store(&opened, true);
     return true;
 }
 
@@ -286,6 +418,7 @@ bool doom_ui_open(lv_obj_t *screen) {
 void doom_ui_init(uint32_t bytes) {
     doom_keyq_init(&keyq); // before the engine task starts: it reads the ring from its first tick
     atomic_store(&wad_size, bytes);
+    doom_path_init(&path);
 }
 
 void doom_ui_note_read(size_t n) {
@@ -303,10 +436,23 @@ static void refresh_palette(void) {
     pal_ready       = true;
 }
 
-void doom_ui_present(void) {
-    if (!atomic_load(&present_on) || !DG_ScreenBuffer) {
-        return;
+// The video path (#564): the frame through the palette's LUT into the OS's source buffer, 320x200 (the OS scales it). A dropped
+// present (the OS still shows the last one) leaves the buffer as it is: the next frame renders into it again.
+static void present_video(void) {
+    uint16_t *dst = lichen_video_back();
+    if (!dst) {
+        return; // reclaimed or released under this frame
     }
+    if (palette_changed || !pal_ready) {
+        refresh_palette(); // the LUT is rebuilt only when the engine's palette changed
+    }
+    doom_expand_1x(dst, DG_ScreenBuffer, pal565);
+    if (lichen_video_present()) {
+        doom_fps_frame(&ui.fps, lv_tick_get()); // the engine task is the only writer while the surface is held
+    }
+}
+
+static void present_canvas(void) {
     if (atomic_load_explicit(&ready, memory_order_acquire)) {
         return; // LVGL has not taken the last frame: it may be about to draw the buffer this one would go into
     }
@@ -323,6 +469,31 @@ void doom_ui_present(void) {
 #endif
     last = b;
     atomic_store_explicit(&ready, true, memory_order_release);
+}
+
+void doom_ui_present(void) {
+    if (!atomic_load(&present_on) || !DG_ScreenBuffer) {
+        return;
+    }
+    switch (doom_path_get(&path)) {
+    case DOOM_PATH_PENDING:
+        atomic_store(&first_frame, true); // the screen chooses the path; this frame is dropped
+        break;
+    case DOOM_PATH_VIDEO:
+        present_video();
+        break;
+    case DOOM_PATH_CANVAS:
+        present_canvas();
+        break;
+    case DOOM_PATH_PAUSED:
+        break;
+    }
+}
+
+bool doom_ui_engine_held(void) {
+    bool held = doom_path_get(&path) == DOOM_PATH_PAUSED;
+    atomic_store(&parked, held); // seen between two frames: the video buffers are not being written
+    return held;
 }
 
 bool doom_ui_next_key(int *pressed, unsigned char *key) {
@@ -350,6 +521,12 @@ static void detach_cb(void *arg) {
         lv_obj_delete(ui.canvas);
         ui.canvas = NULL;
     }
+    if (atomic_load(&video_held)) {
+        if (!lichen_video_release()) {
+            return; // the UI lock was busy: detached stays false, the loader's wait runs out and the stop is reported
+        }
+        atomic_store(&video_held, false);
+    }
     uint32_t avg = doom_fps_avg_x10(&ui.fps);
     // the WAD figure is for calibrating the loading bar: how much of the file the engine reads before its first frame
     snprintf(ui.summary, sizeof(ui.summary), "%u.%u fps on average, lowest second %u, over %u s. Read %u of %u KiB to start.",
@@ -364,7 +541,7 @@ static void detach_cb(void *arg) {
 // When the wait runs out, detach_cb may still be queued: the OS must cancel or drain the app's queued UI calls before it
 // unloads the image (#541). Nothing is freed here in that case, so a late run only repeats what it did.
 bool doom_ui_detach(uint32_t wait_ms) {
-    if (!video_mem) {
+    if (!atomic_load(&opened)) {
         return true;
     }
     atomic_store(&present_on, false);
@@ -378,8 +555,11 @@ bool doom_ui_detach(uint32_t wait_ms) {
     if (!atomic_load(&detached)) {
         return false;
     }
-    lichen_free(lichen_ctx_self(), video_mem);
-    video_mem = NULL;
+    if (video_mem) {
+        lichen_free(lichen_ctx_self(), video_mem);
+        video_mem = NULL;
+    }
+    atomic_store(&opened, false);
     return true;
 }
 

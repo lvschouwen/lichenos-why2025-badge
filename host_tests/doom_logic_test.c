@@ -163,7 +163,31 @@ static void picture_i8(void) {
     CHECK(dst[DOOM_SRC_W * 2 * DOOM_SRC_H * 2] == 0xee); // nothing written past the picture
 }
 
+static void picture_1x(void) {
+    static uint8_t  src[DOOM_SRC_W * DOOM_SRC_H];
+    static uint16_t dst[DOOM_SRC_W * DOOM_SRC_H + 2];
+    uint16_t        pal[256];
+    for (int i = 0; i < 256; i++) {
+        pal[i] = (uint16_t)(0x1000 + i * 3);
+    }
+    for (size_t i = 0; i < sizeof(src); i++) {
+        src[i] = (uint8_t)(i * 7 + i / 320);
+    }
+    memset(dst, 0xee, sizeof(dst));
+    doom_expand_1x(dst, src, pal);
+    int bad = 0;
+    for (size_t i = 0; i < sizeof(src); i++) {
+        bad += dst[i] != pal[src[i]];
+    }
+    CHECK(bad == 0);
+    CHECK(dst[DOOM_SRC_W * DOOM_SRC_H] == 0xeeee); // nothing written past the frame
+    pal[src[5]] = 0xabcd; // a palette change: the next expand picks it up
+    doom_expand_1x(dst, src, pal);
+    CHECK(dst[5] == 0xabcd);
+}
+
 int main(void) {
+    picture_1x();
     keys_map();
     keys_queue();
     fps_windows();

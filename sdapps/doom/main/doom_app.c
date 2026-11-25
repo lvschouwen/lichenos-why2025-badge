@@ -28,10 +28,13 @@
 // lv_tick_get ms (resolution 5 ms; the average from totals is still good, the max and the >33 counts are not).
 // Only frames of a level (demos included), both before and after the Tick, count: a title screen is cheaper than the
 // game, and the Tick that loads a level or runs the wipe is not a game frame.
-#if DOOM_SPIKE == 2
-#define ENGINE_PRIO LICHEN_PRIO_APP_LOOP
-#else
+// #558 measured the engine alone at 8.2 / 8.3 ms a frame on core 0 / core 1: no difference. Shipped on core 1 (APP_LOOP): LVGL
+// draws nothing while the video surface is held, and core 0 carries the SDIO, console and mesh work (#527 plan). The canvas
+// fallback shares core 1 with LVGL's render, which a measurement has still to show harmless.
+#if DOOM_SPIKE == 1
 #define ENGINE_PRIO LICHEN_PRIO_BACKGROUND
+#else
+#define ENGINE_PRIO LICHEN_PRIO_APP_LOOP
 #endif
 
 #if DOOM_SPIKE
@@ -110,6 +113,10 @@ static void engine_task(void *arg) {
     spike_t_begin = lv_tick_get();
 #endif
     while (!stop_req) {
+        if (doom_ui_engine_held()) {
+            vTaskDelay(pdMS_TO_TICKS(20)); // the OS has the screen (#564): the game waits, the tick is not run
+            continue;
+        }
 #if DOOM_SPIKE
         bool     was_level = gamestate == SPIKE_GS_LEVEL;
         doom_spike_frame_begin(&spike);
