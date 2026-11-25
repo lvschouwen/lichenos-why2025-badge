@@ -564,6 +564,16 @@ static void test_present_ppa_failure(void) {
     fk.never_done = true;
     CHECK(display_engine_present(&e, &f, &o, NULL, 0, &VIDEO) == DISPLAY_PRESENT_REFUSED);
     CHECK(strchr(fk.log, 'C') == NULL && strchr(fk.log, 'R') == NULL);
+    // the failure is in a band strip (#561 review): the fall-back turns that 1:1 band on the CPU, the scaled video then
+    // finds the CPU engine and is refused; no frame end either way, so no half frame is shown
+    video_setup(&fk, &e, &f, &o);
+    fk.refuse_start = true;
+    CHECK(display_engine_present(&e, &f, &o, &BAND_L, 1, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(strchr(fk.log, 'R') == NULL && fk.fell_back[DISPLAY_FALLBACK_START] == 1);
+    video_setup(&fk, &e, &f, &o);
+    fk.never_done = true;
+    CHECK(display_engine_present(&e, &f, &o, &BAND_L, 1, &VIDEO) == DISPLAY_PRESENT_REFUSED);
+    CHECK(strchr(fk.log, 'R') == NULL);
 }
 
 int main(void) {

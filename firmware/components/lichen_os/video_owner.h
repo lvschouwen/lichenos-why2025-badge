@@ -13,18 +13,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Called under the LVGL lock when the screen is taken back (a reason that is not the app's): no blocking, no lock.
+// Called under the LVGL lock when the screen is taken back (a reason that is not the app's): no blocking. It may call
+// video_owner_release: the UI lock is recursive, the same task re-enters it, and the display side tolerates the state
+// change (the timer is already stopped, the reclaim then finds IDLE) - not tested on the badge.
 typedef void (*video_reclaim_fn)(void *arg, display_video_reclaim_t why);
-
-typedef struct {
-    bool                    held; // an owner record exists (it outlives a reclaim until the app releases)
-    bool                    reclaimed;
-    bool                    parked; // sources kept because the PPA may still read them
-    lichen_ctx_t            ctx;
-    display_video_state_t   state;
-    display_video_reclaim_t reason;
-    uint32_t                acquires, reclaims, presented, frames_dropped, strips_dropped, bands_lost, present_max_us, queued;
-} video_owner_stats_t;
 
 // Takes the surface for ctx: allocates two w x h RGB565 sources (black, 64-byte aligned PSRAM) into src[0..1] and hands the
 // screen over. The app writes its first frame into src[1]: src[0] is the black one the surface shows until the first
@@ -35,14 +27,25 @@ display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32
 bool video_owner_present(lichen_ctx_t ctx, unsigned idx);
 // Lets go (idempotent). True when done; false only when the UI lock was not free in time: nothing was released.
 bool video_owner_release(lichen_ctx_t ctx);
-// The loader's hook, before an app's image and sweeps go: releases what ctx holds. False = lock timeout, keep the image
+// The loader's hook, before an app's image and sweeps go: releases what ctx holds. release_app_holdings runs after the
+// unload steps stopped the app's tasks and timers (sd_app_loader.c unload(), and the card-removal path), so no present() of
+// the app is in flight; a late one is refused by its state check. False = lock timeout, keep the image
 // (the reclaim callback may point into it).
 bool video_owner_release_ctx(lichen_ctx_t ctx);
 // An explicit event takes the screen back (dialog, thermal, card, hold-Esc). False when it is not ACTIVE.
 bool video_owner_reclaim(display_video_reclaim_t why);
-void video_owner_stats(video_owner_stats_t *out);
 
 #if CONFIG_LICHEN_DEV_COMMANDS
+typedef struct {
+    bool                    held; // an owner record exists (it outlives a reclaim until the app releases)
+    bool                    reclaimed;
+    bool                    parked; // sources kept because the PPA may still read them
+    lichen_ctx_t            ctx;
+    display_video_state_t   state;
+    display_video_reclaim_t reason;
+    uint32_t                acquires, reclaims, presented, frames_dropped, strips_dropped, bands_lost, present_max_us, queued;
+} video_owner_stats_t;
+void video_owner_stats(video_owner_stats_t *out);
 void video_owner_register(void); // "fw video" (developer mode)
 #else
 static inline void video_owner_register(void) {

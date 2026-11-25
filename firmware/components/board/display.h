@@ -3,8 +3,11 @@
 #include "lvgl.h"
 
 #include "display_info.h"
+#include "display_video_geom.h"
 #include "display_video_rules.h"
 #include "display_video_state.h"
+
+#include "sdkconfig.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,16 +25,10 @@ void display_blank(void);
 // and none keeps it across frames. Without the direct flush all of them refuse.
 typedef void (*display_vsurf_reclaim_fn)(void *arg, display_video_reclaim_t why);
 
-typedef struct {
-    display_video_state_t   state;
-    display_video_reclaim_t reason;
-    uint32_t                acquires, reclaims, presented;
-    uint32_t                frames_dropped; // a present that found the slot taken, or a frame the pump could not draw
-    uint32_t                strips_dropped; // LVGL strips entirely inside the video rectangle
-    uint32_t                bands_lost;     // band strips that did not fit the band buffer (re-rendered by LVGL)
-    uint32_t                present_max_us; // one pump tick: the band strips and the scaled frame, PPA done included
-    uint32_t                queued;         // band strips waiting for the next present
-} display_vsurf_stats_t;
+// The refusals that need no memory, first (display_video_rules.h order): owned, no PPA engine, PSRAM speed, geometry (g is
+// filled when it fits), and mem_ok = false. A caller allocates its sources only after NONE here.
+display_video_refusal_t display_vsurf_check_locked(uint32_t w, uint32_t h, uint32_t want_x_milli, uint32_t want_y_milli,
+                                                   unsigned psram_mhz, bool mem_ok, display_video_geom_t *g);
 
 // IDLE -> ACTIVE for a w x h RGB565 source (src[0], src[1]: 64-byte aligned PSRAM, written black or with a picture, size
 // w * h * 2 and a multiple of 64) at the wanted scales in thousandths. Paints the bars black in both frame buffers and
@@ -42,8 +39,8 @@ display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_
                                                      display_vsurf_reclaim_fn on_reclaim, void *arg);
 
 // Hands the surface back (the app released, or its image is going): IDLE, band queue dropped, screen invalidated. True when
-// the sources and the band buffer are no longer read by the PPA (waited out, bounded); false: a transfer may still run, the
-// caller keeps the sources (display_vsurf_ppa_idle_locked says when they may go). Idempotent.
+// the sources and the band buffer are no longer read by the PPA (checked, not waited for); false: a transfer may still run, the
+// caller parks the sources (display_vsurf_ppa_idle_locked says when they may go); it never waits. Idempotent.
 bool display_vsurf_release_locked(void);
 bool display_vsurf_ppa_idle_locked(void);
 
@@ -56,4 +53,16 @@ bool display_vsurf_reclaim_locked(display_video_reclaim_t why);
 // taken). The buffer is the OS's until the next present call returns.
 bool display_vsurf_present(unsigned idx);
 
+#if CONFIG_LICHEN_DEV_COMMANDS // the counters of "fw video": not in a release image
+typedef struct {
+    display_video_state_t   state;
+    display_video_reclaim_t reason;
+    uint32_t                acquires, reclaims, presented;
+    uint32_t                frames_dropped; // a present that found the slot taken, or a frame the pump could not draw
+    uint32_t                strips_dropped; // LVGL strips entirely inside the video rectangle
+    uint32_t                bands_lost;     // band strips that did not fit the band buffer (re-rendered by LVGL)
+    uint32_t                present_max_us; // one pump tick: the band strips and the scaled frame, PPA done included
+    uint32_t                queued;         // band strips waiting for the next present
+} display_vsurf_stats_t;
 void display_vsurf_stats(display_vsurf_stats_t *out); // any task, a racy read
+#endif

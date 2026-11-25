@@ -59,15 +59,18 @@ display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32
         return DISPLAY_VIDEO_REFUSE_UI;
     }
     reap_parked();
-    display_video_refusal_t r = DISPLAY_VIDEO_REFUSE_OWNED;
-    if (!o.held && !o.parked[0]) {
-        size_t const bytes = src_bytes(w, h);
-        void        *s[2]  = {NULL, NULL};
-        for (int i = 0; i < 2 && w && h && w <= 1024 && h <= 1024; i++) {
-            s[i] = heap_caps_aligned_calloc(LINE, 1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
+    display_video_geom_t    g;
+    display_video_refusal_t r = o.held ? DISPLAY_VIDEO_REFUSE_OWNED
+                                       : display_vsurf_check_locked(w, h, want_x_milli, want_y_milli, psram_speed_running(), true, &g);
+    if (r == DISPLAY_VIDEO_REFUSE_NONE && o.parked[0]) {
+        r = DISPLAY_VIDEO_REFUSE_ENGINE; // the PPA may still read the last owner's sources (hung): no new surface yet
+    }
+    if (r == DISPLAY_VIDEO_REFUSE_NONE) { // the verdict first: nothing is allocated for a refusal
+        size_t const bytes = src_bytes(w, h); // the geometry bounds it: the output fits the panel at a scale of at least 1/16
+        void        *s[2]  = {heap_caps_aligned_calloc(LINE, 1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT), NULL};
+        s[1]               = s[0] ? heap_caps_aligned_calloc(LINE, 1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
         if (!s[0] || !s[1]) {
-            r = DISPLAY_VIDEO_REFUSE_MEM; // (also a zero or absurd size)
+            r = DISPLAY_VIDEO_REFUSE_MEM;
         } else {
             for (int i = 0; i < 2; i++) {
                 esp_cache_msync(s[i], bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED); // black, written back
@@ -75,7 +78,7 @@ display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32
             r = display_vsurf_acquire_locked(s, w, h, want_x_milli, want_y_milli, psram_speed_running(), on_reclaimed, NULL);
         }
         if (r == DISPLAY_VIDEO_REFUSE_NONE) {
-            o = (owner_t){.held = true, .ctx = ctx, .src = {s[0], s[1]}, .cb = on_reclaim, .arg = arg};
+            o      = (owner_t){.held = true, .ctx = ctx, .src = {s[0], s[1]}, .cb = on_reclaim, .arg = arg};
             src[0] = s[0];
             src[1] = s[1];
         } else {
@@ -138,6 +141,7 @@ bool video_owner_reclaim(display_video_reclaim_t why) {
     return ok;
 }
 
+#if CONFIG_LICHEN_DEV_COMMANDS
 void video_owner_stats(video_owner_stats_t *out) {
     display_vsurf_stats_t d;
     display_vsurf_stats(&d);
@@ -156,6 +160,7 @@ void video_owner_stats(video_owner_stats_t *out) {
                                  .present_max_us = d.present_max_us,
                                  .queued         = d.queued};
 }
+#endif
 
 // ---- fw video (developer mode) ---------------------------------------------------------------------------------------
 #if CONFIG_LICHEN_DEV_COMMANDS

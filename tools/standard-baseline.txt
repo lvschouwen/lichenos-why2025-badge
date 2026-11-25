@@ -18,7 +18,7 @@ size	<merged-strings>	320245
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
-size	libboard.a	26181
+size	libboard.a	26367
 size	libbootloader_support.a	5944
 size	libc.a	53890
 size	libc6link.a	33448
@@ -111,7 +111,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	38504
 size	liblichen_notify.a	13414
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	108976
+size	liblichen_os.a	108980
 size	liblichen_random.a	63
 size	liblichen_shell.a	198434
 size	liblog.a	2726
