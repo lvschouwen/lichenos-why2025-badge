@@ -105,15 +105,18 @@ bool video_owner_holds(lichen_ctx_t ctx) {
 // are parked, not freed (no tag-ignore): they are OS memory, so keeping them is safe, only late.
 static void release_locked(void) {
     bool const idle = display_vsurf_release_locked();
+    void      *s0 = o.src[0], *s1 = o.src[1];
+    // The record goes first: a present or holds() racing on another task then finds nothing to read before the free
+    o = (owner_t){.parked = {o.parked[0], o.parked[1]}};
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     if (idle) {
-        heap_caps_free(o.src[0]);
-        heap_caps_free(o.src[1]);
+        heap_caps_free(s0);
+        heap_caps_free(s1);
     } else {
         ESP_LOGW(TAG, "release: the PPA may still read the sources, kept until its done");
-        o.parked[0] = o.src[0];
-        o.parked[1] = o.src[1];
+        o.parked[0] = s0;
+        o.parked[1] = s1;
     }
-    o = (owner_t){.parked = {o.parked[0], o.parked[1]}};
 }
 
 static bool release_if(bool any, lichen_ctx_t ctx) {

@@ -27,6 +27,10 @@ bool lichen_video_do_acquire(lichen_video_t *v, lichen_video_ops_t const *ops, l
     }
     void    *src[2] = {NULL, NULL};
     uint32_t ctx    = ops->self();
+    if (ctx == 0) { // the OS's context (a task the app did not start through lichen_task_start): never a holder
+        ops->refuse("lichen_video_acquire");
+        return false;
+    }
     if (ops->acquire(ctx, cfg->src_w, cfg->src_h, LICHEN_VIDEO_SCALE_X_MILLI, LICHEN_VIDEO_SCALE_Y_MILLI, on_reclaim, NULL,
                      src) != DISPLAY_VIDEO_REFUSE_NONE) {
         return false;
@@ -56,7 +60,7 @@ bool lichen_video_do_release(lichen_video_t *v, lichen_video_ops_t const *ops) {
         return true; // nothing held counts as done
     }
     if (!mine(v, ops, "lichen_video_release")) {
-        return true; // another app's record: a no-op, as if there were nothing of the caller's to release
+        return false; // another app's record (refused, counted): the caller holds nothing to release
     }
     if (!ops->release(v->ctx)) {
         return false; // a lock timeout keeps the record for the retry

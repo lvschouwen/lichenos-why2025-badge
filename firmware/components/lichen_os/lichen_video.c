@@ -14,7 +14,8 @@ static bool cap_ok(void) {
 }
 
 static uint32_t self(void) {
-    return lichen_ctx_self();
+    lichen_ctx_t c = lichen_ctx_self();
+    return c == lichen_sys_ctx_os() ? LICHEN_CTX_NONE : c; // the OS and unbound tasks are no holder
 }
 
 static void refuse(char const *what) {

@@ -3,7 +3,10 @@
 // buffers and the OS scales and rotates them onto the panel (the PPA), centred with black bars. The geometry is the OS's
 // (a 320 x 200 source fills 720 x 537), LVGL is paused while the app holds the screen, and the status bar keeps being
 // drawn. Calls are checked against the app's manifest: an app without VIDEO is refused (false / NULL, counted in
-// "fw app caps"). One holder at a time; the OS releases what an unloaded app held.
+// "fw app caps"). One holder at a time; the OS releases what an unloaded app held. Only the holder may call present,
+// back and release, from its open hook or from tasks it started with lichen_task_start (any other task is the OS's
+// context and is refused). Use one render task: back/present keep an unlocked frame index. Stop that task before
+// release(): release frees the buffers.
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -123,11 +123,23 @@ static void test_other_app_refused(void) {
     me = 0x5678u;                                              // app B, also with VIDEO
     CHECK(lichen_video_do_back(&v, &OPS) == NULL && refusals == 1);
     CHECK(!lichen_video_do_present(&v, &OPS) && f.presents == 0 && refusals == 2);
-    CHECK(lichen_video_do_release(&v, &OPS) && f.releases == 0 && refusals == 3); // a no-op
+    CHECK(!lichen_video_do_release(&v, &OPS) && f.releases == 0 && refusals == 3);
     CHECK(f.holds && v.src[0]);                                                  // A's record is untouched
     me = 0x1234u;
     CHECK((char *)lichen_video_do_back(&v, &OPS) == f.b && lichen_video_do_present(&v, &OPS));
     CHECK(lichen_video_do_release(&v, &OPS) && f.releases == 1);
+}
+
+static void test_os_context_refused(void) {
+    reset();
+    lichen_video_t v = {0};
+    me = 0; // the OS's context (an unbound task)
+    CHECK(!lichen_video_do_acquire(&v, &OPS, &CFG, owner_cb) && f.acquires == 0 && refusals == 1);
+    me = 0x1234u;
+    CHECK(lichen_video_do_acquire(&v, &OPS, &CFG, owner_cb));
+    me = 0;
+    CHECK(lichen_video_do_back(&v, &OPS) == NULL && !lichen_video_do_present(&v, &OPS) && !lichen_video_do_release(&v, &OPS));
+    CHECK(f.presents == 0 && f.releases == 0 && f.holds);
 }
 
 static void test_reclaim_forward(void) {
@@ -148,6 +160,7 @@ int main(void) {
     test_cycle();
     test_stale_and_release();
     test_other_app_refused();
+    test_os_context_refused();
     test_reclaim_forward();
     if (failures) {
         printf("lichen_video_rules_test: %d failed\n", failures);

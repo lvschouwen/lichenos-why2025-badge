@@ -406,7 +406,9 @@ an API change.
   short: the app keeps its LVGL path. `on_reclaim(arg, why)` runs on the LVGL task under the UI lock when a dialog,
   thermal warning, card removal, hold-Esc or a lost scaler takes the screen back: it must not block (set a flag, notify
   a task). After it `present()` returns false until the app calls `lichen_video_release()`. The OS releases the screen
-  at unload and card removal.
+  at unload and card removal. Only the holder may call `present`, `back` and `release`, and only from its open hook or a
+  task it started with `lichen_task_start`: a plain FreeRTOS task has the OS's context and is refused. Use one render
+  task, and stop it before `lichen_video_release()`, which frees the buffers.
 
 ### Lifecycle
 
