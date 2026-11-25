@@ -13,6 +13,8 @@
 #include "raw_owner.h"
 #include "shell_parts.h"
 #include "shell_ui_ops.h"
+#include "key_matrix.h"
+#include "video_notice.h"
 
 #include <stdatomic.h>
 
@@ -34,6 +36,8 @@ static atomic_int    active;  // listeners registered: the hook queues nothing w
 static atomic_int    swallowing;
 static atomic_bool   test_open; // the Keyboard test holds the keys
 static atomic_bool   held;      // any app holds them: the shape-key shortcuts stay quiet
+static atomic_bool   esc_down;    // keyboard task writes, the escape sampler reads (#563)
+static atomic_uint   esc_presses; // counted, so a release and press between two samples is seen
 
 void raw_keys_set_test_open(bool open) {
     atomic_store(&test_open, open);
@@ -50,6 +54,12 @@ bool raw_keys_held(void) {
 // Keyboard task
 static bool hook(key_raw_event_t const *ev, void *arg) {
     (void)arg;
+    if (ev->code == KEY_MATRIX_ESC_CODE) {
+        atomic_store(&esc_down, ev->pressed);
+        if (ev->pressed) {
+            atomic_fetch_add(&esc_presses, 1);
+        }
+    }
     if (atomic_load(&active) > 0) {
         key_raw_event_t stamped = *ev;
         raw_owner_stamp(&stamped, atomic_load(&test_open), atomic_load(&held));
@@ -200,4 +210,35 @@ bool raw_keys_release_ctx(lichen_ctx_t ctx) {
     bool free_of_ctx = owner.ctx != ctx;
     lichen_sys_ui_unlock();
     return free_of_ctx;
+}
+
+// The escape sampler (#563): LVGL task, every ESC_SAMPLE_MS. It reads only the keyboard task's two atomics, never an app's
+// state or the listener queue, so what an app does with its raw keys cannot hold it back. Only an app that hangs the LVGL
+// task itself, or holds the UI lock, can: then nothing here runs.
+#define ESC_SAMPLE_MS 100
+
+static void leave_video_app(void) {
+    if (video_notice_raise(VN_ESCAPE)) {
+        free_keys(owner.ctx); // the hung app's raw hold must not outlive the screen: the keyboard would stay swallowed
+        shell_back_impl();    // the same leave as a short Esc on the app's screen
+    }
+}
+
+static void escape_tick(lv_timer_t *t) {
+    (void)t;
+    static video_escape_t esc;
+    if (video_escape_sample(&esc, video_notice_active(), atomic_load(&esc_down), atomic_load(&esc_presses), lv_tick_get())) {
+        leave_video_app();
+    }
+}
+
+void raw_keys_start_escape(void) {
+    if (!ensure_started()) { // the hook is shared with the listeners; its timer stays paused until one registers
+        ESP_LOGE(TAG, "escape hook not started");
+        return;
+    }
+    if (atomic_load(&active) == 0) {
+        lv_timer_pause(timer);
+    }
+    lv_timer_create(escape_tick, ESC_SAMPLE_MS, NULL);
 }

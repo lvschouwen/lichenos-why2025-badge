@@ -31,6 +31,7 @@
 #include "sdkconfig.h"
 #include "settings_store.h"
 #include "thermal_rules.h"
+#include "video_notice.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -186,6 +187,7 @@ static void on_events(unsigned ev) {
         size_t n = strlen(body);
         snprintf(body + n, sizeof(body) - n, " Screen dimmed, radios off. Unplug the charger and let it cool.");
         say(LN_WARN, "Badge is getting hot", body, LN_COALESCE);
+        video_notice_raise(VN_THERMAL); // a video owner gives the screen back so the warning can be seen (#563); not for the shutdown
         shed_load(true);
         if (hooks.hot_alert) {
             hooks.hot_alert();

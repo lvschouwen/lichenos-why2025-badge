@@ -45,6 +45,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "safe_mode.h"
+#include "video_notice.h"
 #include "video_owner.h"
 
 #include <errno.h>
@@ -1255,6 +1256,9 @@ static void rescan_deferred(void) {
 }
 
 static void do_card(void) {
+    if (!sd_mounted()) {
+        video_notice_raise(VN_CARD); // a video owner gives the screen back, with the reason, before its release below (#563)
+    }
     remove_all(); // a card that went, or one that came back: the apps of the old mount leave first
     if (sd_mounted()) {
         sd_app_scan();

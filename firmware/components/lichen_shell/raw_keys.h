@@ -31,3 +31,9 @@ bool raw_keys_release_ctx(lichen_ctx_t ctx);
 // them from racing the drain timer and each other (#118)
 bool raw_keys_listen(raw_keys_cb cb, void *arg, bool swallow);
 void raw_keys_unlisten(raw_keys_cb cb, void *arg);
+
+// The OS hold-Esc for a video owner (#563): hooks the keyboard task for Esc and starts the sampler on the LVGL task. Esc
+// held VIDEO_ESCAPE_MS while a video owner is active takes the screen back (reason escape), gives the owner's raw keys back
+// and leaves the app (shell_back). A short Esc is an ordinary key for the app. Call once from the shell's start, under the
+// LVGL lock.
+void raw_keys_start_escape(void);

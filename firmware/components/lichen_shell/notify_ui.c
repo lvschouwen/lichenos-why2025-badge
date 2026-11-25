@@ -15,6 +15,7 @@
 #include "shell_parts.h"
 #include "theme.h"
 #include "update_screen.h"
+#include "video_notice.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -131,8 +132,10 @@ static void drain(lv_timer_t *timer) {
     if (s_showing.id && lv_tick_elaps(s_shown_at) >= nview_toast_ms(s_showing.level)) {
         hide();
     }
-    // Not over the boot screen nor the update screen; the queue waits
-    if (!s_showing.id && s_waiting.n && shell_home_shown() && !update_screen_busy()) {
+    // Not over the boot screen nor the update screen, nor a video owner (#563: the unread dot counts it, it shows on exit);
+    // the queue waits
+    if (!s_showing.id && s_waiting.n && shell_home_shown() && !update_screen_busy() &&
+        video_notice_policy(VN_TOAST, video_notice_active()) != VN_HOLD) {
         show_next();
     }
 }

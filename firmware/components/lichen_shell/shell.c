@@ -799,6 +799,7 @@ void shell_start(lv_display_t *display) {
     }
     update_screen_init();
     notify_ui_start();
+    raw_keys_start_escape();
     shortcuts_start();
     up = true;
     lichen_sys_ui_unlock();

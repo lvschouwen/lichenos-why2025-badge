@@ -16,6 +16,7 @@
 #include "shell_parts.h"
 #include "theme.h"
 #include "ui_text.h"
+#include "video_notice.h"
 #include "shell_ui_ops.h"
 #include "lichen_ui.h"
 
@@ -250,6 +251,7 @@ static void apply(void *arg) {
     }
     if (rebuild) {
         shown_gen = gen;
+        video_notice_raise(VN_DIALOG); // a video owner gives the screen back: the dialog sits under it and the app has the keys (#563)
         build();
     }
 }

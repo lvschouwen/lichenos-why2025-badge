@@ -3078,3 +3078,11 @@ target_include_directories(lichen_video_rules_test PRIVATE ${CMAKE_CURRENT_SOURC
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
 target_compile_options(lichen_video_rules_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_video_rules_test COMMAND lichen_video_rules_test)
+
+add_executable(video_notice_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/video_notice_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/video_notice.c
+)
+target_include_directories(video_notice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(video_notice_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME video_notice_test COMMAND video_notice_test)

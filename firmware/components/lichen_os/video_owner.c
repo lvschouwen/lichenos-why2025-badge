@@ -11,6 +11,7 @@
 #include "lichen_sys_ui.h"
 #include "esp_attr.h"
 #include "psram_speed.h"
+#include "video_notice.h"
 
 #include <string.h>
 
@@ -46,11 +47,21 @@ static void reap_parked(void) {
 
 static void on_reclaimed(void *arg, display_video_reclaim_t why) {
     (void)arg;
+    video_notice_set_active(false); // before the app's callback: a notice it raises there is no longer held
     o.reclaimed = true;
     o.reason    = why;
     if (o.cb) {
         o.cb(o.arg, why);
     }
+}
+
+// The policy's reclaim (video_notice.h): the shell and the services raise a notice kind, this maps it to a reason
+static bool notice_reclaim(vn_kind_t kind) {
+    static display_video_reclaim_t const why[] = {[VN_DIALOG]  = DISPLAY_VIDEO_RECLAIM_DIALOG,
+                                                  [VN_THERMAL] = DISPLAY_VIDEO_RECLAIM_THERMAL,
+                                                  [VN_CARD]    = DISPLAY_VIDEO_RECLAIM_CARD,
+                                                  [VN_ESCAPE]  = DISPLAY_VIDEO_RECLAIM_ESCAPE};
+    return kind >= VN_DIALOG && kind <= VN_ESCAPE && video_owner_reclaim(why[kind]);
 }
 
 display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32_t h, uint32_t want_x_milli,
@@ -78,6 +89,8 @@ display_video_refusal_t video_owner_acquire(lichen_ctx_t ctx, uint32_t w, uint32
             r = display_vsurf_acquire_locked(s, w, h, want_x_milli, want_y_milli, psram_speed_running(), on_reclaimed, NULL);
         }
         if (r == DISPLAY_VIDEO_REFUSE_NONE) {
+            video_notice_set_reclaim(notice_reclaim);
+            video_notice_set_active(true);
             o      = (owner_t){.held = true, .ctx = ctx, .src = {s[0], s[1]}, .cb = on_reclaim, .arg = arg};
             src[0] = s[0];
             src[1] = s[1];
@@ -104,6 +117,7 @@ bool video_owner_holds(lichen_ctx_t ctx) {
 // Under the lock. The display side waits out a PPA transfer before it says the sources are free; if one may still run they
 // are parked, not freed (no tag-ignore): they are OS memory, so keeping them is safe, only late.
 static void release_locked(void) {
+    video_notice_set_active(false);
     bool const idle = display_vsurf_release_locked();
     void      *s0 = o.src[0], *s1 = o.src[1];
     // The record goes first: a present or holds() racing on another task then finds nothing to read before the free
