@@ -54,7 +54,7 @@ when the run ends. The old wave logs are in git history (before #483).
 
 ## Live (2026-11-25, badge on fw-a0661d87, wave benched)
 - Wave a0661d87 benched and closed: #556 #557 #558 #559. #541 open: benchtest's slow stop needs sliced sleeps (comment there).
-- #527: spike verdict go (engine ~8 ms, PPA ~7.8 ms, expand ~2.5 ms; carry ~14 ms goes with C). Contracts for C/D in the #527 comments. Next: owner go, then create C-H child issues and run them in waves (C+D Opus, one Opus reviewer over C+D).
+- #527: spike verdict go (engine ~8 ms, PPA ~7.8 ms, expand ~2.5 ms; carry ~14 ms goes with C). Contracts for C/D in the #527 comments. Owner said go (2026-11-25): create C-H child issues and run them in waves (C+D Opus, one Opus reviewer over C+D).
 - My ota-firmware is refused by the permission check: Lucas runs it with `!` via scratchpad fw.sh (recreate after a /clear: ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted).
 - Bench gotchas: `fw ui open` wakes the screen and loads async (wait ~5 s before acting on the app); a firmware update refuses /console and /screenshot (409); the card-removal unload logs nothing on success; DOOM closes with `keys send esc hold:3000`; spike/variant SD apps: build with the env for the whole build.sh run, push with ota-file, rebuild normal and `sdapp-push` after.
 - NEEDS-LUCAS: #126 launch the MeshCore peer session; #523 step 3 (yellow flash glance), 7 (`owner-onair.sh sync`/`off`); stray `stash@{0}` from impl-549 (duplicate, drop it); #391, #281, #237.
