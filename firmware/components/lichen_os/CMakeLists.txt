@@ -59,7 +59,7 @@ idf_component_register(SRCS ${dev_srcs} "sd_app_loader.c" "sd_app_scan.c" "sd_ap
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c" "mem_window.c" "mem_window_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
                             "safe_mode.c" "safe_mode_policy.c" "safe_mode_rec.c" "app_stop.c" "app_manage.c"
-                            "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "bt_sync.c" "reg_p4_table.c" "reg_p4_psram.c" "reg_p4_display.c" "reg_disp_engine.c" "reg_p4_sensors.c" "reg_p4_misc.c" "reg_p4_settings.c" "reg_p4_switch.c" "switch_reg.c" "switch_logic.c" "settings_fail.c" "settings_reg.c" "reg_wifi.c" "disp_state.c" "disp_state_fmt.c" "vbench_cmd.c" "../../../shared/reg/reg.c"
+                            "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "bt_sync.c" "reg_p4_table.c" "reg_p4_psram.c" "reg_p4_display.c" "reg_disp_engine.c" "reg_p4_sensors.c" "reg_p4_misc.c" "reg_p4_settings.c" "reg_p4_switch.c" "switch_reg.c" "switch_logic.c" "settings_fail.c" "settings_reg.c" "reg_wifi.c" "disp_state.c" "disp_state_fmt.c" "vbench_cmd.c" "video_owner.c" "../../../shared/reg/reg.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        LDFRAGMENTS "linker.lf"

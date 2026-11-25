@@ -45,6 +45,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "safe_mode.h"
+#include "video_owner.h"
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -485,6 +486,11 @@ static bool unload_step(sd_app_rec_t *rec, sd_unload_step_t step) {
 // listener calls into the image) and when the card goes. The context may already be stale: both are keyed by the number only.
 // False: something may still call into the app, so its image is not freed (the app counts as one that did not stop).
 static bool release_app_holdings(sd_app_rec_t *rec) {
+    // #561: the video surface first, with its sources: before the sweeps, and the reclaim callback may point into the image
+    if (!video_owner_release_ctx(rec->ctx)) {
+        ESP_LOGE(TAG, "%s: the video surface could not be released: image kept", rec->m.id);
+        return false;
+    }
     lichen_fs_sd_release_ctx(rec->ctx); // a batch it left open locks the card for everyone (only logged when its task is gone)
     export_file_close_all(rec->ctx);
     bool ok = lichen_sys_app_leave(rec->ctx); // takes the LVGL lock: never under sd_app_lock or the app lock

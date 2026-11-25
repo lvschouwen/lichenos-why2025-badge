@@ -16,16 +16,19 @@
 #include "display_engine.h"
 #include "display_flip.h"
 #include "display_rot.h"
+#include "display_video_band.h"
+#include "display_video_geom.h"
 #include "esp_attr.h"
 #include "esp_cache.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_interface.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <stdint.h>
-#include <string.h>
 #include "driver/ppa.h"
 #endif
+#include <string.h>
 #include "display_info.h"
 #include "display_vbench.h"
 
@@ -371,6 +374,279 @@ static void engine_fell_back(void *ctx, display_engine_id_t from, display_fallba
 
 static display_engine_ops_t const engine_ops = {cpu_turn, ppa_start, ppa_wait, engine_fell_back, flip_now_us, NULL};
 
+// ---- The OS video surface (#561, part of #527) ----
+// While an app owns the video rectangle, LVGL's strips are filtered in flush_direct: what lies inside the rectangle is
+// dropped, the parts outside (the status bar) are copied into one small PSRAM band buffer and LVGL is released at once, so
+// a paused or hung app never holds the UI up. A pump timer on the LVGL task (the port loop only runs lv_timer_handler, a
+// wake alone runs nothing) draws the latest source frame, scaled by the PPA, together with the queued bands into the back
+// buffer and requests one swap (display_engine_present). The app's present() is lock-free: write-back, one mailbox slot,
+// wake. All panel writes are on the LVGL task or under the LVGL lock (acquire and release), never held across frames.
+#define BAND_BUF_BYTES   (LCD_H_RES * DRAW_BUFFER_LINES * 2) // one 720x80 strip
+#define SLOT_WAIT_MS     100
+#define PPA_IDLE_WAIT_MS 500
+
+typedef struct {
+    display_video_owner_t    owner;
+    display_video_geom_t     geom;
+    display_band_q_t         bq;
+    uint8_t                 *band_buf;
+    void                    *src[2];
+    uint32_t                 src_w, src_h;
+    lv_timer_t              *timer;
+    display_vsurf_reclaim_fn on_reclaim;
+    void                    *arg;
+    int                      pending; // the app's finished source (0/1) or -1; atomic: set by present(), cleared by the pump
+    int                      last;    // the source shown last, -1 = none yet
+    uint32_t                 last_us;
+    display_vsurf_stats_t    st;
+    display_strip_t          strips[DISPLAY_BAND_MAX];
+} vsurf_t;
+
+EXT_RAM_BSS_ATTR static vsurf_t vs = {.pending = -1, .last = -1};
+
+// The rows of a part of an LVGL strip into the band buffer (the strip's own pixels are LVGL's again once flush_ready is out)
+static void vsurf_hold_part(display_rect_t whole, display_rect_t p, uint8_t const *px, uint32_t stride) {
+    display_band_t const *b = display_band_q_put(&vs.bq, p);
+    if (!b) {
+        vs.st.bands_lost++;
+        return;
+    }
+    uint32_t const       row   = (uint32_t)(p.x2 - p.x1 + 1) * 2, rows = (uint32_t)(p.y2 - p.y1 + 1);
+    uint8_t const *const from  = px + (uint32_t)(p.y1 - whole.y1) * stride + (uint32_t)(p.x1 - whole.x1) * 2;
+    for (uint32_t r = 0; r < rows; r++) {
+        memcpy(vs.band_buf + b->off + r * row, from + r * stride, row);
+    }
+}
+
+// True = the strip is handled (LVGL released). Never waits for the app.
+static bool vsurf_filter(lv_display_t *disp, display_rect_t ui, uint8_t const *px, uint32_t stride) {
+    if (vs.owner.state != DISPLAY_VIDEO_ACTIVE) {
+        return false;
+    }
+    display_rect_t parts[DISPLAY_VIDEO_SPLIT_MAX];
+    uint32_t const n = display_video_split(&vs.geom, ui, parts);
+    vs.st.strips_dropped += n == 0;
+    for (uint32_t i = 0; i < n; i++) {
+        vsurf_hold_part(ui, parts[i], px, stride);
+    }
+    lv_display_flush_ready(disp);
+    return true;
+}
+
+static display_present_t vsurf_draw(int idx) {
+    uint32_t const n = display_band_q_count(&vs.bq);
+    for (uint32_t i = 0; i < n; i++) {
+        display_rect_t const ui = vs.bq.e[i].ui;
+        vs.strips[i] = (display_strip_t){.ui     = ui,
+                                         .blk    = display_rot90_block(ui, LCD_V_RES),
+                                         .px     = vs.band_buf + vs.bq.e[i].off,
+                                         .stride = (uint32_t)(ui.x2 - ui.x1 + 1) * 2};
+    }
+    display_video_geom_t const *g = &vs.geom;
+    display_strip_t const       v = {.ui        = g->rect,
+                                     .blk       = g->rect_blk,
+                                     .px        = vs.src[idx],
+                                     .stride    = vs.src_w * 2,
+                                     .scale_x16 = g->scale_x16,
+                                     .scale_y16 = g->scale_y16,
+                                     .src_h     = vs.src_h,
+                                     .crop      = {0, 0, (int32_t)vs.src_w - 1, (int32_t)vs.src_h - 1}};
+    return display_engine_present(&engine, &flip, &vs.owner, vs.strips, n, &v);
+}
+
+static bool vsurf_engine_lost(void) {
+    return display_engine_active(&engine) == DISPLAY_ENGINE_CPU || display_engine_ppa_hung(&engine);
+}
+
+// A pump tick, LVGL task, lock held (a timer). The slot is freed after the draw, so the app never writes a source the PPA
+// still reads, and even a refused or failed frame frees it (no retry storm).
+static void vsurf_pump(lv_timer_t *t) {
+    (void)t;
+    if (vs.owner.state != DISPLAY_VIDEO_ACTIVE) {
+        return;
+    }
+    uint32_t const t0   = (uint32_t)esp_timer_get_time();
+    int const      pend = __atomic_load_n(&vs.pending, __ATOMIC_ACQUIRE);
+    int const      idx  = display_video_pump_pick(pend, vs.last, display_band_q_count(&vs.bq), t0 - vs.last_us);
+    if (idx < 0) {
+        return;
+    }
+    ppa_on_demand();
+    display_present_t const r = vsurf_draw(idx);
+    uint32_t const          us = (uint32_t)esp_timer_get_time() - t0;
+    vs.st.present_max_us       = us > vs.st.present_max_us ? us : vs.st.present_max_us;
+    vs.last_us                 = (uint32_t)esp_timer_get_time();
+    if (r == DISPLAY_PRESENT_OK) {
+        vs.st.presented += pend >= 0;
+        vs.last = idx;
+        display_band_q_pop_all(&vs.bq);
+        display_rect_t lost;
+        if (display_band_q_take_lost(&vs.bq, &lost)) { // what did not fit comes round again, now that the queue is empty
+            lv_area_t const a = {lost.x1, lost.y1, lost.x2, lost.y2};
+            lv_obj_invalidate_area(lv_screen_active(), &a);
+        }
+    } else {
+        vs.st.frames_dropped += pend >= 0;
+    }
+    if (pend >= 0) {
+        __atomic_store_n(&vs.pending, -1, __ATOMIC_RELEASE);
+    }
+    if (r == DISPLAY_PRESENT_REFUSED && vsurf_engine_lost()) {
+        display_vsurf_reclaim_locked(DISPLAY_VIDEO_RECLAIM_ENGINE);
+    }
+}
+
+// Nothing of the surface runs after this: no pump, no queued band, no frame waiting
+static void vsurf_stop(void) {
+    if (vs.timer) {
+        lv_timer_delete(vs.timer);
+        vs.timer = NULL;
+    }
+    display_band_q_clear(&vs.bq);
+    __atomic_store_n(&vs.pending, -1, __ATOMIC_RELEASE);
+    vs.last = -1;
+}
+
+static void vsurf_paint_bars(void) {
+    for (unsigned fb = 0; fb < 2; fb++) {
+        for (unsigned i = 0; i < 2; i++) {
+            display_rect_t const r = vs.geom.bar_blk[i];
+            if (!vs.geom.bar_ok[i]) {
+                continue;
+            }
+            for (int32_t y = r.y1; y <= r.y2; y++) {
+                memset(panel_fbs[fb] + y * LCD_H_RES + r.x1, 0, (size_t)(r.x2 - r.x1 + 1) * 2);
+            }
+            esp_cache_msync(panel_fbs[fb] + r.y1 * LCD_H_RES, (size_t)(r.y2 - r.y1 + 1) * LCD_H_RES * 2,
+                            ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        }
+    }
+}
+
+static bool vsurf_ppa_busy(void) {
+    display_engine_ppa_done_seen(&engine, ppa_gen_last_done);
+    return engine.in_flight || display_engine_ppa_hung(&engine);
+}
+
+bool display_vsurf_ppa_idle_locked(void) {
+    return !direct_disp || !vsurf_ppa_busy();
+}
+
+display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_t w, uint32_t h, uint32_t want_x_milli,
+                                                     uint32_t want_y_milli, unsigned psram_mhz,
+                                                     display_vsurf_reclaim_fn on_reclaim, void *arg) {
+    if (!direct_disp) {
+        return DISPLAY_VIDEO_REFUSE_ENGINE;
+    }
+    display_engine_settle(&engine);
+    display_video_geom_t       g;
+    display_video_acquire_in_t in = {.owned       = vs.owner.state != DISPLAY_VIDEO_IDLE,
+                                     .engine_ppa  = display_engine_active(&engine) == DISPLAY_ENGINE_PPA_ASYNC && ppa_srm != NULL,
+                                     .engine_hung = vsurf_ppa_busy(),
+                                     .swap_on     = flip.swap_on,
+                                     .psram_mhz   = psram_mhz,
+                                     .geom_ok = display_video_geom_make(&g, w, h, LCD_H_RES, LCD_V_RES, want_x_milli, want_y_milli),
+                                     .mem_ok  = src[0] && src[1]};
+    display_video_refusal_t const verdict = display_video_acquire_verdict(&in);
+    if (verdict != DISPLAY_VIDEO_REFUSE_NONE) {
+        return verdict;
+    }
+    if (!vs.band_buf) {
+        vs.band_buf = heap_caps_aligned_alloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE, BAND_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    vs.timer = vs.band_buf ? lv_timer_create(vsurf_pump, 1, NULL) : NULL;
+    if (!vs.timer || !display_video_acquire(&vs.owner)) {
+        if (vs.timer) {
+            lv_timer_delete(vs.timer);
+            vs.timer = NULL;
+        }
+        return DISPLAY_VIDEO_REFUSE_MEM;
+    }
+    display_flip_write_target(&flip); // resolves a pending swap: both buffers are settled before the bars are painted
+    vs.geom       = g;
+    vs.src[0]     = src[0];
+    vs.src[1]     = src[1];
+    vs.src_w      = w;
+    vs.src_h      = h;
+    vs.on_reclaim = on_reclaim;
+    vs.arg        = arg;
+    vs.last_us    = (uint32_t)esp_timer_get_time();
+    display_band_q_init(&vs.bq, BAND_BUF_BYTES);
+    __atomic_store_n(&vs.pending, -1, __ATOMIC_RELEASE);
+    vs.last = -1;
+    vsurf_paint_bars();
+    lv_obj_invalidate(lv_screen_active()); // the bars come back through the band queue
+    return DISPLAY_VIDEO_REFUSE_NONE;
+}
+
+// Waits out a transfer the engine gave up on (its own done), bounded; true = the PPA is idle
+static bool vsurf_wait_ppa(void) {
+    display_engine_settle(&engine);
+    for (int i = 0; i < PPA_IDLE_WAIT_MS / 10 && vsurf_ppa_busy(); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return !vsurf_ppa_busy();
+}
+
+bool display_vsurf_release_locked(void) {
+    if (!direct_disp) {
+        return true;
+    }
+    if (vs.owner.state != DISPLAY_VIDEO_IDLE) {
+        vsurf_stop();
+        display_video_release(&vs.owner);
+        lv_obj_invalidate(lv_screen_active()); // the video rectangle holds the app's last frame in both buffers
+    }
+    bool const idle = vsurf_wait_ppa();
+    if (idle && vs.band_buf) {
+        heap_caps_free(vs.band_buf);
+        vs.band_buf = NULL;
+    }
+    return idle;
+}
+
+bool display_vsurf_reclaim_locked(display_video_reclaim_t why) {
+    if (!direct_disp || !display_video_reclaim(&vs.owner, why)) {
+        return false;
+    }
+    vsurf_stop();
+    vs.st.reclaims++;
+    if (vs.on_reclaim) {
+        vs.on_reclaim(vs.arg, why);
+    }
+    display_video_reclaim_done(&vs.owner);
+    lv_obj_invalidate(lv_screen_active());
+    return true;
+}
+
+bool display_vsurf_present(unsigned idx) {
+    if (idx > 1 || vs.owner.state != DISPLAY_VIDEO_ACTIVE) {
+        return false;
+    }
+    esp_cache_msync(vs.src[idx], (size_t)vs.src_w * vs.src_h * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    for (int waited = 0;; waited++) {
+        int expect = -1;
+        if (__atomic_compare_exchange_n(&vs.pending, &expect, (int)idx, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            break;
+        }
+        if (waited >= SLOT_WAIT_MS || vs.owner.state != DISPLAY_VIDEO_ACTIVE) {
+            vs.st.frames_dropped++;
+            return false;
+        }
+        vTaskDelay(1);
+    }
+    lvgl_port_task_wake(LVGL_PORT_EVENT_USER, NULL);
+    return true;
+}
+
+void display_vsurf_stats(display_vsurf_stats_t *out) {
+    *out         = vs.st;
+    out->state   = vs.owner.state;
+    out->reason  = vs.owner.reason;
+    out->acquires = vs.owner.acquires;
+    out->queued  = display_band_q_count(&vs.bq);
+}
+
 static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_map) {
     display_rect_t const  ui = {area->x1, area->y1, area->x2, area->y2};
     display_strip_t const s  = {
@@ -379,6 +655,9 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
          .px     = px_map,
          .stride = lv_draw_buf_width_to_stride(ui.x2 - ui.x1 + 1, LV_COLOR_FORMAT_RGB565),
     };
+    if (vsurf_filter(disp, ui, px_map, s.stride)) {
+        return;
+    }
     bool const last = lv_display_flush_is_last(disp); // read first: flush_ready (the interrupt's too) clears it
     ppa_on_demand();
     bool const done = display_engine_flush(&engine, &flip, &s, last);
@@ -703,3 +982,29 @@ bool display_phy_ldo_mv(uint32_t *mv) {
     *mv = DSI_PHY_LDO_MV;
     return lcd_panel != NULL;
 }
+
+#if !CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH // no engine, no surface: every call refuses
+display_video_refusal_t display_vsurf_acquire_locked(void *const src[2], uint32_t w, uint32_t h, uint32_t want_x_milli,
+                                                     uint32_t want_y_milli, unsigned psram_mhz,
+                                                     display_vsurf_reclaim_fn on_reclaim, void *arg) {
+    (void)src, (void)w, (void)h, (void)want_x_milli, (void)want_y_milli, (void)psram_mhz, (void)on_reclaim, (void)arg;
+    return DISPLAY_VIDEO_REFUSE_ENGINE;
+}
+bool display_vsurf_release_locked(void) {
+    return true;
+}
+bool display_vsurf_ppa_idle_locked(void) {
+    return true;
+}
+bool display_vsurf_reclaim_locked(display_video_reclaim_t why) {
+    (void)why;
+    return false;
+}
+bool display_vsurf_present(unsigned idx) {
+    (void)idx;
+    return false;
+}
+void display_vsurf_stats(display_vsurf_stats_t *out) {
+    memset(out, 0, sizeof(*out));
+}
+#endif
