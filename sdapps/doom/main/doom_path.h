@@ -4,6 +4,7 @@
 // state (open, reclaim, resume); the engine task only reads it. GPL-3.0-or-later, like the app as a whole.
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum {
     DOOM_PATH_PENDING = 0, // loading: the first frame has not come, nothing is chosen
@@ -33,3 +34,16 @@ int               doom_path_why(doom_path_t *p); // the reclaim reason while pau
 bool              doom_path_own_back_ok(doom_path_t *p);
 // The engine renders a frame in this state
 bool              doom_path_engine_draws(doom_path_t *p);
+
+// The game's clock without the paused time (engine task only, no atomics): the engine's tic loop would otherwise run the
+// whole pause in one burst at the resume. Times are wrapping ms ticks.
+typedef struct {
+    uint32_t begin; // tick the pause began
+    uint32_t total; // ms paused so far
+    bool     held;
+} doom_clock_t;
+
+// Every engine loop: is the game held now
+void     doom_clock_held(doom_clock_t *c, uint32_t now, bool held);
+// The game's ms at now (frozen across a pause)
+uint32_t doom_clock_ms(doom_clock_t const *c, uint32_t now);

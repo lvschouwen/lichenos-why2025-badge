@@ -64,7 +64,38 @@ static void own_back(void) {
     CHECK(doom_path_own_back_ok(&p));  // the canvas path has only the app's hold
 }
 
+static void clock_across_pause(void) {
+    doom_clock_t c = {0};
+    doom_clock_held(&c, 1000, false);
+    CHECK(doom_clock_ms(&c, 1100) == 1100);
+    doom_clock_held(&c, 1200, true); // paused at 1200
+    CHECK(doom_clock_ms(&c, 1200) == 1200);
+    CHECK(doom_clock_ms(&c, 5000) == 1200); // frozen while held
+    doom_clock_held(&c, 9000, true);
+    CHECK(doom_clock_ms(&c, 9500) == 1200);
+    doom_clock_held(&c, 9600, false); // resumed after 8400 ms
+    CHECK(doom_clock_ms(&c, 9600) == 1200); // no burst: the game clock continues where it stopped
+    CHECK(doom_clock_ms(&c, 9650) == 1250);
+    uint32_t prev = 0;
+    for (uint32_t now = 9650; now < 9700; now += 5) {
+        uint32_t g = doom_clock_ms(&c, now);
+        CHECK(g >= prev);
+        prev = g;
+    }
+}
+
+static void clock_wraps(void) {
+    doom_clock_t c = {0};
+    doom_clock_held(&c, 0xfffffff0u, false);
+    doom_clock_held(&c, 0xfffffff8u, true);
+    doom_clock_held(&c, 0x00000010u, false); // the tick wrapped during a 24 ms pause
+    CHECK(doom_clock_ms(&c, 0x00000010u) == 0xfffffff8u);
+    CHECK(doom_clock_ms(&c, 0x00000020u) == 0xfffffff8u + 16u);
+}
+
 int main(void) {
+    clock_across_pause();
+    clock_wraps();
     choice();
     pause_and_resume();
     own_back();

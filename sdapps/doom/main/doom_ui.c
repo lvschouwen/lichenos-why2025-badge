@@ -212,8 +212,8 @@ static void show_pause(bool on) {
 // LVGL task: the OS had the screen (a dialog, the thermal warning). The engine waits; Enter takes the screen again.
 static void tick_paused(void) {
     if (doom_path_why(&path) == DOOM_RECLAIM_ESCAPE) {
-        // The OS pops the app's screen itself (only while it is still on top, #563); if it does not, the app's own hold-Esc is
-        // not offered here either: the pause card stays and Esc held 2 s is the OS's again once the screen is closed
+        // no card is shown; the OS pops the screen itself (#563). If it does not, the screen stays blank until the person
+        // leaves through the OS's normal Esc.
         return;
     }
     if (ui.failed) {
@@ -516,23 +516,17 @@ void doom_ui_present(void) {
 }
 
 // Engine task only: the pause is taken out of the game's clock, or its tic loop would run the missed time in one burst
-static uint32_t pause_begin, paused_total;
-static bool     in_pause;
+static doom_clock_t game_clock;
 
 bool doom_ui_engine_held(void) {
     bool held = doom_path_get(&path) == DOOM_PATH_PAUSED;
-    if (held && !in_pause) {
-        pause_begin = lv_tick_get();
-    } else if (!held && in_pause) {
-        paused_total += lv_tick_get() - pause_begin;
-    }
-    in_pause = held;
+    doom_clock_held(&game_clock, lv_tick_get(), held);
     atomic_store(&parked, held); // seen between two frames: the video buffers are not being written
     return held;
 }
 
 uint32_t doom_ui_game_ms(void) {
-    return lv_tick_get() - paused_total;
+    return doom_clock_ms(&game_clock, lv_tick_get());
 }
 
 bool doom_ui_next_key(int *pressed, unsigned char *key) {

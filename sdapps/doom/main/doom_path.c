@@ -46,3 +46,16 @@ bool doom_path_engine_draws(doom_path_t *p) {
     doom_path_state_t s = doom_path_get(p);
     return s == DOOM_PATH_VIDEO || s == DOOM_PATH_CANVAS;
 }
+
+void doom_clock_held(doom_clock_t *c, uint32_t now, bool held) {
+    if (held && !c->held) {
+        c->begin = now;
+    } else if (!held && c->held) {
+        c->total += now - c->begin;
+    }
+    c->held = held;
+}
+
+uint32_t doom_clock_ms(doom_clock_t const *c, uint32_t now) {
+    return (c->held ? c->begin : now) - c->total;
+}

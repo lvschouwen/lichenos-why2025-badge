@@ -150,7 +150,8 @@ void doom_expand_2x_i8(void *dst, uint8_t const *src) {
 }
 
 void doom_expand_1x(uint16_t *dst, uint8_t const *src, uint16_t const pal[256]) {
-    for (int i = 0; i < DOOM_SRC_W * DOOM_SRC_H; i++) {
-        dst[i] = pal[src[i]];
+    for (int i = 0; i < DOOM_SRC_W * DOOM_SRC_H; i += 2) {
+        uint32_t two = (uint32_t)pal[src[i]] | (uint32_t)pal[src[i + 1]] << 16; // little-endian: the first pixel low
+        memcpy(dst + i, &two, sizeof(two)); // one 32-bit store into PSRAM, no aliasing cast
     }
 }
