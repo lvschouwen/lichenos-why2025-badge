@@ -52,10 +52,10 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-25, badge on fw-d270a186, wave E+F benched remotely)
-- #527 children: C #560 closed, D #561 + F #563 merged with hands checklists (needs-lucas), E #562 closed, G #564 next (carries the live app-API proof and the shell_back double-pop recheck), H #565. #567 (dev console hold after reclaim) small, can ride with G.
-- Badge on fw-e3206742. #567 closed. G bench bugs fixed and merged (123fb793..4eafeaa4, reviewed). Next: Lucas flashes fw-4eafeaa4, main sdapp-push doom, rerun scratchpad bench-g.sh (log bench-g2.log, no ui lock), then close #564 and go to H #565.
-- Thermal `test warn` sheds Wi-Fi + LoRa for ~120 s: a bench script must wait for the badge to come back after it. `fw video hold` after a reclaim lies until #567 lands: release first.
+## Live (2026-11-25, badge on fw-4eafeaa4, G #564 benched remotely)
+- #527 children: C #560 closed, D #561 + F #563 + G #564 merged with hands checklists (needs-lucas), E #562 + #567 closed, H #565 next.
+- Next: fix #568 (first Enter after a reclaim does not resume the DOOM pause card; sdapps/doom only), then H #565 (bench wave: 30 fps at 720x537; check `strips dropped` growth during play, canvas-fallback fps on core 1). State in the latest #564 / #565 comments.
+- Bench: scratchpad bench-g.sh is the DOOM bench template (no ui lock: a 3 s phys Esc under the lock ends the lock). Thermal `test warn` sheds Wi-Fi + LoRa ~120 s. After a flash: `fw.sh sdapp-push doom` before opening DOOM.
 - Flash: Lucas runs `! <scratchpad>/fw.sh ota-firmware` (my ota-firmware is refused); fw.sh = ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted.
 - Bench gotchas: `fw ui open` wakes the screen and loads async (wait ~5 s before acting on the app); a firmware update refuses /console and /screenshot (409); the card-removal unload logs nothing on success; DOOM closes with `keys send esc hold:3000`; spike/variant SD apps: build with the env for the whole build.sh run, push with ota-file, rebuild normal and `sdapp-push` after.
 - NEEDS-LUCAS: hands checklist on #561; #523 step 7 (`owner-onair.sh sync`/`off`); #237.
