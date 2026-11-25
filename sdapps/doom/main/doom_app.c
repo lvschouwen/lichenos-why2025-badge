@@ -178,26 +178,19 @@ static void open_screen(lv_obj_t *screen) {
     }
 }
 
-// The engine task is gone when it said so (task_done) or when it left through exit(): the OS's book then has no task of
-// this app left (lichen_task_leftovers does not wait with 0).
-static bool engine_gone(void) {
-    return task_done || lichen_task_leftovers(lichen_ctx_self(), 0) == 0;
-}
-
 static bool doom_stop(void) {
     stop_req = true;
     uint32_t begin = lv_tick_get(); // not xTaskGetTickCount: it is not in the export table (#550)
     bool started = start_state == START_OK;
-    for (int waited = 0; started && !engine_gone() && waited < STOP_WAIT; waited += 50) {
+    // task_done is the engine's word that it saw the stop (polled quietly: the OS logs every look at a task that still runs); it
+    // is not its end, the task is still returning. The one bounded call below is the proof that the OS's book has no task of
+    // this app left, which also covers an engine that left through exit() without saying so. Until then nothing is freed under
+    // it (bench #564: a paused engine stopped at once and was still booked). At most STOP_WAIT + STOP_END_WAIT of the budget.
+    for (int waited = 0; started && !task_done && waited < STOP_WAIT; waited += 50) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-    if (started && !engine_gone()) {
-        return false; // the engine task is stuck: the loader reports it, nothing is freed under a running task
-    }
-    // task_done is the engine's last word, not its end: the task is still returning. Wait until the OS's book has no task of this
-    // app left, so the unload never frees the image under it (bench #564: a paused engine stopped at once and was still booked).
     if (started && lichen_task_leftovers(lichen_ctx_self(), STOP_END_WAIT) != 0) {
-        return false; // still booked after the wait: the loader reports it, nothing is freed under a running task
+        return false; // the engine task is stuck or still booked: the loader reports it
     }
     uint32_t spent = lv_tick_elaps(begin);
     if (!doom_ui_detach(spent < STOP_TOTAL ? STOP_TOTAL - spent : 200)) {
