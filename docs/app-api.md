@@ -214,6 +214,7 @@ with its capability and thread rule, and the build checks that it matches the he
 | `CONSOLE` | `console_register` (fw_console.h) | MeshCore, QR code |
 | `RESTART` | `system_restart`, `system_restart_asked` | MeshCore (the companion's reboot) |
 | `BACKGROUND` | may start tasks (`lichen_task_start`/`_start_in`, `lichen_task_leftovers`) and may have a `start_background` hook; Notes and LoRa spectrum have it for tasks that run only while they are open. Safe mode (#232) and the Settings > Apps background switch (#233) key on `start_background`, not on this capability | MeshCore, Weather, Notes, LoRa spectrum |
+| `VIDEO` | `lichen_video.h`: `lichen_video_acquire`/`_back`/`_present`/`_release` | DOOM (#515) |
 | `HAPTICS` | `lichen_haptics_play` | none |
 | `SENSORS` | `lichen_sensors.h` | Weather |
 | `NOTIFY` | `lichen_notify.h`, `lichen_badge_set` | MeshCore, Weather, Timer |
@@ -359,7 +360,7 @@ repeated key or an unknown key refuses the file):
 | `internal_ram_kib`, `psram_kib` | declared budgets, like a built-in app's (0 = none declared). `internal_ram_kib` is enforced for stacks (#538): the internal stacks of `main()`, the stop hook and the app's own tasks, live at the same time, add up to at most that, else the task start is refused with a log line. 0 or absent = the default of 24 KiB (main + stop + one 16 KiB task). The 16 KiB cap per task stack applies to every stack, PSRAM ones too. Size it as main + stop + the tasks' stacks (DOOM: 4 + 4 + 16 = 24) |
 | `stack_kib` | stack of the app's `main()` task; at most 16, default 4 |
 
-- **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.2). An app of another major
+- **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.3). An app of another major
   or a newer minor is refused with a notification.
 - **Caps** are granted as the manifest declares them, shown in Settings, Apps, and checked by the OS calls that need them
   (for example `CAP_RAW_KEYS` for the raw keys). The budgets are declared and reported like a built-in app's.
@@ -395,6 +396,17 @@ an API change.
   before the image is freed. While an app holds them Esc is a plain key too: there is no OS hold-exit, so the app
   wires its own way out (`hold_exit.h`: feed it every event, check it on a timer, `shell_back()` when it fires) and
   takes the keys only after that timer exists (sdapps/doom, app_keytest).
+
+- **Video (API 2.3, #562).** An app with `CAP_VIDEO` takes the screen with `lichen_video_acquire(&cfg)` from its open hook
+  (`lichen_video.h`): the OS allocates two black RGB565 source buffers in PSRAM (the app does not free them), the app
+  renders into `lichen_video_back()` and shows the frame with `lichen_video_present()`, which any task may call, never
+  blocks and returns false for a dropped frame (render again into the same buffer). The OS scales and rotates the frame
+  (320 x 200 fills 720 x 537, centred); geometry is not the app's choice. `lichen_video_acquire` is refused when the app
+  has no `VIDEO`, another app holds the screen, the scaler (PPA) is not in use, PSRAM runs at 80 MHz, or memory is
+  short: the app keeps its LVGL path. `on_reclaim(arg, why)` runs on the LVGL task under the UI lock when a dialog,
+  thermal warning, card removal, hold-Esc or a lost scaler takes the screen back: it must not block (set a flag, notify
+  a task). After it `present()` returns false until the app calls `lichen_video_release()`. The OS releases the screen
+  at unload and card removal.
 
 ### Lifecycle
 

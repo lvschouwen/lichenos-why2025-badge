@@ -25,5 +25,6 @@
 #define CAP_AUDIO       (1u << 15) // audio out (#67; none today)
 #define CAP_BATTERY     (1u << 16) // the battery's state (#11; none for apps today)
 #define CAP_SYSTEM      (1u << 17) // the OS's own apps (the shell's): every capability
-#define CAP_COUNT       18u
+#define CAP_VIDEO       (1u << 18) // full-screen video (lichen_video.h, #562); after SYSTEM so no existing value moves
+#define CAP_COUNT       19u
 

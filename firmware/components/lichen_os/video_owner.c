@@ -97,6 +97,10 @@ bool video_owner_present(lichen_ctx_t ctx, unsigned idx) {
     return display_vsurf_present(idx);
 }
 
+bool video_owner_holds(lichen_ctx_t ctx) {
+    return o.held && o.ctx == ctx;
+}
+
 // Under the lock. The display side waits out a PPA transfer before it says the sources are free; if one may still run they
 // are parked, not freed (no tag-ignore): they are OS memory, so keeping them is safe, only late.
 static void release_locked(void) {

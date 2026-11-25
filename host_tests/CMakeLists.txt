@@ -3068,3 +3068,13 @@ add_executable(display_video_rules_test
 target_include_directories(display_video_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
 target_compile_options(display_video_rules_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME display_video_rules_test COMMAND display_video_rules_test)
+
+# lichen_video.h's rules (#562): the VIDEO gate, the frame cycle, stale records
+add_executable(lichen_video_rules_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/lichen_video_rules_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/lichen_video_rules.c
+)
+target_include_directories(lichen_video_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
+target_compile_options(lichen_video_rules_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lichen_video_rules_test COMMAND lichen_video_rules_test)

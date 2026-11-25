@@ -143,6 +143,10 @@ extern void lichen_ui_event_add(void);
 extern void lichen_ui_group_focus_cb(void);
 extern void lichen_ui_timer_create(void);
 extern void lichen_ui_with_group(void);
+extern void lichen_video_acquire(void);
+extern void lichen_video_back(void);
+extern void lichen_video_present(void);
+extern void lichen_video_release(void);
 extern void list_filter_edit(void);
 extern void list_filter_is_hex(void);
 extern void list_filter_is_number(void);
@@ -525,6 +529,10 @@ struct esp_elfsym const lichen_exports[] = {
     {"lichen_ui_group_focus_cb", (void *)lichen_ui_group_focus_cb},
     {"lichen_ui_timer_create", (void *)lichen_ui_timer_create},
     {"lichen_ui_with_group", (void *)lichen_ui_with_group},
+    {"lichen_video_acquire", (void *)lichen_video_acquire},
+    {"lichen_video_back", (void *)lichen_video_back},
+    {"lichen_video_present", (void *)lichen_video_present},
+    {"lichen_video_release", (void *)lichen_video_release},
     {"list_filter_edit", (void *)list_filter_edit},
     {"list_filter_is_hex", (void *)list_filter_is_hex},
     {"list_filter_is_number", (void *)list_filter_is_number},

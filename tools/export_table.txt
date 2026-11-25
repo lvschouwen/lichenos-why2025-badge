@@ -6,7 +6,7 @@
 # allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
 # the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
-api	2.2
+api	2.3
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
 wrap	bootloader_random_enable	__wrap_bootloader_random_enable
 wrap	esp_panic_handler	__wrap_esp_panic_handler
@@ -36,7 +36,6 @@ type	lichen_caps.h	CAP_BACKGROUND	2797d97a
 type	lichen_caps.h	CAP_BATTERY	d6c15c33
 type	lichen_caps.h	CAP_BT	e94d9359
 type	lichen_caps.h	CAP_CONSOLE	35815d56
-type	lichen_caps.h	CAP_COUNT	4e5390b7
 type	lichen_caps.h	CAP_HAPTICS	d287cab4
 type	lichen_caps.h	CAP_LORA_BORROW	f38f2afe
 type	lichen_caps.h	CAP_LORA_RX	a6932940
@@ -50,6 +49,7 @@ type	lichen_caps.h	CAP_SD	f7286313
 type	lichen_caps.h	CAP_SECRETS	864ce1c1
 type	lichen_caps.h	CAP_SENSORS	dcddd4d7
 type	lichen_caps.h	CAP_SYSTEM	5ff12e20
+type	lichen_caps.h	CAP_VIDEO	004b4ab2
 type	clock_check.h	CLOCK_ABOVE_BUILD_S	b33ecc5a
 type	clock_check.h	CLOCK_BELOW_BUILD_S	7b939677
 type	clock_check.h	CLOCK_BIG_STEP	101d1170
@@ -117,6 +117,11 @@ type	lichen_task.h	LICHEN_STACK_INTERNAL	54ac7e1d
 type	lichen_task.h	LICHEN_STACK_LP_RAM	9b0c53d9
 type	lichen_task.h	LICHEN_STACK_PSRAM	bf46eceb
 type	lichen_timer.h	LICHEN_TIMER_NONE	1aa252a8
+type	lichen_video.h	LICHEN_VIDEO_RECLAIM_CARD	101d1170
+type	lichen_video.h	LICHEN_VIDEO_RECLAIM_DIALOG	d4fafa50
+type	lichen_video.h	LICHEN_VIDEO_RECLAIM_ENGINE	0def75ea
+type	lichen_video.h	LICHEN_VIDEO_RECLAIM_ESCAPE	4b920977
+type	lichen_video.h	LICHEN_VIDEO_RECLAIM_THERMAL	05239f15
 type	list_filter.h	LIST_FILTER_MAX	4bc9e33d
 type	lichen_notify.h	LN_COALESCE	acb84569
 type	lichen_notify.h	LN_ERROR	05239f15
@@ -221,6 +226,9 @@ type	lichen_sd_app.h	lichen_sd_hooks_t	5368bd8f
 type	lichen_sensors.h	lichen_sensors_t	38582b85
 type	lichen_task.h	lichen_stack_t	064de069
 type	lichen_timer.h	lichen_timer_t	3ad7ccc5
+type	lichen_video.h	lichen_video_cfg_t	0c7e46e9
+type	lichen_video.h	lichen_video_reclaim_fn	a8eaadcd
+type	lichen_video.h	lichen_video_reclaim_t	a361470f
 type	list_filter.h	list_filter_word_fn	2817b6d4
 type	lichen_notify.h	ln_level_t	4fe4a945
 type	lora_app.h	lora_packet_cb_t	e1429180
@@ -387,6 +395,10 @@ export	lichen_ui_event_add	lichen_ui_event_add	lichen_ui.h	9dcf5ecd
 export	lichen_ui_group_focus_cb	lichen_ui_group_focus_cb	lichen_ui.h	547943ed
 export	lichen_ui_timer_create	lichen_ui_timer_create	lichen_ui.h	ca29ca5f
 export	lichen_ui_with_group	lichen_ui_with_group	lichen_ui.h	7f73b6f3
+export	lichen_video_acquire	lichen_video_acquire	lichen_video.h	daa808dc
+export	lichen_video_back	lichen_video_back	lichen_video.h	a8fb1ef1
+export	lichen_video_present	lichen_video_present	lichen_video.h	099af744
+export	lichen_video_release	lichen_video_release	lichen_video.h	7f6fbdf9
 export	list_filter_edit	list_filter_edit	list_filter.h	a2cba629
 export	list_filter_is_hex	list_filter_is_hex	list_filter.h	88fb87f4
 export	list_filter_is_number	list_filter_is_number	list_filter.h	cb341ba6

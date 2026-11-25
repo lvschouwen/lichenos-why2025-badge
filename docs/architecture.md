@@ -498,6 +498,14 @@ The shell's navigation, dialog, station clock and raw keys (`lichen_ui.h`, `lich
 itself: `lichen_ui_ops.c` forwards them to the `lichen_ui_ops_t` table the shell sets in `shell_boot_screen` and
 `shell_start`, with a defined "not up" answer before (#221), so no caller links upward to the shell.
 
+**Video for apps (#562, #527):** `lichen_video.h` (`CAP_VIDEO`) is the app-facing face of the OS video surface. The
+calls live in `lichen_os` (`lichen_video.c` binds the capability check and `video_owner.h`; `lichen_video_rules.c` holds
+the decisions, host-tested): `acquire` binds the caller's context, so `present` works from any task of the app, and every
+call is refused without `VIDEO`. The owner record, the two PSRAM sources and the reclaim reasons stay in `video_owner.c`
+and the board's `display_vsurf_*` (geometry fixed there); the app's `on_reclaim` is called on the LVGL task under the UI
+lock, so it must not block. The unload sweep releases the surface before the image goes; a record the owner no longer
+holds hands out no pointers (`video_owner_holds`).
+
 **Two surfaces** (per-header lines in [app-api.md](app-api.md)):
 - **App surface:** `lichen_*.h`, for L6 (the shell uses it too).
 - **System surface:** `lichen_sys_*.h`, for L5 and `main`. `forbid L6 lichen_sys_*` in `layers.conf` makes any app use a

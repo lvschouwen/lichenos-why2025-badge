@@ -496,6 +496,10 @@ lichen_ui_ops_unlock	SYSTEM	unspecified	lichen_ui_ops.h
 lichen_ui_timer_create	-	lvgl	lichen_ui.h
 lichen_ui_with_group	-	lvgl	lichen_ui.h
 lichen_unregister_app	SYSTEM	unspecified	lichen_sys_app.h
+lichen_video_acquire	VIDEO	lvgl	lichen_video.h
+lichen_video_back	VIDEO	unspecified	lichen_video.h
+lichen_video_present	VIDEO	any	lichen_video.h
+lichen_video_release	VIDEO	lvgl	lichen_video.h
 list_filter_edit	-	unspecified	list_filter.h
 list_filter_is_hex	-	unspecified	list_filter.h
 list_filter_is_number	-	unspecified	list_filter.h

@@ -59,6 +59,7 @@ static void test_refused(void) {
     CHECK(parse("id=a\nname=A\napi=1\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VERSION);
     CHECK(parse("id=a\nname=A\napi=1.x\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VERSION);
     CHECK(parse("id=a\nname=A\napi=1.0.1\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VERSION);
+    CHECK(parse("id=a\nname=A\napi=1.0\ncaps=VIDEO SD\n", "a", &m, &line) == LICHEN_MANIFEST_OK && m.caps == (CAP_VIDEO | CAP_SD)); // #562
     CHECK(parse("id=a\nname=A\napi=1.0\ncaps=SD BOGUS\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VALUE);
     CHECK(parse("id=a\nname=A\napi=1.0\ncaps=SYSTEM\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VALUE);
     CHECK(parse("id=a\nname=A\napi=1.0\nstack_kib=70000\n", "a", &m, &line) == LICHEN_MANIFEST_ERR_VALUE);

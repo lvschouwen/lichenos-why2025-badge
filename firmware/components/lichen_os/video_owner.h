@@ -32,6 +32,9 @@ bool video_owner_release(lichen_ctx_t ctx);
 // the app is in flight; a late one is refused by its state check. False = lock timeout, keep the image
 // (the reclaim callback may point into it).
 bool video_owner_release_ctx(lichen_ctx_t ctx);
+// True while ctx holds the record (acquired, not released, not swept by an unload), reclaimed or not: its sources are
+// still valid. Lock-free, like present.
+bool video_owner_holds(lichen_ctx_t ctx);
 // An explicit event takes the screen back (dialog, thermal, card, hold-Esc). False when it is not ACTIVE.
 bool video_owner_reclaim(display_video_reclaim_t why);
 

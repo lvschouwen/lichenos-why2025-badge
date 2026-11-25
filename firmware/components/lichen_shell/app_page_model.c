@@ -43,8 +43,9 @@ static char const *const cap_words[CAP_COUNT] = {
     [15] = "audio",
     [16] = "the battery",
     [17] = NULL, // CAP_SYSTEM: said as a whole
+    [18] = "full-screen video",
 };
-_Static_assert(CAP_COUNT == 18u, "a new capability needs its words in cap_words (app_page_model.c)");
+_Static_assert(CAP_COUNT == 19u, "a new capability needs its words in cap_words (app_page_model.c)");
 
 char const *app_page_cap_words(unsigned bit) {
     return bit < CAP_COUNT ? cap_words[bit] : NULL;

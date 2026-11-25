@@ -56,6 +56,8 @@ static void test_allows(void) {
     CHECK(!app_caps_allows(CAP_SD, CAP_SD | CAP_NOTIFY)); // every bit of need
     CHECK(!app_caps_allows(0, CAP_BACKGROUND));           // main.c: start_background without BACKGROUND is skipped
     CHECK(app_caps_allows(CAP_SYSTEM, CAP_RAW_KEYS | CAP_SECRETS));
+    CHECK(app_caps_allows(CAP_SYSTEM, CAP_VIDEO) && !app_caps_allows(CAP_SD, CAP_VIDEO) && app_caps_allows(CAP_VIDEO, CAP_VIDEO));
+    CHECK(strcmp(app_caps_name(18), "VIDEO") == 0); // #562
     CHECK(app_caps_allows(0, 0));
 }
 
@@ -104,7 +106,7 @@ static void test_log_rate_limit(void) {
 static void test_names_and_format(void) {
     char out[64];
     CHECK(strcmp(app_caps_name(0), "LORA_TX") == 0 && strcmp(app_caps_name(9), "BACKGROUND") == 0);
-    CHECK(strcmp(app_caps_name(CAP_COUNT - 1), "SYSTEM") == 0 && app_caps_name(CAP_COUNT) == NULL);
+    CHECK(strcmp(app_caps_name(CAP_COUNT - 1), "VIDEO") == 0 && app_caps_name(CAP_COUNT) == NULL);
     CHECK(app_caps_format(0, out, sizeof(out)) == 1 && strcmp(out, "-") == 0);
     app_caps_format(CAP_SD | CAP_NOTIFY | CAP_BACKGROUND, out, sizeof(out));
     CHECK(strcmp(out, "SD BACKGROUND NOTIFY") == 0);

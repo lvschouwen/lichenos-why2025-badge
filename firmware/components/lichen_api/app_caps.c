@@ -10,7 +10,7 @@
 // By bit number: CAP_<name> of lichen_caps.h (host_tests/caps_test.c pins the order)
 static char const *const CAP_NAMES[CAP_COUNT] = {
     "LORA_TX", "LORA_RX", "LORA_BORROW", "SD",      "NET",        "SECRETS", "RAW_KEYS", "CONSOLE", "RESTART",
-    "BACKGROUND", "HAPTICS", "SENSORS",  "NOTIFY", "RADIO_SCAN", "BT",      "AUDIO",    "BATTERY", "SYSTEM",
+    "BACKGROUND", "HAPTICS", "SENSORS",  "NOTIFY", "RADIO_SCAN", "BT",      "AUDIO",    "BATTERY", "SYSTEM", "VIDEO",
 };
 
 bool app_caps_allows(uint32_t have, uint32_t need) {

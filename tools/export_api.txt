@@ -27,6 +27,7 @@ header scroll_anchor.h
 header text_entry.h
 header ui_text.h
 header lichen_keys.h
+header lichen_video.h
 header key_matrix.h
 header hold_exit.h
 func lichen_font

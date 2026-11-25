@@ -95,6 +95,11 @@ def header_prototypes(root, conf):
     return out
 
 
+# Macros of an exported header that are the OS's bookkeeping: an app names its capabilities in its manifest, never by
+# number, so a new capability (CAP_COUNT up by one) is an addition, not a break (#562).
+INTERNAL_NAMES = {"CAP_COUNT"}
+
+
 def type_decls(root, conf, listed):
     """{name: (header, hash)}: the types, structs, enums (and their values), variables and macros of the listed headers and
     of the headers they include from their own directory (lichen_caps.h under lichen_app.h). One entry per declaration,
@@ -111,7 +116,8 @@ def type_decls(root, conf, listed):
     out = {}
     for h, p in sorted(seen.items()):
         for name, dh in declarations(cl.read(p)).items():
-            out.setdefault(name, (h, dh))
+            if name not in INTERNAL_NAMES:
+                out.setdefault(name, (h, dh))
     return out
 
 
@@ -250,7 +256,9 @@ def version_problems(root, new_text):
 def bump_problems(old_v, old, new_v, new, old_t=None, new_t=None):
     """Exports removed or with a changed prototype hash, and types (typedefs, structs, enum values, macros, variables)
     removed or changed, need a major bump; exports or types added a minor bump."""
-    old_t, new_t = old_t or {}, new_t or {}
+    # A table written before INTERNAL_NAMES existed still lists them: they are no part of the comparison
+    old_t = {n: h for n, h in (old_t or {}).items() if n not in INTERNAL_NAMES}
+    new_t = {n: h for n, h in (new_t or {}).items() if n not in INTERNAL_NAMES}
     broke = sorted(n for n in old if new.get(n) != old[n])
     broke += sorted("type " + n for n in old_t if new_t.get(n) != old_t[n])
     added = sorted(n for n in new if n not in old) + sorted("type " + n for n in new_t if n not in old_t)

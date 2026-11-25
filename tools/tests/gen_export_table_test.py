@@ -176,6 +176,11 @@ class VersionTest(unittest.TestCase):
             self.assertTrue(g.bump_problems((1, 0), {"a": "h"}, (1, 1), {"a": "h"}, {"N": "1"}, new_t))
             self.assertFalse(g.bump_problems((1, 0), {"a": "h"}, (2, 0), {"a": "h"}, {"N": "1"}, new_t))
 
+    def test_the_capability_count_is_no_api(self):
+        # #562: a new capability moves CAP_COUNT, which no app uses (it names caps in its manifest)
+        self.assertFalse(g.bump_problems((2, 2), {"a": "h"}, (2, 3), {"a": "h"}, {"CAP_COUNT": "1", "X": "1"}, {"X": "1"}))
+        self.assertFalse(g.bump_problems((2, 2), {"a": "h"}, (2, 2), {"a": "h"}, {"CAP_COUNT": "1"}, {"CAP_COUNT": "2"}))
+
     def test_unchanged_needs_nothing(self):
         self.assertFalse(g.bump_problems((1, 0), {"a": "a"}, (1, 0), {"a": "a"}))
 
