@@ -21,7 +21,10 @@ mkdir "$t/sdapps"
 cp "$repo/sdapps/sdapp.cmake" "$t/sdapps/"
 cp -r "$repo/sdapps/hello" "$t/sdapps/"
 snap() { (cd "$t" && find sdapps -type f | sort | xargs sha256sum; ls sdapps) | sha256sum; }
-real_before=$(cd "$repo" && { find sdapps firmware/components tools/layers.conf host_tests/CMakeLists.txt -type f | sort | xargs sha256sum; } | sha256sum)
+# Names only, not contents: the scaffold can only leak by creating a path through the symlinks, and a content hash made the
+# test fail whenever a source file in the real tree was saved or rebuilt while the (10 s) test ran (#566)
+real_tree() { (cd "$repo" && find sdapps firmware/components tools/layers.conf host_tests/CMakeLists.txt -type f | sort | sha256sum); }
+real_before=$(real_tree)
 new_sd() { python3 -I "$repo/tools/new_app.py" --root "$t" --sd "$@"; }
 refuses() { # refuses <why> <id> <name>
     local why=$1 before out rc
@@ -76,15 +79,23 @@ done
 # The generated app compiles against the real headers (syntax only), as the app build does
 lvgl=$repo/firmware/managed_components/lvgl__lvgl
 if [ -f "$lvgl/lvgl.h" ] && [ -f "$repo/firmware/build/config/sdkconfig.h" ]; then
-    grep '^#define CONFIG_LV_' "$repo/firmware/build/config/sdkconfig.h" > "$tmp/lv.h"
+    # A build running at the same time rewrites sdkconfig.h in place: compile only from a copy that did not change while it
+    # was read, else skip, instead of failing on a half-written file (#566)
+    cfg=$repo/firmware/build/config/sdkconfig.h
+    stamp=$(stat -c '%Y.%s' "$cfg")
+    grep '^#define CONFIG_LV_' "$cfg" > "$tmp/lv.h"
+    if [ "$stamp" != "$(stat -c '%Y.%s' "$cfg")" ]; then
+        echo "SKIP: sdkconfig.h changed while it was read (a build is running): the generated app.c is compiled by the build only" >&2
+    else
     out=$("${CC:-cc}" -std=gnu11 -fsyntax-only -Wall -Wextra -Werror -DLV_CONF_INCLUDE_SIMPLE -include "$tmp/lv.h" -I"$lvgl" \
         -I"$repo/firmware/components/lichen_api" "$t/sdapps/demo/main/app.c" 2>&1) || bad "the generated app.c does not compile: $out"
+    fi
 else
     echo "SKIP: no configured firmware tree (lvgl or build/config/sdkconfig.h missing): the generated app.c is compiled by the build only" >&2
 fi
 
 # The real tree was not touched
-real_after=$(cd "$repo" && { find sdapps firmware/components tools/layers.conf host_tests/CMakeLists.txt -type f | sort | xargs sha256sum; } | sha256sum)
+real_after=$(real_tree)
 [ "$real_before" = "$real_after" ] || bad "the real tree changed"
 [ ! -e "$repo/sdapps/demo" ] || bad "a generated app is in the real tree"
 
@@ -94,11 +105,14 @@ out=$(bash "$repo/tools/badge.sh" new-app --sd onlyone 2>&1); rc=$?
 out=$(bash "$repo/tools/badge.sh" new-app --sd 'Bad Id' x 2>&1); rc=$?
 [ "$rc" = 1 ] && grep -q '^new-app: ' <<<"$out" || bad "new-app --sd with a bad id: exit $rc: $out"
 
-# sdapp-push: refusals first, then the two files go to SD0:[lichen.apps.<id>] (curl is a stub that records X-Path)
-push() { env BADGE_SDAPPS_DIR="$tmp/built" BADGE_OTA_TOKEN=x XDG_CONFIG_HOME="$tmp/none" PATH="$tmp/stub:$PATH" bash "$repo/tools/badge.sh" sdapp-push "$@" 2>&1; }
+# sdapp-push: refusals first, then the two files go to SD0:[lichen.apps.<id>] (curl is a stub that records X-Path). The stub
+# must read its stdin (the token config badge.sh feeds it): else the writer gets SIGPIPE when the stub exits first, pipefail
+# fails the push, and the test fails about 1 run in 20 under load (#566)
+push() { env BADGE_SDAPPS_DIR="$tmp/built" BADGE_OTA_TOKEN=00112233445566778899aabbccddeeffXDG_CONFIG_HOME="$tmp/none" PATH="$tmp/stub:$PATH" bash "$repo/tools/badge.sh" sdapp-push "$@" 2>&1; }
 mkdir -p "$tmp/stub" "$tmp/built/demo"
 cat > "$tmp/stub/curl" <<STUB
 #!/usr/bin/env bash
+cat >/dev/null
 for a in "\$@"; do case \$a in X-Path:*) echo "\$a" >> "$tmp/paths" ;; esac; done
 exit 0
 STUB
