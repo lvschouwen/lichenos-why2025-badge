@@ -10,4 +10,5 @@ pub mod perf;
 pub mod pma;
 pub mod pmp;
 pub mod ring;
+pub mod slots;
 pub mod trap;

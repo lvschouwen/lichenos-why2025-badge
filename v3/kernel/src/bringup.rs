@@ -138,6 +138,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     timer(&mut t);
     fault(&mut t);
     user(&mut t);
+    crate::bringup_u::run_rows(&mut t);
     crate::bringup_pmp::run(&mut t);
 
     let dropped = platform::take_dropped();
@@ -236,6 +237,10 @@ fn user(t: &mut Tally) {
     crate::pmp::report();
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, udata, kram) = unsafe { (addr(&_utext), addr(&_udata), addr(&_sbss)) };
+    // The U data page is NOLOAD: whatever the ROM or an earlier stage left there is not U's to read. The text page is
+    // part of the loaded image (padded with zeros by the linker), so its tail needs no clearing.
+    // SAFETY: the page is kernel-owned NOLOAD memory that no one else uses yet.
+    unsafe { core::ptr::write_bytes(udata as *mut u8, 0, UPAGE) };
     crate::pmp::apply(utext, udata, UPAGE);
     kprintln!("pmp: U view text {utext:#x} R+X, data {udata:#x} R+W ({UPAGE} B each), rest denied");
     let sp = udata + UPAGE;

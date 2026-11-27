@@ -192,14 +192,19 @@ fn from_user(s: &mut State, frame: &mut Frame, mcause: u32, c: Cause) -> usize {
     };
     let epc = hw::trap::mepc();
     if c.code == trap::EXC_ECALL_U {
-        if frame.a[7] == 0 {
-            u.echoes += 1;
-            frame.a[0] = frame.a[0].wrapping_add(1);
-            set_mepc(epc + 4);
-            return 0;
+        match trap::classify_ucall(frame.a[7]) {
+            trap::UCall::Echo => {
+                u.echoes += 1;
+                frame.a[0] = frame.a[0].wrapping_add(1);
+            }
+            trap::UCall::Unknown => frame.a[0] = trap::ENOSYS_RET,
+            trap::UCall::Exit => {
+                u.exit = Some(frame.a[0]);
+                return 1;
+            }
         }
-        u.exit = Some(frame.a[0]);
-        return 1;
+        set_mepc(epc + 4);
+        return 0;
     }
     u.fault = Some(Caught { cause: mcause, epc, tval: hw::trap::mtval() });
     1

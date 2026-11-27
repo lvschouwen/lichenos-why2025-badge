@@ -22,13 +22,11 @@ pub fn enter_fatal() {
 pub fn init() {}
 
 pub use lichen_kcore::image::Slot;
-const SLOT_TEXT: usize = 0x4FF6_0000;
-const SLOT_DATA: usize = 0x4FF7_0000;
-const SLOT_LEN: usize = 0x8000;
 
-/// App slot i (plan on #642): 32 KB NAPOT text and data regions in NOLOAD L2MEM, above the kernel's bss and stacks.
+/// App slot `i` from the one table in `lichen_kcore::slots` (32 KB NAPOT text and data regions in NOLOAD L2MEM, above
+/// the kernel's bss and stacks). An index past the table is a kernel bug and stops the run.
 pub fn slot(i: usize) -> Slot {
-    Slot { text: SLOT_TEXT + i * SLOT_LEN, data: SLOT_DATA + i * SLOT_LEN, len: SLOT_LEN }
+    lichen_kcore::slots::slot(i).unwrap_or_else(|| exit(2))
 }
 
 /// Queue one byte for UART0 and push out whatever the FIFO has room for. Never blocks: a full ring drops its oldest

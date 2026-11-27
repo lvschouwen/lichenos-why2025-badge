@@ -35,6 +35,23 @@ pub const EXC_ECALL_M: u16 = 11;
 /// The CLINT machine timer is CLIC interrupt id 7 on the P4.
 pub const IRQ_MTIMER: u16 = 7;
 
+/// What a U ecall asks for (a7). Anything else is an error for the caller, never an exit.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UCall {
+    Echo,
+    Exit,
+    Unknown,
+}
+pub const fn classify_ucall(a7: usize) -> UCall {
+    match a7 {
+        0 => UCall::Echo,
+        1 => UCall::Exit,
+        _ => UCall::Unknown,
+    }
+}
+/// a0 for an unknown call: -ENOSYS.
+pub const ENOSYS_RET: usize = (-38isize) as usize;
+
 /// Short name of a standard exception code, for fault dumps.
 pub const fn exception_name(code: u16) -> &'static str {
     match code {
@@ -146,6 +163,16 @@ pub const fn boot_info_in_range(ptr: usize, size: usize, l2_base: usize, l2_end:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unknown_ecalls_are_not_exits() {
+        use super::*;
+        assert_eq!(classify_ucall(0), UCall::Echo);
+        assert_eq!(classify_ucall(1), UCall::Exit);
+        assert_eq!(classify_ucall(2), UCall::Unknown);
+        assert_eq!(classify_ucall(usize::MAX), UCall::Unknown);
+        assert_eq!(ENOSYS_RET as isize, -38);
+    }
+
     use super::*;
     use proptest::prelude::*;
 

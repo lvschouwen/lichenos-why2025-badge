@@ -8,6 +8,10 @@
 .global _start
 _start:
     csrci mstatus, 8
+    li t0, 0x6000               # mstatus.FS = off: no FPU state for U to see or leave behind
+    csrc mstatus, t0
+    li t0, 0x200000             # mstatus.TW = 1: wfi in a lower mode traps instead of stalling the hart
+    csrs mstatus, t0
     la t0, trap_entry
     ori t0, t0, 3
     csrw mtvec, t0
@@ -31,7 +35,9 @@ park:
 # M-mode trap vector (#612). CLIC mode: exceptions and non-vectored interrupts land at the mtvec base (64-byte aligned
 # at least). Invariant: outside a trap, mscratch holds this hart's trap stack top; inside one, it is 0. So a trap taken
 # while a trap is being handled swaps in 0, and goes to the nested-trap path on its own stack instead of overwriting
-# the frame. Only caller-saved registers are saved: m_trap is a normal C-ABI function and keeps the rest.
+# the frame. The window between the swap and the `csrrw t0, mscratch, zero` is one addi and one store to the trap
+# stack (kernel RAM, M-mode, unlocked PMP): neither can fault, and interrupts cannot be taken (MIE is cleared on entry).
+# Only caller-saved registers are saved: m_trap is a normal C-ABI function and keeps the rest.
 # mcause is never written (CLIC: it aliases mpp/mpie and carries mpil, which mret restores).
 .balign 256
 .global trap_entry
@@ -39,8 +45,10 @@ trap_entry:
     csrrw sp, mscratch, sp
     beqz sp, nested_trap
     addi sp, sp, -80
-    sw ra, 0(sp)
     sw t0, 4(sp)
+    csrrw t0, mscratch, zero    # t0 = interrupted sp, mscratch = 0 in one instruction
+    sw t0, 64(sp)
+    sw ra, 0(sp)
     sw t1, 8(sp)
     sw t2, 12(sp)
     sw a0, 16(sp)
@@ -55,9 +63,6 @@ trap_entry:
     sw t4, 52(sp)
     sw t5, 56(sp)
     sw t6, 60(sp)
-    csrr t0, mscratch
-    sw t0, 64(sp)
-    csrw mscratch, zero
     mv a0, sp
     call m_trap
     bnez a0, to_kernel
@@ -153,8 +158,35 @@ run_user:
     mv sp, a1
     mv a0, a2
     mv a1, a3
+    # U sees only sp, a0 and a1: every other register is zeroed (the callee-saved ones are in k_ctx already).
+    mv ra, zero
     mv gp, zero
     mv tp, zero
+    mv t0, zero
+    mv t1, zero
+    mv t2, zero
+    mv t3, zero
+    mv t4, zero
+    mv t5, zero
+    mv t6, zero
+    mv a2, zero
+    mv a3, zero
+    mv a4, zero
+    mv a5, zero
+    mv a6, zero
+    mv a7, zero
+    mv s0, zero
+    mv s1, zero
+    mv s2, zero
+    mv s3, zero
+    mv s4, zero
+    mv s5, zero
+    mv s6, zero
+    mv s7, zero
+    mv s8, zero
+    mv s9, zero
+    mv s10, zero
+    mv s11, zero
     mret
 
 .section .bss

@@ -22,6 +22,7 @@ SECTIONS {
   .udata 0x4FF70000 (NOLOAD) : { _udata = .; . += 4K; _eudata = .; } > NOLOAD
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
   ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
+  ASSERT(_udata == 0x4FF70000, "the U data page must be the first data slot (SLOT_DATA in kcore/src/slots.rs)")
   ASSERT(_eutext - _utext == 4096, "the U stub page must be exactly one 4 KB NAPOT page")
   ASSERT(_noload_end <= 0x4FF60000, "kernel bss and stacks must stay below the app slots at 0x4FF60000")
   ASSERT(_noload_end <= 0x4FF80000, "NOLOAD memory runs into the L2 cache carve")

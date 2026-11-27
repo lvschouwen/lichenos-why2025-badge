@@ -13,12 +13,20 @@ core::arch::global_asm!(
     r#"
     .section .utext, "ax"
     .balign 4
-    .global bp_u_echo_n
-bp_u_echo_n:
-    beqz a0, 2f
+# U-side timing loop: a0 = n, a1 = sample buffer. Each iteration brackets one echo ecall with rdcycle (needs
+# mcounteren.CY, set by the bring-up in this measurement build only) and stores the cycle delta. t0 counts: the echo
+# handler adds 1 to a0 on every call. Then the exit ecall.
+    .global bp_u_echo_time
+bp_u_echo_time:
     mv t0, a0
-1:  li a7, 0
+    beqz t0, 2f
+1:  rdcycle t3
+    li a7, 0
     ecall
+    rdcycle t4
+    sub t4, t4, t3
+    sw t4, 0(a1)
+    addi a1, a1, 4
     addi t0, t0, -1
     bnez t0, 1b
 2:  li a7, 1
@@ -32,21 +40,17 @@ bp_u_echo_n:
 bp_read_mcycle:
     csrr a0, mcycle
     ret
+    .global bp_read_inhibit
+bp_read_inhibit:
+    csrr a0, 0x320
+    ret
     .global bp_clear_inhibit
 bp_clear_inhibit:
     csrw 0x320, zero
     ret
-    .global bp_read_pccr
-bp_read_pccr:
-    csrr a0, 0x7e2
-    ret
-    .global bp_write_pcer
-bp_write_pcer:
-    csrw 0x7e0, a0
-    ret
-    .global bp_write_pcmr
-bp_write_pcmr:
-    csrw 0x7e1, a0
+    .global bp_write_counteren
+bp_write_counteren:
+    csrw 0x306, a0
     ret
     .option pop
 "#
@@ -58,12 +62,11 @@ extern "C" {
     fn u_load();
     fn u_store();
     fn u_echo();
-    fn bp_u_echo_n();
+    fn bp_u_echo_time();
     fn bp_read_mcycle() -> u32;
+    fn bp_read_inhibit() -> u32;
     fn bp_clear_inhibit();
-    fn bp_read_pccr() -> u32;
-    fn bp_write_pcer(v: usize);
-    fn bp_write_pcmr(v: usize);
+    fn bp_write_counteren(v: usize);
 }
 
 const UPAGE: usize = 4096;
@@ -235,23 +238,21 @@ fn pma_rows(t: &mut Tally, udata: usize) {
 enum Src {
     Mtime = 0,
     Mcycle = 1,
-    Pccr = 2,
 }
 static SRC: AtomicU8 = AtomicU8::new(0);
 static HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(MTIME_HZ as u32);
 
 fn src() -> Src {
-    match SRC.load(Ordering::Relaxed) {
-        1 => Src::Mcycle,
-        2 => Src::Pccr,
-        _ => Src::Mtime,
+    if SRC.load(Ordering::Relaxed) == 1 {
+        Src::Mcycle
+    } else {
+        Src::Mtime
     }
 }
 fn now() -> u32 {
     match src() {
-        // SAFETY: the stub was proven to work by `calibrate` before the source was selected.
+        // SAFETY: `calibrate` proved the stub works before the source was selected.
         Src::Mcycle => unsafe { bp_read_mcycle() },
-        Src::Pccr => unsafe { bp_read_pccr() },
         Src::Mtime => hw::clint::mtime() as u32,
     }
 }
@@ -266,73 +267,68 @@ fn survives(stub: usize, run: impl FnOnce()) -> bool {
     mtrap::take_caught().is_none()
 }
 
-/// Pick a cycle counter by trying them (mcycle, then the P4's PCCR), checking each against mtime (40 MHz): the one that
-/// counts at a plausible CPU clock wins. Falls back to mtime ticks (25 ns).
+/// The kernel's cycle counter is mcycle (the P4 has no other): read mcountinhibit, clear it, calibrate against mtime
+/// (40 MHz). Falls back to mtime ticks (25 ns) when mcycle does not count.
 fn calibrate(t: &mut Tally) {
     begin("perf.clock");
-    for (s, name) in [(Src::Mcycle, "mcycle"), (Src::Pccr, "pccr")] {
-        let usable = match s {
-            Src::Mcycle => {
-                // SAFETY: stubs hold one CSR instruction each; a fault is caught by expect_fault.
-                survives(bp_clear_inhibit as *const () as usize, || unsafe { bp_clear_inhibit() });
-                survives(bp_read_mcycle as *const () as usize, || unsafe {
-                    bp_read_mcycle();
-                })
-            }
-            _ => {
-                // SAFETY: as above.
-                survives(bp_write_pcer as *const () as usize, || unsafe { bp_write_pcer(1) })
-                    && survives(bp_write_pcmr as *const () as usize, || unsafe { bp_write_pcmr(1) })
-                    && survives(bp_read_pccr as *const () as usize, || unsafe {
-                        bp_read_pccr();
-                    })
-            }
-        };
-        if !usable {
-            kprintln!("perf: {name} is not implemented (illegal instruction)");
-            continue;
-        }
-        SRC.store(s as u8, Ordering::Relaxed);
+    // SAFETY: stubs hold one CSR instruction each; a fault is caught by expect_fault.
+    let inhibit = unsafe { bp_read_inhibit() };
+    survives(bp_clear_inhibit as *const () as usize, || unsafe { bp_clear_inhibit() });
+    let usable = survives(bp_read_mcycle as *const () as usize, || unsafe {
+        bp_read_mcycle();
+    });
+    if usable {
+        SRC.store(Src::Mcycle as u8, Ordering::Relaxed);
         let (c0, m0) = (now(), hw::clint::mtime());
         while hw::clint::mtime() - m0 < 4000 {} // 100 us
         let (c1, m1) = (now(), hw::clint::mtime());
         let f = perf::clock_hz(c1.wrapping_sub(c0), (m1 - m0) as u32, MTIME_HZ);
-        kprintln!("perf: {name} counted {} over {} mtime ticks -> {f} Hz", c1.wrapping_sub(c0), m1 - m0);
         if (10_000_000..1_000_000_000).contains(&f) {
             HZ.store(f as u32, Ordering::Relaxed);
             record(
                 t,
                 "perf.clock",
                 None,
-                format_args!("timebase {name}, CPU clock {} MHz (calibrated against mtime 40 MHz)", f / 1_000_000),
+                format_args!(
+                    "timebase mcycle, CPU clock {} MHz (calibrated against mtime 40 MHz), mcountinhibit at boot {inhibit:#x}",
+                    f / 1_000_000
+                ),
             );
             return;
         }
+        kprintln!("perf: mcycle counted {} over {} mtime ticks -> {f} Hz", c1.wrapping_sub(c0), m1 - m0);
     }
     SRC.store(Src::Mtime as u8, Ordering::Relaxed);
     HZ.store(MTIME_HZ as u32, Ordering::Relaxed);
-    record(t, "perf.clock", None, format_args!("timebase mtime 40 MHz (25 ns); no cycle counter usable"));
+    record(
+        t,
+        "perf.clock",
+        None,
+        format_args!("timebase mtime 40 MHz (25 ns); mcycle not usable, mcountinhibit at boot {inhibit:#x}"),
+    );
 }
 
 fn print_perf(name: &str, samples: &mut [u32], note: &str) {
     let hz = hz();
     let Some((med, p95)) = perf::median_p95(samples) else { return };
+    let (min, max) = (samples[0], samples[samples.len() - 1]); // sorted by median_p95
     let us = |c: u32| {
         let ns = perf::ticks_to_ns(c, hz);
         (ns / 1000, (ns % 1000) / 10)
     };
-    let (m, p) = (us(med), us(p95));
-    let sname = match src() {
-        Src::Mcycle => "mcycle",
-        Src::Pccr => "pccr",
-        Src::Mtime => "mtime",
-    };
+    let (lo, m, p, hi) = (us(min), us(med), us(p95), us(max));
+    let sname = if src() == Src::Mcycle { "mcycle" } else { "mtime" };
     kprintln!(
-        "PERF {name} median_us={}.{:02} p95_us={}.{:02} n={} timebase={sname} clock_mhz={} {note}",
+        "PERF {name} median_us={}.{:02} p95_us={}.{:02} min_us={}.{:02} max_us={}.{:02} n={} timebase={sname} \
+         clock_mhz={} {note}",
         m.0,
         m.1,
         p.0,
         p.1,
+        lo.0,
+        lo.1,
+        hi.0,
+        hi.1,
         samples.len(),
         hz / 1_000_000
     );
@@ -407,39 +403,30 @@ fn reload_perf(utext: usize, udata: usize) {
     print_perf("pmp.plan", &mut s, "planner only, 2 regions");
 }
 
-/// U ecall round trip: bp_u_echo_n(K) minus the fixed cost of an empty run (entry + exit ecall), divided by K. Each
-/// sample is the mean of K calls, with the tick off.
+/// U ecall round trip, timed in U with rdcycle around each echo ecall (ecall -> M handler -> mret -> next
+/// instruction), tick off. mcounteren.CY is set for this measurement only: it lets U read the cycle counter, a timing
+/// side channel, so it is cleared again straight after.
 fn syscall_perf(udata: usize) {
     begin("perf.syscall");
     pmp::apply(addrs().0, udata, UPAGE);
-    const K: usize = 32;
-    let sp = udata + UPAGE;
-    let mut s = [0u32; N];
-    let mut fixed = [0u32; N];
-    for v in fixed.iter_mut() {
-        let t0 = now();
-        mtrap::run_u(fnaddr(bp_u_echo_n), sp, 0, 0);
-        *v = now().wrapping_sub(t0);
+    if src() != Src::Mcycle {
+        kprintln!("PERF syscall.local skipped: no cycle counter");
+        return;
     }
-    let f = perf::median_p95(&mut fixed).map_or(0, |m| m.0);
-    for v in s.iter_mut() {
-        let t0 = now();
-        let u = mtrap::run_u(fnaddr(bp_u_echo_n), sp, K, 0);
-        let d = now().wrapping_sub(t0);
-        *v = if u.echoes as usize == K { d.saturating_sub(f) / K as u32 } else { u32::MAX };
+    const SAMPLES: usize = 256;
+    // SAFETY: stub with one CSR instruction; mcounteren bit 0 = CY.
+    unsafe { bp_write_counteren(1) };
+    let u = mtrap::run_u(fnaddr(bp_u_echo_time), udata + UPAGE, SAMPLES, udata);
+    // SAFETY: as above.
+    unsafe { bp_write_counteren(0) };
+    if u.echoes as usize != SAMPLES || u.fault.is_some() {
+        kprintln!("PERF syscall.local skipped: {} echoes, fault {}", u.echoes, u.fault.is_some());
+        return;
     }
-    print_perf(
-        "syscall.local.mean32",
-        &mut s,
-        "mean of 32 echo ecalls per sample, U ecall -> M handler -> mret, tick off",
-    );
-    // One ecall per run: a real per-call tail. Minus the median empty run (entry + exit ecall), which is subtracted
-    // once, so it is a slight under-estimate of the p95 by the jitter of the empty run.
-    for v in s.iter_mut() {
-        let t0 = now();
-        let u = mtrap::run_u(fnaddr(bp_u_echo_n), sp, 1, 0);
-        let d = now().wrapping_sub(t0);
-        *v = if u.echoes == 1 { d.saturating_sub(f) } else { u32::MAX };
+    let mut s = [0u32; SAMPLES];
+    for (i, v) in s.iter_mut().enumerate() {
+        // SAFETY: the U data page is kernel-owned NOLOAD memory U just filled with SAMPLES words.
+        *v = unsafe { core::ptr::read_volatile((udata + 4 * i) as *const u32) };
     }
-    print_perf("syscall.local", &mut s, "one echo ecall per run minus the median empty run, tick off");
+    print_perf("syscall.local", &mut s, "U rdcycle around one echo ecall (two rdcycle included), tick off");
 }
