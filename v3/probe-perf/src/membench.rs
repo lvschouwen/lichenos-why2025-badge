@@ -15,7 +15,7 @@ use lichen_platform_esp32p4::psram::map::CACHED_BASE;
 const SEQ: usize = 4 << 20;
 
 #[inline(never)]
-fn read_words(base: usize, words: usize) -> u32 {
+pub(crate) fn read_words(base: usize, words: usize) -> u32 {
     let (mut s, mut i) = (0u32, 0);
     while i < words {
         let a = base + i * 4;
@@ -25,7 +25,7 @@ fn read_words(base: usize, words: usize) -> u32 {
     s
 }
 #[inline(never)]
-fn write_words(base: usize, words: usize, v: u32) {
+pub(crate) fn write_words(base: usize, words: usize, v: u32) {
     let mut i = 0;
     while i < words {
         let a = base + i * 4;
@@ -175,7 +175,9 @@ fn verify_ring(metric: &str, base: usize, stride: usize, perm: &[u32]) -> bool {
     bad == 0
 }
 
-fn chase_one(metric: &str, base: usize, stride: usize, ws: usize, perm: &mut [u32], cold: bool) -> bool {
+/// Build a ring, check it, and time `hops` dependent loads along it. Returns ns per hop in hundredths, or `None` if the ring read back
+/// wrong (already reported).
+fn chase_measure(metric: &str, base: usize, stride: usize, ws: usize, perm: &mut [u32], cold: bool) -> Option<u64> {
     let slots = ws / stride;
     let perm = &mut perm[..slots];
     build_ring(base, stride, perm, &mut Rng::new(ws as u32 ^ stride as u32));
@@ -183,7 +185,7 @@ fn chase_one(metric: &str, base: usize, stride: usize, ws: usize, perm: &mut [u3
         wb_inv(base, ws); // the build's stores reach the chip and the cache starts empty
     }
     if !verify_ring(metric, base, stride, perm) {
-        return false;
+        return None;
     }
     let hops = 200_000u32;
     // two laps (a ring that fits a cache is then resident; one that does not stays a stream of misses)
@@ -192,11 +194,21 @@ fn chase_one(metric: &str, base: usize, stride: usize, ws: usize, perm: &mut [u3
     let p = chase(base, hops);
     let t1 = ticks();
     black_box(p);
-    perf(
-        metric,
-        &[("ns", Val::F2(ns_x100(t1 - t0, hops as u64, TICK_HZ) as i64)), ("stride_b", Val::U(stride as u64))],
-    );
+    Some(ns_x100(t1 - t0, hops as u64, TICK_HZ))
+}
+
+fn chase_one(metric: &str, base: usize, stride: usize, ws: usize, perm: &mut [u32], cold: bool) -> bool {
+    let Some(ns) = chase_measure(metric, base, stride, ws, perm, cold) else { return false };
+    perf(metric, &[("ns", Val::F2(ns as i64)), ("stride_b", Val::U(stride as u64))]);
     true
+}
+
+/// The PSRAM ring of `ws` bytes, for the other suites: ns per hop in hundredths (0 if the ring was wrong).
+pub(crate) fn chase_ring(ws: usize, stride: usize) -> u64 {
+    let o = &PSRAM_OFFSETS;
+    // SAFETY: the permutation scratch is a cached-alias PSRAM range of 1 MB that nothing else uses.
+    let perm = unsafe { core::slice::from_raw_parts_mut(cached(o.perm) as *mut u32, 1 << 18) };
+    chase_measure("lab.mem.chase.psram.dual", cached(o.chase), stride, ws, perm, true).unwrap_or(0)
 }
 
 fn chases() -> bool {

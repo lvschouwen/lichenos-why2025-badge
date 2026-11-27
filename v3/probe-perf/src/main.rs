@@ -22,9 +22,12 @@ use lichen_platform_esp32p4::{clock, uart};
 
 #[macro_use]
 mod con;
+mod cores;
+mod cpu;
 mod dmabench;
 mod hw;
 mod integrity;
+mod irq;
 mod mem;
 mod membench;
 
@@ -66,16 +69,20 @@ fn panic(i: &core::panic::PanicInfo) -> ! {
     finish()
 }
 
-/// Any trap: the rail back first, report the cause once, end. The probe takes none on purpose, so one is a result.
+/// A trap or interrupt, called from the vector in boot.S. Returns only for the CLINT timer interrupt of the irq suite; any other cause
+/// is a result: the rail back first, report it once, end. The probe takes no other trap on purpose.
 #[no_mangle]
-extern "C" fn ptrap() -> ! {
+extern "C" fn ptrap(mcause: usize) {
+    // CLIC mode: bit 31 interrupt, [11:0] the code (the machine timer is 7); the middle bits are mpp/mpie/mpil.
+    if mcause >> 31 == 1 && mcause & 0xFFF == 7 {
+        irq::timer_isr();
+        return;
+    }
     hw::ldo_restore_raw();
-    let (c, e, t): (usize, usize, usize);
+    let (e, t): (usize, usize);
     // SAFETY: reads of M-mode trap CSRs.
-    unsafe {
-        core::arch::asm!("csrr {}, mcause", "csrr {}, mepc", "csrr {}, mtval", out(reg) c, out(reg) e, out(reg) t)
-    };
-    con::check("648.trap", Verdict::Fail, format_args!("mcause={c:#x} mepc={e:#x} mtval={t:#x}"));
+    unsafe { core::arch::asm!("csrr {}, mepc", "csrr {}, mtval", out(reg) e, out(reg) t) };
+    con::check("648.trap", Verdict::Fail, format_args!("mcause={mcause:#x} mepc={e:#x} mtval={t:#x}"));
     finish()
 }
 
@@ -280,11 +287,19 @@ const fn integrity_secs() -> u32 {
 fn suites() -> bool {
     let all = matches!(SUITE.as_bytes(), b"smoke" | b"all");
     let want = |s: &str| all || SUITE == s;
-    if !(all || matches!(SUITE.as_bytes(), b"config" | b"mem" | b"dma" | b"integrity" | b"park")) {
+    if !(all
+        || matches!(SUITE.as_bytes(), b"config" | b"mem" | b"cpu" | b"irq" | b"dual" | b"dma" | b"integrity" | b"park"))
+    {
         con::check("648.suite", Verdict::Fail, format_args!("unknown suite {SUITE}"));
         return false;
     }
     if want("mem") && !membench::run() {
+        return false;
+    }
+    if want("cpu") {
+        cpu::run();
+    }
+    if want("irq") && !irq::run() {
         return false;
     }
     if want("dma") && !dmabench::run(CFG.burst.bytes()) {
@@ -293,7 +308,11 @@ fn suites() -> bool {
     if want("integrity") && !integrity::run(integrity_secs(), &mut || temp_checkpoint("lab.temp.integrity")) {
         return false;
     }
-    want("park") && integrity::park(5) || !want("park")
+    if want("park") && !integrity::park(5) {
+        return false;
+    }
+    // last: core 1 keeps polling its flag after the suite, which would disturb whatever ran after it
+    !want("dual") || cores::run(CFG.cpu_mhz)
 }
 
 fn banner() {

@@ -8,6 +8,8 @@ pub mod cfg;
 pub mod chase;
 pub mod dma;
 pub mod fmt;
+pub mod irq;
+pub mod kern;
 pub mod l2;
 pub mod ldo;
 pub mod line;

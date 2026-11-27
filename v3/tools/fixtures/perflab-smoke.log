@@ -1,11 +1,11 @@
 Loaded 1 segments from 'load-ram.bin' to RAM, executing at 0x4ff10000.
 +-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
-lichen-v3 4401d881+-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
+lichen-v3 02761299+-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
 CHECK 648.cfg INFO cpu360-ps120-l2k256l64-dma32-ldocal suite smoke
-clk: after: measured Some(359) MHz
-CHECK 648.cpu PASS measured 359 MHz, 360 expected
-CHECK 648.temp INFO die temperature sensor reads (control word 0x00419685)
-PERF lab.temp.start celsius=38.25
+clk: after: measured Some(360) MHz
+CHECK 648.cpu PASS measured 360 MHz, 360 expected
+CHECK 648.temp INFO die temperature sensor reads (control word 0x00419687)
+PERF lab.temp.start celsius=38.69
 l2: ROM state 256 KB, 64 B lines
 CHECK 648.l2 PASS 256 KB, 64 B lines read back; carve starts at 0x4ff80000
 psram: ldo: now xpd=1 sw_owner=1 tieh=0 dref=12 mul=2
@@ -14,29 +14,44 @@ CHECK 648.map PASS 32 MB mapped with the hole, 0 cache sync failures
 PERF lab.config cpu_mhz=360 psram_mhz=120 l2_kb=256 l2_line_b=64 dma_burst_b=32 ldo_dref=12 ldo_mul=2
 CHECK 648.config PASS cpu360-ps120-l2k256l64-dma32-ldocal requested; cpu 360 MHz measured, read back from the registers
 BEGIN mem
-PERF lab.mem.sram.seq_read mb_s=638.39
-PERF lab.mem.sram.seq_write mb_s=239.74
-PERF lab.mem.sram.copy mb_s=234.91
+PERF lab.mem.sram.seq_read mb_s=638.38
+PERF lab.mem.sram.seq_write mb_s=239.76
+PERF lab.mem.sram.copy mb_s=234.90
 PERF lab.mem.psram.seq_read mb_s=111.30
 PERF lab.mem.psram.seq_write mb_s=76.47 store_mb_s=77.67
 PERF lab.mem.psram.copy mb_s=46.74
-PERF lab.mem.psram.rand_read mops=1.93 ns=517.01
+PERF lab.mem.psram.rand_read mops=1.93 ns=516.98
 PERF lab.mem.chase.psram.ws8k ns=6.25 stride_b=128
 PERF lab.mem.chase.psram.ws128k ns=33.14 stride_b=128
 PERF lab.mem.chase.psram.ws8m ns=519.40 stride_b=128
-PERF lab.mem.chase.psram.ws8m_s64 ns=487.78 stride_b=64
+PERF lab.mem.chase.psram.ws8m_s64 ns=487.77 stride_b=64
+BEGIN cpu
+PERF lab.cpu.alu.code_sram cycles_per_instr=1.11 minstr_s=323.99
+PERF lab.cpu.alu.code_psram cycles_per_instr=1.11 minstr_s=323.99
+PERF lab.cpu.fetch.psram512k cycles_per_instr=12.37 minstr_s=29.08
+PERF lab.cpu.crc.data_psram mb_s=5.70
+CHECK 648.cpu.crc PASS same data, internal RAM 0xe45a7134, PSRAM 0xe45a7134
+BEGIN irq
+PERF lab.timer.accuracy mtime_khz=360000 mtime_vs_40mhz_ppm=8000001 cpu_mhz=360.00 window_ms=100
+CHECK 648.irq.setup INFO clic line 7: ip/ie/attr/ctl [00, 01, c0, ff], threshold 0
+PERF lab.irq.idle latency_median_ns=238 latency_p95_ns=305 latency_max_ns=416 jitter_max_ns=133 gap_min_ns=999866 gap_max_ns=1000099 period_ns=999999 samples=1000
+PERF lab.irq.psram_load latency_median_ns=452 latency_p95_ns=686 latency_max_ns=780 jitter_max_ns=566 gap_min_ns=999433 gap_max_ns=1000544 period_ns=999999 samples=1000
 BEGIN dma
-PERF lab.dma.sram_to_sram mb_s=172.93 cpu_free_pct=98.43 setup_cycles=1070 burst_b=32
-PERF lab.dma.psram_to_psram mb_s=77.52 cpu_free_pct=99.74 setup_cycles=1070 burst_b=32
+PERF lab.dma.sram_to_sram mb_s=173.27 cpu_free_pct=98.63 setup_cycles=992 burst_b=32
+PERF lab.dma.psram_to_psram mb_s=77.59 cpu_free_pct=99.83 setup_cycles=992 burst_b=32
 BEGIN integrity
 integrity: whole chip 32 MB, hole 0x540000-0x5C0000 included, watch class 0x400 mod 0x800 in 0x540000-0x640000
-PERF lab.integrity.cached.addr mb_s=28.39 words=8388608 bad=0 watch=0
-PERF lab.integrity.dma_write.addr mb_s=17.81 words=8388608 bad=0 watch=0
-PERF lab.integrity.dma_read.addr mb_s=17.81 words=8388608 bad=0 watch=0
-PERF lab.temp.integrity celsius=39.56
+PERF lab.integrity.cached.addr mb_s=29.27 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_write.addr mb_s=18.62 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_read.addr mb_s=18.62 words=8388608 bad=0 watch=0
+PERF lab.temp.integrity celsius=40.00
 CHECK 648.integrity PASS 2 pattern passes, each cached and DMA, whole chip, 0 bad words (0 cache sync failures)
 BEGIN park
 CHECK 648.park PASS 5 s untouched, 2 x 1024 KB (cpu-written and dma-written), 0 + 0 bad words
+BEGIN dual
+CHECK 648.core1 INFO core 1 start: Some(0) polls, running true
+PERF lab.dual.read_read c0_mb_s=56.47 c1_mb_s=74.92 solo_mb_s=111.30 c1_passes=2
+PERF lab.dual.chase_loaded ns=723.01 solo_ns=519.40
 CHECK 648.run PASS suites done, 0 cache sync failures
-PERF lab.temp.end celsius=38.69
+PERF lab.temp.end celsius=40.00
 END ok

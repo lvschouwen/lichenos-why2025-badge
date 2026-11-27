@@ -8,7 +8,7 @@ A RAM-only image for `tools/v3-load-ram.sh` that measures one point of the matri
 ## Build one point
 
     v3/probe-perf/build.sh [--cpu 360|400] [--psram 120|160] [--l2kb 128|256|512] [--l2line 64|128] [--dma 32|64|128]
-                           [--ldo cal|1900] [--suite smoke|all|config|mem|dma|integrity|park] [--secs N]
+                           [--ldo cal|1900] [--suite smoke|all|config|mem|cpu|irq|dma|integrity|park|dual] [--secs N]
 
 The image is `v3/target/lichen/probe-perf/probe-perf-<tag>-<suite>.bin`, `<tag>` = `cpu360-ps120-l2k256l64-dma32-ldocal`. The tag is
 also in the banner (`lichen-v3 <sha>-<tag> platform esp32p4 perflab ...`), so a stale file cannot pass for another point. Defaults are
@@ -22,10 +22,13 @@ clippy, every switch value, the refusals).
 |---|---|---|
 | `config` | bring-up and the register read-back only | seconds |
 | `mem` | internal RAM and cached PSRAM: sequential read, write, copy, random reads, pointer chase from 8 KB to 8 MB | seconds |
+| `cpu` | ALU kernel and straight-line code (24 KB, 512 KB) run from internal RAM and from PSRAM, CRC over data in both | seconds |
+| `irq` | CLINT timer against SYSTIMER and mcycle (the counter's measured rate), 1 kHz interrupt latency and jitter, idle and with random PSRAM reads | 3 s |
 | `dma` | AXI-GDMA memory to memory on four paths: MB/s, share of the CPU left, setup cycles | seconds |
 | `integrity` | whole chip, dense inverted multi-pass, written by the CPU through the cache and by DMA, read back both ways | `--secs`, default 10 (smoke) or 60 |
 | `park` | 5 s untouched, CPU-written and DMA-written 1 MB (the #569 style) | about 6 s |
-| `smoke` | mem, dma, integrity (10 s, at least one pass of each kind), park | under 120 s (first run: fits the load-ram timeout of 115 s) |
+| `dual` | core 1 streams PSRAM reads or writes while core 0 reads, measures a pointer chase, or reads internal RAM | seconds; always last |
+| `smoke` | mem, cpu, irq, dma, integrity (10 s, at least one pass of each kind), park, dual | ended with END ok inside a 118 s load-ram timeout on the first full run |
 | `all` | the same with 60 s of integrity | give load-ram 120 s; not yet run |
 
 Plan a run at 120 s or less (`--secs` shortens it). It stops at the first flip, DMA fault, trap, panic or temperature at 85 C, records it as a failed point

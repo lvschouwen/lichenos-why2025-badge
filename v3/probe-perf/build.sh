@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build one configuration of the #648 perf lab: ELF, then a RAM image (the ROM download format) for tools/v3-load-ram.sh.
 #   ./probe-perf/build.sh [--cpu 360|400] [--psram 120|160] [--l2kb 128|256|512] [--l2line 64|128] [--dma 32|64|128]
-#                         [--ldo cal|1900] [--suite smoke|all|config|mem|dma|integrity|park] [--secs N]
+#                         [--ldo cal|1900] [--suite smoke|all|config|mem|cpu|irq|dual|dma|integrity|park] [--secs N]
 # -> target/lichen/probe-perf/probe-perf-<config tag>-<suite>.bin (+ .elf): the tag is in the file name and in the image's banner, so a
 # stale variant cannot be loaded for another. Defaults are the production point (CPU 360, PSRAM 120, L2 256 KB / 64 B, burst 32 B,
 # calibrated rail). Impossible combinations (PSRAM 200 before #650, 512 KB with 64 B lines, CPU above 400, an LDO value other than
@@ -23,7 +23,7 @@ done
 for v in "$cpu" "$psram" "$l2kb" "$l2line" "$dma" "$secs"; do
     case $v in ''|*[!0-9]*) echo "not a number: $v" >&2; exit 2 ;; esac
 done
-case $suite in smoke|all|config|mem|dma|integrity|park) ;; *) echo "unknown suite $suite" >&2; exit 2 ;; esac
+case $suite in smoke|all|config|mem|cpu|irq|dual|dma|integrity|park) ;; *) echo "unknown suite $suite" >&2; exit 2 ;; esac
 tag="cpu$cpu-ps$psram-l2k${l2kb}l$l2line-dma$dma-ldo$ldo"
 id=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 git diff --quiet HEAD -- 2>/dev/null || id="$id+"
