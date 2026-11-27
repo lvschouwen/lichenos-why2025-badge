@@ -29,10 +29,17 @@ pub fn slot(i: usize) -> Slot {
     lichen_kcore::slots::slot(i).unwrap_or_else(|| exit(2))
 }
 
+/// Raw UART output, no ring: after a fatal trap (see FATAL), and always on hart 1. The ring is a single-context
+/// `Global` that only core 0 uses, so core 1's prints (its banner before UP, and its failure paths at any time,
+/// review M5) can never race core 0's (they may interleave bytes on the wire, nothing worse).
+fn raw() -> bool {
+    FATAL.load(core::sync::atomic::Ordering::Relaxed) || crate::smp::hartid() != 0
+}
+
 /// Queue one byte for UART0 and push out whatever the FIFO has room for. Never blocks: a full ring drops its oldest
 /// byte (counted, see `take_dropped`), so a dead UART cannot stall the kernel.
 pub fn putc(b: u8) {
-    if FATAL.load(core::sync::atomic::Ordering::Relaxed) {
+    if raw() {
         while !uart::tx_ready() {}
         uart::put_byte(b);
         return;
@@ -54,7 +61,7 @@ fn pump(r: &mut Ring<LOG_RING>) {
 
 /// Block until every queued byte has left the UART.
 pub fn flush() {
-    if FATAL.load(core::sync::atomic::Ordering::Relaxed) {
+    if raw() {
         uart::drain();
         return;
     }
@@ -74,6 +81,15 @@ pub fn take_dropped() -> u32 {
 
 /// Report the end of the run (`END fatal` for a nonzero code), then park. The host resets the badge after END.
 pub fn exit(code: u32) -> ! {
+    if crate::smp::hartid() != 0 {
+        // Hart 1 never writes END (review M5): it posts its code and parks; core 0 sees it in its next mailbox wait
+        // and ends the run with END fatal, so no row can follow an END.
+        crate::kprintln!("core1: exit code {code}; core 0 ends the run");
+        crate::smp::post_exit(code);
+        loop {
+            hw::trap::wfi();
+        }
+    }
     let reason = if code == 0 { "ok" } else { "fatal" };
     let _ = lichen_kcore::check::write_end(&mut crate::console::Console, reason);
     park()

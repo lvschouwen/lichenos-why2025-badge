@@ -103,11 +103,13 @@ const fn codes(list: &[u16]) -> u32 {
     m
 }
 
-struct Shape {
-    id: &'static str,
-    f: unsafe extern "C" fn(),
-    addr: usize,
-    want: u32,
+/// One access shape; core 1 runs the same table (bringup_core1, review H1 on both harts).
+pub struct Shape {
+    pub id: &'static str,
+    pub f: unsafe extern "C" fn(),
+    pub addr: usize,
+    /// Accepted exception codes as a bit mask (bit n = code n).
+    pub want: u32,
 }
 
 const W: usize = 0x2000_4000;
@@ -117,7 +119,7 @@ const MISALIGNED: u32 = codes(&[4, 5]);
 const ILLEGAL: u32 = codes(&[2]);
 
 /// Safe shapes first, the ones with a PMP-denied half last.
-const SHAPES: [Shape; 15] = [
+pub const SHAPES: [Shape; 15] = [
     Shape { id: "u.shape.lb", f: bs_lb, addr: W, want: LOAD },
     Shape { id: "u.shape.lbu", f: bs_lbu, addr: W + 1, want: LOAD },
     Shape { id: "u.shape.lh", f: bs_lh, addr: W, want: LOAD },

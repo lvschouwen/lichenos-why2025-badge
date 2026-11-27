@@ -52,6 +52,11 @@ _start1:
     csrr t0, mhartid
     li t1, 1
     bne t0, t1, park
+    # As _start (review M2): U-visible state starts at zero on this hart too: HWLP and PIE state OFF, no U access
+    # to the cycle counters. These CSRs are per hart; core 0's zeroing does not reach them.
+    csrw 0x7f1, zero
+    csrw 0x7f2, zero
+    csrw 0x306, zero
     la sp, _stack1_top
     la t0, _trap_stack1_top
     csrw mscratch, t0

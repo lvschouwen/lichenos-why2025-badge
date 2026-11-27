@@ -192,6 +192,17 @@ target = 50
 stretch = 20
 ratchet = false
 
+["kernel.mailbox_rtt"]
+# Core 0 -> core 1 -> core 0 message round trip over the SPSC mailbox (#612 checkpoint 3), polled, no syscall work:
+# the transport under kernel.syscall.xcore (#619). The target is from a measurement, not from v2: p95 11.12 us at the
+# 40 MHz boot clock (4f4bf99b, e3733a9e); it tightens once the kernel runs the CPU at 360 MHz.
+key = "p95_us"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a, v2 has no cross-core mailbox; target set from the v3 measurement"
+target = 15
+ratchet = false
+
 ["kernel.fault_containment"]
 key = "p95_ms"
 direction = "lower"

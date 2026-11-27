@@ -351,7 +351,7 @@ const CLIC_LEN: usize = 0x2000;
 /// U loads and stores every word of the CLINT and CLIC pages: every one must fault (loads: the hardware privilege
 /// check, stores: the PMP). A word that
 /// does not is a FINDING and fails the row. A BEGIN line per 4 KB block names a hang.
-fn sweep(t: &mut Tally, sp: usize, id: &str, base: usize, len: usize) {
+pub fn sweep(t: &mut Tally, sp: usize, id: &str, base: usize, len: usize) {
     let (mut words, mut bad) = (0u32, 0u32);
     for blk in (0..len).step_by(0x1000) {
         kprintln!("BEGIN {id}.{:#x}", base + blk);

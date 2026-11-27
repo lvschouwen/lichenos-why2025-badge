@@ -4,13 +4,18 @@
 //! by mhartid, `_start1` gives it its own kernel and trap stacks, mtrap keeps one State per hart). Its tick is its own
 //! CLINT compare and CLIC line 7, both programmed through core 1's own view of those blocks.
 //!
-//! Console rule (the console ring is a single-context `Global`): core 1 prints only in `kmain1` before it posts
-//! `UP`, while core 0 waits silently for that message; it flushes first, and the Release of the post hands the ring
-//! back. After that core 1 only answers messages, and core 0 prints the results. Fatal paths switch to the raw UART
-//! (`enter_fatal`) before printing, on either hart.
+//! Console rule: the console ring is a single-context `Global` that only core 0 uses. Core 1 always writes straight
+//! to the UART (platform `raw`), so its banner before UP and its failure paths at any time never touch the ring
+//! (review M5). After UP core 1 only answers messages, and core 0 prints the results. `exit` on hart 1 posts its
+//! code (`post_exit`) and parks; core 0's next mailbox wait sees it and ends the run with END fatal.
 //!
 //! The message set is the bench's. #619 (syscall forwarding) adds its own ops on the same queues; `Msg` already has
-//! room for a syscall number and six arguments.
+//! room for a syscall number and six arguments, and `Link::call` matches replies by sequence number, dropping stale
+//! ones after a timeout (review L1).
+//!
+//! For #619 (review L6): the PMA is programmed on core 0 only (bringup_pmp). Core 1 still runs on the ROM PMA, which
+//! is enough for L2MEM; before core 1 touches flash or PSRAM, or runs U code that does, it must program its own PMA
+//! (the PMA CSRs are per hart, like the PMP).
 use crate::kprintln;
 use crate::mtrap;
 use crate::platform::{self, hw};
@@ -37,9 +42,11 @@ pub const OP_TICK: u32 = 4;
 pub const OP_USPIN: u32 = 5;
 /// Reply, then park in wfi for good.
 pub const OP_PARK: u32 = 6;
-/// U load (a[1] = 0) or store (a[1] = 1) of a[0] on core 1 under its U view. Reply a = [fault code (0xFFF none),
-/// mtval, epc, exit a0, 1 if it exited, 0].
-pub const OP_UACCESS: u32 = 7;
+/// Run the U stub at a[0] (it must lie on the U stub page) with a0 = a[1] on core 1 under its U view.
+/// Reply a = [fault code (0xFFF none), mtval, epc, exit a0, 1 if it exited, 0]; all u32::MAX for a bad entry.
+pub const OP_URUN: u32 = 7;
+/// Core 1's U-visible boot state. Reply a = [HWLP state 0x7f1, PIE state 0x7f2, mcounteren, mstatus, 0, 0].
+pub const OP_BOOT: u32 = 8;
 /// Set on every reply.
 pub const REPLY: u32 = 0x8000_0000;
 
@@ -54,8 +61,6 @@ pub static COHERE_WORD: core::sync::atomic::AtomicU32 = core::sync::atomic::Atom
 extern "C" {
     fn _start1();
     fn u_spin_illegal();
-    fn u_load();
-    fn u_store();
     static _utext: u8;
 }
 
@@ -92,10 +97,20 @@ pub fn uninhibit_mcycle() {
     unsafe { core::arch::asm!("csrci 0x320, 1", options(nomem, nostack)) };
 }
 
+/// Set by `post_exit` (hart 1's `exit`): the exit code + 1, 0 while core 1 runs.
+static C1_EXIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Hart 1 is done for good with `code`; core 0 ends the run (see the console rule).
+pub fn post_exit(code: u32) {
+    C1_EXIT.store(code.saturating_add(1), core::sync::atomic::Ordering::Release);
+}
+
 /// Core 0's ends of the two queues.
 pub struct Link {
     tx: Producer<'static, Msg, QLEN>,
     rx: Consumer<'static, Msg, QLEN>,
+    seq: u32,
+    stale: u32,
 }
 
 /// Start core 1 at `_start1`. Core 0 must print nothing until `Link::recv` returns UP (see the console rule).
@@ -106,7 +121,7 @@ pub fn start() -> Option<(Link, u32)> {
     // SAFETY: _start1 sets up its own stacks and mtvec (boot_esp32p4.S); this is the only call (bringup runs once).
     let polls = unsafe { hw::core1::start(_start1 as *const () as usize, 1_000_000) }?;
     // SAFETY: core 0 is the only producer of TO_C1 and the only consumer of TO_C0; Link is created once.
-    Some((Link { tx: unsafe { TO_C1.producer() }, rx: unsafe { TO_C0.consumer() } }, polls))
+    Some((Link { tx: unsafe { TO_C1.producer() }, rx: unsafe { TO_C0.consumer() }, seq: 0, stale: 0 }, polls))
 }
 
 impl Link {
@@ -121,20 +136,72 @@ impl Link {
             }
         }
     }
-    /// The next message from core 1, or None at `deadline`.
+    /// The next message from core 1, or None at `deadline`. Ends the run if core 1 has exited.
     pub fn recv(&mut self, deadline: u64) -> Option<Msg> {
         loop {
             if let Some(m) = self.rx.pop() {
                 return Some(m);
             }
+            self.check_alive();
             if hw::clint::mtime() >= deadline {
                 return None;
             }
         }
     }
-    /// Non-blocking.
+    /// Non-blocking. Ends the run if core 1 has exited.
     pub fn try_recv(&mut self) -> Option<Msg> {
-        self.rx.pop()
+        let m = self.rx.pop();
+        if m.is_none() {
+            self.check_alive();
+        }
+        m
+    }
+    /// A fresh sequence number, never reused within a run.
+    pub fn next_seq(&mut self) -> u32 {
+        self.reserve(1)
+    }
+    /// `n` consecutive fresh sequence numbers; returns the first.
+    pub fn reserve(&mut self, n: u32) -> u32 {
+        let first = self.seq.wrapping_add(1);
+        self.seq = self.seq.wrapping_add(n);
+        first
+    }
+    /// Count a reply that answered nobody (see `call`).
+    pub fn drop_stale(&mut self) {
+        self.stale += 1;
+    }
+    /// Replies dropped because their seq did not match the call waiting (late answers to timed-out calls).
+    pub fn stale(&self) -> u32 {
+        self.stale
+    }
+    /// Send `op` and wait up to `ms` for its own reply: a reply to an earlier, timed-out call is dropped and counted,
+    /// so one timeout does not shift every later answer by one (review L1).
+    pub fn call(&mut self, op: u32, a: [u32; 6], ms: u64) -> Option<Msg> {
+        let deadline = hw::clint::mtime() + lichen_kcore::trap::us_to_ticks(ms * 1000);
+        let seq = self.next_seq();
+        if !self.send(Msg { op, seq, a }, deadline) {
+            return None;
+        }
+        loop {
+            let r = self.recv(deadline)?;
+            if r.op == op | REPLY && r.seq == seq {
+                return Some(r);
+            }
+            self.stale += 1;
+        }
+    }
+    /// Core 1 posted an exit: report it and end the run here, so END is the last line.
+    fn check_alive(&self) {
+        let c = C1_EXIT.load(core::sync::atomic::Ordering::Acquire);
+        if c != 0 {
+            crate::kcheck!(
+                "core1.alive",
+                lichen_kcore::check::Verdict::Fail,
+                "core 1 exited with code {} (its dump is above)",
+                c - 1
+            );
+            platform::exit(c);
+        }
     }
 }
 
@@ -147,7 +214,6 @@ extern "C" fn kmain1() -> ! {
     let cfg = core::array::from_fn::<u32, 4, _>(|w| {
         (0..4).fold(0u32, |acc, b| acc | (crate::pmp::cfg_byte(w * 4 + b) as u32) << (8 * b))
     });
-    platform::flush();
     // SAFETY: hart 1 is the only consumer of TO_C1 and the only producer of TO_C0; kmain1 runs once.
     let (mut rx, mut tx) = unsafe { (TO_C1.consumer(), TO_C0.producer()) };
     let up = Msg { op: OP_UP, seq: 0, a: [hartid() as u32, mtvec, cfg[0], cfg[1], cfg[2], cfg[3]] };
@@ -165,7 +231,10 @@ extern "C" fn kmain1() -> ! {
             }
             OP_TICK => tick_run(m.a[0] as u64, m.a[1]),
             OP_USPIN => u_spin(m.a[0] as usize),
-            OP_UACCESS => u_access_at(m.a[0] as usize, m.a[1] != 0),
+            OP_URUN => u_run(m.a[0] as usize, m.a[1] as usize),
+            OP_BOOT => {
+                [hw::trap::hwlp_state(), hw::trap::pie_state(), hw::trap::mcounteren(), hw::trap::mstatus(), 0, 0]
+            }
             OP_PARK => {
                 reply(&mut tx, Msg { op: m.op | REPLY, seq: m.seq, a: [0; 6] });
                 park()
@@ -229,12 +298,16 @@ fn u_view() -> usize {
     udata
 }
 
-/// One U load (or store, when `store`) on core 1 for the core-local deny rows: a load must be refused by the hardware
-/// privilege check, a store by the PMP.
-fn u_access_at(addr: usize, store: bool) -> [u32; 6] {
+/// Run one U stub on core 1 (the core-local deny rows and the access shapes, review H1 on both harts). The entry must
+/// lie on the U stub page, so a bad message can never make core 1 run U code anywhere else.
+fn u_run(entry: usize, a0: usize) -> [u32; 6] {
+    // SAFETY: a linker symbol; only its address is used.
+    let utext = unsafe { &_utext as *const u8 as usize };
+    if !(utext..utext + UPAGE).contains(&entry) {
+        return [u32::MAX; 6];
+    }
     let udata = u_view();
-    let f = if store { u_store as *const () as usize } else { u_load as *const () as usize };
-    let u = mtrap::run_u(f, udata + UPAGE, addr, 0);
+    let u = mtrap::run_u(entry, udata + UPAGE, a0, 0);
     let (code, tval, epc) =
         u.fault.map_or((0xFFF, 0, 0), |f| (lichen_kcore::trap::decode(f.cause).code as u32, f.tval, f.epc));
     [code, tval, epc, u.exit.unwrap_or(0) as u32, u.exit.is_some() as u32, 0]

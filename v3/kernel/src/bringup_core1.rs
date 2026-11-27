@@ -1,5 +1,5 @@
 //! #612 checkpoint 3 bench rows, run by core 0 after the core 0 rows: start core 1, 1000 mailbox pings with the
-//! round-trip PERF line, a burst, the shared-cache evidence, core 1's own tick with its jitter PERF line, and core 1
+//! round-trip PERF line (kernel.mailbox_rtt), a burst, the shared-cache evidence, core 1's own tick with its jitter PERF line (kernel.timer_jitter), and core 1
 //! timer preemption of a U spin (#609 row 3). Every wait on core 1 is bounded by an mtime deadline and announced
 //! with BEGIN, so a silent core 1 gives a FAIL row and still an END.
 use crate::platform::{self, hw};
@@ -17,6 +17,7 @@ const C1_TICKS: u32 = 5000;
 /// Jitter target (#612): under 2 us.
 const JITTER_TARGET_TICKS: u64 = 2 * 40;
 const U_SPIN: u32 = 4_000_000;
+const UPAGE: usize = 4096;
 
 /// Round-trip samples in mtime ticks (bss, not the stack).
 static RTT: crate::global::Global<[u32; PINGS]> = crate::global::Global::new([0; PINGS]);
@@ -54,15 +55,6 @@ fn begin(id: &str) {
 
 fn after_ms(ms: u64) -> u64 {
     hw::clint::mtime() + us_to_ticks(ms * 1000)
-}
-
-/// Send one request and wait for its reply (same op and seq). None on a timeout or a mismatched reply.
-fn call(l: &mut Link, op: u32, seq: u32, a: [u32; 6], ms: u64) -> Option<Msg> {
-    let deadline = after_ms(ms);
-    if !l.send(Msg { op, seq, a }, deadline) {
-        return None;
-    }
-    l.recv(deadline).filter(|r| r.op == op | REPLY && r.seq == seq)
 }
 
 pub fn run(t: &mut Tally) {
@@ -106,17 +98,117 @@ pub fn run(t: &mut Tally) {
         ),
     );
 
+    boot_state(t, &mut l);
     pings(t, &mut l);
     burst(t, &mut l);
     coherence(t, &mut l);
     timer(t, &mut l);
     u_preempt(t, &mut l);
-
     u_deny(t, &mut l);
+    // The access shapes go last on core 1: they are the likeliest to find a new hang (review H1).
+    shapes(t, &mut l);
 
     begin("core1.park");
-    let p = call(&mut l, smp::OP_PARK, 0, [0; 6], 100);
-    record(t, "core1.park", Some(p.is_some()), format_args!("core 1 acknowledged and parks in wfi"));
+    let p = l.call(smp::OP_PARK, [0; 6], 100);
+    let stale = l.stale();
+    record(
+        t,
+        "core1.park",
+        Some(p.is_some() && stale == 0),
+        format_args!("core 1 acknowledged and parks in wfi; {stale} stale repl(ies) dropped over the run"),
+    );
+    clic1_sweep(t);
+}
+
+/// Review M2 on core 1: `_start1` zeroes the U-visible CSRs of its own hart (HWLP and PIE state, mcounteren), and
+/// mstatus.FS is off.
+fn boot_state(t: &mut Tally, l: &mut Link) {
+    begin("core1.boot");
+    let Some(r) = l.call(smp::OP_BOOT, [0; 6], 100) else {
+        record(t, "core1.boot", Some(false), format_args!("no reply within 100 ms"));
+        return;
+    };
+    let [hwlp, pie, mcounteren, mstatus, _, _] = r.a;
+    record(
+        t,
+        "core1.boot",
+        Some(hwlp & 3 == 0 && pie & 3 == 0 && mcounteren == 0 && mstatus & 0x6000 == 0),
+        format_args!(
+            "core 1: HWLP state {hwlp:#x}, PIE state {pie:#x} (low 2 bits 0 = off), mcounteren {mcounteren:#x}, \
+             mstatus {mstatus:#010x} FS {} (want all 0)",
+            (mstatus >> 13) & 3
+        ),
+    );
+}
+
+/// Run a U stub on core 1 with a0 = `arg`; None on a timeout. Reply a = [code, mtval, epc, exit a0, exited, 0].
+fn u_run(l: &mut Link, f: unsafe extern "C" fn(), arg: u32) -> Option<[u32; 6]> {
+    l.call(smp::OP_URUN, [f as *const () as usize as u32, arg, 0, 0, 0, 0], 100).map(|r| r.a)
+}
+
+/// A CHECK id with a prefix, built on the stack (ids are at most 48 bytes, kcore check).
+struct Id {
+    buf: [u8; 48],
+    len: usize,
+}
+impl Id {
+    fn new(prefix: &str, id: &str) -> Self {
+        let mut buf = [0u8; 48];
+        let mut len = 0;
+        for b in prefix.bytes().chain(id.bytes()).take(48) {
+            buf[len] = b;
+            len += 1;
+        }
+        Self { buf, len }
+    }
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.buf[..self.len]).unwrap_or("core1.bad-id")
+    }
+}
+
+/// Review H1 on core 1: pmp-612's access-shape table, each stub run on core 1 under its own U view. Each must trap
+/// with an accepted code and never return a value.
+fn shapes(t: &mut Tally, l: &mut Link) {
+    for s in &crate::bringup_shapes::SHAPES {
+        let id = Id::new("core1.", s.id);
+        let id = id.as_str();
+        kprintln!("BEGIN {id} {:#010x}", s.addr);
+        platform::flush();
+        let Some([code, tval, epc, value, exited, _]) = u_run(l, s.f, s.addr as u32) else {
+            record(t, id, Some(false), format_args!("no reply within 100 ms (core 1 hung?)"));
+            return;
+        };
+        let ok = code < 32 && s.want & (1 << code) != 0 && exited == 0;
+        record(
+            t,
+            id,
+            Some(ok),
+            format_args!(
+                "U access at {:#010x} on core 1: code {code} ({}) mtval {tval:#x} mepc {epc:#x}, exited {exited} \
+                 (want code mask {:#x})",
+                s.addr,
+                lichen_kcore::trap::exception_name(code as u16),
+                s.want
+            ),
+        );
+        if exited != 0 {
+            kprintln!("FINDING {id}: the access RETURNED {value:#x} instead of trapping");
+        }
+    }
+}
+
+/// Review M1: every word of core 1's CLIC page (0x2081_0000-0x2081_1FFF, core 0's view of the other core's CLIC),
+/// loaded and stored from U on core 0 with core 1 out of reset and parked. Run with pmp-612's sweep under core 0's
+/// U view.
+fn clic1_sweep(t: &mut Tally) {
+    extern "C" {
+        static _utext: u8;
+    }
+    // SAFETY: a linker symbol; only its address is used.
+    let utext = unsafe { &_utext as *const u8 as usize };
+    let udata = platform::slot(0).data;
+    crate::pmp::apply(utext, udata, UPAGE);
+    crate::bringup_u::sweep(t, udata + UPAGE, "u.sweep.clic-core1", 0x2081_0000, 0x2000);
 }
 
 /// CPU clock from mcycle against mtime over 2 ms (mtime is 40 MHz, #608 run 9). Clears mcountinhibit.CY first if a
@@ -143,6 +235,11 @@ fn ping_once(l: &mut Link, seq: u32, a: [u32; 6]) -> (Option<Msg>, u32) {
     let mut polls = 0u32;
     loop {
         if let Some(r) = l.try_recv() {
+            if r.seq != seq {
+                // A late answer to an earlier timed-out request (review L1): not this ping's.
+                l.drop_stale();
+                continue;
+            }
             return (Some(r), smp::cycles().wrapping_sub(c0));
         }
         polls = polls.wrapping_add(1);
@@ -158,8 +255,8 @@ fn pings(t: &mut Tally, l: &mut Link) {
     // SAFETY: only this function touches RTT, on core 0, and no other borrow of it exists.
     let rtt = unsafe { RTT.get() };
     let (mut ok, mut bad) = (0u32, (u32::MAX, 0u32, 0u32));
-    for (i, slot) in rtt.iter_mut().enumerate() {
-        let seq = i as u32;
+    for slot in rtt.iter_mut() {
+        let seq = l.next_seq();
         let a = core::array::from_fn(|k| seq.wrapping_mul(0x9E37_79B9).rotate_left(k as u32 * 5));
         let (r, cycles) = ping_once(l, seq, a);
         *slot = cycles;
@@ -186,9 +283,9 @@ fn pings(t: &mut Tally, l: &mut Link) {
     let (med, p95) = perf::median_p95(&mut rtt[..n]).unwrap_or((0, 0));
     let us = |c: u32| Us100(perf::cycles_to_us100(c, hz));
     // The PERF grammar (#643, v3/perf/README.md) is key=value numbers only; the conditions go on their own line.
-    kprintln!("perf: mailbox.rtt = mcycle on core 0, push to pop; both ends polled, no wake latency");
+    kprintln!("perf: kernel.mailbox_rtt = core 0 -> core 1 -> core 0 message round trip, mcycle on core 0, push to pop; both ends polled, no wake latency, no syscall work");
     kprintln!(
-        "PERF mailbox.rtt median_us={} p95_us={} min_us={} max_us={} n={n} median_cycles={med} cpu_hz={hz} \
+        "PERF kernel.mailbox_rtt median_us={} p95_us={} min_us={} max_us={} n={n} median_cycles={med} cpu_hz={hz} \
          mcountinhibit={inhibit}",
         us(med),
         us(p95),
@@ -202,15 +299,16 @@ fn pings(t: &mut Tally, l: &mut Link) {
 fn burst(t: &mut Tally, l: &mut Link) {
     begin("mailbox.burst");
     let deadline = after_ms(100);
+    let base = l.reserve(BURST);
     let mut sent = 0;
     let mut got = 0u32;
     let mut in_order = true;
     while got < BURST && hw::clint::mtime() < deadline {
-        if sent < BURST && l.send(Msg { op: smp::OP_PING, seq: 0x1000 + sent, a: [sent; 6] }, 0) {
+        if sent < BURST && l.send(Msg { op: smp::OP_PING, seq: base + sent, a: [sent; 6] }, 0) {
             sent += 1;
         }
         if let Some(r) = l.try_recv() {
-            in_order &= r.seq == 0x1000 + got && r.a == [!got; 6];
+            in_order &= r.seq == base + got && r.a == [!got; 6];
             got += 1;
         }
     }
@@ -227,7 +325,7 @@ fn burst(t: &mut Tally, l: &mut Link) {
 fn coherence(t: &mut Tally, l: &mut Link) {
     begin("mailbox.coherence");
     let pattern = 0xC0DE_0612;
-    let r = call(l, smp::OP_COHERE, 0, [pattern, 0, 0, 0, 0, 0], 10);
+    let r = l.call(smp::OP_COHERE, [pattern, 0, 0, 0, 0, 0], 10);
     let cached = smp::COHERE_WORD.load(core::sync::atomic::Ordering::Relaxed);
     // SAFETY: COHERE_WORD is an aligned static in L2MEM.
     let raw = unsafe { hw::mailbox::read_uncached(&smp::COHERE_WORD as *const _ as usize) };
@@ -245,7 +343,7 @@ fn coherence(t: &mut Tally, l: &mut Link) {
 fn timer(t: &mut Tally, l: &mut Link) {
     begin("core1.timer");
     let ms = C1_TICK_US * C1_TICKS as u64 / 1000 + 1000;
-    let r = call(l, smp::OP_TICK, 0, [C1_TICK_US as u32, C1_TICKS, 0, 0, 0, 0], ms);
+    let r = l.call(smp::OP_TICK, [C1_TICK_US as u32, C1_TICKS, 0, 0, 0, 0], ms);
     let Some(r) = r else {
         record(t, "core1.timer", Some(false), format_args!("no reply within {ms} ms"));
         return;
@@ -263,11 +361,11 @@ fn timer(t: &mut Tally, l: &mut Link) {
         ),
     );
     kprintln!(
-        "perf: timer.jitter.core1 = max |gap - {C1_TICK_US} us|; core 1 idle in wfi, core 0 polling the mailbox, \
-         nothing printing"
+        "perf: kernel.timer_jitter = CORE 1's tick, max |gap - {C1_TICK_US} us|; core 1 idle in wfi, core 0 polling the \
+         mailbox, nothing printing"
     );
     kprintln!(
-        "PERF timer.jitter.core1 max_us={} p2p_us={} n={count} period_us={C1_TICK_US}",
+        "PERF kernel.timer_jitter max_us={} p2p_us={} n={count} period_us={C1_TICK_US}",
         Us(jitter),
         Us((gmax.saturating_sub(gmin)) as u64)
     );
@@ -275,7 +373,7 @@ fn timer(t: &mut Tally, l: &mut Link) {
 
 fn u_preempt(t: &mut Tally, l: &mut Link) {
     begin("core1.u-preempt");
-    let r = call(l, smp::OP_USPIN, 0, [U_SPIN, 0, 0, 0, 0, 0], 5000);
+    let r = l.call(smp::OP_USPIN, [U_SPIN, 0, 0, 0, 0, 0], 5000);
     let Some(r) = r else {
         record(t, "core1.u-preempt", Some(false), format_args!("no reply within 5 s"));
         return;
@@ -298,6 +396,10 @@ fn u_preempt(t: &mut Tally, l: &mut Link) {
 /// hardware privilege check (code 5) and stores in the PMP (code 7) instead of hanging the hart. Core 1's own CLIC
 /// (0x2080_0000), the other core's CLIC (0x2081_0000; core 0 is running, so its window is safe to reach) and the CLINT.
 fn u_deny(t: &mut Tally, l: &mut Link) {
+    extern "C" {
+        fn u_load();
+        fn u_store();
+    }
     let cases: [(&str, u32, bool); 5] = [
         ("core1.u-deny.clint", 0x2000_4000, false),
         ("core1.u-deny.clic", 0x2080_0000, false),
@@ -307,11 +409,11 @@ fn u_deny(t: &mut Tally, l: &mut Link) {
     ];
     for (id, addr, store) in cases {
         begin(id);
-        let Some(r) = call(l, smp::OP_UACCESS, 0, [addr, store as u32, 0, 0, 0, 0], 100) else {
+        let f: unsafe extern "C" fn() = if store { u_store } else { u_load };
+        let Some([code, tval, epc, _, exited, _]) = u_run(l, f, addr) else {
             record(t, id, Some(false), format_args!("no reply within 100 ms (core 1 hung?)"));
             return;
         };
-        let [code, tval, epc, _, exited, _] = r.a;
         let want = if store { 7 } else { 5 };
         record(
             t,
