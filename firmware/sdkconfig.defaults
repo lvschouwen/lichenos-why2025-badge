@@ -309,12 +309,16 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
 CONFIG_BT_NIMBLE_MAX_BONDS=3
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=185
-# L2CAP connection-oriented channels (bulk transfer: files, screenshots); 2 at a time
+# L2CAP connection-oriented channels, 2 at a time; the first user is the badge-to-badge peer session (P1 of #73)
 CONFIG_BT_NIMBLE_L2CAP_COC_MAX_NUM=2
-# HID over GATT both ways (esp_hid: the badge as a keyboard, a BLE keyboard on the badge); needs NimBLE's HID service
-CONFIG_BT_NIMBLE_HID_SERVICE=y
 # Privacy (RPA): the host privacy APIs; resolving runs in the C6 controller (host-based privacy is ESP32-only)
 CONFIG_BT_NIMBLE_HS_PVCY=y
 # NimBLE's pools in PSRAM (internal RAM is tight). The host task is created by xTaskCreatePinnedToCore, so its stack
 # stays internal: NVS bond writes run with the cache off.
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+# #267: without this, nimble_mem_malloc/calloc/realloc/free (esp_nimble_mem.c) are IRAM_ATTR and call heap_caps_*,
+# which runs from PSRAM here; it also moves NimBLE's GAP/GATT/NPL code out of IRAM
+CONFIG_BT_NIMBLE_LOW_SPEED_MODE=y
+# NimBLE logs errors and warnings only (its INFO lines are per-procedure traces, 7.3 KB of image); connection and
+# pairing outcomes reach lichen_ble as GAP events and are logged there
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
