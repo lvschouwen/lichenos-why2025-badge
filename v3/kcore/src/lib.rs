@@ -6,6 +6,7 @@ pub mod check;
 pub mod handles;
 pub mod image;
 pub mod l2;
+pub mod mailbox;
 pub mod perf;
 pub mod pma;
 pub mod pmp;
