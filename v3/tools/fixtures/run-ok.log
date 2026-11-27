@@ -1,0 +1,21 @@
+ESP-ROM:esp32p4-eco2-20240710
+Build:Jul 10 2024
+rst:0x1 (POWERON),boot:0x4 (USB_BOOT)
+Core0 Saved PC:0x4fc00000
+SPI mode:DIO, clock div:1
+entry 0x4ff10000
+
+lichen-v3 151b0540 platform esp32p4 abi 1 (#611 bring-up, RAM only)
+CHECK boot.hart PASS mhartid=0
+CHECK image.layout PASS loaded 0x4ff10000..0x4ff1190c (6412 B), noload 0x4ff40000..0x4ff44800 (18432 B)
+BEGIN c6
+CHECK c6.strap PASS gpio13 level=1
+CHECK c6.en PASS gpio12 level=1
+BEGIN l2
+CHECK l2.cache INFO size=256 KB reg=0x400 carve=0x4ff80000
+CHECK l2.fit PASS noload end 0x4ff44800 vs carve 0x4ff80000
+CHECK log.ring PASS dropped=0
+END ok
+ESP-ROM:esp32p4-eco2-20240710
+rst:0x3 (SW_RESET),boot:0x10 (SPI_FAST_FLASH_BOOT)
+END from v2 console noise
