@@ -13,6 +13,7 @@
 //!
 //! The CPU/AXI clock must be at least the PSRAM clock (IDF `clk_utils.c` BELOW_FREQ_THRESHOLD on the P4: the MSPI write
 //! FIFO can overflow otherwise). This module does not touch the CPU clock; `init` only reports it (`cpu_clock_ok`).
+pub mod clockmath;
 pub mod ldo;
 pub mod map;
 pub mod mspi;

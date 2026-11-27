@@ -32,6 +32,7 @@ macro_rules! pl {
     ($($a:tt)*) => {{ let _ = { use core::fmt::Write as _; writeln!($crate::Con, $($a)*) }; }};
 }
 
+mod clock;
 mod tests;
 
 const STAGE: &str = env!("LICHEN_PSRAM_STAGE");
@@ -82,11 +83,31 @@ extern "C" fn ptrap() -> ! {
 extern "C" fn pmain() -> ! {
     pl!("psram: probe stage={STAGE}");
     dump();
-    let upto = match STAGE {
+    // "cpu" = clock only; "cpu-<stage>" = clock first, then <stage>
+    let mut stage = STAGE;
+    let mut cpu_mhz = 40;
+    if let Some(rest) = STAGE.strip_prefix("cpu") {
+        stage = rest.strip_prefix('-').unwrap_or("");
+        let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
+        // SAFETY: the one caller, boot hart, RAM-only image (see clock::cpu_to_360).
+        match unsafe { clock::cpu_to_360(&mut log) } {
+            Ok((_, Some(a))) => {
+                cpu_mhz = a;
+                pl!("PERF cpu.clock mhz={cpu_mhz}");
+                pl!(
+                    "CHECK 645.cpu360 {} measured {cpu_mhz} MHz (360 expected)",
+                    if (350..=370).contains(&cpu_mhz) { "PASS" } else { "FAIL" }
+                );
+            }
+            Ok(_) => pl!("psram: clock set, timer did not count: no measurement"),
+            Err(e) => pl!("CHECK 645.cpu360 FAIL {e:?}"),
+        }
+    }
+    let upto = match stage {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" | "eye" | "diag" => Some(psram::Upto::Tuned),
+        "tune" | "all" | "eye" | "diag" | "perf" => Some(psram::Upto::Tuned),
         _ => None,
     };
     if let Some(upto) = upto {
@@ -95,16 +116,19 @@ extern "C" fn pmain() -> ! {
         match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
-                if STAGE == "diag" {
+                if stage == "perf" {
+                    tests::perf(cpu_mhz);
+                }
+                if stage == "diag" {
                     tests::diag();
                 }
-                if STAGE == "eye" {
+                if stage == "eye" {
                     clock_report();
                     tests::eye();
                 }
-                if STAGE == "all" {
+                if stage == "all" {
                     clock_report();
-                    let fails = tests::run();
+                    let fails = tests::run(cpu_mhz);
                     pl!(
                         "psram: RESULT {} ({fails} failed tests) at {} MHz",
                         if fails == 0 { "PASS" } else { "FAIL" },

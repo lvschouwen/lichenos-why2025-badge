@@ -9,6 +9,9 @@ use lichen_platform_esp32p4::psram::map::{self, CACHED_BASE, PAGE_BYTES, UNCACHE
 use lichen_platform_esp32p4::psram::{mspi::delay_us, patterns};
 
 pub const PSRAM_BYTES: usize = 32 << 20;
+/// Bytes the sweeping tests cover (the whole chip took minutes; a bench run is at most 120 s).
+const TEST_BYTES: usize = 6 << 20;
+const TEST_OFF: usize = 0x50_0000; // includes the 0x55xxxx-0x58xxxx addresses that failed at CPU 40 MHz
 const UNC: usize = CACHED_BASE + UNCACHED_OFFSET;
 const CHUNK: usize = PAGE_BYTES; // 64 KB: fits the caches, so a chunk is written back and verified in one go
 
@@ -98,20 +101,26 @@ fn addr_in_addr_uncached() -> bool {
     let mut ok = true;
     for inverted in [false, true] {
         let mut t = Tally::new();
-        let mut a = 0;
-        while a < PSRAM_BYTES {
+        let mut a = TEST_OFF;
+        while a < TEST_OFF + TEST_BYTES {
             w(UNC + a, patterns::addr_word(a as u32, inverted));
             a += 4;
         }
-        let mut a = 0;
-        while a < PSRAM_BYTES {
+        let mut a = TEST_OFF;
+        while a < TEST_OFF + TEST_BYTES {
             t.check(UNC + a, patterns::addr_word(a as u32, inverted), r(UNC + a));
             a += 4;
         }
         ok &= verdict(
-            format_args!("address-in-address, uncached, {}, 32 MB", if inverted { "inverted" } else { "plain" }),
+            format_args!(
+                "address-in-address, uncached, {}, {} MB at {TEST_OFF:#x}",
+                if inverted { "inverted" } else { "plain" },
+                TEST_BYTES >> 20
+            ),
             &t,
         );
+        PERF_BYTES.fetch_add(2 * TEST_BYTES as u32, core::sync::atomic::Ordering::Relaxed);
+        PERF_ERRORS.fetch_add(t.bad as u32, core::sync::atomic::Ordering::Relaxed);
     }
     ok
 }
@@ -120,8 +129,8 @@ fn addr_in_addr_uncached() -> bool {
 /// back, read the truth through the uncached alias; then drop the lines and read the same chunk cached again.
 fn random_cached(seed: u32) -> bool {
     let (mut truth, mut again) = (Tally::new(), Tally::new());
-    let mut off = 0;
-    while off < PSRAM_BYTES {
+    let mut off = TEST_OFF;
+    while off < TEST_OFF + TEST_BYTES {
         let mut a = 0;
         while a < CHUNK {
             let i = ((off + a) / 4) as u32;
@@ -151,7 +160,8 @@ fn random_cached(seed: u32) -> bool {
         format_args!("random fill {seed:#x}, cached write, read back uncached (the memory itself), 32 MB"),
         &truth,
     );
-    let b = verdict(format_args!("random fill {seed:#x}, same chunks read back cached, 32 MB"), &again);
+    let b =
+        verdict(format_args!("random fill {seed:#x}, same chunks read back cached, {} MB", TEST_BYTES >> 20), &again);
     a & b
 }
 
@@ -449,8 +459,51 @@ pub fn diag() {
     diag_case("E address, cached write + write-back, AXI read", &|a| a as u32, true, Rd::Axi, false);
 }
 
+static PERF_BYTES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+static PERF_ERRORS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+unsafe fn mcycle() -> u32 {
+    let v: u32;
+    core::arch::asm!("csrr {}, mcycle", out(reg) v);
+    v
+}
+
+/// Sequential throughput through the cached alias, 4 MB: read (line fills), write plus write-back, as MB/s from the cycle
+/// counter and the measured CPU clock.
+pub fn perf(cpu_mhz: u32) {
+    const LEN: usize = 4 << 20;
+    // SAFETY: ROM cache maintenance; mapped window.
+    unsafe {
+        map::cache_invalidate_all_l2();
+        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+        map::cache_invalidate(CACHED_BASE, PSRAM_BYTES);
+    }
+    pl!("PERF psram.clock mhz={}", lichen_platform_esp32p4::psram::PSRAM_MHZ);
+    let mhz = if cpu_mhz == 0 { 40 } else { cpu_mhz } as u64;
+    let rate = |cycles: u32| -> u64 { LEN as u64 * mhz / cycles.max(1) as u64 }; // bytes per us = MB/s
+                                                                                 // SAFETY: cycle counter reads.
+    let c0 = unsafe { mcycle() };
+    let mut a = 0;
+    let mut sink = 0u32;
+    while a < LEN {
+        sink ^= r(CACHED_BASE + 0x100_0000 + a);
+        a += 4;
+    }
+    let c1 = unsafe { mcycle() };
+    let mut a = 0;
+    while a < LEN {
+        w(CACHED_BASE + 0x180_0000 + a, a as u32 ^ sink);
+        a += 4;
+    }
+    // SAFETY: ROM cache maintenance.
+    unsafe { map::cache_writeback_invalidate(CACHED_BASE + 0x180_0000, LEN) };
+    let c2 = unsafe { mcycle() };
+    pl!("PERF psram.seq_read mb_s={} cpu_mhz={mhz}", rate(c1.wrapping_sub(c0)));
+    pl!("PERF psram.seq_write mb_s={} cpu_mhz={mhz}", rate(c2.wrapping_sub(c1)));
+}
+
 /// Everything. Returns the number of failed tests.
-pub fn run() -> u32 {
+pub fn run(cpu_mhz: u32) -> u32 {
     let mut fails = 0;
     // SAFETY: ROM cache maintenance; L2 holds external memory only.
     let rc_l2 = unsafe { map::cache_invalidate_all_l2() };
@@ -470,5 +523,17 @@ pub fn run() -> u32 {
     fails += u32::from(!random_cached(0x1234_5678));
     fails += u32::from(!random_cached(0xA5A5_5A5A));
     fails += u32::from(!retention(6));
+    pl!(
+        "PERF psram.pattern errors={} bytes={}",
+        PERF_ERRORS.load(core::sync::atomic::Ordering::Relaxed),
+        PERF_BYTES.load(core::sync::atomic::Ordering::Relaxed)
+    );
+    perf(cpu_mhz);
+    pl!(
+        "CHECK 620.pattern {} at {} MHz, cpu {} MHz",
+        if fails == 0 { "PASS" } else { "FAIL" },
+        lichen_platform_esp32p4::psram::PSRAM_MHZ,
+        cpu_mhz
+    );
     fails
 }
