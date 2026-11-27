@@ -283,8 +283,10 @@ fn timer_report(t: Trap, ratio: u64) {
 }
 
 // Check 2 -----------------------------------------------------------------------------------------------------------
-const SOC_CLK_CTRL0: usize = 0x500E_6014; // hp_sys_clkrst_reg.h: bit 6 BUSMON_CPU_CLK_EN, bit 11 TRACE_CPU_CLK_EN
-const BUSMON_TRACE_CLK: u32 = (1 << 6) | (1 << 11);
+const SOC_CLK_CTRL0: usize = 0x500E_6014; // hp_sys_clkrst_reg.h: bit 6 BUSMON_CPU, bit 11 TRACE_CPU, bit 24 TRACE_SYS clocks
+const BUSMON_TRACE_CLK: u32 = (1 << 6) | (1 << 11) | (1 << 24);
+const HP_RST_EN0: usize = 0x500E_60C0; // bit 9 RST_EN_CORETRACE0
+const TRACE0_RST: u32 = 1 << 9;
 const BUSMON_INTR_ENA: usize = 0x3FF0_6000; // ASSIST_DEBUG_CORE_0_INTR_ENA_REG
 const PMP1_CFG: u8 = 0x9B; // the bootloader's entry 1 (step 3b): L, NAPOT, RW
 const PMP1_ADDR: usize = 0x0FFC_3FFF; // NAPOT 0x3ff0_0000-0x3ff1_ffff
@@ -333,9 +335,15 @@ fn pmp1() {
         verdict(false, format_args!("void: soc_clk_ctrl0 not readable"));
         return;
     };
-    // Both clocks are off in ROM state (run 8); the test runs with them on, the case a kernel would face.
+    // The bus monitor and trace clocks are off in ROM state (run 8); the test runs with them on and trace0 out of
+    // reset, the case a kernel would face. Both registers are restored after.
+    let rst = m_lw(HP_RST_EN0);
     let _ = m_sw(SOC_CLK_CTRL0, clk | BUSMON_TRACE_CLK);
-    pl!("609.2 pmp1 cfg {cfg:#04x} addr {addr:#010x}; soc_clk_ctrl0 {clk:#010x} -> {} (bus monitor and trace clocks on)", show(m_lw(SOC_CLK_CTRL0)));
+    if let Ok(r) = rst {
+        let _ = m_sw(HP_RST_EN0, r & !TRACE0_RST);
+    }
+    pl!("609.2 pmp1 cfg {cfg:#04x} addr {addr:#010x}; soc_clk_ctrl0 {clk:#010x} -> {} (bus monitor and trace clocks on); hp_rst_en0 {} -> {} (trace0 out of reset)",
+        show(m_lw(SOC_CLK_CTRL0)), show(rst), show(m_lw(HP_RST_EN0)));
     let (mut bad, mut void) = (0, 0);
     for r in &PMP1_REGS {
         begin(r.id);
@@ -345,6 +353,9 @@ fn pmp1() {
             bad += (s == Seen::Reached) as u32;
             void += (s == Seen::Void) as u32;
         }
+    }
+    if let Ok(r) = rst {
+        let _ = m_sw(HP_RST_EN0, r);
     }
     let _ = m_sw(SOC_CLK_CTRL0, clk);
     verdict(bad == 0 && void == 0, format_args!("U through the locked pmp1 (cache, bus monitor, trace0): {bad} access(es) reached a register, {void} void; PASS = the window is privilege-checked for U (every U access faults or is dropped)"));
@@ -407,6 +418,9 @@ const PSRAM_SHOW: [(&str, usize); 10] = [("fctrl", S_CACHE_FCTRL), ("sctrl", PSR
     ("pms0_attr", PSRAM_MSPI + 0x130), ("mmu_power", PSRAM_MSPI + 0x384), ("date", PSRAM_MSPI + 0x3FC)];
 const PERI_CLK_CTRL00: usize = 0x500E_6030; // bit 14 PSRAM_PLL_CLK_EN, bit 15 PSRAM_CORE_CLK_EN, [13:12] source
 const PSRAM_SYS_CLK: u32 = 1 << 31; // SOC_CLK_CTRL0
+// MPLL, the PSRAM clock source: clk_ll_mpll_enable sets both bits; only sleep or a released refcount clears them.
+const PMU_RF_PWC: usize = 0x5011_515C; // bit 24 MSPI_PHY_XPD
+const LP_HP_CLK_CTRL: usize = 0x5011_1040; // bit 28 HP_MPLL_500M_CLK_EN
 const MMU_PSRAM: u32 = (1 << 11) | (1 << 10); // SOC_MMU_PSRAM_VALID | SOC_MMU_ACCESS_PSRAM (ext_mem_defs.h)
 const PS_PPAGE: u32 = 0x10; // physical 64 KB page 16 (1 MB in): v2 re-initialises PSRAM after the reset
 const PS_VADDR: usize = 0x4800_0000; // SOC_MMU_PSRAM_VADDR_BASE: PSRAM MMU entry 0
@@ -437,12 +451,12 @@ fn mmu_entry0(write: Option<u32>) -> Result<u32, Trap> {
 /// Is IDF's PSRAM setup still there? Only registers, no PSRAM access: a dead controller could stall the bus.
 fn psram_alive() -> bool {
     begin("609.4.clk");
-    let (Ok(c0), Ok(p0)) = (m_lw(SOC_CLK_CTRL0), m_lw(PERI_CLK_CTRL00)) else {
+    let (Ok(c0), Ok(p0), Ok(rf), Ok(hc)) = (m_lw(SOC_CLK_CTRL0), m_lw(PERI_CLK_CTRL00), m_lw(PMU_RF_PWC), m_lw(LP_HP_CLK_CTRL)) else {
         verdict(false, format_args!("void: clock registers not readable"));
         return false;
     };
-    pl!("609.4 soc_clk_ctrl0 {c0:#010x} (bit 31 PSRAM_SYS_CLK_EN), peri_clk_ctrl00 {p0:#010x} (bits 14-15 PSRAM PLL/core clock)");
-    if c0 & PSRAM_SYS_CLK == 0 || p0 & (3 << 14) != 3 << 14 {
+    pl!("609.4 soc_clk_ctrl0 {c0:#010x} (bit 31 PSRAM_SYS_CLK_EN), peri_clk_ctrl00 {p0:#010x} (bits 14-15 PSRAM PLL/core clock), pmu_rf_pwc {rf:#010x} (bit 24 MPLL XPD), lp hp_clk_ctrl {hc:#010x} (bit 28 MPLL clock)");
+    if c0 & PSRAM_SYS_CLK == 0 || p0 & (3 << 14) != 3 << 14 || rf & (1 << 24) == 0 || hc & (1 << 28) == 0 {
         verdict(false, format_args!("void: PSRAM clocks off behind the bootloader, so no PSRAM access was tried (a v3 kernel needs its own PSRAM init)"));
         return false;
     }
