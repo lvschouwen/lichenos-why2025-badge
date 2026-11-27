@@ -28,6 +28,14 @@ class ImportsTest(unittest.TestCase):
         self.assertEqual(c.missing_imports(READELF, TABLE), ["xTaskGetTickCount"])
         self.assertEqual(c.missing_imports(READELF, TABLE + "export\txTaskGetTickCount\tx\tallow\t1\n"), [])
 
+    def test_api_since(self):
+        guard = READELF + "     4: 00000000     0 NOTYPE  GLOBAL DEFAULT  UND __stack_chk_guard\n"
+        self.assertEqual(c.manifest_api("id=x\napi=2.3\n"), (2, 3))
+        self.assertEqual(c.too_old(guard, (2, 3)), ["__stack_chk_guard"])
+        self.assertEqual(c.too_old(guard, (2, 4)), [])
+        self.assertEqual(c.too_old(guard, None), ["__stack_chk_guard"])
+        self.assertEqual(c.too_old(READELF, (2, 0)), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 # Manifest of the DOOM SD app (format: lichen_api/lichen_manifest.h). freedoom1.wad goes next to it on the card.
 id=doom
 name=DOOM
-api=2.3
+api=2.4
 entry=app.elf
 caps=SD,BACKGROUND,RAW_KEYS,NOTIFY,VIDEO
 # PSRAM: 6 MiB zone, 256 KB engine screen, the engine heap (WAD directory, lump tables, the loader's blocks) and, only

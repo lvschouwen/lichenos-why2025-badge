@@ -236,9 +236,10 @@ build_sdapps() {
         # Skipped, kernel-only (no header an app compiles uses them) and held back by an app's own config:
         # TASK_CREATE_ALLOW_EXT_MEM needs CONFIG_SPIRAM, TASK_FUNCTION_WRAPPER debug optimisation or the coredump
         local skip='^(# )?CONFIG_FREERTOS_(TASK_CREATE_ALLOW_EXT_MEM|TASK_FUNCTION_WRAPPER)[= ]'
-        if ! diff <(grep -E '^(# )?CONFIG_FREERTOS_' "$sdkconfig" | grep -Ev "$skip") \
-            <(grep -E '^(# )?CONFIG_FREERTOS_' "$out/sdkconfig" | grep -Ev "$skip") >&2; then
-            echo "sdapps/$id: its FreeRTOS config differs from the firmware's (above: < firmware, > app; #540)" >&2
+        local cmp='^(# )?CONFIG_(FREERTOS_|COMPILER_STACK_CHECK_)'
+        if ! diff <(grep -E "$cmp" "$sdkconfig" | grep -Ev "$skip") \
+            <(grep -E "$cmp" "$out/sdkconfig" | grep -Ev "$skip") >&2; then
+            echo "sdapps/$id: its FreeRTOS or stack-check config differs from the firmware's (above: < firmware, > app; #540)" >&2
             return 1
         fi
         cmake --build "$out" --target elf

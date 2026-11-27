@@ -185,6 +185,36 @@ static void cache(void) {
     CHECK(mn_key_hash(&b) != mn_key_hash(&a));
 }
 
+typedef struct {
+    mn_queue_t *q;
+    int         seen, locks, unlocks;
+    bool        repost;
+    char        first[40], last[40];
+} drain_t;
+
+static void drain_lock(void *ctx) {
+    ((drain_t *)ctx)->locks++;
+}
+
+static void drain_unlock(void *ctx) {
+    ((drain_t *)ctx)->unlocks++;
+}
+
+static void drain_each(mn_note_t const *note, void *ctx) {
+    drain_t *d = ctx;
+    if (d->seen++ == 0) {
+        snprintf(d->first, sizeof(d->first), "%s", note->title);
+    }
+    snprintf(d->last, sizeof(d->last), "%s", note->title);
+    if (d->repost) {
+        mesh_chat_key_t key;
+        char            name[16];
+        snprintf(name, sizeof(name), "#g%d", d->seen & 15);
+        mesh_chat_key_channel(&key, name);
+        mn_queue_push(d->q, MN_CHANNEL, &key, name, "t", false);
+    }
+}
+
 static void queue(void) {
     mn_queue_t      q;
     mn_note_t       out[MN_QUEUE_MAX];
@@ -227,6 +257,36 @@ static void queue(void) {
     }
     CHECK(mn_queue_take(&q, out, 4) == 4 && q.n == 2 && strcmp(out[3].title, "#d3") == 0);
     CHECK(mn_queue_take(&q, out, 4) == 2 && q.n == 0 && strcmp(out[0].title, "#d4") == 0 && strcmp(out[1].title, "#d5") == 0);
+
+    // the batched drain (#586): every count, the pass cap, and notes posted by the handler
+    static const int counts[] = {0, 3, 4, 5, 8};
+    for (size_t c = 0; c < sizeof(counts) / sizeof(counts[0]); c++) {
+        memset(&q, 0, sizeof(q));
+        for (int i = 0; i < counts[c]; i++) {
+            char name[16];
+            snprintf(name, sizeof(name), "#e%d", i);
+            mesh_chat_key_channel(&other, name);
+            CHECK(mn_queue_push(&q, MN_CHANNEL, &other, name, "t", false));
+        }
+        drain_t d = {.q = &q};
+        mn_drain_ops_t ops = {drain_lock, drain_unlock, drain_each, &d};
+        CHECK(mn_queue_drain(&q, out, &ops) == (size_t)counts[c]);
+        CHECK(d.seen == counts[c] && q.n == 0 && d.locks == d.unlocks && d.locks == (counts[c] / MN_DRAIN_BATCH + 1 > 2 ? 2 : counts[c] / MN_DRAIN_BATCH + 1));
+        if (counts[c] > 0) {
+            CHECK(strcmp(d.first, "#e0") == 0 && strcmp(d.last, counts[c] == 8 ? "#e7" : counts[c] == 5 ? "#e4" : counts[c] == 4 ? "#e3" : "#e2") == 0);
+        }
+    }
+    // a handler that keeps posting cannot hold the drain: two passes, the rest waits
+    memset(&q, 0, sizeof(q));
+    for (int i = 0; i < MN_QUEUE_MAX; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "#f%d", i);
+        mesh_chat_key_channel(&other, name);
+        CHECK(mn_queue_push(&q, MN_CHANNEL, &other, name, "t", false));
+    }
+    drain_t more = {.q = &q, .repost = true};
+    mn_drain_ops_t mops = {drain_lock, drain_unlock, drain_each, &more};
+    CHECK(mn_queue_drain(&q, out, &mops) == (size_t)MN_QUEUE_MAX && q.n > 0);
 
     // title and body are cut on a character boundary
     char big[400];

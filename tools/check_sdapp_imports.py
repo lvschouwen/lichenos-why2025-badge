@@ -37,6 +37,29 @@ def missing_imports(readelf_text, table_text):
     return sorted({s for s in undefined_symbols(readelf_text) if s not in allowed})
 
 
+# Exports added after API 2.0, by the version that added them: an app importing one needs a manifest at least that new,
+# or on an older OS it fails relocation instead of getting the loader's clean API refusal (#586). Add a line with each
+# export that an app's toolchain, rather than its source, pulls in.
+SINCE = {"__stack_chk_guard": (2, 4), "__stack_chk_fail": (2, 4)}
+
+
+def manifest_api(manifest_text):
+    """(major, minor) of the `api=` line of a manifest, or None."""
+    for line in manifest_text.splitlines():
+        if line.startswith("api="):
+            try:
+                major, minor = line[4:].strip().split(".")
+                return int(major), int(minor)
+            except ValueError:
+                return None
+    return None
+
+
+def too_old(readelf_text, api):
+    """The imports of SINCE newer than the manifest's api."""
+    return sorted(s for s in set(undefined_symbols(readelf_text)) if s in SINCE and (api is None or api < SINCE[s]))
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--table", default=os.path.join(HERE, "export_table.txt"))
@@ -57,6 +80,15 @@ def main(argv):
             bad += 1
             continue
         app = os.path.basename(os.path.dirname(elf))
+        try:
+            with open(os.path.join(os.path.dirname(elf), "manifest"), encoding="utf-8") as f:
+                api = manifest_api(f.read())
+        except OSError:
+            api = None
+        for sym in too_old(res.stdout, api):
+            print(f"sdapps/{app}: imports {sym}, new in API {'.'.join(map(str, SINCE[sym]))}, but its manifest says api="
+                  f"{'.'.join(map(str, api)) if api else '?'}", file=sys.stderr)
+            bad += 1
         for sym in missing_imports(res.stdout, table):
             print(f"sdapps/{app}: imports {sym}, which tools/export_table.txt does not export (the loader would refuse it)", file=sys.stderr)
             bad += 1

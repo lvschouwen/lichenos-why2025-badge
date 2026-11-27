@@ -4,7 +4,7 @@
 # A bench tool for the SD app APIs (#537): file shims, sandbox, open-file book, exit. Keys: r e m f q (see main/app.c).
 id=benchtest
 name=Bench test
-api=2.2
+api=2.4
 entry=app.elf
 caps=SD,RAW_KEYS,NOTIFY
 # internal RAM: 6 KiB main task (stack_kib) + 6 KiB for the loader-run stop (#556: both must fit).

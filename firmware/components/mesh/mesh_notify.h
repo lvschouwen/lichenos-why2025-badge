@@ -116,6 +116,17 @@ void   mn_text_prepare(mn_text_t *out, char const *title, char const *body);
 // Moves everything out (oldest first), returns how many
 size_t mn_queue_take(mn_queue_t *q, mn_note_t *out, size_t max);
 
+// Drains q in batches of at most MN_DRAIN_BATCH (buf holds that many): each batch is taken under lock/unlock, handled
+// with each() outside it, and it stops after a short batch or MN_QUEUE_MAX / MN_DRAIN_BATCH passes (each() may post new
+// notes; what is left waits for the next drain). Returns the notes handled.
+typedef struct {
+    void (*lock)(void *ctx);
+    void (*unlock)(void *ctx);
+    void (*each)(mn_note_t const *note, void *ctx);
+    void *ctx;
+} mn_drain_ops_t;
+size_t mn_queue_drain(mn_queue_t *q, mn_note_t *buf, mn_drain_ops_t const *ops);
+
 // One failed-delivery note per message: true when id has just become failed (a retry that fails again counts again)
 #define MN_FAILTRACK_MAX 32
 typedef struct {

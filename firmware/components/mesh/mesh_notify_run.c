@@ -290,26 +290,38 @@ static void handle(mn_note_t const *n, mn_switches_t const *s, bool *read) {
     }
 }
 
+typedef struct {
+    mn_switches_t s;
+    bool          read;
+} drain_state_t;
+
+static void drain_lock(void *ctx) {
+    (void)ctx;
+    portENTER_CRITICAL(&mux);
+}
+
+static void drain_unlock(void *ctx) {
+    (void)ctx;
+    portEXIT_CRITICAL(&mux);
+}
+
+static void drain_each(mn_note_t const *note, void *ctx) {
+    drain_state_t *st = ctx;
+    handle(note, &st->s, &st->read);
+}
+
 bool mesh_notify_drain(void) {
     // In batches of MN_DRAIN_BATCH: the whole queue on the stack (8 notes, ~1.8 KB) outgrew the stack baseline once the
     // stack canary came in (#586)
-    mn_note_t     notes[MN_DRAIN_BATCH];
-    bool          read = false;
-    mn_switches_t s    = switches();
-    size_t        n;
-    do {
-        portENTER_CRITICAL(&mux);
-        n = mn_queue_take(&queue, notes, MN_DRAIN_BATCH);
-        portEXIT_CRITICAL(&mux);
-        for (size_t i = 0; i < n; i++) {
-            handle(&notes[i], &s, &read);
-        }
-    } while (n == MN_DRAIN_BATCH);
+    mn_note_t      notes[MN_DRAIN_BATCH];
+    drain_state_t  st  = {.s = switches(), .read = false};
+    mn_drain_ops_t ops = {drain_lock, drain_unlock, drain_each, &st};
+    mn_queue_drain(&queue, notes, &ops);
     portENTER_CRITICAL(&mux);
     bool was_dirty = dirty;
     dirty          = false;
     portEXIT_CRITICAL(&mux);
-    return read || was_dirty;
+    return st.read || was_dirty;
 }
 
 // ---- console -------------------------------------------------------------------------------------------------------

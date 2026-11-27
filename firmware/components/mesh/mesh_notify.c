@@ -289,6 +289,23 @@ size_t mn_queue_take(mn_queue_t *q, mn_note_t *out, size_t max) {
     return n;
 }
 
+size_t mn_queue_drain(mn_queue_t *q, mn_note_t *buf, mn_drain_ops_t const *ops) {
+    size_t total = 0;
+    for (size_t pass = 0; pass < MN_QUEUE_MAX / MN_DRAIN_BATCH; pass++) {
+        ops->lock(ops->ctx);
+        size_t n = mn_queue_take(q, buf, MN_DRAIN_BATCH);
+        ops->unlock(ops->ctx);
+        for (size_t i = 0; i < n; i++) {
+            ops->each(&buf[i], ops->ctx);
+        }
+        total += n;
+        if (n < MN_DRAIN_BATCH) {
+            break;
+        }
+    }
+    return total;
+}
+
 bool mn_failtrack_step(mn_failtrack_t *t, uint32_t id, bool is_failed) {
     for (int i = 0; i < MN_FAILTRACK_MAX; i++) {
         if (t->id[i] == id && id) {

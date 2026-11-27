@@ -360,7 +360,7 @@ repeated key or an unknown key refuses the file):
 | `internal_ram_kib`, `psram_kib` | declared budgets, like a built-in app's (0 = none declared). `internal_ram_kib` is enforced for stacks (#538): the internal stacks of `main()`, the stop hook and the app's own tasks, live at the same time, add up to at most that, else the task start is refused with a log line. 0 or absent = the default of 24 KiB (main + stop + one 16 KiB task). The 16 KiB cap per task stack applies to every stack, PSRAM ones too. Size it as main + stop + the tasks' stacks (DOOM: 4 + 4 + 16 = 24) |
 | `stack_kib` | stack of the app's `main()` task; at most 16, default 4 |
 
-- **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.4). An app of another major
+- **API gate.** The OS runs an app of the same major whose minor is not above the OS's (now 2.4). An app of another major An app built with the stack canary (the firmware's `CONFIG_COMPILER_STACK_CHECK_MODE_NORM`, which `build_sdapps` passes on) imports `__stack_chk_guard` and `__stack_chk_fail`, new in 2.4, so its manifest needs `api=2.4` or higher; `tools/check_sdapp_imports.py` fails the build otherwise.
   or a newer minor is refused with a notification.
 - **Caps** are granted as the manifest declares them, shown in Settings, Apps, and checked by the OS calls that need them
   (for example `CAP_RAW_KEYS` for the raw keys). The budgets are declared and reported like a built-in app's.
