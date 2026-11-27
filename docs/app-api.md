@@ -127,6 +127,9 @@ to `layers.conf`):
   `lichen_free(ctx, ptr)`. BULK is PSRAM, for anything big; INTERNAL counts against the app's internal-RAM quota of
   64 KB (`MEM_BOOK_INTERNAL_QUOTA`) and is refused past it. `fw mem` lists what every app holds ("mem app <id> ...").
   Free with `lichen_free`, never `free()`, or the app's count stays up.
+- `lichen_bt.h` (#599, epic #73): Bluetooth LE for apps. **Declared only**: nothing implements it before #73 B2
+  (server), C1 (central), C3 (SD apps) and P1 (peer session), so an app that calls it does not link yet. See
+  [Bluetooth](#bluetooth-lichen_bth) below.
 - `radio_state.h`, `tz_table.h`: types and the time zone table used by the headers above.
 - `settings_store.h` is Lichen's own (`badge_fw`) and sits here only because `lichen_boot` needs it: apps do not use it.
 
@@ -158,6 +161,53 @@ to `layers.conf`):
   for one the app decides on its own (it waits while the image is on trial, #304, so never from the LVGL task). The
   Wi-Fi console (`POST /console`) is plain HTTP on the LAN, guarded by the update token only: a secret in its reply
   crosses the network unencrypted, as the token itself does.
+
+### Bluetooth (`lichen_bt.h`)
+
+The API of #599 for #73's Bluetooth service. Declarations only; the rules below are what the implementation is held
+to, and the pure parts that enforce them are already host-tested (`lichen_os/ble_policy.c`, `bt_registry.c`,
+`peer_session.c`).
+
+- **The OS owns the stack:** the host task, the advertising set, the name, the address (RPA privacy, so a badge is
+  not trackable by its address), pairing, bonds and Forget. An app never sees a passkey or a bond; pairing is only
+  open from Settings > Bluetooth (120 s, 3 failures then a 60 s lockout, at most 3 bonds and no silent eviction).
+- **No app code on the Bluetooth task.** A peer's read is answered from the value copy the app last set
+  (`lichen_bt_value_set`); a peer's write, a subscription, a scan result and a GATT client result are events queued
+  to the app. `lichen_bt_open(cb, arg, deliver)` picks where they run: `LICHEN_BT_DELIVER_UI` on the LVGL task (a
+  screen), `LICHEN_BT_DELIVER_TASK` on the app's own task, which calls `lichen_bt_pump(wait_ms)` (a task needs
+  `BACKGROUND`). An event's data is the OS's copy, valid during the callback.
+- **Nothing blocks on the radio:** `lichen_bt_notify` and `lichen_bt_peer_send` return `LICHEN_BT_BUSY` when their
+  queue is full, and `LICHEN_BT_EV_READY` says when to try again.
+- **Server (`BT`):** `lichen_bt_service_add(def, &svc, chrs)` adds a service with up to 8 characteristics while
+  connections stay up; each characteristic names its properties, its value size (up to 512 B) and its level:
+  `LICHEN_BT_OPEN`, `_ENCRYPTED` or `_BONDED` (authenticated and bonded, the phone link and the MeshCore companion).
+  A peer below the level gets the ATT error that makes a phone pair. GAP, GATT and the Lichen peer service UUIDs are
+  the OS's. The OS's own services (Battery, Device Information, the peer service) have their own budget, so apps
+  share 8 services and 32 characteristics among themselves. `lichen_bt_advertise(true)` asks for advertising: the OS
+  advertises while any client wants it and one more peer may connect, every 100 ms for 30 s, then every 1 s for
+  5 min, then not until a new reason (slow only when it waits just for bonded peers to come back). Its advert is 31 B plus a 31 B scan response,
+  flags and name first; the services that asked to be seen share the rest and rotate when they do not all fit.
+- **Central:** `lichen_bt_scan_start(uuid, ms)` needs `RADIO_SCAN` (one scan at a time for the badge, `BUSY` while
+  another runs); `lichen_bt_connect` and the GATT client (`lichen_bt_gattc_find`, `_read`, `_write`, `_subscribe`) need
+  `BT`. The badge has at most 3 connections: 2 that peers made to it and 1 it made (`LICHEN_BT_FULL` past that). A peer
+  that connects to the badge and is not bonded is dropped after 10 s (30 s while it pairs); links the badge made, and
+  the peer session's, are exempt.
+- **L2CAP channels (`BT`):** `lichen_bt_chan_listen(psm, mtu, on)` and `lichen_bt_chan_open(conn, psm, mtu, &chan)`
+  give an ordered stream with the transport's credit flow control (SDUs up to 512 B, PSM 0x80-0xff; 0xc1 is the peer
+  session's); `lichen_bt_chan_send` is `BUSY` without credits; events `LICHEN_BT_EV_CHAN_OPEN`, `_DATA`, `_CLOSED`.
+- **Ownership:** every service, scan, connection and peer session belongs to the app that made it. When the app stops,
+  or before an SD app's memory is freed, the OS revokes them all; the app's handles are refused at once and never
+  match again (each carries a generation).
+- **Peer session (`BT`), badge to badge:** `lichen_bt_peer_visible(true)` makes the badge findable for 10 min;
+  `lichen_bt_peer_discover(true)` lists Visible badges (`LICHEN_BT_EV_PEER_FOUND`); `lichen_bt_peer_invite(peer,
+  version, param, len)` invites one to the same app at the app's protocol version (the inviter becomes the central,
+  up to 14 B of the app's own; the invite is 64 B in all). The other
+  badge's person accepts on the OS's dialog, both screens confirm the same 6-digit number (encrypted, never bonded),
+  and `LICHEN_BT_EV_PEER_OPEN` follows on both. Messages (up to 512 B) arrive in order and exactly once
+  (`LICHEN_BT_EV_PEER_MSG`); the session closes on `lichen_bt_peer_end`, 20 s of silence, a message never acked or a
+  lost link (`LICHEN_BT_EV_PEER_CLOSED`), and when either side's app exits (the other learns that it did). The
+  session runs on an L2CAP channel. One session per badge; invites are refused while one is under way, while the
+  badge is not Visible, and within 10 s of the last one shown from the same badge.
 
 ## The two surfaces, the gate, capabilities and lifecycle
 
@@ -218,7 +268,9 @@ with its capability and thread rule, and the build checks that it matches the he
 | `HAPTICS` | `lichen_haptics_play` | none |
 | `SENSORS` | `lichen_sensors.h` | Weather |
 | `NOTIFY` | `lichen_notify.h`, `lichen_badge_set` | MeshCore, Weather, Timer |
-| `NET`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY` | nothing an app reaches yet (the Wi-Fi, scanner #172, Bluetooth #73, audio #67, battery #11 calls are the OS's); declared so the list is not reopened | none |
+| `BT` | `lichen_bt.h` (declared in #599, implemented from #73 B2): services, advertising, connect, GATT client, peer session | none |
+| `RADIO_SCAN` | `lichen_bt_scan_start`/`_stop` (#599, not implemented yet); the scanner #172 and Wi-Fi analyser calls are the OS's | none |
+| `NET`, `AUDIO`, `BATTERY` | nothing an app reaches yet (the Wi-Fi, audio #67, battery #11 calls are the OS's); declared so the list is not reopened | none |
 | `SYSTEM` | every capability: the shell's own apps; also what `lichen_sys_*.h`, radio switching (`lichen_radio_set` and friends), the haptics and clock settings need | Settings, About, Files, Power, Benchmark, Crash log, Release notes, Notifications |
 
 Clock, Calculator and Test card declare none. `CAP_SECRETS` is an app's own class only: the OS's protected secrets

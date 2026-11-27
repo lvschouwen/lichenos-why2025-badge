@@ -3115,3 +3115,40 @@ add_executable(video_notice_test
 target_include_directories(video_notice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(video_notice_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME video_notice_test COMMAND video_notice_test)
+
+# Bluetooth as a Lichen OS service, the pure parts (#599, epic #73): not in the image until #73 B2 / P1 use them
+add_executable(ble_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/ble_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ble_policy.c
+)
+target_include_directories(ble_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(ble_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ble_policy_test COMMAND ble_policy_test)
+
+add_executable(bt_registry_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/bt_registry_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/bt_registry.c
+)
+target_include_directories(bt_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(bt_registry_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bt_registry_test COMMAND bt_registry_test)
+
+add_executable(peer_session_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/peer_session_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/peer_session.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ble_policy.c
+)
+target_include_directories(peer_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(peer_session_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME peer_session_test COMMAND peer_session_test)
+
+add_executable(adv_sched_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/adv_sched_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/adv_sched.c
+)
+target_include_directories(adv_sched_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+target_compile_options(adv_sched_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME adv_sched_test COMMAND adv_sched_test)
