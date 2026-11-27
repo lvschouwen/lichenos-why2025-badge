@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 #define FILES_PATH_MAX 256
-#define FILES_NAME_MAX 128 // longer names are left out of the listing (counted as skipped)
+#define FILES_NAME_MAX 256 // 255 name bytes + NUL: the FatFs LFN limit, so no name on the card is left out of the listing
 #define FILES_STORAGE  LICHEN_SYS_STORAGE_BASE
 #define FILES_SD       LICHEN_SYS_SD_BASE
 

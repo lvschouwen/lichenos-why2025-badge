@@ -30,6 +30,17 @@ static void test_paths(void) {
     // a trailing space or dot is Lichen's own refusal (FatFs would snip it); DEL and bad UTF-8 are FatFs's
     CHECK(!files_name_ok_fat("a\x7f") && !files_name_ok_fat("\x80") && !files_name_ok_fat("a\xC3") && !files_name_ok_fat("\xC0\x80") &&
           !files_name_ok_fat("\xED\xA0\x80") && !files_name_ok_fat("\xF5\x80\x80\x80") && !files_name_ok_fat("\xE0\x80\x80"));
+    { // FatFs allows 255-byte names (#600): 128..255 bytes pass, 256 does not
+        char n[300];
+        memset(n, 'a', sizeof(n));
+        n[255] = '\0';
+        CHECK(files_name_ok(n) && files_name_ok_fat(n));
+        n[128] = '\0';
+        CHECK(files_name_ok(n));
+        memset(n, 'a', 256);
+        n[256] = '\0';
+        CHECK(!files_name_ok(n));
+    }
     CHECK(files_name_ok_fat("caf\xC3\xA9") && files_name_ok_fat("\xE2\x82\xAC") && files_name_ok_fat("\xF0\x9F\x98\x80"));
     char out[FILES_PATH_MAX];
     CHECK(files_path_join("/sd", "x.txt", out, sizeof(out)) && !strcmp(out, "/sd/x.txt"));

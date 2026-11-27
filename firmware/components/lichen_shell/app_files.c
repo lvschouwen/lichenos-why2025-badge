@@ -108,7 +108,8 @@ static void add_volume_rows(void) {
 static void add_entry_rows(void) {
     files_entry_t const *entries = files_job_entries();
     for (size_t i = 0; i < s_v.count; i++) {
-        char label[FILES_NAME_MAX + 2], value[24] = "";
+        static char label[FILES_NAME_MAX + 2]; // UI task only; static keeps this frame under 512 B
+        char        value[24] = "";
         char path[FILES_PATH_MAX];
         snprintf(label, sizeof(label), "%s%s", entries[i].name, entries[i].dir ? "/" : "");
         if (files_path_join(s_v.dir, entries[i].name, path, sizeof(path)) && files_protected_entry(path, entries[i].dir)) {
