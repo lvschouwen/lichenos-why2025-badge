@@ -51,9 +51,10 @@ sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome);
 // After a mount attempt at tried_khz ended in outcome, on a card that chose negotiated_khz (card->max_freq_khz; 0 when
 // the card never got as far as the speed choice): the clock of the one retry, or 0 for none. Only a card that took
 // High Speed and then failed (card init, or the first reads of f_mount: SD_MOUNT_ERROR or a timeout reported as
-// SD_MOUNT_NO_CARD) is retried, at the default speed; a missing card, a card without FAT and a card that refused High
-// Speed (already at 20) are not.
-uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome);
+// SD_MOUNT_NO_CARD) is retried, at the default speed; a missing card, a card without FAT, a card that refused High
+// Speed (already at 20) and a mount that ran f_mkfs (formatted: the retry would erase the card a second time) are not.
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome,
+                                bool formatted);
 
 // The live SDMMC clock (#583): src_mhz / host_div, then / (2 * card_div) unless card_div is 0 (bypass). 0 for a
 // host_div of 0.

@@ -8,4 +8,5 @@ if(CONFIG_LICHEN_DEV_COMMANDS)
 endif()
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES board fatfs sdmmc esp_driver_sdmmc esp_driver_gpio heap freertos esp_timer fw_console vfs psram_guard soc)
+                       PRIV_REQUIRES board fatfs sdmmc esp_driver_sdmmc esp_driver_gpio heap freertos esp_timer fw_console vfs
+                                     psram_guard soc esp_hal_sd)

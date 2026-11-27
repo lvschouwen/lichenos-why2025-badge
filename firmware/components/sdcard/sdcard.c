@@ -22,6 +22,7 @@
 #include "sdmmc_cmd.h"
 #include "soc/hp_sys_clkrst_struct.h"
 #include "soc/sdmmc_struct.h"
+#include "hal/sdmmc_ll.h"
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -383,7 +384,8 @@ static FRESULT make_fat(void) {
     return res;
 }
 
-static sd_mount_outcome_t bring_up(bool format, uint32_t freq_khz, char *reason, size_t cap) {
+// *formatted: f_mkfs ran (whatever came of it), so a retry would format a second time
+static sd_mount_outcome_t bring_up(bool format, uint32_t freq_khz, bool *formatted, char *reason, size_t cap) {
     sd_mount_outcome_t outcome = power_and_probe(freq_khz, reason, cap);
     if (outcome != SD_MOUNT_OK) {
         return outcome;
@@ -404,6 +406,7 @@ static sd_mount_outcome_t bring_up(bool format, uint32_t freq_khz, char *reason,
         return SD_MOUNT_ERROR;
     }
     vfs_up      = true;
+    *formatted  = format;
     FRESULT res = format ? make_fat() : FR_OK;
     if (res != FR_OK) {
         snprintf(reason, cap, "format failed (FR %d)", (int)res);
@@ -433,22 +436,28 @@ static sd_mount_outcome_t bring_up(bool format, uint32_t freq_khz, char *reason,
     return SD_MOUNT_OK;
 }
 
-// "fw sd"'s live SDMMC clock (#583): the controller's source select and divider and both slots' card dividers, read
-// from the registers (as sdmmc_ll_get_clock_div decodes them), never through sdmmc_host_get_real_freq (sd_policy.h).
-// Only while the controller exists: its registers are not clocked otherwise.
+// "fw sd"'s live SDMMC clock (#583): the controller's source select (hand-read: sdmmc_ll has no getter) and divider,
+// and both slots' card dividers, from the registers, never through sdmmc_host_get_real_freq (sd_policy.h). Under the
+// controller lock: a controller delete (the C6 link's deinit with no card mounted, drop_empty_controller) gates the
+// bus clock and runs under it, and the reads then come from one moment.
 bool sd_bus_status(char *out, size_t cap) {
-    sdmmc_host_state_t state = {0};
-    if (sdmmc_host_get_state(&state) != ESP_OK || !state.host_initialized) {
+    if (!board_sdmmc_lock(SD_HOST_WAIT_MS)) {
         return false;
     }
-    uint32_t src_mhz  = HP_SYS_CLKRST.peri_clk_ctrl01.reg_sdio_ls_clk_src_sel ? 200 : 160;
-    bool     bypass   = HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_h == 0 &&
-                  HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_n == 0 &&
-                  HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_l == 0;
-    uint32_t host_div = bypass ? 1 : HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_l + 1;
-    uint32_t clkdiv   = SDMMC.clkdiv.val;
-    sd_bus_line(src_mhz, host_div, clkdiv & 0xFF, (clkdiv >> 8) & 0xFF, out, cap);
-    return true;
+    sdmmc_host_state_t state = {0};
+    bool               up    = sdmmc_host_get_state(&state) == ESP_OK && state.host_initialized;
+    uint32_t           src_mhz = 0, host_div = 0, card_div0 = 0, card_div1 = 0;
+    if (up) {
+        src_mhz   = HP_SYS_CLKRST.peri_clk_ctrl01.reg_sdio_ls_clk_src_sel ? 200 : 160;
+        host_div  = sdmmc_ll_get_clock_div(&SDMMC);
+        card_div0 = sdmmc_ll_get_card_clock_div(&SDMMC, 0);
+        card_div1 = sdmmc_ll_get_card_clock_div(&SDMMC, 1);
+    }
+    board_sdmmc_unlock();
+    if (up) {
+        sd_bus_line(src_mhz, host_div, card_div0, card_div1, out, cap);
+    }
+    return up;
 }
 
 // A card that took High Speed and then failed, in its card init (the SCR read back at 50 MHz) or in f_mount's first
@@ -456,9 +465,10 @@ bool sd_bus_status(char *out, size_t cap) {
 // 50 MHz still mounts. The retry starts from scratch: volume, slot and LDO released and made again, the card reset by
 // CMD0 (there is no guaranteed off-time for its VDD).
 static sd_mount_outcome_t bring_up_with_fallback(bool format, char *reason, size_t cap) {
-    sd_mount_outcome_t outcome    = bring_up(format, SD_CLOCK_HS_KHZ, reason, cap);
+    bool               formatted  = false;
+    sd_mount_outcome_t outcome    = bring_up(format, SD_CLOCK_HS_KHZ, &formatted, reason, cap);
     uint32_t           negotiated = card ? card->max_freq_khz : 0;
-    uint32_t           retry_khz  = sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, negotiated, outcome);
+    uint32_t           retry_khz  = sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, negotiated, outcome, formatted);
     if (retry_khz == 0) {
         return outcome;
     }
@@ -466,7 +476,7 @@ static sd_mount_outcome_t bring_up_with_fallback(bool format, char *reason, size
              (unsigned)retry_khz);
     bring_down();
     reason[0] = '\0';
-    return bring_up(format, retry_khz, reason, cap);
+    return bring_up(format, retry_khz, &formatted, reason, cap);
 }
 
 // With `lock` held. Logs one line either way: the default log level hides ESP_LOGI, and the bench wants to see it.

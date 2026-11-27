@@ -29,15 +29,19 @@ static void test_mount_plan(void) {
 }
 
 // #583: a card that took High Speed and failed at 50 MHz (card init, or f_mount's first reads) gets one retry at 20;
-// a missing card, a card without FAT, a card that refused High Speed and a 20 MHz try get none
+// a missing card, a card without FAT, a card that refused High Speed, a 20 MHz try and a format get none
 static void test_clock_fallback(void) {
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_ERROR) == SD_CLOCK_DEFAULT_KHZ);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NO_CARD) == SD_CLOCK_DEFAULT_KHZ);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_OK) == 0);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NOT_FAT) == 0);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR) == 0); // refused HS: at 20
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, 0, SD_MOUNT_NO_CARD) == 0);                  // never answered
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_DEFAULT_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_ERROR, false) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NO_CARD, false) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_OK, false) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NOT_FAT, false) == 0);
+    // Refused High Speed: already at 20
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR, false) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, 0, SD_MOUNT_NO_CARD, false) == 0); // never answered
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_DEFAULT_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR, false) == 0);
+    // A format that failed after f_mkfs ran at 50 MHz: no second erase
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_ERROR, true) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NO_CARD, true) == 0);
     CHECK(SD_CLOCK_HS_KHZ == 50000 && SD_CLOCK_DEFAULT_KHZ == 20000);
 }
 

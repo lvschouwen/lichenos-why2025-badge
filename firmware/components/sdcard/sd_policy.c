@@ -18,8 +18,9 @@ sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome) {
     }
 }
 
-uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome) {
-    bool failed = outcome == SD_MOUNT_ERROR || outcome == SD_MOUNT_NO_CARD;
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome,
+                                bool formatted) {
+    bool failed = !formatted && (outcome == SD_MOUNT_ERROR || outcome == SD_MOUNT_NO_CARD);
     return failed && tried_khz > SD_CLOCK_DEFAULT_KHZ && negotiated_khz > SD_CLOCK_DEFAULT_KHZ ? SD_CLOCK_DEFAULT_KHZ
                                                                                              : 0;
 }
