@@ -31,6 +31,9 @@ LICHEN_PROBE_ID=check cargo build --locked -q --release -p lichen-probe-p4 --tar
 step "release build: probe-psram (#620, stage all)"
 LICHEN_PSRAM_STAGE=all cargo build --locked -q --release -p lichen-probe-psram --target $TARGET --target-dir target/probe-psram
 
+step "perf lab (#648): perflab + probe-perf, own gate"
+./probe-perf/check.sh
+
 step "clippy -D warnings"
 CL=(cargo clippy --locked -q --target-dir target/clippy)
 "${CL[@]}" -p lichen-kcore -p lichen-abi --all-targets --target $HOST -- -D warnings
