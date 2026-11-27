@@ -52,6 +52,10 @@ Usage: $(basename "$0") <command> [args]
   restore <port> <file> --yes
                             write a backup image back at offset 0 (checks the .sha256 and that the chip
                             matches the backup's name; --yes confirms overwriting the whole flash)
+  load-ram <port> <image> [seconds]
+                            run an esptool RAM image (elf2image) through the ROM download mode: no flash write; prints
+                            its UART output until a line 'END ...' or [seconds] (default 20), then hard-resets the badge
+                            into the unchanged active slot (#608 bench probes; wait 75 s before console commands)
   monitor <port>            open a serial console: through the logger's socket while it runs (line by line, leave with
                             Ctrl-D), else miniterm with the logger paused (exit with Ctrl-])
   logger <install|start|stop|restart|status>
@@ -384,6 +388,18 @@ cmd_restore() {
     remote "mkdir -p $REMOTE_DIR/images"
     scp "$file" "$HOST:$REMOTE_DIR/images/restore.bin"
     esptool --port "$port" --baud "$BAUD" write-flash 0 "$REMOTE_DIR/images/restore.bin"
+}
+
+# Run a RAM image through the ROM download mode (#608): nothing is written to flash, a hard reset ends it.
+cmd_load_ram() {
+    local port=$1 image=$2 secs=${3:-20}
+    require_espressif_port "$port"
+    [ -f "$image" ] || { echo "no such image: $image" >&2; exit 1; }
+    case $secs in '' | *[!0-9]*) echo "seconds must be a number" >&2; exit 1 ;; esac
+    remote "mkdir -p $REMOTE_DIR/images"
+    scp -q "$REPO/tools/load_ram_run.py" "$HOST:$REMOTE_DIR/load_ram_run.py"
+    scp -q "$image" "$HOST:$REMOTE_DIR/images/load-ram.bin"
+    port_remote "$VENV/bin/python $REMOTE_DIR/load_ram_run.py '$port' $REMOTE_DIR/images/load-ram.bin $secs"
 }
 
 # The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in ~/badge-logs/badge-serial.log).
@@ -1091,6 +1107,7 @@ case "${1:-}" in
         fi ;;
     crash)    [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_crash "$2" "${3:-}" ;;
     restore)  [ $# -eq 4 ] || usage; cmd_restore "$2" "$3" "$4" ;;
+    load-ram) [ $# -ge 3 ] && [ $# -le 4 ] || usage; cmd_load_ram "$2" "$3" "${4:-}" ;;
     monitor)  [ $# -eq 2 ] || usage; cmd_monitor "$2" ;;
     console)      [ $# -eq 3 ] || usage; cmd_console "$2" "$3" ;;
     logger)       [ $# -eq 2 ] || usage; cmd_logger "$2" ;;
