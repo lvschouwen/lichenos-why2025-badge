@@ -132,9 +132,6 @@ static void test_result_records(void) {
 
 // Review M3 and M4: the trial rule by provenance, and the boot screen's row after the step
 static void test_trial_and_step(void) {
-    CHECK(sdu_trial_without_wifi(0));             // prepared by hand: physical access
-    CHECK(!sdu_trial_without_wifi(SDU_REC_WIFI)); // came over Wi-Fi: the Wi-Fi rule, so one that breaks Wi-Fi rolls back
-    CHECK(!sdu_trial_without_wifi(SDU_REC_WIFI | SDU_REC_TOLD | SDU_REC_FAILED));
     CHECK(sdu_step_of(SDU_SKIP_ABSENT, SDU_DONE) == SDU_STEP_SKIPPED);
     CHECK(sdu_step_of(SDU_SKIP_SAME, SDU_DONE) == SDU_STEP_DONE);
     CHECK(sdu_step_of(SDU_SKIP_TRIED, SDU_DONE) == SDU_STEP_SKIPPED);
@@ -149,28 +146,41 @@ static void test_trial_and_step(void) {
     CHECK(sdu_step_of((sdu_action_t)99, SDU_DONE) == SDU_STEP_SKIPPED);
 }
 
-// Security review of M3: the Wi-Fi provenance lives in the attempt record, not on the card. Whatever a Wi-Fi client
-// writes or deletes in the folder (a "marker" file included, if one were there) only ever sets the bit, and only an
-// install's own record clears it; the image a Wi-Fi push put there can't be made to look prepared by hand
+// Review H1: the Wi-Fi provenance is the pushed image's SHA-256 in the attempt record, not a file on the card. A Wi-Fi
+// delete of anything in the folder changes no record, so the pushed image keeps the Wi-Fi trial; a card prepared by
+// hand with another image gets the no-Wi-Fi trial
 static void test_wifi_provenance(void) {
-    uint8_t f = 0;
-    f         = sdu_flags_marked_wifi(f); // a Wi-Fi push of badge_fw.bin
-    CHECK(f & SDU_REC_WIFI);
-    f = sdu_flags_marked_wifi(f); // then a Wi-Fi delete of any file there (an old marker name, the .sha256): still set
-    CHECK(f == SDU_REC_WIFI);
-    f = sdu_flags_marked_wifi((uint8_t)(f | SDU_REC_TOLD)); // an overwrite after a told skip keeps both
-    CHECK(f == (SDU_REC_WIFI | SDU_REC_TOLD));
-    CHECK(!sdu_trial_without_wifi(f));
-    // The install: the attempt starts afresh (its trial took the bit into account), a failed image keeps it
-    CHECK(sdu_flags_after(SDU_REC_WIFI, SDU_DONE) == 0);
-    CHECK(sdu_flags_after(SDU_REC_WIFI, SDU_FAIL_IMAGE) == (SDU_REC_WIFI | SDU_REC_FAILED | SDU_REC_TOLD));
+    uint8_t pushed[SDU_SHA_LEN], hand[SDU_SHA_LEN], none[SDU_SHA_LEN] = {0};
+    memset(pushed, 0xA5, sizeof(pushed));
+    memset(hand, 0xA5, sizeof(hand));
+    hand[31] ^= 1;
+    uint8_t rec[SDU_SHA_LEN];
+    memcpy(rec, pushed, sizeof(rec)); // ota_sd_update_note_wifi_image before the pushed file landed
+    CHECK(!sdu_trial_without_wifi(pushed, rec)); // the pushed image: the Wi-Fi rule
+    // ... after any Wi-Fi delete in the folder (a marker-like name, the .sha256, badge_fw.bin itself pushed again): the
+    // record is untouched by deletes, so the same image still gets the Wi-Fi rule
+    CHECK(!sdu_trial_without_wifi(pushed, rec));
+    CHECK(sdu_trial_without_wifi(hand, rec));  // a different image copied on a PC: physical access
+    CHECK(sdu_trial_without_wifi(hand, none)); // nothing ever pushed over Wi-Fi
+    CHECK(sdu_trial_without_wifi(none, none)); // an all-zero record means none, never "matches"
+    // The record's flags: the attempt starts untold, a failed image is recorded failed and told, else unchanged
+    CHECK(sdu_flags_after(SDU_REC_TOLD, SDU_DONE) == 0);
+    CHECK(sdu_flags_after(0, SDU_FAIL_IMAGE) == (SDU_REC_FAILED | SDU_REC_TOLD));
     CHECK(sdu_flags_after(0, SDU_FAIL_READBACK) == (SDU_REC_FAILED | SDU_REC_TOLD));
-    for (int r = SDU_FAIL_READ; r <= SDU_FAIL_BOOT; r++) {
-        if (!sdu_result_records((sdu_result_t)r)) {
-            CHECK(sdu_flags_after(SDU_REC_WIFI, (sdu_result_t)r) == SDU_REC_WIFI); // not the image's: nothing cleared
-        }
+    CHECK(sdu_flags_after(SDU_REC_TOLD, SDU_FAIL_READ) == SDU_REC_TOLD);
+    CHECK(SDU_READBACK_TRIES == 2); // L1: one more read before a read-back mismatch is recorded
+    // The hex the server has (X-File-SHA256, lowercase from the receiver) to the bytes the record holds
+    char    hex[65];
+    uint8_t back[SDU_SHA_LEN];
+    for (int i = 0; i < SDU_SHA_LEN; i++) {
+        snprintf(hex + 2 * i, 3, "%02x", hand[i]);
     }
-    // The card's update folder is what sets it, every spelling of it (ota_path_test pins ota_path_in_sd_update)
+    CHECK(sdu_sha_from_hex(hex, back) && memcmp(back, hand, SDU_SHA_LEN) == 0);
+    hex[63] = 'g';
+    CHECK(!sdu_sha_from_hex(hex, back));
+    hex[63] = '\0';
+    CHECK(!sdu_sha_from_hex(hex, back)); // 63 digits
+    CHECK(!sdu_sha_from_hex(NULL, back));
 }
 
 int main(void) {

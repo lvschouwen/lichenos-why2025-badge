@@ -473,6 +473,12 @@ static void finish_stream(int fd) {
         staged_reset();
         return;
     }
+    // H1: before the swap, so a power cut after it can't leave a Wi-Fi image unrecorded
+    if (mapped && !ota_wifi_image_noted(fd, path, staged.file_sha256)) {
+        hook_end(false, false);
+        staged_reset();
+        return;
+    }
     bool locked = mapped && (!staged.sd || sd_begin(SD_FINISH_WAIT_MS));
     if (locked) {
         step = stream_swap(path, &err);

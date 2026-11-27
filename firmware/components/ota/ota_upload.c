@@ -12,6 +12,8 @@
 #include "ota_path.h"
 #include "ota_pieces.h"
 #include "ota_sd_stream.h"
+#include "ota_sd_update.h"
+#include "sd_update_policy.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "sha256.h"
@@ -292,6 +294,18 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
     return true;
 }
 
+bool ota_wifi_image_noted(int fd, char const *posix, char const *sha_hex) {
+    uint8_t sha[SDU_SHA_LEN];
+    if (!ota_path_is_sd_update_image(posix)) {
+        return true;
+    }
+    if (sdu_sha_from_hex(sha_hex, sha) && ota_sd_update_note_wifi_image(sha)) {
+        return true;
+    }
+    ota_respond(fd, 500, "couldn't record the SD card's update image as pushed over Wi-Fi, nothing written");
+    return false;
+}
+
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
 bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent,
                      char const *sha_hex) {
@@ -304,6 +318,10 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
     ESP_LOGI(TAG, "file push to %s: staging buffer %p, %zu bytes", vms, (void const *)data, len);
     if (!ota_drive_ready(fd, vms) || !ota_storage_room(fd, vms, len, 0, 0) || !ota_file_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
+    }
+    if (!ota_wifi_image_noted(fd, path, sha_hex)) {
+        ota_change_end(false);
+        return false;
     }
     // The change stays marked in progress until the rename has landed or failed: "fw onair on" in between must see it
     // (#454). A C6 file's change also stays pending through c6link_bundle_changed.

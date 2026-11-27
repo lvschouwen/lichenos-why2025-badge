@@ -783,6 +783,7 @@ static void start_c6link(boot_ctx_t *ctx) {
                                       .notice         = c6_card_notice,
                                       .image_trial_pending = ota_image_trial_pending}; // the rescue copy: off trial only
     c6link_set_boot_hooks(&boot);
+    ota_sweep_stale_temps(); // #595 M-a: before the C6 step's copy counts the free space, before the update server
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
     wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);
     settings_bind_net(); // the Wi-Fi credentials through the settings, passwords as secrets (#235): before any reader

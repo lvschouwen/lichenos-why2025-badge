@@ -140,10 +140,20 @@ static bool segment_is(char const *p, size_t len, char const *want) {
     return len == strlen(want) && strncasecmp(p, want, len) == 0;
 }
 
-bool ota_path_in_sd_update(char const *posix) {
-    static char const *const dir[] = {"sd", "lichen", "update"};
-    size_t                   k     = 0;
-    bool                     same  = true;
+char const *ota_flash_stale_temp(size_t i) {
+    static char const *const temps[] = {
+        STORAGE_BASE "/" OTA_TEMP_NAME,
+        STORAGE_BASE "/" OTA_STREAM_TEMP_NAME,
+        STORAGE_BASE "/c6/" OTA_TEMP_NAME,
+        STORAGE_BASE "/c6/" OTA_STREAM_TEMP_NAME,
+    };
+    return i < sizeof(temps) / sizeof(temps[0]) ? temps[i] : NULL;
+}
+
+bool ota_path_is_sd_update_image(char const *posix) {
+    static char const *const want[] = {"sd", "lichen", "update", "badge_fw.bin"};
+    size_t                   k      = 0;
+    bool                     same   = true;
     for (char const *p = posix; *p;) {
         if (*p == '/') {
             p++;
@@ -153,13 +163,11 @@ bool ota_path_in_sd_update(char const *posix) {
         if (p[0] == '.' && (len == 1 || (len == 2 && p[1] == '.'))) {
             return true; // anywhere, also after a segment that differs
         }
-        if (k < 3 && !segment_is(p, len, dir[k])) {
-            same = false;
-        }
+        same = same && k < 4 && segment_is(p, len, want[k]);
         k++;
         p += len;
     }
-    return same && k >= 3;
+    return same && k == 4;
 }
 
 bool ota_path_onair_held(char const *posix) {

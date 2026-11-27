@@ -103,6 +103,10 @@ typedef struct {
     char const *temp;
 } ota_place_names_t;
 bool        ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const *names, size_t len, long long sent);
+// Review H1: a file about to land at posix over Wi-Fi with the verified whole-file SHA-256 sha_hex: when it is the SD
+// card's update image, its SHA-256 is recorded first (the install keeps the Wi-Fi trial). False: answered 500, the
+// file must not land.
+bool        ota_wifi_image_noted(int fd, char const *posix, char const *sha_hex);
 bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent,
                             char const *sha_hex);
 bool        ota_finish_assets(int fd, uint8_t const *data, size_t len, long long sent);

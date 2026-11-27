@@ -72,23 +72,36 @@ static void test_onair_held(void) {
     CHECK(ota_path_onair_held("/sd/lichen/update./badge_fw.bin"));
     CHECK(ota_path_onair_held("//sd//lichen/x/../update/badge_fw.bin"));
     CHECK(ota_path_onair_held("/sd/lichen/update"));
-    // Review M3: which Wi-Fi writes leave the update folder's Wi-Fi marker (fails closed: it only makes a trial stricter)
-    CHECK(ota_path_to_posix("SD0:[lichen.update]badge_fw.bin", upd, sizeof(upd)) && ota_path_in_sd_update(upd));
-    CHECK(ota_path_to_posix("SD0:[lichen.update.c6]firmware.bin", upd, sizeof(upd)) && ota_path_in_sd_update(upd));
-    CHECK(ota_path_in_sd_update("/sd/lichen/update"));
-    CHECK(ota_path_in_sd_update("/SD/Lichen/UPDATE./badge_fw.bin"));
-    CHECK(ota_path_in_sd_update("//sd//lichen//update//badge_fw.bin.sha256"));
-    CHECK(ota_path_in_sd_update("/sd/lichen/apps/../update/badge_fw.bin"));
-    CHECK(ota_path_in_sd_update("/sd/./x"));
-    // Security review: a Wi-Fi delete or overwrite of a marker-like name in the folder is a write there like any other
-    CHECK(ota_path_in_sd_update("/sd/lichen/update/badge_fw.bin.wifi"));
-    CHECK(ota_path_in_sd_update("/sd/lichen/update/BADGE_FW.BIN.WIFI. "));
-    CHECK(!ota_path_in_sd_update("/sd/lichen/apps/x/app.elf"));
-    CHECK(!ota_path_in_sd_update("/sd/lichen/updates/badge_fw.bin"));
-    CHECK(!ota_path_in_sd_update("/sd/lichen"));
-    CHECK(!ota_path_in_sd_update("/storage/lichen/update/badge_fw.bin"));
-    CHECK(!ota_path_in_sd_update("/sd/badge_fw.bin"));
-    CHECK(!ota_path_in_sd_update(""));
+    // Review H1: which Wi-Fi writes record their SHA-256 as a Wi-Fi image: the update image, however FAT spells it (fails
+    // closed: the record only makes a trial stricter); a C6 file or anything else in the folder records nothing (L4)
+    CHECK(ota_path_to_posix("SD0:[lichen.update]badge_fw.bin", upd, sizeof(upd)) && ota_path_is_sd_update_image(upd));
+    CHECK(ota_path_to_posix("SD0:[LICHEN.UPDATE]BADGE_FW.BIN", upd, sizeof(upd)) && ota_path_is_sd_update_image(upd));
+    CHECK(ota_path_is_sd_update_image("/SD/Lichen/UPDATE./badge_fw.bin. "));
+    CHECK(ota_path_is_sd_update_image("//sd//lichen//update//badge_fw.bin"));
+    CHECK(ota_path_is_sd_update_image("/sd/lichen/apps/../update/badge_fw.bin"));
+    CHECK(ota_path_is_sd_update_image("/sd/./x"));
+    CHECK(ota_path_to_posix("SD0:[lichen.update.c6]firmware.bin", upd, sizeof(upd)) && !ota_path_is_sd_update_image(upd));
+    CHECK(!ota_path_is_sd_update_image("/sd/lichen/update/badge_fw.bin.sha256"));
+    CHECK(!ota_path_is_sd_update_image("/sd/lichen/update/badge_fw.bin.wifi"));
+    CHECK(!ota_path_is_sd_update_image("/sd/lichen/update/badge_fw.bin/x"));
+    CHECK(!ota_path_is_sd_update_image("/sd/lichen/update"));
+    CHECK(!ota_path_is_sd_update_image("/sd/lichen/updates/badge_fw.bin"));
+    CHECK(!ota_path_is_sd_update_image("/storage/lichen/update/badge_fw.bin"));
+    CHECK(!ota_path_is_sd_update_image("/sd/badge_fw.bin"));
+    CHECK(!ota_path_is_sd_update_image(""));
+    // FAT's short alias of badge_fw.bin (BADGE_~1.BIN) can't be named over Wi-Fi: '~' is no name character
+    CHECK(!ota_path_to_posix("SD0:[lichen.update]BADGE_~1.BIN", upd, sizeof(upd)));
+    // Review M-a: the FLASH0: temps a power cut can leave, in the root and the C6 folder, both names
+    size_t nt = 0;
+    for (char const *t; (t = ota_flash_stale_temp(nt)) != NULL; nt++) {
+        CHECK(strncmp(t, "/storage/", 9) == 0 && strstr(t, OTA_TEMP_NAME));
+    }
+    CHECK(nt == 4);
+    CHECK(strcmp(ota_flash_stale_temp(2), "/storage/c6/" OTA_TEMP_NAME) == 0);
+    CHECK(strcmp(ota_flash_stale_temp(3), "/storage/c6/" OTA_STREAM_TEMP_NAME) == 0);
+    char tmp_posix[OTA_PATH_MAX + 16 + sizeof(OTA_STREAM_TEMP_NAME)];
+    CHECK(ota_stream_temp_to_posix("FLASH0:[c6]firmware.bin", tmp_posix, sizeof(tmp_posix)) &&
+          strcmp(tmp_posix, ota_flash_stale_temp(3)) == 0); // the name a C6 push's stream really uses
     CHECK(!ota_path_onair_held("/storage/notes.txt"));
     CHECK(!ota_path_onair_held("/storage"));
     CHECK(!ota_path_onair_held(""));

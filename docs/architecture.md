@@ -290,7 +290,10 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   leave the old P4 with a rescue it cannot talk to; the first boot after the mark-valid copies), the bundle is copied
   into `/storage/c6`, the no-card rescue: room for a whole second bundle is checked first (`c6_card_copy_fits`; no
   room is a notice), all six files go into temps, each `.bin` is read back against its `.md5`, and only then are the
-  six renamed (a power cut between two renames can still mix them; the next boot with the card copies again). The
+  six renamed (a power cut between two renames can still mix them; the next boot with the card copies again). On a
+  trial boot the copy waits, with a notice to keep the card in until the next restart. Stale temps go first: the
+  copy's own `.new` files, and the FLASH0: upload temps a power cut left (`ota_sweep_stale_temps`, before the C6
+  step). The
   flasher completed with the bundle on the C6 (written this boot, or found there by its check) and IDENT did not prove
   it: NVS `c6_card_bad` records its key plus the running P4's ELF sha, and the boots after go back to `/storage/c6`
   until the card bundle or the P4 image changes. A flash cut short (a card read error) records nothing. The copy needs
@@ -302,12 +305,14 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   through a short-lived internal buffer, `esp_ota_end`, the slot read back with `esp_partition_read` and hashed
   (`esp_partition_get_sha256` returns the image's appended hash, never the file's), the attempt recorded, then
   `esp_ota_set_boot_partition` and `system_restart_asked`. The boot screen's *update* row (`BOOT_UPDATE`) shows the
-  write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). Any Wi-Fi write or delete under the
-  folder first sets `SDU_REC_WIFI` in the attempt record (NVS, not the card, so no Wi-Fi delete or overwrite can take it
-  away; `ota_file_change_begin` -> `ota_sd_update_mark_wifi`, not saved means not written). Without it the arrival is
-  marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is physical access, so the trial needs
-  no Wi-Fi (#411). With it the image keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls back; the install's own
-  record clears it (`sdu_flags_after`), and a card changed by hand after a Wi-Fi push gets the stricter rule once. A bad image rolls back and the
+  write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). A slot that reads back different
+  is read once more before it counts (`SDU_READBACK_TRIES`, the #569/#593 read-path flips). Before a `badge_fw.bin`
+  lands in the folder over Wi-Fi (whole push or the streamed finish, before the swap), its SHA-256 goes into the
+  attempt record (`wifi_sha`, NVS: `ota_wifi_image_noted` -> `ota_sd_update_note_wifi_image`; not saved means not
+  written); a C6 file or anything else there records nothing, and no Wi-Fi delete changes it. An image whose SHA-256 is
+  not that one is marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is physical access,
+  so the trial needs no Wi-Fi (#411). The pushed image keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls
+  back (`sdu_trial_without_wifi`). FAT's short alias (`BADGE_~1.BIN`) can't be named over Wi-Fi. A bad image rolls back and the
   record keeps it from installing again (one notice). A card pulled or a bad file before `set_boot` leaves the boot slot
   alone, with a notice. A power cut between the record and `set_boot` blocks that image until the file changes. An image that matched its `.sha256` but failed after the copy
   (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and
@@ -317,8 +322,9 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   (`ota_path_onair_held`, pinned in `ota_path_test.c`).
 - **Wi-Fi pushes:** `/info` says `sd0-card` while a card is mounted. With `sd0-stream` and `sd0-card` the firmware
   push of `tools/badge.sh` sends `badge_fw.bin` and then its `.sha256` to `SD0:[lichen.update]`, and its C6 push the
-  six files to `SD0:[lichen.update.c6]` (no `/prepare`: it would refuse file pushes); it reboots and polls `/info` for
-  the version, and the boot step installs. Without a card (D2) nothing is held whole in PSRAM: firmware comes only in
+  six files to `SD0:[lichen.update.c6]` (no `/prepare`: it would refuse file pushes); it reboots and polls `/info`,
+  then reports the P4 version (firmware) or the C6 step's IDENT line from `fw c6` (C6 bundle), and the boot step
+  installs. Without a card (D2) nothing is held whole in PSRAM: firmware comes only in
   pieces, straight into the inactive slot (a whole-body `PUT /firmware` is refused, `ota_whole_body_refused`); a file
   above `OTA_WHOLE_FILE_MAX` (256 KB) comes only in pieces, which on either drive go to a temp file next to the target
   (`ota_piece_http.c` `file_stream_open`, one piece buffer in PSRAM), are read back against the whole file's SHA-256

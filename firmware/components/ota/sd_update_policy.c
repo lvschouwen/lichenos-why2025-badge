@@ -101,12 +101,12 @@ sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r) {
     }
 }
 
-uint8_t sdu_flags_marked_wifi(uint8_t flags) {
-    return (uint8_t)(flags | SDU_REC_WIFI);
-}
-
-bool sdu_trial_without_wifi(uint8_t flags) {
-    return !(flags & SDU_REC_WIFI);
+bool sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wifi_sha[SDU_SHA_LEN]) {
+    uint8_t any = 0;
+    for (int i = 0; i < SDU_SHA_LEN; i++) {
+        any |= wifi_sha[i];
+    }
+    return !any || memcmp(digest, wifi_sha, SDU_SHA_LEN) != 0;
 }
 
 uint8_t sdu_flags_after(uint8_t old, sdu_result_t r) {
@@ -114,7 +114,7 @@ uint8_t sdu_flags_after(uint8_t old, sdu_result_t r) {
         return 0;
     }
     if (sdu_result_records(r)) {
-        return (uint8_t)(SDU_REC_FAILED | SDU_REC_TOLD | (old & SDU_REC_WIFI));
+        return (uint8_t)(SDU_REC_FAILED | SDU_REC_TOLD);
     }
     return old;
 }
@@ -130,6 +130,21 @@ static int hex_digit(char c) {
         return c - 'A' + 10;
     }
     return -1;
+}
+
+bool sdu_sha_from_hex(char const *hex, uint8_t out[SDU_SHA_LEN]) {
+    if (!hex || strlen(hex) != 2 * SDU_SHA_LEN) {
+        return false;
+    }
+    for (int i = 0; i < SDU_SHA_LEN; i++) {
+        int hi = hex_digit(hex[2 * i]);
+        int lo = hex_digit(hex[2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        out[i] = (uint8_t)(hi << 4 | lo);
+    }
+    return true;
 }
 
 bool sdu_sha256_text_ok(char const *text, size_t len, uint8_t const digest[SDU_SHA_LEN]) {

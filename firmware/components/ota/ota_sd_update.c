@@ -2,6 +2,7 @@
 #include "ota_sd_update.h"
 
 #include "fw_console.h"
+#include "ota_path.h"
 #include "ota_trial.h"
 #include "sd_update_policy.h"
 #include "sdcard.h"
@@ -22,6 +23,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 static char const TAG[] = "sd_update";
 
@@ -46,6 +48,7 @@ typedef struct {
     uint8_t  digest[SDU_SHA_LEN];  // SHA-256 of the whole card file
     uint8_t *buf;                  // SDU_PIECE bytes, internal
     uint8_t  flags;                // the attempt record's flags when the boot step began
+    uint8_t  wifi_sha[SDU_SHA_LEN]; // ... and its Wi-Fi image SHA-256
     int      err;                  // errno of a failed card read, for sd_end
 } sdu_job_t;
 
@@ -56,24 +59,30 @@ static void notice(bool warn, char const *title, char const *body) {
     }
 }
 
-static bool tried_read(uint8_t out[SDU_SHA_LEN], uint8_t *flags) {
+static bool tried_read(uint8_t out[SDU_SHA_LEN], uint8_t *flags, uint8_t wifi_sha[SDU_SHA_LEN]) {
     ota_sd_record_t r;
     *flags = 0;
+    memset(wifi_sha, 0, SDU_SHA_LEN);
     if (!s_hooks.record_get || !s_hooks.record_get(&r)) {
         return false;
     }
     memcpy(out, r.elf_sha, SDU_SHA_LEN);
+    memcpy(wifi_sha, r.wifi_sha, SDU_SHA_LEN);
     *flags = r.flags;
     return true;
 }
 
-// sha NULL clears the record (all zero). True only when saved.
-// sha NULL keeps no image (all zero) but the flags (the Wi-Fi bit outlives a failed attempt)
+// The attempt (sha NULL: none) and its flags; the Wi-Fi image's SHA-256 stays as stored. True only when saved.
 static bool tried_write(uint8_t const *sha, uint8_t flags) {
-    ota_sd_record_t r = {.flags = flags};
+    ota_sd_record_t r = {0};
+    if (!s_hooks.record_get || !s_hooks.record_get(&r)) {
+        memset(&r, 0, sizeof(r));
+    }
+    memset(r.elf_sha, 0, sizeof(r.elf_sha));
     if (sha) {
         memcpy(r.elf_sha, sha, SDU_SHA_LEN);
     }
+    r.flags = flags;
     return s_hooks.record_set && s_hooks.record_set(&r);
 }
 
@@ -190,8 +199,12 @@ static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
         return SDU_FAIL_SHA;
     }
     sdu_result_t r = slot ? write_slot(j, slot) : SDU_FAIL_NO_SLOT;
-    if (r == SDU_DONE && !slot_matches(j, slot)) {
-        r = SDU_FAIL_READBACK;
+    for (int t = 0; r == SDU_DONE && !slot_matches(j, slot); t++) {
+        if (t + 1 >= SDU_READBACK_TRIES) {
+            r = SDU_FAIL_READBACK;
+        } else {
+            ESP_LOGW(TAG, "the slot read back different: reading it again (a read-path flip, #593?)");
+        }
     }
     if (r != SDU_DONE) {
         return r;
@@ -201,13 +214,13 @@ static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
         return SDU_FAIL_RECORD;
     }
     if (esp_ota_set_boot_partition(slot) != ESP_OK) {
-        tried_write(NULL, j->flags); // never made the boot slot: not tried, the Wi-Fi bit stays
+        tried_write(NULL, j->flags); // never made the boot slot: not tried
         return SDU_FAIL_BOOT;
     }
-    if (sdu_trial_without_wifi(j->flags)) {
+    if (sdu_trial_without_wifi(j->digest, j->wifi_sha)) {
         ota_image_note_slot_switch(slot); // a card prepared by hand is physical access: no Wi-Fi needed (#411)
     } else {
-        ESP_LOGI(TAG, "the update folder was written over Wi-Fi: the image's trial keeps the Wi-Fi rule");
+        ESP_LOGI(TAG, "the image came over Wi-Fi: its trial keeps the Wi-Fi rule");
     }
     return SDU_DONE;
 }
@@ -253,7 +266,7 @@ static sdu_action_t look_and_install(sdu_job_t *j, sdu_result_t *r) {
     sdu_card_t card = read_head(j);
     uint8_t    tried[SDU_SHA_LEN];
     uint8_t    flags = 0;
-    bool       have  = tried_read(tried, &flags) && memcmp(tried, (uint8_t[SDU_SHA_LEN]){0}, SDU_SHA_LEN) != 0;
+    bool       have  = tried_read(tried, &flags, j->wifi_sha) && memcmp(tried, (uint8_t[SDU_SHA_LEN]){0}, SDU_SHA_LEN) != 0;
     j->flags         = flags;
     bool       ok    = card == SDU_CARD_OK;
     uint8_t const *running = esp_app_get_description()->app_elf_sha256;
@@ -301,17 +314,26 @@ void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks) {
     }
 }
 
-bool ota_sd_update_mark_wifi(void) {
+void ota_sweep_stale_temps(void) {
+    char const *t;
+    for (size_t i = 0; (t = ota_flash_stale_temp(i)) != NULL; i++) {
+        if (unlink(t) == 0) {
+            ESP_LOGW(TAG, "removed %s, left by an upload a power cut ended", t);
+        }
+    }
+}
+
+bool ota_sd_update_note_wifi_image(uint8_t const sha[32]) {
     ota_sd_record_t r = {0};
     if (!s_hooks.record_get || !s_hooks.record_set) {
-        return false; // no store: fail closed, the write is refused
+        return false; // no store: fail closed, the file is not put in place
     }
     if (!s_hooks.record_get(&r)) {
         memset(&r, 0, sizeof(r)); // none stored yet
     }
-    if (r.flags & SDU_REC_WIFI) {
-        return true; // already set: no NVS wear per piece
+    if (memcmp(r.wifi_sha, sha, SDU_SHA_LEN) == 0) {
+        return true; // the same image again: no NVS write
     }
-    r.flags = sdu_flags_marked_wifi(r.flags);
+    memcpy(r.wifi_sha, sha, SDU_SHA_LEN);
     return s_hooks.record_set(&r);
 }

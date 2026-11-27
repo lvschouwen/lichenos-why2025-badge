@@ -24,10 +24,16 @@ bool ota_stream_temp_to_posix(char const *vms, char *out, size_t cap);
 // counts as held (fails closed).
 bool ota_path_onair_held(char const *posix);
 
-// Whether a posix path is the SD card's update folder (/sd/lichen/update, #595) or anything under it: a Wi-Fi write or
-// delete there leaves the Wi-Fi marker first (ota_sd_update_mark_wifi, review M3). By segment, any case, trailing dots
-// and spaces dropped; "." or ".." anywhere counts as inside (fails closed: the marker only makes a trial stricter).
-bool ota_path_in_sd_update(char const *posix);
+// Whether a posix path is the image in the SD card's update folder (/sd/lichen/update/badge_fw.bin, #595): one landing
+// there over Wi-Fi has its SHA-256 recorded first (ota_sd_update_note_wifi_image, review H1). By segment, any case,
+// trailing dots and spaces dropped (FAT folds them); "." or ".." anywhere counts as it (fails closed: the record only
+// makes a trial stricter).
+bool ota_path_is_sd_update_image(char const *posix);
+
+// Review M-a: the temp files a FLASH0: upload leaves behind when the power goes mid-upload (OTA_TEMP_NAME and
+// OTA_STREAM_TEMP_NAME in the /storage root and C6_IMAGE_DIR, where badge.sh pushes), i = 0.. until NULL. Removed once per
+// boot before the C6 step (ota_sweep_stale_temps), so an orphan never eats the room the card's C6 copy needs.
+char const *ota_flash_stale_temp(size_t i);
 
 // The decisions of an upload that don't need hardware, so the host tests pin them (#528)
 // Offset of the next '/' that ends a directory of a /storage or /sd path, after from (0: start), skipping the mount

@@ -282,6 +282,17 @@ static bool copy_room(void) {
     return c6_card_copy_fits(known, free_b, sizes);
 }
 
+// A copy a power cut ended: its temps must not count against the room (review M-a). Own frame: the paths stay off
+// c6_card_finish's stack.
+__attribute__((noinline)) static void sweep_copy_temps(void) {
+    copy_paths_t p;
+    for (int k = 0; k < 6; k++) {
+        if (pair_paths(k / 2, k % 2, &p)) {
+            unlink(p.tmp);
+        }
+    }
+}
+
 typedef enum { COPY_OK, COPY_NO_ROOM, COPY_FAILED } copy_t;
 
 static copy_t copy_to_storage(void) {
@@ -291,6 +302,7 @@ static copy_t copy_to_storage(void) {
     }
     copy_t r   = COPY_FAILED;
     int    err = 0;
+    sweep_copy_temps();
     if (sd_mounted() && sd_begin(CARD_WAIT_MS)) {
         r = !copy_room() ? COPY_NO_ROOM : copy_all(buf, &err) ? COPY_OK : COPY_FAILED;
         sd_end(r == COPY_FAILED && err ? sd_io_from_errno(err) : SD_IO_OK);
@@ -338,6 +350,9 @@ void c6_card_finish(bool on_c6, bool ident_ok) {
     default:
         if (s.from_card && ident_ok) {
             ESP_LOGI(TAG, "card bundle proven; copied to " C6_IMAGE_DIR " at the first boot off trial");
+            c6_hooks_notice("C6 updated from the SD card",
+                            "Keep the card in until the next restart: the copy used without a card is made once this "
+                            "version is confirmed"); // review L2
         }
         break;
     }

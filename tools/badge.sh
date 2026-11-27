@@ -570,12 +570,18 @@ ota_version() {
 # After the files are on the card: reboot, wait for the badge to come back (an install restarts it once more), and say
 # what it runs. The boot step may skip an image (tried before, a mismatch, on trial): an unchanged version says so.
 ota_sd_reboot_wait() {
-    local ip=$1 before=$2 i now
+    local ip=$1 before=$2 what=${3:-p4} i now
     echo "rebooting: the badge installs from its SD card at boot (C6 first, then the P4)..."
     cmd_ota_reboot "$ip" > /dev/null 2>&1 || true
     sleep 20 # let it go down before polling
     for i in $(seq 1 48); do
         now=$(ota_version "$ip" 2>/dev/null || true)
+        if [ -n "$now" ] && [ "$what" = c6 ]; then
+            # A C6 bundle does not change the P4's version: the C6 step's own line says what the C6 runs (IDENT)
+            echo "the badge is back after about $((20 + (i - 1) * 5)) s; its C6 step:"
+            cmd_fw "$ip" c6 2>&1 | grep -m1 'IDENT' || echo "  (no C6 status over Wi-Fi: check 'fw $ip c6')"
+            return 0
+        fi
         if [ -n "$now" ]; then
             if [ "$now" = "$before" ]; then
                 echo "the badge is back after about $((20 + (i - 1) * 5)) s, still on $now: nothing new was installed (see its notices, or 'fw $ip log')"
@@ -988,7 +994,7 @@ ota_c6_sd() {
             fi
         done
     done
-    ota_sd_reboot_wait "$ip" "$before"
+    ota_sd_reboot_wait "$ip" "$before" c6
 }
 
 cmd_ota_c6() {
