@@ -50,7 +50,6 @@ const LOCK_B: usize = 0x4FF5_B800; // B2 TOR, 256 B
 // CLIC (clic_reg.h): per-core window, other core at +0x10000; line i control word at CTRL + 4 * i.
 const CLIC_THRESH: usize = 0x2080_0008;
 const CLIC_CTRL: usize = 0x2080_1000;
-const OTHER_CORE: usize = 0x1_0000;
 const TEST_CPU_LINE: usize = 25;
 const TEST_ID: usize = 16 + TEST_CPU_LINE; // CLIC_EXT_INTR_NUM_OFFSET
 const fn clic_byte(core_off: usize, id: usize, byte: usize) -> usize {
@@ -358,6 +357,8 @@ fn u_write_probe(id: &str, what: &str, addr: usize, val: u32, byte: bool) {
         check(id, None, format_args!("{what} {addr:#x}: M read traps {} -> skipped", show(before)));
         return;
     };
+    let ctl = user(uaddr(u_load), addr & !3, 0, false);
+    pl!("{id} control: U read of {:#x} with the PMP grant: {ctl} a0={:#x}", addr & !3, ctl.a0);
     let stub = if byte { u_storeb as unsafe extern "C" fn() } else { u_store };
     let t = user(uaddr(stub), addr, val as usize, false);
     let after = if byte { m_lbu(addr).map(u32::from) } else { m_lw(addr) };
@@ -381,9 +382,8 @@ fn b4_clic_from_u() {
     for (name, off) in hw_clint::CANDIDATES {
         u_write_probe("B4.clint", name, 0x2000_0000 + off, 0x0, false);
     }
-    begin("B4.other-core");
-    u_write_probe("B4.other-thresh", "other core CLIC threshold", CLIC_THRESH + OTHER_CORE, 0xFF00_0000, false);
-    u_write_probe("B4.other-ie", "other core CLIC ie line 41", clic_byte(OTHER_CORE, TEST_ID, 1), 1, true);
+    // The other core's windows (CLIC_THRESH + OTHER_CORE, ...) are not probed: with core 1 held off in ROM state
+    // an M read of them stalled the bus until reset (#608 run 1, probe ed277b62).
     pmp_off(E_T1);
 }
 mod hw_clint {
