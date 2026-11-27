@@ -203,6 +203,11 @@ size_t ota_first_diff_block(ota_read_fn read, void *ctx, uint8_t const *data, si
     return (size_t)-1;
 }
 
+bool ota_line_inside(uintptr_t buf, size_t len, uintptr_t at, size_t line, uintptr_t *start) {
+    *start = at & ~(uintptr_t)(line - 1);
+    return *start >= buf && len >= line && *start - buf <= len - line;
+}
+
 size_t ota_pieces_check_read(ota_pieces_t const *p, ota_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len,
                              size_t *bad, size_t max) {
     size_t differ = 0;

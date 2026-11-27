@@ -98,63 +98,101 @@ static uint8_t peek(uint8_t const *p) {
     return *(volatile uint8_t const *)p;
 }
 
-// What the staging buffer holds now for one byte the file got wrong (#593, the #569 signature: one bit, 0 -> 1): the
-// plain read, and the read after the cache line is invalidated. Tells a read-path transient during the copy (staging
-// right now) from a stored change (wrong even after the invalidate).
-static void log_flip(size_t off, uint8_t in_file, uint8_t const *data) {
-    uint8_t const *at   = data + off;
-    uint8_t        now  = peek(at);
-    uintptr_t      line = (uintptr_t)at & ~(uintptr_t)(CACHE_LINE - 1);
-    esp_err_t      err  = esp_cache_msync((void *)line, CACHE_LINE, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
-    uint8_t        inv  = peek(at);
-    ESP_LOGW(TAG, "flip at file offset 0x%zx, psram %p: file 0x%02x, staging now 0x%02x, after invalidate 0x%02x (%s)", off,
-             (void const *)at, in_file, now, inv, err == ESP_OK ? "msync ok" : esp_err_to_name(err));
+// One byte the file got wrong (#593, the #569 signature: one bit, 0 -> 1), found with plain reads before any msync
+typedef struct {
+    size_t  off;
+    uint8_t in_file, staging;
+} flip_t;
+
+// The staging byte again after its cache line is written back and invalidated: tells a read-path transient during the
+// copy (right now) from a stored change (still wrong from PSRAM). Only a line that lies wholly inside the buffer is
+// synced: the single-file path's buffer is a plain malloc, and a line shared with a neighbouring block is left alone.
+static void log_flip(flip_t const *fl, uint8_t const *data, size_t len) {
+    uint8_t const *at = data + fl->off;
+    uintptr_t      line;
+    if (!ota_line_inside((uintptr_t)data, len, (uintptr_t)at, CACHE_LINE, &line)) {
+        ESP_LOGW(TAG, "flip at file offset 0x%zx, psram %p: file 0x%02x, staging 0x%02x (msync skipped: line not inside "
+                      "the buffer)", fl->off, (void const *)at, fl->in_file, fl->staging);
+        return;
+    }
+    esp_err_t err = esp_cache_msync((void *)line, CACHE_LINE,
+                                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+    uint8_t   inv = peek(at);
+    ESP_LOGW(TAG, "flip at file offset 0x%zx, psram %p: file 0x%02x, staging 0x%02x, after write-back+invalidate 0x%02x (%s)",
+             fl->off, (void const *)at, fl->in_file, fl->staging, inv, err == ESP_OK ? "msync ok" : esp_err_to_name(err));
 }
 
-// The differing bytes of the temp file against the staging buffer (up to DIFF_LOG_MAX), and whether the staging buffer
-// still hashes to the whole file's SHA-256: all of it only runs after a mismatch.
-__attribute__((noinline)) static void log_flips(FILE *f, uint8_t const *data, size_t len, uint8_t *bounce, size_t cap, char const *sha_hex) {
-    size_t logged = 0;
-    for (size_t at = 0; at < len && logged < DIFF_LOG_MAX; at += cap) {
+// Up to DIFF_LOG_MAX bytes where the temp file differs from the staging buffer, with plain reads only
+static size_t collect_flips(FILE *f, uint8_t const *data, size_t len, uint8_t *bounce, size_t cap, flip_t *out) {
+    size_t n_out = 0;
+    for (size_t at = 0; at < len && n_out < DIFF_LOG_MAX; at += cap) {
         size_t n = len - at < cap ? len - at : cap;
         if (file_read(f, at, bounce, n) != 0) {
             break;
         }
-        for (size_t i = 0; i < n && logged < DIFF_LOG_MAX; i++) {
-            if (bounce[i] != data[at + i]) {
-                log_flip(at + i, bounce[i], data);
-                logged++;
+        for (size_t i = 0; i < n && n_out < DIFF_LOG_MAX; i++) {
+            uint8_t now = peek(data + at + i);
+            if (bounce[i] != now) {
+                out[n_out++] = (flip_t){.off = at + i, .in_file = bounce[i], .staging = now};
             }
         }
     }
-    uint8_t digest[SHA256_DIGEST_LEN];
-    char    hex[OTA_SHA256_HEX + 1];
+    return n_out;
+}
+
+// Whether the staging buffer still hashes to the whole file's SHA-256, taken before anything else touches it
+static bool staging_hashes(uint8_t const *data, size_t len, char const *sha_hex) {
+    uint8_t      digest[SHA256_DIGEST_LEN];
+    char         hex[OTA_SHA256_HEX + 1];
     sha256_ctx_t sha;
     sha256_init(&sha);
     sha256_update(&sha, data, len);
     sha256_final(&sha, digest);
     ota_hex(digest, sizeof(digest), hex);
-    ESP_LOGW(TAG, "staging buffer %p now hashes %s the whole file's SHA-256 (%zu differing bytes logged)", (void const *)data,
-             strcmp(hex, sha_hex) == 0 ? "to" : "NOT to", logged);
+    return strcmp(hex, sha_hex) == 0;
+}
+
+// The diagnosis after a mismatch: the staging hash first, then the differing bytes by plain reads, then the probes,
+// so no msync taints a read that comes after it
+__attribute__((noinline)) static void log_flips(char const *temp, FILE *f, uint8_t const *data, size_t len, uint8_t *bounce,
+                                                size_t cap, char const *sha_hex) {
+    bool   same = staging_hashes(data, len, sha_hex);
+    size_t bad  = ota_first_diff_block(file_read, f, data, len, bounce, cap, 4096);
+    char   block[24] = "none";
+    if (bad != (size_t)-1) {
+        snprintf(block, sizeof(block), "at %zu", bad);
+    }
+    flip_t flips[DIFF_LOG_MAX];
+    size_t n = collect_flips(f, data, len, bounce, cap, flips);
+    ESP_LOGW(TAG, "read-back of %s differs, first differing 4 KB block %s; staging buffer %p hashes %s the whole file's "
+                  "SHA-256 (%zu differing bytes logged)", temp, block, (void const *)data, same ? "to" : "NOT to", n);
+    for (size_t i = 0; i < n; i++) {
+        log_flip(&flips[i], data, len);
+    }
 }
 
 // Read the temp file back and compare its SHA-256 with the whole file's (#593): a bit that flipped between the check
 // in PSRAM and the flash is caught here, before the swap, instead of at the next boot. The bounce buffer is internal.
-__attribute__((noinline)) static bool written_ok(char const *temp, uint8_t const *data, size_t len, char const *sha_hex) {
+// OTA_PLACE_WRITE (errno set) when the temp can't be opened or read, OTA_PLACE_VERIFY when it differs.
+__attribute__((noinline)) static ota_place_t written_ok(char const *temp, uint8_t const *data, size_t len, char const *sha_hex) {
     FILE *f = fopen(temp, "rb");
     if (!f) {
-        return false;
+        int e = errno;
+        ESP_LOGW(TAG, "read-back of %s: can't open it (%s)", temp, strerror(e));
+        errno = e;
+        return OTA_PLACE_WRITE;
     }
     uint8_t bounce[FLASH_CHUNK_BOUNCE];
     int     res = ota_readback_check(file_read, f, len, bounce, sizeof(bounce), sha_hex);
-    if (res != 0) {
-        size_t bad = ota_first_diff_block(file_read, f, data, len, bounce, sizeof(bounce), 4096);
-        ESP_LOGW(TAG, "read-back of %s %s, first differing 4 KB block at %zu", temp,
-                 res < 0 ? "failed" : "differs", bad == (size_t)-1 ? (size_t)0 : bad);
-        log_flips(f, data, len, bounce, sizeof(bounce), sha_hex);
+    int     e   = errno;
+    if (res < 0) {
+        ESP_LOGW(TAG, "read-back of %s failed (%s), first differing 4 KB block none", temp, strerror(e));
+    } else if (res > 0) {
+        log_flips(temp, f, data, len, bounce, sizeof(bounce), sha_hex);
     }
     fclose(f);
-    return res == 0;
+    errno = e;
+    return res == 0 ? OTA_PLACE_OK : res < 0 ? OTA_PLACE_WRITE : OTA_PLACE_VERIFY;
 }
 
 // Room for an upload of size bytes on the drive vms names (#299), else a 507 now instead of a failed write after the
@@ -211,9 +249,8 @@ static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8
     ota_mkdir_parents(path);
     unlink(temp); // left by an upload that was cut; only the target's own directory is cleaned
     ota_place_t step = write_file(temp, data, len) ? OTA_PLACE_OK : OTA_PLACE_WRITE;
-    if (step == OTA_PLACE_OK && !written_ok(temp, data, len, sha_hex)) {
-        step = OTA_PLACE_VERIFY; // the old file stays; the temp is dropped
-        errno = EIO;
+    if (step == OTA_PLACE_OK) {
+        step = written_ok(temp, data, len, sha_hex); // on a failure the old file stays; the temp is dropped
     }
     if (step == OTA_PLACE_OK) {
         step = ota_swap_temp(path, temp, sd);
@@ -237,7 +274,7 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
         return false;
     }
     if (step == OTA_PLACE_VERIFY) {
-        ota_respond(fd, 400, "%s arrived damaged in storage (read-back differs), file left as it was, send it again", vms);
+        ota_respond(fd, 400, OTA_READBACK_REPLY, vms);
         return false;
     }
     if (step == OTA_PLACE_LOST) {
@@ -278,7 +315,8 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
     int err  = 0;
     ota_place_t step = place_file(path, temp, sd, data, len, sha_hex, &err);
     if (sd) {
-        sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
+        // A read-back that differs is damage in memory, not the card failing (#593)
+        sd_end(step == OTA_PLACE_OK ? SD_IO_OK : step == OTA_PLACE_VERIFY ? SD_IO_NEUTRAL : sd_io_from_errno(err));
     }
     ota_change_end(false);
     ota_place_names_t const names = {.vms = vms, .path = path, .temp = temp};

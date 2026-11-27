@@ -372,6 +372,21 @@ int main(void) {
     f.len = sizeof(data);
     CHECK(ota_readback_check(fake_read, &f, sizeof(data), scratch, sizeof(scratch), "nothex") == -1);
 
+    // The cache line a flip probe may sync (#593): only one wholly inside the buffer
+    uintptr_t line = 0;
+    CHECK(ota_line_inside(0x1000, 4096, 0x1000, 128, &line) && line == 0x1000);   // the first line, exact fit
+    CHECK(ota_line_inside(0x1000, 4096, 0x1fff, 128, &line) && line == 0x1f80);   // the last line, exact fit
+    CHECK(ota_line_inside(0x1000, 128, 0x1040, 128, &line) && line == 0x1000);    // a buffer of one line
+    CHECK(!ota_line_inside(0x1010, 4096, 0x1020, 128, &line) && line == 0x1000);  // unaligned start: shared head line
+    CHECK(ota_line_inside(0x1010, 4096, 0x1090, 128, &line) && line == 0x1080);   // the next line is the buffer's own
+    CHECK(!ota_line_inside(0x1000, 4000, 0x1f90, 128, &line) && line == 0x1f80);  // ragged tail: shared last line
+    CHECK(!ota_line_inside(0x1000, 100, 0x1010, 128, &line));                      // shorter than a line
+    CHECK(!ota_line_inside(0x1010, 128, 0x1020, 128, &line));                      // one line long, but straddling
+
+    // The read-back reply must not make badge.sh resend just the last piece (#593)
+    CHECK(strstr(OTA_READBACK_REPLY, "send it again") == NULL);
+    CHECK(strstr(OTA_READBACK_REPLY, "read-back differs") != NULL);
+
     // Flash pieces: sector-aligned start; whole sectors long unless last
     CHECK(ota_piece_flash_ok(0, 131072, 1784656, 4096));
     CHECK(ota_piece_flash_ok(1703936, 80720, 1784656, 4096)); // the last, ragged piece

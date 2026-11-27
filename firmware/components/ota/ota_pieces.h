@@ -106,6 +106,15 @@ int ota_readback_check(ota_read_fn read, void *ctx, size_t len, uint8_t *scratch
 size_t ota_first_diff_block(ota_read_fn read, void *ctx, uint8_t const *data, size_t len, uint8_t *scratch,
                             size_t scratch_len, size_t block);
 
+// Whether the cache line of size line holding at lies fully inside the buffer [buf, buf + len) (#593): only such a
+// line may be written back and invalidated to probe a flip, a line shared with a neighbouring heap block may not.
+// *start is the line's first address.
+bool ota_line_inside(uintptr_t buf, size_t len, uintptr_t at, size_t line, uintptr_t *start);
+
+// The reply to a file whose read-back differs (#593): the whole file is gone from the staging buffer by then, so it
+// must not carry the words badge.sh resends a single piece on ("send it again")
+#define OTA_READBACK_REPLY "%s arrived damaged in storage (read-back differs), file left as it was; push the whole file again"
+
 // ota_pieces_check over a store: indices of the pieces that differ (an unreadable piece counts as differing)
 size_t ota_pieces_check_read(ota_pieces_t const *p, ota_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len,
                              size_t *bad, size_t max);
