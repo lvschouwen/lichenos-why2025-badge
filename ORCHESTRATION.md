@@ -53,9 +53,8 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-27 21:30, v3 sprint)
-- v3 tip 67ed44dc (pushed): #612 + #646 merged and closed; leftovers on #647, #617, #619. v3 merges: rebase, ff-only, ./v3/check.sh, push.
-- v3 slots: `agent-wt done` refuses branches merged into v3 (not main). Recipe: `git -C <slot> checkout --detach origin/v3 && agent-wt release <slot>`; the branch stays (wt-5/wt-6 #612 branches kept).
-- wt-8 feat/620-v3-psram: fix commit 0dcdf4e7 (check green, bench PASS 360/120 and 400/160). Delta review by review-620 running. Then ff onto v3, ./v3/check.sh, push, close #620 (known limit: uncached single-word writes) and #645 (default 360/120).
-- #648 perf lab: Phase 0 research agent perflab-research (read-only) writes the scratchpad file 648-phase0.md; main posts it. Phases 1-2 start after #620 is on v3. Owner priority: 360/200.
+- v3 tip 4401d881 (pushed): #612, #646, #620, #645 merged and closed. v3 merges: rebase, ff-only, ./v3/check.sh, push.
+- v3 slots: `agent-wt done` refuses branches merged into v3 (not main). Recipe: `git -C <slot> checkout --detach origin/v3 && agent-wt release <slot>`; the branch stays (wt-5/6/8 branches kept).
+- #648 perf lab: Phase 0 posted; owner decisions on the issue. Phase 0b (BadgeVMS PSRAM 200 + LDO) running in perflab-research (read-only), writes the scratchpad file 648-phase0b.md; main posts it. Phases 1-2 can start now; fix #650 before the 160/200 runs.
 - Bench lock: one load-ram at a time, runs of 120 s or less; roadmap first. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
 - #615 next steps are owner flash writes.
