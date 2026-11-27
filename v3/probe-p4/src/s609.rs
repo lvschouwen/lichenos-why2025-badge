@@ -4,7 +4,8 @@
 //! - pmp1 (check 2): U reads and writes the CPU-peripheral window that the bootloader's locked pmp1 grants every mode.
 //! - c1timer (check 3): core 1's CLINT timer preempts a U spin loop TICKS times; period and jitter in mtime ticks.
 //! - psram (check 4): the probe maps one PSRAM page; U exec and write through the cached and uncached aliases.
-//! - dgpio (check 5): U reads and writes of the dedicated-GPIO CSRs 0x803-0x805.
+//! - dgpio (check 5): U reads and writes of the dedicated-GPIO CSRs 0x803-0x805. Also a load-ram suite in ROM state
+//!   (LICHEN_PROBE_RUN=dgpio), the route #609 row 5 uses since the rows 1-4 moved to #612 and #615.
 //!
 //! Each suite ends in one verdict, `CHECK [C1.]609.<n> PASS|FAIL <probe id> ...` (C1. when core 1 prints it). PASS
 //! means the isolation property holds (check 1: the kernel owns all 16 core-1 PMP entries); FAIL is either a hole or a
@@ -30,7 +31,9 @@ pub const fn known(s: &str) -> bool {
     false
 }
 const fn verdict_id() -> &'static str {
-    if suite_is("c1pmp") {
+    if crate::run_is("dgpio") {
+        "609.5"
+    } else if suite_is("c1pmp") {
         "609.1"
     } else if suite_is("pmp1") {
         "609.2"
@@ -672,7 +675,8 @@ fn dgpio_routes() -> (u32, u32) {
     pl!("609.5 GPIO matrix: {out} of {PADS} pads driven by a CORE_GPIO output, {inp} CORE_GPIO inputs fed by a pad, {err} registers unreadable");
     (out + err, inp)
 }
-fn dgpio() {
+/// Also the load-ram suite LICHEN_PROBE_RUN=dgpio (#609 row 5 after the rescope): ROM state, pmain parks after it.
+pub fn dgpio() {
     begin("609.5");
     setup_u();
     let (routed, inputs) = dgpio_routes();

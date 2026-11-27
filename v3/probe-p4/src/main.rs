@@ -39,7 +39,7 @@ extern "C" {
 
 const PROBE_ID: &str = env!("LICHEN_PROBE_ID");
 /// LICHEN_PROBE_RUN picks the suite: "b5" (default, run 10), "b6" (run 9), "core1" (run 8), "core0" (runs 1-7) or
-/// "app" (step 3b): an app image the v6.1 bootloader loads from ota_1, see app_desc.rs.
+/// "app" (step 3b): an app image the v6.1 bootloader loads from ota_1, see app_desc.rs; "dgpio" (#609 row 5, s609.rs).
 const RUN: &str = match option_env!("LICHEN_PROBE_RUN") {
     Some(r) => r,
     None => "b5",
@@ -184,6 +184,16 @@ extern "C" fn pmain() -> ! {
         pl!("END ok");
         hw::drain();
         app_desc::reset(); // the bootloader then finds ota_1 still pending-verify, marks it aborted, boots ota_0
+    }
+    if const { run_is("dgpio") } {
+        pl!("lichen-probe-p4 {PROBE_ID} (#609 row 5), core 0, ROM download-mode state: dedicated-GPIO CSRs from U");
+        s609::dgpio();
+        pl!("END ok");
+        hw::drain();
+        loop {
+            // SAFETY: park; the host hard-resets the badge after END.
+            unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+        }
     }
     if const { run_is("b6") } {
         pl!("lichen-probe-p4 {PROBE_ID} (#608 run 9), core 0, ROM download-mode state: B6 mtime clock and violation record");
