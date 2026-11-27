@@ -157,7 +157,10 @@ fn random_cached(seed: u32) -> bool {
         off += CHUNK;
     }
     let a = verdict(
-        format_args!("random fill {seed:#x}, cached write, read back uncached (the memory itself), 32 MB"),
+        format_args!(
+            "random fill {seed:#x}, cached write, read back uncached (the memory itself), {} MB",
+            TEST_BYTES >> 20
+        ),
         &truth,
     );
     let b =
