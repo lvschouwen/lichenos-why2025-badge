@@ -39,6 +39,7 @@ const ROM_CACHE_WRITEBACK_INVALIDATE_ADDR: usize = 0x4FC0_03FC;
 /// CACHE_MAP_L1_DCACHE | CACHE_MAP_L2_CACHE (rom/cache.h)
 const MAP_DATA: u32 = (1 << 4) | (1 << 5);
 
+const ROM_CACHE_SET_L2_MODE: usize = 0x4FC0_03D4;
 const ROM_CACHE_INVALIDATE_ALL: usize = 0x4FC0_0404;
 /// CACHE_MAP_L2_CACHE
 const MAP_L2: u32 = 1 << 5;
@@ -52,6 +53,16 @@ const MAP_L2: u32 = 1 << 5;
 pub unsafe fn cache_invalidate_all_l2() -> i32 {
     let f: extern "C" fn(u32) -> i32 = core::mem::transmute(ROM_CACHE_INVALIDATE_ALL);
     f(MAP_L2)
+}
+
+/// IDF `cache_hal_init_l2_cache`: `Cache_Set_L2_Cache_Mode(size, ways, line)`. v2 uses 256 KB (`CACHE_SIZE_256K` = 10), 8 ways,
+/// 128 B lines (`CACHE_LINE_SIZE_128B` = 4); the ROM state after download mode has 64 B lines. Invalidate L2 afterwards.
+///
+/// # Safety
+/// Calls mask ROM code; reconfigures the L2 cache, so nothing may be cached through it meanwhile.
+pub unsafe fn cache_set_l2_mode(size_code: u32, ways: u32, line_code: u32) {
+    let f: extern "C" fn(u32, u32, u32) = core::mem::transmute(ROM_CACHE_SET_L2_MODE);
+    f(size_code, ways, line_code)
 }
 
 /// Drop `[addr, addr + len)` from the data caches without writing it back (the next cached read fetches PSRAM).

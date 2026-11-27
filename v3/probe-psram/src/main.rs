@@ -33,6 +33,7 @@ macro_rules! pl {
 }
 
 mod tests;
+mod variants;
 
 const STAGE: &str = env!("LICHEN_PSRAM_STAGE");
 
@@ -48,6 +49,10 @@ const fn parse_override(s: &str) -> Option<u32> {
     }
     Some(v)
 }
+const GROUP: u32 = match parse_override(env!("LICHEN_PSRAM_GROUP")) {
+    Some(g) => g,
+    None => 1,
+};
 const OVERRIDE: psram::TuneOverride = psram::TuneOverride {
     phase: parse_override(env!("LICHEN_PSRAM_PHASE")),
     data_dl: parse_override(env!("LICHEN_PSRAM_DATA_DL")),
@@ -111,7 +116,7 @@ extern "C" fn pmain() -> ! {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" | "eye" | "diag" | "perf" | "regs" => Some(psram::Upto::Tuned),
+        "tune" | "all" | "eye" | "diag" | "perf" | "regs" | "variants" => Some(psram::Upto::Tuned),
         _ => None,
     };
     if let Some(upto) = upto {
@@ -120,6 +125,11 @@ extern "C" fn pmain() -> ! {
         match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
+                if stage == "variants" {
+                    if let Some(t) = i.tuned {
+                        variants::run_group(GROUP, t);
+                    }
+                }
                 if stage == "regs" {
                     regs_dump();
                 }
