@@ -2,7 +2,7 @@
 //! and the cache maintenance (ported from IDF's patched write-back, see `sync`). Entries as in ESP-IDF v6.1 `ext_mem_defs.h` (SOC_MMU_PSRAM_VALID
 //! bit 11, SOC_MMU_ACCESS_PSRAM bit 10, 64 KB pages, 1024 entries) written through the PSRAM controller's MMU window
 //! (index register SPIMEM2 + 0x380, content register + 0x37C), as the #609 probe did.
-use crate::mmio::{read32, write32};
+use crate::mmio::write32;
 use crate::psram::regs::SPIMEM2;
 
 /// Virtual base of the cached alias (SOC_MMU_PSRAM_VADDR_BASE).
@@ -83,21 +83,38 @@ pub const fn mmu_word(ppage: u32) -> u32 {
     (ppage & 0x3FF) | MMU_VALID | MMU_ACCESS_PSRAM
 }
 
-unsafe fn map_pages(pages: usize, with_hole: bool) {
+/// Write the MMU entries, then write back and invalidate every mapped run of the window so no line of an earlier mapping
+/// survives. Returns the number of failed cache syncs (0 = fine).
+unsafe fn map_pages(pages: usize, with_hole: bool) -> i32 {
     assert!(pages <= MMU_ENTRIES);
+    let valid = |p: usize| with_hole || !overlaps_excluded(p * PAGE_BYTES, PAGE_BYTES);
     for p in 0..pages {
-        let hole = overlaps_excluded(p * PAGE_BYTES, PAGE_BYTES);
         write32(MMU_INDEX, p as u32);
-        write32(MMU_CONTENT, if hole && !with_hole { 0 } else { mmu_word(p as u32) });
+        write32(MMU_CONTENT, if valid(p) { mmu_word(p as u32) } else { 0 });
     }
+    let mut failed = 0;
+    let mut p = 0;
+    while p < pages {
+        if !valid(p) {
+            p += 1;
+            continue;
+        }
+        let start = p;
+        while p < pages && valid(p) {
+            p += 1;
+        }
+        failed += cache_writeback_invalidate(CACHED_BASE + start * PAGE_BYTES, (p - start) * PAGE_BYTES);
+    }
+    failed
 }
 
 /// Map virtual pages `0..pages` of the PSRAM window to physical pages `0..pages` (64 KB pages), leaving the excluded range's pages
 /// unmapped (their MMU entries are written invalid).
 ///
 /// # Safety
-/// Writes the PSRAM MMU: only after `init` reached `Upto::Tuned`; `pages` at most `MMU_ENTRIES`.
-pub unsafe fn map_identity(pages: usize) {
+/// Writes the PSRAM MMU: only after `init` reached `Upto::Tuned`; `pages` at most `MMU_ENTRIES`. Returns 0, or the number of
+/// cache syncs that timed out.
+pub unsafe fn map_identity(pages: usize) -> i32 {
     map_pages(pages, false)
 }
 
@@ -105,7 +122,7 @@ pub unsafe fn map_identity(pages: usize) {
 ///
 /// # Safety
 /// As `map_identity`; nothing but diagnostics may use the hole.
-pub unsafe fn map_identity_with_hole(pages: usize) {
+pub unsafe fn map_identity_with_hole(pages: usize) -> i32 {
     map_pages(pages, true)
 }
 
@@ -139,36 +156,67 @@ pub const fn align_to_line(addr: u32, size: u32, line: u32) -> (u32, u32) {
     (addr - plus, (size + line - 1) & !(line - 1))
 }
 
-unsafe fn sync(ctrl_op: u32, addr: usize, len: usize) {
-    let l1 = line_bytes_from_reg(read32(L1D_BLOCKSIZE)) as u32;
-    let l2 = line_bytes_from_reg(read32(L2_BLOCKSIZE)) as u32;
-    let (a, s) = align_to_line(addr as u32, len as u32, l1.max(l2));
-    write32(SYNC_MAP, MAP_DATA);
-    write32(SYNC_ADDR, a);
-    write32(SYNC_SIZE, s);
-    // IDF issues the operation twice, "to avoid sync loss": the ROM versions do it once and are replaced in IDF on the P4
-    for _ in 0..2 {
-        write32(SYNC_CTRL, ctrl_op);
-        while read32(SYNC_CTRL) & SYNC_DONE == 0 {}
+/// The aligned `(address, size)` a sync operation gets for `[addr, addr + len)`, or `None` for an empty range (SYNC_SIZE 0 means
+/// the whole cache). Panics for a range of 128 MB or more or one that runs past the 32-bit address space.
+pub const fn sync_range(addr: u32, len: u32, line: u32) -> Option<(u32, u32)> {
+    assert!(len < (1 << 27), "cache sync range too large");
+    if len == 0 {
+        return None;
     }
+    if addr.checked_add(len).is_none() {
+        panic!("cache sync range wraps");
+    }
+    let plus = addr & (line - 1);
+    let Some(size) = len.checked_add(plus) else { panic!("cache sync range wraps") };
+    let Some(rounded) = size.checked_add(line - 1) else { panic!("cache sync range wraps") };
+    Some((addr - plus, rounded & !(line - 1)))
 }
 
-/// Write dirty lines of `[addr, addr + len)` back to PSRAM, keeping them cached (IDF's patched `Cache_WriteBack_Addr`).
+/// Polls of SYNC_DONE before a sync gives up (a few ms of CPU time; a 32 MB sync is well inside it).
+const SYNC_SPINS: u32 = 50_000_000;
+
+/// One sync operation; 0 when the controller reported DONE twice, 1 on a timeout. Lives in RAM (`.text.ram`: the linker script
+/// must keep that input section in internal RAM) and touches registers directly, so it stays safe once the code runs from
+/// flash or PSRAM and the operation covers the lines of the code itself.
+#[inline(never)]
+#[link_section = ".text.ram.cache_sync"]
+unsafe fn sync(ctrl_op: u32, addr: usize, len: usize) -> i32 {
+    use core::ptr::{read_volatile as rd, write_volatile as wr};
+    let l1 = line_bytes_from_reg(rd(L1D_BLOCKSIZE as *const u32)) as u32;
+    let l2 = line_bytes_from_reg(rd(L2_BLOCKSIZE as *const u32)) as u32;
+    let Some((a, s)) = sync_range(addr as u32, len as u32, l1.max(l2)) else { return 0 };
+    wr(SYNC_MAP as *mut u32, MAP_DATA);
+    wr(SYNC_ADDR as *mut u32, a);
+    wr(SYNC_SIZE as *mut u32, s);
+    // IDF issues the operation twice, "to avoid sync loss": the ROM versions do it once and are replaced in IDF on the P4
+    for _ in 0..2 {
+        wr(SYNC_CTRL as *mut u32, ctrl_op);
+        let mut n = 0;
+        while rd(SYNC_CTRL as *const u32) & SYNC_DONE == 0 {
+            n += 1;
+            if n > SYNC_SPINS {
+                return 1;
+            }
+        }
+    }
+    0
+}
+
+/// Write dirty lines of `[addr, addr + len)` back to PSRAM, keeping them cached (IDF's patched `Cache_WriteBack_Addr`). Returns 0,
+/// or 1 if the controller never reported DONE. An empty range does nothing.
 ///
 /// # Safety
 /// Cache controller registers; one caller.
 pub unsafe fn cache_writeback(addr: usize, len: usize) -> i32 {
-    sync(WRITEBACK_ENA, addr, len);
-    0
+    sync(WRITEBACK_ENA, addr, len)
 }
 
-/// Write dirty lines back, then drop the range (IDF's patched `Cache_WriteBack_Invalidate_Addr`). Returns 0.
+/// Write dirty lines back, then drop the range (IDF's patched `Cache_WriteBack_Invalidate_Addr`). Returns 0, or 1 on a timeout.
 ///
 /// # Safety
 /// Cache controller registers; one caller.
 pub unsafe fn cache_writeback_invalidate(addr: usize, len: usize) -> i32 {
-    sync(WRITEBACK_INVALIDATE_ENA, addr, len);
-    0
+    sync(WRITEBACK_INVALIDATE_ENA, addr, len)
 }
 
 const ROM_CACHE_INVALIDATE_ADDR: usize = 0x4FC0_03E4;
@@ -272,6 +320,26 @@ mod tests {
         assert_eq!(align_to_line(0x4800_0000, 0x1_0000, 128), (0x4800_0000, 0x1_0000));
         assert_eq!(align_to_line(0x4800_007F, 2, 64), (0x4800_0040, 128)); // straddles two lines
         assert_eq!(align_to_line(0x4800_0040, 1, 64), (0x4800_0040, 64));
+    }
+
+    #[test]
+    fn sync_range_maths() {
+        assert_eq!(sync_range(0x4800_0000, 0, 128), None);
+        assert_eq!(sync_range(0x4800_0010, 1, 128), Some((0x4800_0000, 128)));
+        assert_eq!(sync_range(0x4800_007F, 2, 128), Some((0x4800_0000, 256)));
+        assert_eq!(sync_range(0x4800_0000, 4096, 64), Some((0x4800_0000, 4096)));
+    }
+
+    #[test]
+    #[should_panic(expected = "too large")]
+    fn sync_range_refuses_huge() {
+        sync_range(0, 1 << 27, 128);
+    }
+
+    #[test]
+    #[should_panic(expected = "wraps")]
+    fn sync_range_refuses_wrap() {
+        sync_range(0xFFFF_FFF0, 0x20, 128);
     }
 
     #[test]

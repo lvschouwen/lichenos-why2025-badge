@@ -87,8 +87,9 @@ pub fn build_chain(descs: &mut [Desc], buf: u32, len: usize, tx: bool) -> usize 
 pub enum DmaError {
     /// No end of frame in time: the RX and TX raw interrupt words at that point.
     Timeout(u32, u32),
-    /// An error bit was raised: the RX raw word, with the TX descriptor-error flag (OUT_DSCR_ERR) added as bit 10.
-    Fault(u32),
+    /// An error bit was raised: the RX and the TX raw interrupt words (RX: bit 2 error EOF, 3 descriptor error, 4 descriptor
+    /// empty; TX: bit 2 descriptor error).
+    Fault(u32, u32),
 }
 
 /// Clock, reset, memory ranges, channel 0 in M2M mode (IDF `gdma_new_axi_channel` + `gdma_connect(M2M)`).
@@ -152,12 +153,15 @@ pub unsafe fn run(tx: *mut Desc, rx: *mut Desc, spins: u32) -> Result<(), DmaErr
     let mut n = 0;
     loop {
         let (raw, traw) = (read32(RX_INT_RAW), read32(TX_INT_RAW));
-        if raw & 0x1C != 0 || traw & 0x4 != 0 {
+        // IN_SUC_EOF is success unless an error bit rides along; IN_DSCR_EMPTY next to it is not an error (the last descriptor
+        // was used up as planned)
+        let err = raw & 0xC != 0 || traw & 0x4 != 0;
+        if err || (raw & 0x2 == 0 && raw & 0x10 != 0) {
             quiesce();
-            return Err(DmaError::Fault(raw | (traw & 0x4) << 8)); // RX: error EOF, descriptor error, descriptor empty; TX bit 2 -> bit 10
+            return Err(DmaError::Fault(raw, traw));
         }
         if raw & 0x2 != 0 {
-            return Ok(()); // IN_SUC_EOF
+            return Ok(());
         }
         n += 1;
         if n > spins {

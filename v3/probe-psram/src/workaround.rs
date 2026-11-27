@@ -329,7 +329,7 @@ pub fn run(cpu_mhz: u32) {
     // control cases need them.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity(TOTAL / PAGE_BYTES);
+        rc(map::map_identity(TOTAL / PAGE_BYTES));
         dma::init();
     }
     pl!(
@@ -346,7 +346,7 @@ pub fn run(cpu_mhz: u32) {
     full_dma("(b) address-in-address, DMA, whole chip minus the hole", Pat::Addr, false);
     // the controls: map the hole for them only
     // SAFETY: MMU window; diagnostics only.
-    unsafe { map::map_identity_with_hole(TOTAL / PAGE_BYTES) };
+    rc(unsafe { map::map_identity_with_hole(TOTAL / PAGE_BYTES) });
     full_cached("(c) hole, address-in-address, cached write + write-back", Pat::Addr, true);
     full_cached("(c) hole, random 0xA5A55A5A, cached write + write-back", Pat::Rand(0xA5A5_5A5A), true);
     full_dma("(b) hole control, address-in-address, DMA", Pat::Addr, true);
