@@ -26,3 +26,7 @@ version = "0.1.0"
 dependencies = [
  "lichen-abi",
 ]
+
+[[package]]
+name = "lichen-probe-p4"
+version = "0.1.0"
