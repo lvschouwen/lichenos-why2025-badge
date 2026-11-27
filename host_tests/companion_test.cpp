@@ -1277,6 +1277,8 @@ static void advert_ends(BadgeMesh &mesh, airlog_tx_result_t want, bool on_air) {
     settle(mesh, 10); // a hanging send is given up after 1.5 x its airtime (len ms here)
     auto adverts = notes_of(from, PAYLOAD_TYPE_ADVERT);
     CHECK(adverts.size() == 1 && adverts[0].result == want && !adverts[0].retry);
+    // advertNow(false) is a zero-hop advert: direct route, no path, never a flood or scoped (transport code) one (#589)
+    CHECK(adverts.size() == 1 && (adverts[0].header & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT && adverts[0].path_len == 0);
     CHECK((test_radio.sent.size() > sent) == on_air);
 }
 

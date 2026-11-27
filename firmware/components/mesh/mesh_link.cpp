@@ -173,12 +173,12 @@ bool BadgeMesh::advertNow(bool flood, bool from_console) {
     mesh::Packet    *pkt   = prefs->advert_loc_policy == ADVERT_LOC_NONE
                                  ? createSelfAdvert(prefs->node_name)
                                  : createSelfAdvert(prefs->node_name, sensors.node_lat, sensors.node_lon);
-    if (pkt && !flood) {
-        sendZeroHop(pkt); // upstream dropped MyMesh::advert() (#589); this is its body
-        return true;
-    }
     if (!pkt) {
         return false;
+    }
+    if (!flood) {
+        sendZeroHop(pkt); // upstream dropped MyMesh::advert() (#589); this is its body
+        return true;
     }
     if (from_console) {
         return floodConsoleScope(pkt, 0);
