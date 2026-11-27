@@ -185,19 +185,21 @@ to, and the pure parts that enforce them are already host-tested (`lichen_os/ble
   the OS's. The OS's own services (Battery, Device Information, the peer service) have their own budget, so apps
   share 8 services and 32 characteristics among themselves. `lichen_bt_advertise(true)` asks for advertising: the OS
   advertises while any client wants it and one more peer may connect, every 100 ms for 30 s, then every 1 s for
-  5 min, then not until a new reason (slow only when it waits just for bonded peers to come back). Its advert is 31 B plus a 31 B scan response,
-  flags and name first; the services that asked to be seen share the rest and rotate when they do not all fit.
+  5 min, then not until a new reason (slow only when it waits just for bonded peers to come back).
+  Its advert is 31 B plus a 31 B scan response, flags and name first; the services that asked to be seen share the
+  rest and rotate when they do not all fit.
 - **Central:** `lichen_bt_scan_start(uuid, ms)` needs `RADIO_SCAN` (one scan at a time for the badge, `BUSY` while
   another runs); `lichen_bt_connect` and the GATT client (`lichen_bt_gattc_find`, `_read`, `_write`, `_subscribe`) need
   `BT`. The badge has at most 3 connections: 2 that peers made to it and 1 it made (`LICHEN_BT_FULL` past that). A peer
   that connects to the badge and is not bonded is dropped after 10 s (30 s while it pairs); links the badge made, and
   the peer session's, are exempt.
-- **L2CAP channels (`BT`):** `lichen_bt_chan_listen(psm, mtu, on)` and `lichen_bt_chan_open(conn, psm, mtu, &chan)`
-  give an ordered stream with the transport's credit flow control (SDUs up to 512 B, PSM 0x80-0xff; 0xc1 is the peer
-  session's); `lichen_bt_chan_send` is `BUSY` without credits; events `LICHEN_BT_EV_CHAN_OPEN`, `_DATA`, `_CLOSED`.
+- **L2CAP channels (`BT`):** `lichen_bt_channel_listen(psm, mtu, on)` and
+  `lichen_bt_channel_open(conn, psm, mtu, &chan)` give an ordered stream with the transport's credit flow control
+  (SDUs up to 512 B, PSM 0x80-0xff; 0xc1 is the peer session's); `lichen_bt_channel_send` is `BUSY` without credits;
+  events `LICHEN_BT_EV_CHANNEL_OPEN`, `_DATA`, `_CLOSED`.
 - **Ownership:** every service, scan, connection and peer session belongs to the app that made it. When the app stops,
-  or before an SD app's memory is freed, the OS revokes them all; the app's handles are refused at once and never
-  match again (each carries a generation).
+  or before an SD app's memory is freed, the OS revokes them all (channels, listened PSMs, its wish to advertise or
+  be Visible too); the app's handles are refused at once and never match again (each carries a generation).
 - **Peer session (`BT`), badge to badge:** `lichen_bt_peer_visible(true)` makes the badge findable for 10 min;
   `lichen_bt_peer_discover(true)` lists Visible badges (`LICHEN_BT_EV_PEER_FOUND`); `lichen_bt_peer_invite(peer,
   version, param, len)` invites one to the same app at the app's protocol version (the inviter becomes the central,

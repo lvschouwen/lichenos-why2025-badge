@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 // The Bluetooth service's rules (#73, #599), pure and host-tested (ble_policy_test.c): no NimBLE, no ESP headers, no
-// statics; every call gets the caller's state and the time (a monotonic ms counter, wrap-safe). Not linked into the
-// image until the service (#73 B2) uses it.
+// statics; every call gets the caller's state and the time (a monotonic ms counter; differences are wrap-safe, and what
+// runs out is latched by ble_pair_tick). Not linked into the image until the service (#73 B2) uses it.
 // - Pairing (OS-only): a window of BLE_PAIR_WINDOW_MS opened from Settings > Bluetooth; one pairing at a time;
 //   BLE_PAIR_FAILS_MAX failures lock pairing out for BLE_PAIR_LOCKOUT_MS (re-opening the window keeps the lockout);
 //   a full bond store refuses (the person forgets a device first, nothing is evicted). A success closes the window.
@@ -18,6 +18,8 @@
 //   BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's GATT client) and the peer session's links
 //   (never bonded, the session has its own timeouts) are not strangers.
 // - The passkey: 6 digits drawn without bias, shown "123 456".
+// - The peer session's links pair by numeric comparison outside all of this: no window, no lockout, no bond store
+//   (they are never bonded); its own invite rate limit and the person's key press guard them (peer_session.h).
 
 #define BLE_PAIR_WINDOW_MS      120000u
 #define BLE_PAIR_FAILS_MAX      3u
@@ -54,6 +56,9 @@ void               ble_pair_init(ble_pair_t *p);
 // Settings opened (or re-opened) the window: BLE_PAIR_WINDOW_MS from now. A lockout stays.
 void               ble_pair_open(ble_pair_t *p, uint32_t now_ms);
 void               ble_pair_close(ble_pair_t *p);
+// Latches what ran out (the window closes, a lockout ends): call it on the service's timer, at least daily, so a
+// window or lockout never reads as current again after the ms counter wraps (49.7 days). ble_pair_begin does it too.
+void               ble_pair_tick(ble_pair_t *p, uint32_t now_ms);
 bool               ble_pair_is_open(ble_pair_t const *p, uint32_t now_ms);
 // The window's time left (the countdown on screen), 0 when closed
 uint32_t           ble_pair_left_ms(ble_pair_t const *p, uint32_t now_ms);
@@ -108,6 +113,9 @@ typedef struct {
 
 void ble_link_init(ble_link_t *l, lichen_bt_role_t role, uint32_t now_ms);
 void ble_link_pairing(ble_link_t *l, uint32_t now_ms, bool under_way);
+// The peer service took the link: its first frame on the peer session's PSM parsed (an INVITE). From then on the
+// session's own timeouts (answer 30 s, pairing 30 s, silence 20 s) hold it, not the 10 s drop.
+void ble_link_set_peer(ble_link_t *l);
 bool ble_link_should_drop(ble_link_t const *l, uint32_t now_ms);
 
 // ---- The passkey ----

@@ -87,6 +87,11 @@ static size_t revoke_l2cap(bt_reg_t *r, bt_owner_t owner, bt_undo_t *undo, size_
             memset(l, 0, sizeof(*l));
         }
     }
+    bt_reg_owner_t *o = owner_mut(r, owner);
+    if (o->claims && n < cap) {
+        undo[n++] = (bt_undo_t){.kind = BT_UNDO_RELEASE, .handle = o->claims};
+        o->claims = 0;
+    }
     return n;
 }
 
@@ -111,6 +116,9 @@ size_t bt_reg_revoke(bt_reg_t *r, bt_owner_t owner, bt_undo_t *undo, size_t cap)
 }
 
 static bool l2cap_idle(bt_reg_t const *r, bt_owner_t owner) {
+    if (owner_at(r, owner)->claims) {
+        return false;
+    }
     for (unsigned i = 0; i < BT_REG_CHANS; i++) {
         if (r->chans[i].used && r->chans[i].owner == owner) {
             return false;
@@ -504,6 +512,45 @@ void bt_reg_chan_gone(bt_reg_t *r, uint16_t cid) {
         if (r->chans[i].used && r->chans[i].cid == cid) {
             memset(&r->chans[i], 0, sizeof(r->chans[i]));
         }
+    }
+}
+
+// ---- Claims ----
+
+bt_owner_t bt_reg_claim_holder(bt_reg_t const *r, uint8_t bit) {
+    for (unsigned i = 0; i < BT_REG_OWNERS; i++) {
+        bt_reg_owner_t const *o = &r->owners[i];
+        if (o->used && !o->revoked && (o->claims & bit)) {
+            return H_MAKE(o->gen, i);
+        }
+    }
+    return 0;
+}
+
+bool bt_reg_claimed(bt_reg_t const *r, uint8_t bit) {
+    return bt_reg_claim_holder(r, bit) != 0;
+}
+
+lichen_bt_err_t bt_reg_claim(bt_reg_t *r, bt_owner_t owner, uint8_t bits) {
+    bt_reg_owner_t *o = owner_mut(r, owner);
+    if (!o || o->revoked) {
+        return LICHEN_BT_NOT_FOUND;
+    }
+    if ((bits & ~BT_CLAIM_ALL) != 0) {
+        return LICHEN_BT_INVALID;
+    }
+    bt_owner_t peer = bt_reg_claim_holder(r, BT_CLAIM_PEER);
+    if ((bits & BT_CLAIM_PEER) && peer != 0 && peer != owner) {
+        return LICHEN_BT_BUSY;
+    }
+    o->claims |= bits;
+    return LICHEN_BT_OK;
+}
+
+void bt_reg_unclaim(bt_reg_t *r, bt_owner_t owner, uint8_t bits) {
+    bt_reg_owner_t *o = owner_mut(r, owner);
+    if (o) {
+        o->claims &= (uint8_t)~bits;
     }
 }
 

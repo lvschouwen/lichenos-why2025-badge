@@ -33,6 +33,12 @@ static void pair_window(void) {
     CHECK(ble_pair_is_open(&p, t0 + 200000 + BLE_PAIR_WINDOW_MS - 1));
     ble_pair_close(&p);
     CHECK(!ble_pair_is_open(&p, t0 + 200001));
+    // a window that ran out is latched closed by the tick: 2^32 ms later it does not read open again
+    ble_pair_open(&p, 5000);
+    ble_pair_tick(&p, 5000 + BLE_PAIR_WINDOW_MS - 1);
+    CHECK(p.open);
+    ble_pair_tick(&p, 5000 + BLE_PAIR_WINDOW_MS);
+    CHECK(!p.open && !ble_pair_is_open(&p, 5000u + 0u)); // the same counter value after a wrap
 }
 
 static void pair_attempts(void) {
@@ -137,7 +143,8 @@ static void stranger_link(void) {
     ble_link_init(&l, LICHEN_BT_ROLE_CENTRAL, 0);
     CHECK(!ble_link_should_drop(&l, 1000000));
     ble_link_init(&l, LICHEN_BT_ROLE_PERIPHERAL, 0);
-    l.kind = BLE_LINK_PEER;
+    ble_link_set_peer(&l);
+    CHECK(l.kind == BLE_LINK_PEER);
     CHECK(!ble_link_should_drop(&l, 1000000));
 }
 

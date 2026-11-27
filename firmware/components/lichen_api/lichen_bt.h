@@ -61,18 +61,18 @@ typedef enum {
 #define LICHEN_BT_PROP_INDICATE 0x20u
 #define LICHEN_BT_PROP_ALL      0x3eu
 
-#define LICHEN_BT_VALUE_MAX      512u // the ATT maximum attribute length
-#define LICHEN_BT_SVC_CHRS_MAX   8u   // characteristics per service
-#define LICHEN_BT_PEER_MSG_MAX   512u // one peer-session message
+#define LICHEN_BT_VALUE_MAX       512u // the ATT maximum attribute length
+#define LICHEN_BT_SVC_CHRS_MAX    8u   // characteristics per service
+#define LICHEN_BT_PEER_MSG_MAX    512u // one peer-session message
 // The app's part of a peer invite: the OS adds the app id and version, the name and a nonce, 64 B in all
-#define LICHEN_BT_PEER_PARAM_MAX 14u
+#define LICHEN_BT_PEER_PARAM_MAX  14u
 // A peer's display name in bytes (UTF-8), without the NUL
-#define LICHEN_BT_NAME_MAX       28u
+#define LICHEN_BT_NAME_MAX        28u
 // L2CAP channels (LE credit-based, CoC): the dynamic PSM range, and the one the OS keeps for the peer session
-#define LICHEN_BT_PSM_MIN        0x0080u
-#define LICHEN_BT_PSM_MAX        0x00ffu
-#define LICHEN_BT_PSM_PEER       0x00c1u
-#define LICHEN_BT_CHAN_MTU_MAX   512u
+#define LICHEN_BT_PSM_MIN         0x0080u
+#define LICHEN_BT_PSM_MAX         0x00ffu
+#define LICHEN_BT_PSM_PEER        0x00c1u
+#define LICHEN_BT_CHANNEL_MTU_MAX 512u
 
 // The Lichen peer service (badge to badge, #73 P1): 98b8aa8d-5357-4fa1-92d2-f5fb04e3d68c, on-air byte order.
 // Reserved for the OS: an app's lichen_bt_service_add with it is LICHEN_BT_INVALID.
@@ -84,7 +84,7 @@ typedef uint32_t lichen_bt_svc_t;
 typedef uint32_t lichen_bt_chr_t;
 typedef uint32_t lichen_bt_conn_t;     // one connection (server or client side)
 typedef uint32_t lichen_bt_rchr_t;     // a characteristic on a peer we connected to (GATT client)
-typedef uint32_t lichen_bt_chan_t;     // an L2CAP channel
+typedef uint32_t lichen_bt_channel_t;  // an L2CAP channel
 typedef uint32_t lichen_bt_peer_t;     // a badge seen by peer discovery (the OS keeps its address)
 #define LICHEN_BT_CONN_ALL 0xffffffffu // notify: every subscribed connection
 
@@ -104,17 +104,17 @@ typedef enum {
     LICHEN_BT_EV_SUBSCRIBE,    // conn, chr, len = 1 subscribed, 0 unsubscribed
     LICHEN_BT_EV_SCAN_RESULT,  // addr, rssi, data/len: the advertising data, then the scan response
     LICHEN_BT_EV_SCAN_DONE,
-    LICHEN_BT_EV_GATTC_FOUND,   // conn, rchr, status: lichen_bt_gattc_find's answer
-    LICHEN_BT_EV_GATTC_READ,    // conn, rchr, status, data/len
-    LICHEN_BT_EV_GATTC_WRITTEN, // conn, rchr, status
-    LICHEN_BT_EV_GATTC_NOTIFY,  // conn, rchr, data/len: a notification or indication from the peer
-    LICHEN_BT_EV_CHAN_OPEN,     // chan, conn, status: lichen_bt_chan_open's answer, or a peer opened a listened PSM
-    LICHEN_BT_EV_CHAN_DATA,     // chan, data/len: one SDU, in order
-    LICHEN_BT_EV_CHAN_CLOSED,   // chan
-    LICHEN_BT_EV_PEER_FOUND,    // peer, rssi, data/len: the badge's name
-    LICHEN_BT_EV_PEER_INVITE,   // version, data/len: the inviter's app version and param; the person accepted already
-    LICHEN_BT_EV_PEER_OPEN,     // role: the session is open both ways
-    LICHEN_BT_EV_PEER_MSG,      // data/len: one message, in order, exactly once
+    LICHEN_BT_EV_GATTC_FOUND,    // conn, rchr, status: lichen_bt_gattc_find's answer
+    LICHEN_BT_EV_GATTC_READ,     // conn, rchr, status, data/len
+    LICHEN_BT_EV_GATTC_WRITTEN,  // conn, rchr, status
+    LICHEN_BT_EV_GATTC_NOTIFY,   // conn, rchr, data/len: a notification or indication from the peer
+    LICHEN_BT_EV_CHANNEL_OPEN,   // chan, conn, status: lichen_bt_channel_open's answer, or a peer opened a listened PSM
+    LICHEN_BT_EV_CHANNEL_DATA,   // chan, data/len: one SDU, in order
+    LICHEN_BT_EV_CHANNEL_CLOSED, // chan
+    LICHEN_BT_EV_PEER_FOUND,     // peer, rssi, data/len: the badge's name
+    LICHEN_BT_EV_PEER_INVITE,    // version, data/len: the inviter's app version and param; the person accepted already
+    LICHEN_BT_EV_PEER_OPEN,      // role: the session is open both ways
+    LICHEN_BT_EV_PEER_MSG,       // data/len: one message, in order, exactly once
     LICHEN_BT_EV_PEER_CLOSED, // status: LICHEN_BT_OK ended by either side, REFUSED declined, NOT_CONNECTED lost/timeout
 } lichen_bt_ev_type_t;
 
@@ -125,7 +125,7 @@ typedef struct {
     lichen_bt_chr_t     chr;
     lichen_bt_rchr_t    rchr;
     lichen_bt_peer_t    peer;
-    lichen_bt_chan_t    chan;
+    lichen_bt_channel_t chan;
     uint16_t            version; // PEER_INVITE: the inviting app's version
     lichen_bt_addr_t    addr;
     lichen_bt_role_t    role;
@@ -208,18 +208,18 @@ lichen_bt_err_t lichen_bt_gattc_subscribe(lichen_bt_rchr_t rchr, bool on);
 // ---- L2CAP channels: streams over a connection (CAP_BT) ----
 // For bulk or stream data (files, a game's own protocol): in order, with the transport's credit flow control. The
 // PSM is LICHEN_BT_PSM_MIN..LICHEN_BT_PSM_MAX except LICHEN_BT_PSM_PEER; mtu is the largest SDU, up to
-// LICHEN_BT_CHAN_MTU_MAX.
+// LICHEN_BT_CHANNEL_MTU_MAX.
 
-// Accepts channels peers open on psm (LICHEN_BT_EV_CHAN_OPEN for each); on false, stops. EXISTS when another app
+// Accepts channels peers open on psm (LICHEN_BT_EV_CHANNEL_OPEN for each); on false, stops. EXISTS when another app
 // listens there. Any task.
-lichen_bt_err_t lichen_bt_chan_listen(uint16_t psm, uint16_t mtu, bool on);
-// Opens a channel on one of the app's connections; LICHEN_BT_EV_CHAN_OPEN gives the status. Any task.
-lichen_bt_err_t lichen_bt_chan_open(lichen_bt_conn_t conn, uint16_t psm, uint16_t mtu, lichen_bt_chan_t *chan);
+lichen_bt_err_t lichen_bt_channel_listen(uint16_t psm, uint16_t mtu, bool on);
+// Opens a channel on one of the app's connections; LICHEN_BT_EV_CHANNEL_OPEN gives the status. Any task.
+lichen_bt_err_t lichen_bt_channel_open(lichen_bt_conn_t conn, uint16_t psm, uint16_t mtu, lichen_bt_channel_t *chan);
 // Sends one SDU (up to the peer's mtu). Never blocks: BUSY while the peer has no credits or the queue is full,
 // LICHEN_BT_EV_READY follows. Any task.
-lichen_bt_err_t lichen_bt_chan_send(lichen_bt_chan_t chan, void const *data, size_t len);
-// Closes it (LICHEN_BT_EV_CHAN_CLOSED follows). Any task.
-lichen_bt_err_t lichen_bt_chan_close(lichen_bt_chan_t chan);
+lichen_bt_err_t lichen_bt_channel_send(lichen_bt_channel_t chan, void const *data, size_t len);
+// Closes it (LICHEN_BT_EV_CHANNEL_CLOSED follows). Any task.
+lichen_bt_err_t lichen_bt_channel_close(lichen_bt_channel_t chan);
 
 // ---- Peer session: badge to badge (Battleship) ----
 // One session per badge at a time. Discovery sees badges that are Visible (Settings or the app turns it on, 10 min).

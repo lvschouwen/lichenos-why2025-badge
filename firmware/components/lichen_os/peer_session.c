@@ -23,7 +23,7 @@ static bool frame_len_ok(peer_ftype_t type, size_t len) {
         case PEER_F_INVITE: return len >= 1 && len <= PEER_INVITE_MAX;
         case PEER_F_DATA: return len >= 1 && len <= PEER_MSG_MAX;
         case PEER_F_ACCEPT:
-        case PEER_F_DECLINE:
+        case PEER_F_DECLINE: return len <= 1; // PEER_WHY_GLARE when a glare was lost by the receiver
         case PEER_F_ACK: return len == 0;
         case PEER_F_END: return len <= 1; // an optional reason byte (PEER_WHY_*)
     }
@@ -194,7 +194,9 @@ static void close_as(peer_session_t *s, uint32_t now_ms, peer_end_t why, uint8_t
     s->events  |= PEER_EV_CLOSED;
 }
 
-lichen_bt_err_t peer_session_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, peer_invite_t const *inv) {
+lichen_bt_err_t peer_session_invite(
+    peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t peer_key, peer_invite_t const *inv
+) {
     uint8_t tmp[PEER_INVITE_MAX];
     if (s->state != PEER_IDLE) {
         return LICHEN_BT_BUSY;
@@ -202,12 +204,14 @@ lichen_bt_err_t peer_session_invite(peer_session_t *s, uint32_t now_ms, uint16_t
     if (peer_invite_encode(inv, tmp, sizeof(tmp)) == 0) {
         return LICHEN_BT_INVALID;
     }
-    s->invite     = *inv;
-    s->link       = link;
-    s->role       = LICHEN_BT_ROLE_CENTRAL;
-    s->end        = PEER_END_NONE;
-    s->ctl        = PEER_F_INVITE;
-    s->last_rx_ms = now_ms;
+    s->invite      = *inv;
+    s->link        = link;
+    s->invited_key = peer_key;
+    s->await_glare = false;
+    s->role        = LICHEN_BT_ROLE_CENTRAL;
+    s->end         = PEER_END_NONE;
+    s->ctl         = PEER_F_INVITE;
+    s->last_rx_ms  = now_ms;
     enter(s, PEER_INVITING, now_ms);
     return LICHEN_BT_OK;
 }
@@ -247,8 +251,24 @@ static bool rate_take(peer_session_t *s, uint32_t now_ms, uint32_t key) {
     return true;
 }
 
+// Glare: the peer we invite invites us. The larger nonce wins on both sides; equal ones refuse plainly, so both end.
+static peer_rx_t on_glare(peer_session_t *s, uint32_t now_ms, uint16_t link, peer_invite_t const *inv) {
+    if (inv->nonce < s->invite.nonce) {
+        s->refuse_why = PEER_WHY_GLARE; // it yields to ours: tell it so it waits for our invite
+        return PEER_RX_REFUSE;
+    }
+    if (inv->nonce == s->invite.nonce) {
+        return PEER_RX_REFUSE;
+    }
+    s->yielded_link = s->link;
+    take_invite(s, now_ms, link, inv);
+    s->events |= PEER_EV_YIELD;
+    return PEER_RX_YIELD;
+}
+
 static peer_rx_t on_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t key, peer_frame_t const *f) {
     peer_invite_t inv;
+    s->refuse_why = 0;
     if (!peer_invite_decode(f->payload, f->len, &inv)) {
         return PEER_RX_BAD;
     }
@@ -258,22 +278,25 @@ static peer_rx_t on_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, ui
     if (!peer_session_visible(s, now_ms)) {
         return PEER_RX_REFUSE;
     }
-    if (s->state == PEER_INVITING && link != s->link) { // glare: the larger nonce wins on both sides
-        if (inv.nonce <= s->invite.nonce) {
-            return PEER_RX_REFUSE;
-        }
-        s->yielded_link = s->link;
-        take_invite(s, now_ms, link, &inv);
-        return PEER_RX_YIELD;
+    if (s->state == PEER_INVITING && key == s->invited_key) {
+        return on_glare(s, now_ms, link, &inv);
     }
-    if (s->state != PEER_IDLE && s->state != PEER_CLOSED) {
+    if (s->state != PEER_IDLE) {
+        return PEER_RX_REFUSE; // busy, or CLOSED and not reset yet
+    }
+    bool awaited = s->await_glare && key == s->invited_key; // the glare's winner, after its DECLINE came first
+    if (!awaited && !rate_take(s, now_ms, key)) {
         return PEER_RX_REFUSE;
     }
-    if (s->state == PEER_CLOSED || !rate_take(s, now_ms, key)) {
-        return PEER_RX_REFUSE; // CLOSED: the service has not reset yet
-    }
+    s->await_glare = false;
     take_invite(s, now_ms, link, &inv);
     return PEER_RX_OK;
+}
+
+size_t peer_session_refusal(peer_session_t *s, uint8_t *out, size_t cap) {
+    uint8_t why   = s->refuse_why;
+    s->refuse_why = 0;
+    return peer_frame_build(PEER_F_DECLINE, 0, 0, &why, why ? 1u : 0u, out, cap);
 }
 
 // The cumulative ack in every frame of an open session
@@ -309,15 +332,30 @@ static void on_data(peer_session_t *s, peer_frame_t const *f) {
     s->events |= PEER_EV_MSG;
 }
 
+// A DECLINE while an invite is under way: a lost glare (we go back to IDLE and wait for the winner) or a real one
+static peer_rx_t on_decline(peer_session_t *s, uint32_t now_ms, peer_frame_t const *f) {
+    if (s->state == PEER_INVITING && f->len == 1 && f->payload[0] == PEER_WHY_GLARE) {
+        s->yielded_link  = s->link; // the winner's invite comes on its own link
+        s->await_glare   = true;
+        s->events       |= PEER_EV_YIELD;
+        enter(s, PEER_IDLE, now_ms);
+        return PEER_RX_YIELD;
+    }
+    if (s->state == PEER_INVITING || s->state == PEER_INVITED) {
+        close_as(s, now_ms, PEER_END_DECLINED, 0);
+        return PEER_RX_OK;
+    }
+    return PEER_RX_IGNORED;
+}
+
 static peer_rx_t on_session_frame(peer_session_t *s, uint32_t now_ms, peer_frame_t const *f) {
     if (f->type == PEER_F_END) {
         bool exit = f->len == 1 && f->payload[0] == PEER_WHY_APP_EXIT;
         close_as(s, now_ms, exit ? PEER_END_REMOTE_EXIT : PEER_END_REMOTE, 0);
         return PEER_RX_OK;
     }
-    if (f->type == PEER_F_DECLINE && (s->state == PEER_INVITING || s->state == PEER_INVITED)) {
-        close_as(s, now_ms, PEER_END_DECLINED, 0);
-        return PEER_RX_OK;
+    if (f->type == PEER_F_DECLINE) {
+        return on_decline(s, now_ms, f);
     }
     if (f->type == PEER_F_ACCEPT && s->state == PEER_INVITING) {
         enter(s, PEER_PAIRING, now_ms);
@@ -421,6 +459,9 @@ static void tick_open(peer_session_t *s, uint32_t now_ms) {
 }
 
 void peer_session_tick(peer_session_t *s, uint32_t now_ms) {
+    if (s->visible && !peer_session_visible(s, now_ms)) {
+        s->visible = false; // latched: a counter wrap never makes the badge Visible again
+    }
     uint32_t in_state = since(now_ms, s->state_ms);
     switch (s->state) {
         case PEER_INVITING:

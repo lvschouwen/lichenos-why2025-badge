@@ -33,7 +33,13 @@
 #define BT_REG_CONNS        3u // the connection cap (ble_policy.h BLE_CONN_MAX)
 #define BT_REG_CHANS        4u // L2CAP channels open at once
 #define BT_REG_LISTENS      4u // PSMs listened on
-#define BT_REG_UNDO_MAX     (BT_REG_SERVICES + BT_REG_CONNS + BT_REG_CHANS + BT_REG_LISTENS + 1u)
+#define BT_REG_UNDO_MAX     (BT_REG_SERVICES + BT_REG_CONNS + BT_REG_CHANS + BT_REG_LISTENS + 2u)
+
+// What an owner holds that is not a stack object: its wish to advertise, its wish to be Visible, the peer session
+#define BT_CLAIM_ADVERTISE 0x01u
+#define BT_CLAIM_VISIBLE   0x02u
+#define BT_CLAIM_PEER      0x04u // one owner at a time: one peer session per badge
+#define BT_CLAIM_ALL       0x07u
 
 typedef uint32_t bt_owner_t;
 typedef enum { BT_OWNER_OS, BT_OWNER_BUILTIN, BT_OWNER_SD } bt_owner_kind_t;
@@ -44,6 +50,7 @@ typedef struct {
     bt_owner_kind_t kind;
     uint32_t        gen;
     bool            scanning;
+    uint8_t         claims; // BT_CLAIM_*
     uint16_t        events; // queued to the owner and not yet run or dropped
 } bt_reg_owner_t;
 
@@ -107,6 +114,7 @@ typedef enum {
     BT_UNDO_DISCONNECT,
     BT_UNDO_CLOSE_CHAN, // handle: the channel id
     BT_UNDO_UNLISTEN,   // handle: the PSM (already free in the books; the stack stops accepting on it)
+    BT_UNDO_RELEASE,    // handle: the BT_CLAIM_* bits it held (already dropped: re-plan advertising, end the session)
 } bt_undo_kind_t;
 
 typedef struct {
@@ -141,8 +149,8 @@ bool       bt_reg_owner_valid(bt_reg_t const *r, bt_owner_t owner);
 // Refuses the owner's handles from now on and lists what the service must undo (at most BT_REG_UNDO_MAX): the number
 // written. Again on a revoked owner: the undos still unconfirmed, so a retry after a lost confirmation works.
 size_t     bt_reg_revoke(bt_reg_t *r, bt_owner_t owner, bt_undo_t *undo, size_t cap);
-// Nothing of the owner is live any more: no service (removing or not), scan, connection, channel, listened PSM or
-// queued event
+// Nothing of the owner is live any more: no service (removing or not), scan, connection, channel, listened PSM, claim
+// or queued event
 bool       bt_reg_owner_idle(bt_reg_t const *r, bt_owner_t owner);
 // Frees the slot of a revoked, idle owner; false (nothing done) otherwise. Its memory may be freed only after true.
 bool       bt_reg_owner_release(bt_reg_t *r, bt_owner_t owner);
@@ -186,6 +194,13 @@ bt_owner_t      bt_reg_listener(bt_reg_t const *r, uint16_t psm);
 lichen_bt_err_t bt_reg_chan_add(bt_reg_t *r, bt_owner_t owner, uint16_t cid);
 bt_owner_t      bt_reg_chan_owner(bt_reg_t const *r, uint16_t cid);
 void            bt_reg_chan_gone(bt_reg_t *r, uint16_t cid);
+// An owner claims bits (BT_CLAIM_*): BUSY for BT_CLAIM_PEER when another owner holds it, NOT_FOUND for an invalid one
+lichen_bt_err_t bt_reg_claim(bt_reg_t *r, bt_owner_t owner, uint8_t bits);
+void            bt_reg_unclaim(bt_reg_t *r, bt_owner_t owner, uint8_t bits);
+// Some valid owner holds bit (BT_CLAIM_ADVERTISE: advertise; BT_CLAIM_VISIBLE: stay Visible); the holder of a one-owner
+// claim (BT_CLAIM_PEER), 0 when none
+bool            bt_reg_claimed(bt_reg_t const *r, uint8_t bit);
+bt_owner_t      bt_reg_claim_holder(bt_reg_t const *r, uint8_t bit);
 // Before queueing an event to owner: false when it may get none (revoked, gone, or 0xffff queued)
 bool            bt_reg_event_queued(bt_reg_t *r, bt_owner_t owner);
 // The event ran or was dropped

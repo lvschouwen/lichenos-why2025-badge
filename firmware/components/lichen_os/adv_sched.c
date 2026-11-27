@@ -8,6 +8,7 @@ void adv_sched_init(adv_sched_t *s) {
 
 void adv_sched_restart(adv_sched_t *s) {
     s->asked = false;
+    s->done  = false;
 }
 
 // The round's mode at elapsed ms into it
@@ -26,10 +27,13 @@ adv_mode_t adv_sched_step(adv_sched_t *s, uint32_t now_ms, adv_wish_t w) {
     }
     if (!s->asked) {
         s->asked    = true;
+        s->done     = false;
         s->start_ms = now_ms;
     }
+    adv_mode_t m = s->done ? ADV_OFF : mode_at(now_ms - s->start_ms, w.bonded_only);
+    s->done      = m == ADV_OFF;
     // a full badge stops advertising, but the round's clock runs on: room again mid-round is not a new round
-    return w.room ? mode_at(now_ms - s->start_ms, w.bonded_only) : ADV_OFF;
+    return w.room ? m : ADV_OFF;
 }
 
 uint32_t adv_sched_interval_ms(adv_mode_t mode) {
@@ -42,7 +46,7 @@ uint32_t adv_sched_interval_ms(adv_mode_t mode) {
 }
 
 uint32_t adv_sched_next_ms(adv_sched_t const *s, uint32_t now_ms, adv_wish_t w) {
-    if (!w.want || !s->asked) {
+    if (!w.want || !s->asked || s->done) {
         return 0;
     }
     uint32_t elapsed = now_ms - s->start_ms, fast = w.bonded_only ? 0 : ADV_FAST_MS;

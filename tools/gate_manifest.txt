@@ -187,10 +187,10 @@ lichen_badge_get	-	unspecified	lichen_badge.h
 lichen_badge_set	NOTIFY	unspecified	lichen_badge.h
 lichen_boot_degraded	-	any	lichen_crashlog.h
 lichen_bt_advertise	BT	any	lichen_bt.h
-lichen_bt_chan_close	BT	any	lichen_bt.h
-lichen_bt_chan_listen	BT	any	lichen_bt.h
-lichen_bt_chan_open	BT	any	lichen_bt.h
-lichen_bt_chan_send	BT	any	lichen_bt.h
+lichen_bt_channel_close	BT	any	lichen_bt.h
+lichen_bt_channel_listen	BT	any	lichen_bt.h
+lichen_bt_channel_open	BT	any	lichen_bt.h
+lichen_bt_channel_send	BT	any	lichen_bt.h
 lichen_bt_close	BT	not-lvgl	lichen_bt.h
 lichen_bt_connect	BT	any	lichen_bt.h
 lichen_bt_disconnect	BT	any	lichen_bt.h

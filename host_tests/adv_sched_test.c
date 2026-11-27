@@ -32,7 +32,8 @@ static void round_trip(void) {
     CHECK(adv_sched_step(&s, t0 + ADV_FAST_MS + ADV_SLOW_MS, ASK) == ADV_OFF);
     CHECK(adv_sched_next_ms(&s, t0 + ADV_FAST_MS + ADV_SLOW_MS, ASK) == 0);
     CHECK(adv_sched_interval_ms(ADV_OFF) == 0);
-    // still asked, round over: stays off until a restart
+    // still asked, round over: stays off until a restart, also when the counter wraps round to the round's start
+    CHECK(adv_sched_step(&s, t0, ASK) == ADV_OFF);
     CHECK(adv_sched_step(&s, t0 + 10000000, ASK) == ADV_OFF);
     adv_sched_restart(&s);
     CHECK(adv_sched_step(&s, t0 + 10000000, ASK) == ADV_FAST);

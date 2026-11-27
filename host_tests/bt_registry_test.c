@@ -256,11 +256,16 @@ static void revoke_before_free(void) {
     CHECK(bt_reg_conn_add(&r, sd, 7) == LICHEN_BT_OK);
     CHECK(bt_reg_chan_add(&r, sd, 0x40) == LICHEN_BT_OK);
     CHECK(bt_reg_listen(&r, sd, 0x0081) == LICHEN_BT_OK);
+    CHECK(bt_reg_claim(&r, sd, BT_CLAIM_ADVERTISE | BT_CLAIM_PEER) == LICHEN_BT_OK);
+    CHECK(bt_reg_claim(&r, os, BT_CLAIM_PEER) == LICHEN_BT_BUSY);
     CHECK(bt_reg_event_queued(&r, sd) && bt_reg_event_queued(&r, sd));
 
     bt_undo_t u[BT_REG_UNDO_MAX];
     size_t    n = bt_reg_revoke(&r, sd, u, BT_REG_UNDO_MAX);
-    CHECK(n == 5);
+    CHECK(n == 6);
+    CHECK(u[5].kind == BT_UNDO_RELEASE && u[5].handle == (BT_CLAIM_ADVERTISE | BT_CLAIM_PEER));
+    CHECK(!bt_reg_claimed(&r, BT_CLAIM_ADVERTISE) && bt_reg_claim_holder(&r, BT_CLAIM_PEER) == 0);
+    CHECK(bt_reg_claim(&r, sd, BT_CLAIM_VISIBLE) == LICHEN_BT_NOT_FOUND);
     CHECK(u[0].kind == BT_UNDO_REMOVE_SERVICE && u[0].svc == svc);
     CHECK(u[1].kind == BT_UNDO_STOP_SCAN);
     CHECK(u[2].kind == BT_UNDO_DISCONNECT && u[2].handle == 7);
@@ -340,6 +345,31 @@ static void scans_conns_events(void) {
     // revoke with a small undo buffer writes what fits
     bt_undo_t u[1];
     CHECK(bt_reg_revoke(&r, b, u, 1) == 1);
+}
+
+static void claims(void) {
+    bt_reg_t r;
+    bt_reg_init(&r);
+    bt_owner_t a = bt_reg_owner_add(&r, BT_OWNER_BUILTIN), b = bt_reg_owner_add(&r, BT_OWNER_SD);
+    CHECK(!bt_reg_claimed(&r, BT_CLAIM_ADVERTISE));
+    CHECK(bt_reg_claim(&r, a, BT_CLAIM_ADVERTISE) == LICHEN_BT_OK);
+    CHECK(bt_reg_claim(&r, b, BT_CLAIM_ADVERTISE | BT_CLAIM_VISIBLE) == LICHEN_BT_OK); // shared wishes
+    bt_reg_unclaim(&r, a, BT_CLAIM_ADVERTISE);
+    CHECK(bt_reg_claimed(&r, BT_CLAIM_ADVERTISE)); // b still wants it
+    bt_reg_unclaim(&r, b, BT_CLAIM_ADVERTISE);
+    CHECK(!bt_reg_claimed(&r, BT_CLAIM_ADVERTISE) && bt_reg_claimed(&r, BT_CLAIM_VISIBLE));
+    CHECK(bt_reg_claim(&r, a, BT_CLAIM_PEER) == LICHEN_BT_OK);
+    CHECK(bt_reg_claim(&r, a, BT_CLAIM_PEER) == LICHEN_BT_OK); // its own again
+    CHECK(bt_reg_claim(&r, b, BT_CLAIM_PEER) == LICHEN_BT_BUSY);
+    CHECK(bt_reg_claim_holder(&r, BT_CLAIM_PEER) == a);
+    CHECK(bt_reg_claim(&r, a, 0x80) == LICHEN_BT_INVALID);
+    CHECK(bt_reg_claim(&r, 0, BT_CLAIM_ADVERTISE) == LICHEN_BT_NOT_FOUND);
+    // a claim keeps the owner from idle until the revoke drops it
+    bt_undo_t u[BT_REG_UNDO_MAX];
+    CHECK(!bt_reg_owner_idle(&r, a));
+    CHECK(bt_reg_revoke(&r, a, u, BT_REG_UNDO_MAX) == 1 && u[0].kind == BT_UNDO_RELEASE);
+    CHECK(bt_reg_owner_idle(&r, a) && bt_reg_owner_release(&r, a));
+    CHECK(bt_reg_claim(&r, b, BT_CLAIM_PEER) == LICHEN_BT_OK); // free again
 }
 
 static void l2cap(void) {
@@ -508,6 +538,7 @@ int main(void) {
     handles();
     revoke_before_free();
     scans_conns_events();
+    claims();
     l2cap();
     advert_order();
     adv_name();

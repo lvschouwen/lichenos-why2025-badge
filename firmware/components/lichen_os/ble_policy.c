@@ -24,6 +24,13 @@ void ble_pair_open(ble_pair_t *p, uint32_t now_ms) {
     p->opened_ms = now_ms;
 }
 
+void ble_pair_tick(ble_pair_t *p, uint32_t now_ms) {
+    pair_unlock_due(p, now_ms);
+    if (p->open && since(now_ms, p->opened_ms) >= BLE_PAIR_WINDOW_MS) {
+        p->open = false;
+    }
+}
+
 void ble_pair_close(ble_pair_t *p) {
     p->open = false;
 }
@@ -44,7 +51,7 @@ uint32_t ble_pair_locked_ms(ble_pair_t const *p, uint32_t now_ms) {
 }
 
 ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds) {
-    pair_unlock_due(p, now_ms);
+    ble_pair_tick(p, now_ms);
     if (!ble_pair_is_open(p, now_ms)) {
         return BLE_PAIR_CLOSED;
     }
@@ -136,6 +143,10 @@ void ble_link_init(ble_link_t *l, lichen_bt_role_t role, uint32_t now_ms) {
     l->role  = role;
     l->kind  = BLE_LINK_PLAIN;
     l->up_ms = now_ms;
+}
+
+void ble_link_set_peer(ble_link_t *l) {
+    l->kind = BLE_LINK_PEER;
 }
 
 void ble_link_pairing(ble_link_t *l, uint32_t now_ms, bool under_way) {

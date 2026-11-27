@@ -24,9 +24,14 @@
 // for the ESP32 test peer. Over a healthy CoC the retransmission never fires. Either side's app exiting ends the
 // session with END + PEER_WHY_APP_EXIT (peer_session_app_exit).
 //
-// Glare: both badges invite each other at once (each is central on its own link and peripheral on the other's). The
-// invite with the larger nonce wins on both sides: the loser drops its own invite and link and takes the winner's
-// (PEER_RX_YIELD), the winner refuses the loser's (PEER_RX_REFUSE). Equal nonces: both refuse, both invites end.
+// Glare: the badge we invite invites us at once (each is central on its own link and peripheral on the other's; the
+// service's peer key says it is the same badge). The larger nonce wins on both sides, in either order of arrival:
+// - the loser gets the winner's INVITE first: it drops its own invite and link and takes the winner's (PEER_RX_YIELD);
+// - the winner refuses the loser's INVITE with DECLINE + PEER_WHY_GLARE (peer_session_refusal); a loser that gets
+//   that first goes back to IDLE (PEER_RX_YIELD, drop yielded_link) and takes the winner's INVITE when it comes,
+//   without the rate limit. The surviving session is the winner's: the winner is its central.
+// Equal nonces: both refuse plainly, both invites end DECLINED. Any other badge's invite while we invite is refused.
+// A peer can send DECLINE + PEER_WHY_GLARE without having won: our invite still ends, only quietly (PEER_EV_YIELD).
 //
 // Wire format, little-endian: version (1), type, seq (2), ack (2), payload length (2), payload.
 
@@ -111,12 +116,13 @@ typedef enum {
 #define PEER_EV_MSG    0x08u // peer_session_recv has a message
 #define PEER_EV_READY  0x10u // the window has room again after a BUSY
 #define PEER_EV_CLOSED 0x20u // s->end says why; the service drops the link once next_frame gives nothing more
+#define PEER_EV_YIELD  0x40u // a glare was lost: our invite ended, the other badge's invite is (or comes) instead
 
 typedef enum {
     PEER_RX_OK,      // taken
     PEER_RX_IGNORED, // nothing to do with the session now
     PEER_RX_BAD,     // malformed: drop the link when it is not the session's
-    PEER_RX_REFUSE,  // an invite refused: send DECLINE on that link and drop it
+    PEER_RX_REFUSE,  // an invite refused: send peer_session_refusal's DECLINE on that link and drop it
     PEER_RX_YIELD,   // glare lost: drop s->yielded_link (our own invite); the incoming one is the session now
 } peer_rx_t;
 
@@ -127,7 +133,8 @@ typedef struct {
 } peer_rate_t;
 
 // END's optional reason byte
-#define PEER_WHY_APP_EXIT 1u
+#define PEER_WHY_APP_EXIT 1u // on END
+#define PEER_WHY_GLARE    2u // on DECLINE
 
 typedef struct {
     uint16_t seq;
@@ -141,6 +148,9 @@ typedef struct {
     lichen_bt_role_t role;
     uint16_t         link;
     uint16_t         yielded_link;
+    uint32_t         invited_key; // INVITING: the service's key of the badge we invite
+    bool             await_glare; // we lost a glare by DECLINE: the winner's invite is expected
+    uint8_t          refuse_why;  // the reason byte of the last refusal (PEER_WHY_GLARE), 0 none
     uint32_t         state_ms;
     uint32_t         last_rx_ms;
     uint32_t         last_tx_ms;
@@ -168,17 +178,20 @@ typedef struct {
     peer_msg_t       rxq[PEER_RXQ];
 } peer_session_t;
 
-void            peer_session_init(peer_session_t *s);
+void peer_session_init(peer_session_t *s);
 // Visible for PEER_VISIBLE_MS from now, or not; peer_session_visible says whether it still is
-void            peer_session_set_visible(peer_session_t *s, uint32_t now_ms, bool on);
-bool            peer_session_visible(peer_session_t const *s, uint32_t now_ms);
-// We invite on link (we are its central): IDLE only (LICHEN_BT_BUSY otherwise), INVALID for an invite that does not
-// encode. The INVITE frame follows from next_frame.
-lichen_bt_err_t peer_session_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, peer_invite_t const *inv);
+void peer_session_set_visible(peer_session_t *s, uint32_t now_ms, bool on);
+bool peer_session_visible(peer_session_t const *s, uint32_t now_ms);
+// We invite the badge the service knows as peer_key on link (we are its central): IDLE only (LICHEN_BT_BUSY otherwise),
+// INVALID for an invite that does not encode. The INVITE frame follows from next_frame.
+lichen_bt_err_t
+    peer_session_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t peer_key, peer_invite_t const *inv);
+// The DECLINE for the invite on_frame just refused (PEER_RX_REFUSE), with its reason: its length, 0 when cap is short
+size_t    peer_session_refusal(peer_session_t *s, uint8_t *out, size_t cap);
 // A frame that came in on link from the peer the service knows as peer_key (the invite rate limit's key)
-peer_rx_t       peer_session_on_frame(
-          peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t peer_key, uint8_t const *buf, size_t len
-      );
+peer_rx_t peer_session_on_frame(
+    peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t peer_key, uint8_t const *buf, size_t len
+);
 // The person answered the invite (INVITED only; false otherwise)
 bool            peer_session_answer(peer_session_t *s, uint32_t now_ms, bool accept);
 // Pairing ended on the session's link: ok opens the session
@@ -188,7 +201,7 @@ void            peer_session_link_down(peer_session_t *s, uint32_t now_ms, uint1
 void            peer_session_end(peer_session_t *s, uint32_t now_ms);
 // The app on this side exits (or stops): END with the reason, so the other side's app sees why. Nothing when idle.
 void            peer_session_app_exit(peer_session_t *s, uint32_t now_ms);
-// The timeouts and retransmission: call it at least every few hundred ms
+// The timeouts and retransmission, and Visible running out (latched): call it at least every few hundred ms
 void            peer_session_tick(peer_session_t *s, uint32_t now_ms);
 // OPEN only (NOT_CONNECTED), 1..PEER_MSG_MAX bytes (INVALID), BUSY with PEER_TXQ in flight
 lichen_bt_err_t peer_session_send(peer_session_t *s, void const *data, size_t len);

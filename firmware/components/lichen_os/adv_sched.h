@@ -32,6 +32,7 @@ typedef struct {
 
 typedef struct {
     bool     asked; // a round is under way (want was true at the last step)
+    bool     done;  // the round ran out: off until a restart (latched, so a counter wrap never revives it)
     uint32_t start_ms;
 } adv_sched_t;
 
