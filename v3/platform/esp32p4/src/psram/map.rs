@@ -7,7 +7,9 @@ use crate::psram::regs::SPIMEM2;
 
 /// Virtual base of the cached alias (SOC_MMU_PSRAM_VADDR_BASE).
 pub const CACHED_BASE: usize = 0x4800_0000;
-/// Offset of the uncached alias (SOC_NON_CACHEABLE_OFFSET_PSRAM): the same bytes at CACHED_BASE + 0x4000_0000.
+/// Offset of the uncached alias (SOC_NON_CACHEABLE_OFFSET_PSRAM): the same bytes at CACHED_BASE + 0x4000_0000. Reads and probe
+/// diagnostics only: single-word stores through it flip bit 8 on this chip (#620), so PSRAM is written through the cached alias
+/// (`cached_addr`) with `cache_writeback_invalidate` where the data must reach the chip.
 pub const UNCACHED_OFFSET: usize = 0x4000_0000;
 pub const PAGE_BYTES: usize = 0x1_0000;
 pub const MMU_ENTRIES: usize = 1024;
@@ -16,6 +18,30 @@ const MMU_CONTENT: usize = SPIMEM2 + 0x37C;
 const MMU_INDEX: usize = SPIMEM2 + 0x380;
 const MMU_VALID: u32 = 1 << 11;
 const MMU_ACCESS_PSRAM: u32 = 1 << 10;
+
+/// Physical offsets `[EXCLUDED_START, EXCLUDED_END)` are never handed out (#620): uncached single-word writes of address-like data
+/// corrupt bit 8 there on this chip, and the workaround keeps allocators and DMA out of the range.
+pub const EXCLUDED_START: usize = 0x54_0000;
+pub const EXCLUDED_END: usize = 0x5C_0000;
+
+/// Does `[off, off + len)` touch the excluded range?
+pub const fn overlaps_excluded(off: usize, len: usize) -> bool {
+    len != 0 && off < EXCLUDED_END && off + len > EXCLUDED_START
+}
+
+/// First offset at or after `off` outside the excluded range.
+pub const fn next_usable(off: usize) -> usize {
+    if off >= EXCLUDED_START && off < EXCLUDED_END {
+        EXCLUDED_END
+    } else {
+        off
+    }
+}
+
+/// Cached-alias address of a physical PSRAM offset (the only alias PSRAM is written through).
+pub const fn cached_addr(off: usize) -> usize {
+    CACHED_BASE + off
+}
 
 /// MMU content word of a mapping to physical page `ppage` (psram page numbers are below 1024).
 pub const fn mmu_word(ppage: u32) -> u32 {
@@ -87,6 +113,25 @@ pub unsafe fn cache_writeback_invalidate(addr: usize, len: usize) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excluded_range_maths() {
+        assert!(!overlaps_excluded(0, EXCLUDED_START));
+        assert!(overlaps_excluded(0, EXCLUDED_START + 1));
+        assert!(overlaps_excluded(EXCLUDED_START, 4));
+        assert!(overlaps_excluded(EXCLUDED_END - 4, 4));
+        assert!(!overlaps_excluded(EXCLUDED_END, 4));
+        assert!(!overlaps_excluded(EXCLUDED_START, 0));
+        assert!(overlaps_excluded(0x50_0000, 0x20_0000));
+        assert_eq!(next_usable(0x10_0000), 0x10_0000);
+        assert_eq!(next_usable(EXCLUDED_START), EXCLUDED_END);
+        assert_eq!(next_usable(EXCLUDED_END - 1), EXCLUDED_END);
+        assert_eq!(next_usable(EXCLUDED_END), EXCLUDED_END);
+        assert_eq!(cached_addr(0x1000), 0x4800_1000);
+        // the hole is page aligned, so whole 64 KB pages are either in or out
+        assert_eq!(EXCLUDED_START % PAGE_BYTES, 0);
+        assert_eq!(EXCLUDED_END % PAGE_BYTES, 0);
+    }
 
     #[test]
     fn mmu_words() {
