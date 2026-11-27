@@ -1,9 +1,9 @@
 dependencies:
   idf: '>=6.1'
   espressif/esp_wifi_remote: '^1.6.5'
-  # Our fork (submodule esp_hosted, branch why2025-badge): v3.0.10 plus the SDIO RX lost-wakeup fix (#60)
+  # Our fork (submodule esp_hosted, branch why2025-badge-main): upstream main (3.1.0+) plus the Lichen host patches (#371)
   espressif/esp_hosted:
-    version: '^3.0.10'
+    version: '^3.1.0'
     override_path: '../../esp_hosted'
   espressif/esp-serial-flasher: '^2.1.0'
   lvgl/lvgl: '^9.2.0'

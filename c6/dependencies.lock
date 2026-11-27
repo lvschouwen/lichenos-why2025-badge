@@ -1,18 +1,37 @@
 dependencies:
   espressif/esp_hosted:
-    component_hash: c88052665d8df3c7185cb5e34327d77674599006bbbbe4bfdb43c44f9a2a73a3
     dependencies:
     - name: idf
-      require: private
       version: '>=5.5'
+    - name: espressif/esp_tinyusb
+      rules:
+      - if: target in [esp32s2, esp32s3, esp32s31]
+      - if: $CONFIG{ESP_HOSTED_CP_TINYUSB_MANIFEST} == 1
+      version: '>=2.2.0'
+    - name: espressif/usb_host_cdc_acm
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST} == 1
+      version: '*'
+    - name: espressif/iot_usbh_rndis
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_RNDIS_MANIFEST} == 1
+      version: ^0.5.2
+    - name: cherry-embedded/cherryusb
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST} == 1
+      version: '>=1.6.0'
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      path: ../esp_hosted
+      type: local
     targets:
     - esp32
-    - esp32c2
     - esp32s2
     - esp32s3
+    - esp32s31
+    - esp32c2
     - esp32c3
     - esp32c5
     - esp32c6
@@ -21,7 +40,7 @@ dependencies:
     - esp32h4
     - esp32h21
     - esp32p4
-    version: 3.0.10
+    version: 3.1.0
   idf:
     source:
       type: idf
@@ -40,6 +59,6 @@ direct_dependencies:
 - espressif/esp_hosted
 - idf
 - jgromes/radiolib
-manifest_hash: 34a3d11292e073880572e883f322a406e2709cf1551cdb5ae5d2bd82f7ebaf29
+manifest_hash: 58807287bc5ca7d3cb9e27408f9ef9e0a8c8c1050c0f0ee60ecea08d31aa3bf1
 target: esp32c6
 version: 3.0.0

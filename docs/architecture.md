@@ -86,9 +86,11 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; a failed DMA gate round at 120 MHz puts the
   PSRAM back at 80 (`docs/psram-speed-switch.md`, #353). Internal DMA RAM stays scarce: bench gate `fw mem` (gate and target: "Memory" under "Using the hardware better").
 
-- **Pairing:** the P4 builds the fork through `override_path` (`firmware/main/idf_component.yml`: v3.0.10 plus the SDIO RX
-  lost-wakeup fix, #60); the C6 uses registry 3.0.10 (`c6/main/idf_component.yml`). So only the P4 has the fix. The
-  transport settings must match on both sides: SDIO stream mode (host `HOST_SDIO_RX_STREAMING_MODE=y`,
+- **Pairing:** both images build the same fork tree through `override_path` (`firmware/main/idf_component.yml`,
+  `c6/main/idf_component.yml`; branch why2025-badge-main: upstream main plus the Lichen host patches, #371). Since
+  upstream main the C6 advertises a 14 x 1536 B stream aggregate in INIT; the P4 still grows its RX staging on demand
+  and releases it when quiet (#555, `CONFIG_ESP_HOSTED_HOST_SDIO_RX_STAGING_ON_DEMAND=y`); a read above that
+  aggregate, or one without memory for 1.5 s, fails the link. The transport settings must match on both sides: SDIO stream mode (host `HOST_SDIO_RX_STREAMING_MODE=y`,
   `firmware/sdkconfig.defaults:91`; C6 `EH_TRANSPORT_CP_SDIO_MODE_STREAM=y`, `c6/sdkconfig.defaults:20`), frame checksum (C6
   `EH_TRANSPORT_CP_SDIO_CHECKSUM=y`, :50, the host mirrors it at runtime), peer data (host `HOST_FEAT_PEER_DATA=y`, :94; C6
   `CP_FEAT_PEER_DATA=y`, :53), SDIO slot 1, 4-bit bus and pins (`firmware/sdkconfig.defaults:78-85`) and the 40 MHz clock

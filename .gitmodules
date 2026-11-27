@@ -5,7 +5,7 @@
 [submodule "esp-hosted-mcu"]
 	path = esp_hosted
 	url = https://github.com/lvschouwen/esp-hosted-mcu-why2025-badge.git
-	branch = why2025-badge
+	branch = why2025-badge-main
 [submodule "third_party/arduinolibs"]
 	path = third_party/arduinolibs
 	url = https://github.com/rweather/arduinolibs.git

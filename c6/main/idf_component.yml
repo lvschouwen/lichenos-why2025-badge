@@ -1,5 +1,8 @@
 dependencies:
   idf: '>=6.1'
-  espressif/esp_hosted: '3.0.10'
+  # The same fork tree as the P4 (submodule esp_hosted, #371), so host and slave never drift apart
+  espressif/esp_hosted:
+    version: '^3.1.0'
+    override_path: '../../esp_hosted'
   # SX1262 driver for the LoRa receive service (#51); the same library MeshCore uses
   jgromes/radiolib: '8.0.0'
