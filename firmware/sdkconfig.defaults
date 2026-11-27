@@ -46,7 +46,7 @@ CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 # none when the data was re-read every 200 ms). Needs tools/idf-patches/0004; build.sh refuses an IDF without it.
 CONFIG_SPIRAM_HEX_REFRESH_4X=y
 CONFIG_SPIRAM_USE_MALLOC=y
-# NVS cache stays internal until #569 is closed: a PSRAM flip in idle NVS structures is undetected
+# NVS cache stays internal until #569 is closed (follow-up #602): a PSRAM flip in idle NVS structures is undetected
 # A plain malloc of up to 4 KB is internal first, a bigger one PSRAM first (IDF default 16 KB, #261): internal RAM is
 # nearly all DMA-capable, and every ordinary 4-16 KB block took it from esp_hosted's Wi-Fi frames. Safe because nothing
 # that DMAs, runs in an ISR or runs with the cache off uses a plain malloc (#261 audit): those ask for caps
