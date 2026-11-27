@@ -163,23 +163,25 @@ impl ModeRegs {
 }
 
 /// The read-register dummy that matches the chip's CURRENT latency. After a failed speed change the chip may still be at the
-/// old latency while `set_timing` already holds the new dummies, and mode registers read with the wrong dummy are garbage. Each
-/// candidate is `(rd_reg_dummy, MR0 read latency field)` of a known speed; the first one whose MR0 read with that dummy shows its own
-/// latency field wins (the current dummy is tried first); none consistent keeps the current one. With a single candidate nothing is
-/// read (the default 120 MHz build behaves exactly as before).
-pub fn pick_reg_dummy(candidates: &[(u32, u8)], current: u32, read_mr0: &mut dyn FnMut(u32) -> u8) -> u32 {
+/// old latency while `set_timing` already holds the new dummies, and a register read with the wrong dummy returns a neighbouring
+/// register shifted into place (MR1 = 0x8D looks like latency field 3, MR8 = 0x4B like field 2). Each candidate is
+/// `(rd_reg_dummy, MR0 read latency field)` of a known speed; `read_regs(d)` returns `(MR0, MR1)` of one 16-bit read made with
+/// dummy `d`. A dummy counts as consistent only if the pair looks like the real registers: MR1's vendor ID is 0xD, MR0's latency
+/// field is that speed's own, and MR0's fixed-latency bit 5 is set. The current dummy is tried first; none consistent keeps the
+/// current one. With a single candidate nothing is read (the default 120 MHz build behaves exactly as before).
+pub fn pick_reg_dummy(candidates: &[(u32, u8)], current: u32, read_regs: &mut dyn FnMut(u32) -> (u8, u8)) -> u32 {
     if candidates.len() < 2 {
         return current;
     }
-    let consistent = |d: u32, read: &mut dyn FnMut(u32) -> u8| {
-        let field = (read(d) >> 2) & 7;
-        candidates.iter().any(|&(cd, rl)| cd == d && rl == field)
+    let consistent = |d: u32, read: &mut dyn FnMut(u32) -> (u8, u8)| {
+        let (mr0, mr1) = read(d);
+        mr1 & 0x1F == 0xD && mr0 & (1 << 5) != 0 && candidates.iter().any(|&(cd, rl)| cd == d && rl == (mr0 >> 2) & 7)
     };
-    if consistent(current, read_mr0) {
+    if consistent(current, read_regs) {
         return current;
     }
     for &(d, _) in candidates {
-        if d != current && consistent(d, read_mr0) {
+        if d != current && consistent(d, read_regs) {
             return d;
         }
     }
@@ -196,14 +198,25 @@ pub fn reg_dummy() -> u32 {
     rd_reg_dummy()
 }
 
-/// MR0 read with an explicit dummy.
+/// MR0 and MR1 from one 16-bit register read with an explicit dummy.
+///
+/// With a dummy that does not match the chip's latency the ROM `cmd_start` still waits for data that never arrives in the
+/// expected cycle; it has no timeout, so a badly wrong dummy could in principle hang here. The known speeds' dummies differ by
+/// a few cycles only, which has answered with shifted data on the bench so far.
 ///
 /// # Safety
 /// As `xact`.
-pub unsafe fn read_mr0_with(dummy: u32) -> u8 {
+pub unsafe fn read_regs_with(dummy: u32) -> (u8, u8) {
     let mut r = [0u32; 1];
     xact(REG_READ, 0, dummy, None, Some((&mut r, 16)));
-    byte(&r, 0)
+    (byte(&r, 0), byte(&r, 1))
+}
+
+static MODE_PROGRAMMED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Whether this boot has already written the chip's mode registers (`init_mode_regs` ran). Before that the chip has its power-on
+/// MR0 and the dummies are right by construction, so there is nothing to probe.
+pub fn mode_programmed() -> bool {
+    MODE_PROGRAMMED.load(Relaxed)
 }
 
 /// MR0 as IDF writes it: drive strength 0, read latency `RD_LATENCY`, fixed latency, the other bits kept.
@@ -243,6 +256,7 @@ pub unsafe fn init_mode_regs(rl: u8, wl: u8) {
     xact(REG_READ, 8, rd_reg_dummy(), None, Some((&mut r, 8)));
     let m8 = byte(&r, 0);
     xact(REG_WRITE, 8, 0, Some((&word2(mr8_value(m8), 0), 16)), None);
+    MODE_PROGRAMMED.store(true, Relaxed);
 }
 
 /// `s_get_psram_mode_reg`: MR0..MR4 and MR8 as the chip reports them now.
@@ -329,13 +343,17 @@ mod tests {
         assert!(!ModeRegs { mr8: 0x00, ..ok }.matches_init(2, 2));
     }
 
-    /// A chip at the given MR0 latency field: a read with that field's own dummy returns the register, any other dummy garbage.
-    fn fake_chip(field: u8, dummy_of_field: &'static [(u32, u8)]) -> impl FnMut(u32) -> u8 {
+    /// A chip at the given MR0 latency field. A read with that field's own dummy returns (MR0, MR1) as they are; any other dummy
+    /// shifts a neighbouring register into place: toward a longer dummy MR1 (0x8D) and MR2 (0xDF), toward a shorter one MR8
+    /// (0x4B) and a zero byte.
+    fn fake_chip(field: u8, dummy_of_field: &'static [(u32, u8)]) -> impl FnMut(u32) -> (u8, u8) {
         move |d| {
             if dummy_of_field.iter().any(|&(dd, f)| dd == d && f == field) {
-                0x20 | (field << 2)
+                (0x20 | (field << 2), 0x8D)
+            } else if d > 8 {
+                (0x8D, 0xDF)
             } else {
-                0x81 // shifted garbage: latency field 0
+                (0x4B, 0x00)
             }
         }
     }
@@ -344,28 +362,41 @@ mod tests {
 
     #[test]
     fn retry_after_a_failed_160_reads_an_lc5_chip_with_the_lc5_dummy() {
-        // dummies are still those of 160 (10) but the chip stayed at LC5 (field 2)
+        // dummies are still those of 160 (10) but the chip stayed at LC5 (field 2): the misread is MR1 = 0x8D, "field 3"
         let mut chip = fake_chip(2, KNOWN);
         assert_eq!(pick_reg_dummy(KNOWN, 10, &mut chip), 8);
     }
 
     #[test]
     fn an_lc6_chip_with_120_dummies_is_found_too() {
+        // the misread is MR8 = 0x4B, "field 2" = LC5, the field of the dummy in use
         let mut chip = fake_chip(3, KNOWN);
         assert_eq!(pick_reg_dummy(KNOWN, 8, &mut chip), 10);
+    }
+
+    #[test]
+    fn the_field_alone_would_be_fooled_by_a_neighbouring_register() {
+        // the old rule (MR0[4:2] equals the speed's field) accepts both misreads; the vendor and LT checks refuse them
+        let field_only = |(mr0, _): (u8, u8), rl: u8| (mr0 >> 2) & 7 == rl;
+        assert!(field_only((0x8D, 0xDF), 3)); // LC5 chip read with the 160 dummy
+        assert!(field_only((0x4B, 0x00), 2)); // LC6 chip read with the 120 dummy
+        let mut lc5 = fake_chip(2, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 10, &mut lc5), 8);
+        let mut lc6 = fake_chip(3, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 8, &mut lc6), 10);
     }
 
     #[test]
     fn a_consistent_current_dummy_is_kept_and_nothing_is_probed_with_one_speed() {
         let mut chip = fake_chip(3, KNOWN);
         assert_eq!(pick_reg_dummy(KNOWN, 10, &mut chip), 10);
-        let mut never = |_| -> u8 { panic!("a single known speed must not probe") };
+        let mut never = |_| -> (u8, u8) { panic!("a single known speed must not probe") };
         assert_eq!(pick_reg_dummy(&[(8, 2)], 8, &mut never), 8);
     }
 
     #[test]
     fn nothing_consistent_keeps_the_current_dummy() {
-        let mut dead = |_| 0xFFu8;
+        let mut dead = |_| (0xFFu8, 0xFFu8);
         assert_eq!(pick_reg_dummy(KNOWN, 10, &mut dead), 10);
     }
 

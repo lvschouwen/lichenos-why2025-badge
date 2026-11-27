@@ -54,6 +54,12 @@ pub const KNOWN_REG_DUMMIES: &[(u32, u8)] = &[
 mod tests {
     use super::*;
 
+    #[cfg(not(feature = "bench-experiments"))]
+    #[test]
+    fn the_default_build_knows_one_speed_so_nothing_is_probed() {
+        assert_eq!(KNOWN_REG_DUMMIES.len(), 1);
+    }
+
     #[test]
     fn axi_fields_of_120_match_the_register_table() {
         // regs::CONFIG_FOR_PSRAM: read dummy 18 bits = 0x450 (field 17 << 6, enable bit 4 separate), write dummy 8 bits = 0x01C0_0008
