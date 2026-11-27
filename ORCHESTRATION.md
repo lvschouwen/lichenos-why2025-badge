@@ -52,11 +52,6 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-25, badge on fw-4eafeaa4, G #564 benched remotely)
-- #527 children: C #560 closed, D #561 + F #563 + G #564 merged with hands checklists (needs-lucas), E #562 + #567 closed, H #565 next.
-- Next: #569 (PSRAM loses bit 9 in unread data; 4x refresh patch 0004 on main, bench rerun with the DOOM_DIAG patch from the backups folder, `diag-held0.patch`). Then #586 stack check, #587 DEBUG_LOG, #583 SDIO 50 MHz, #585 C6 core dump, #584 QIO investigation. H #565 waits on #569.
-- Bench: scratchpad bench-g.sh is the DOOM bench template (no ui lock: a 3 s phys Esc under the lock ends the lock). Thermal `test warn` sheds Wi-Fi + LoRa ~120 s. After a flash: `fw.sh sdapp-push doom` before opening DOOM.
-- Flash: Lucas runs `! <scratchpad>/fw.sh ota-firmware` (my ota-firmware is refused); fw.sh = ~10 lines around `tools/badge.sh <sub> <ip>`, IP from ~/.config/why2025-badge/badge-ip, sed-redacted.
-- Bench gotchas: `fw ui open` wakes the screen and loads async (wait ~5 s before acting on the app); a firmware update refuses /console and /screenshot (409); the card-removal unload logs nothing on success; DOOM closes with `keys send esc hold:3000`; spike/variant SD apps: build with the env for the whole build.sh run, push with ota-file, rebuild normal and `sdapp-push` after.
-- NEEDS-LUCAS: hands checklist on #561; #523 step 7 (`owner-onair.sh sync`/`off`); #237.
-- #545 parked until #527 lands.
+## Live (2026-11-27, epic #591 dependency wave in flight)
+- State table and merge notes: the latest #591 comment. Agents impl-588 (wt-1), impl-589 (wt-5), impl-590 (wt-6), impl-592 (wt-7), impl-371 (wt-4, uncommitted superproject work: don't reset the slot).
+- Merge #588 first (CHECK moves to ~/esp/esp-idf-v6.1-head; move the stale bootloader caches aside), then #589/#590/#592, then #371 after its review. One bench at the end covers #583/#586 too.
