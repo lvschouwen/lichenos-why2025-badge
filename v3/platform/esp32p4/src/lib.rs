@@ -20,6 +20,9 @@ pub mod clic;
 pub mod clint;
 pub mod core1;
 pub mod mailbox;
+// Raw CSR access (inline RISC-V asm): target only, so the host tests of the register maths still build.
+#[cfg(target_arch = "riscv32")]
 pub mod pma;
 pub mod pmp;
+#[cfg(target_arch = "riscv32")]
 pub mod trap;
