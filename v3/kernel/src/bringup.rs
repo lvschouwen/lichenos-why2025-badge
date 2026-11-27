@@ -15,7 +15,19 @@ extern "C" {
     static _noload_start: u8;
     static _noload_end: u8;
     fn planted_fault();
+    static _utext: u8;
+    static _udata: u8;
+    static _sbss: u8;
+    fn u_echo();
+    fn u_load();
+    fn u_store();
+    fn u_spin_illegal();
+    fn u_illegal_at();
 }
+
+const UPAGE: usize = 4096;
+/// U spin length for the preemption case: several 100 us ticks at any plausible ROM core clock.
+const U_SPIN: usize = 4_000_000;
 
 /// The core 0 tick under test: 1 ms, 10 000 of them (#612 checkpoint 1).
 const TICK_US: u64 = 1000;
@@ -125,6 +137,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
 
     timer(&mut t);
     fault(&mut t);
+    user(&mut t);
 
     let dropped = platform::take_dropped();
     record(&mut t, "log.ring", Some(dropped == 0), format_args!("dropped={dropped}"));
@@ -205,4 +218,107 @@ fn fault(t: &mut Tally) {
         }
         None => record(t, "trap.mfault", Some(false), format_args!("the planted fault never trapped")),
     }
+}
+
+fn fnaddr(f: unsafe extern "C" fn()) -> usize {
+    f as *const () as usize
+}
+
+fn fault_line(u: &mtrap::URun) -> (u16, u32, u32) {
+    u.fault.map_or((0xFFF, 0, 0), |f| (lichen_kcore::trap::decode(f.cause).code, f.epc, f.tval))
+}
+
+/// U-mode under PMP (#612 checkpoint 1 U cases, checkpoint 2 first rows): the stub page R+X, the data page R+W,
+/// everything else denied by an explicit deny-all entry.
+fn user(t: &mut Tally) {
+    begin("pmp");
+    crate::pmp::report();
+    // SAFETY: linker symbols; only their addresses are used.
+    let (utext, udata, kram) = unsafe { (addr(&_utext), addr(&_udata), addr(&_sbss)) };
+    crate::pmp::apply(utext, udata, UPAGE);
+    kprintln!("pmp: U view text {utext:#x} R+X, data {udata:#x} R+W ({UPAGE} B each), rest denied");
+    let sp = udata + UPAGE;
+
+    begin("u.echo");
+    let u = mtrap::run_u(fnaddr(u_echo), sp, 0x1234, 0);
+    record(
+        t,
+        "u.ecall",
+        Some(u.echoes == 1 && u.exit == Some(0x1235) && u.fault.is_none()),
+        format_args!(
+            "U ecall round trip: {} echo(es), exit a0={:#x?}, mintstatus {:#x}",
+            u.echoes,
+            u.exit,
+            hw::trap::mintstatus()
+        ),
+    );
+
+    begin("u.grant");
+    let st = mtrap::run_u(fnaddr(u_store), sp, udata, 0xA5A5_0612);
+    let ld = mtrap::run_u(fnaddr(u_load), sp, udata, 0);
+    // SAFETY: the U data page is NOLOAD kernel-owned memory the kernel may read.
+    let m_view = unsafe { core::ptr::read_volatile(udata as *const u32) };
+    record(
+        t,
+        "u.grant",
+        Some(st.exit.is_some() && ld.exit == Some(0xA5A5_0612) && m_view == 0xA5A5_0612),
+        format_args!(
+            "U store+load of its data page: store {:?}, load {:#x?}, M reads {m_view:#x}",
+            st.exit.is_some(),
+            ld.exit
+        ),
+    );
+
+    // Each must be refused by the PMP: load-access-fault (5) with mtval = the address.
+    let denied: [(&str, usize); 6] = [
+        ("u.deny.kram", kram),
+        ("u.deny.peri", 0x500C_A01C),
+        ("u.deny.lpram", 0x5010_8000),
+        ("u.deny.uncached", udata + 0x4000_0000),
+        ("u.deny.cache-mon", 0x3FF0_0000),
+        ("u.deny.cache-ctl", 0x3FF1_0000),
+    ];
+    for (id, a) in denied {
+        begin(id);
+        let u = mtrap::run_u(fnaddr(u_load), sp, a, 0);
+        let (code, epc, tval) = fault_line(&u);
+        record(
+            t,
+            id,
+            Some(code == 5 && tval as usize == a && epc as usize == fnaddr(u_load) && u.exit.is_none()),
+            format_args!(
+                "U load {a:#010x}: code {code} ({}) mepc {epc:#x} mtval {tval:#x}",
+                lichen_kcore::trap::exception_name(code)
+            ),
+        );
+    }
+    begin("u.deny.kram-store");
+    let u = mtrap::run_u(fnaddr(u_store), sp, kram, 0xBAD);
+    let (code, _, tval) = fault_line(&u);
+    record(
+        t,
+        "u.deny.kram-store",
+        Some(code == 7 && tval as usize == kram),
+        format_args!(
+            "U store {kram:#010x}: code {code} ({}) mtval {tval:#x}",
+            lichen_kcore::trap::exception_name(code)
+        ),
+    );
+
+    begin("u.preempt");
+    mtrap::tick_start(lichen_kcore::trap::us_to_ticks(100), u32::MAX);
+    let u = mtrap::run_u(fnaddr(u_spin_illegal), sp, U_SPIN, 0);
+    let tick = mtrap::tick_stop();
+    let (code, epc, _) = fault_line(&u);
+    let want = fnaddr(u_illegal_at);
+    record(
+        t,
+        "u.preempt-illegal",
+        Some(code == lichen_kcore::trap::EXC_ILLEGAL && epc as usize == want && u.preempts >= 3),
+        format_args!(
+            "U spin {U_SPIN} then illegal: {} preemption(s), {} tick(s), fault code {code} at {epc:#x} (want {want:#x})",
+            u.preempts,
+            tick.map_or(0, |k| k.stats.count)
+        ),
+    );
 }

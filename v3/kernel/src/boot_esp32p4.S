@@ -60,6 +60,7 @@ trap_entry:
     csrw mscratch, zero
     mv a0, sp
     call m_trap
+    bnez a0, to_kernel
     lw t0, 64(sp)
     csrw mscratch, t0
     lw ra, 0(sp)
@@ -82,6 +83,30 @@ trap_entry:
     csrrw sp, mscratch, sp
     mret
 
+# m_trap returned nonzero: the U run is over. Drop the U frame, re-arm mscratch with the trap stack top, and return
+# from run_user into the kernel with its saved callee-saved registers.
+to_kernel:
+    addi t0, sp, 80
+    csrw mscratch, t0
+    la t0, k_ctx
+    lw ra, 0(t0)
+    lw sp, 4(t0)
+    lw s0, 8(t0)
+    lw s1, 12(t0)
+    lw s2, 16(t0)
+    lw s3, 20(t0)
+    lw s4, 24(t0)
+    lw s5, 28(t0)
+    lw s6, 32(t0)
+    lw s7, 36(t0)
+    lw s8, 40(t0)
+    lw s9, 44(t0)
+    lw s10, 48(t0)
+    lw s11, 52(t0)
+    lw gp, 56(t0)
+    lw tp, 60(t0)
+    ret
+
 nested_trap:
     csrw mscratch, zero
     la sp, _fault_stack_top
@@ -96,3 +121,71 @@ nested_trap:
 planted_fault:
     .word 0
     ret
+
+# run_user(entry, user_sp, a0, a1): mret into U at entry with sp/a0/a1 and MPIE = 1 (the tick preempts U). Returns
+# when m_trap ends the run (an exit ecall or a fault). mcause is not written (#612): mret restores mil from its mpil,
+# which is 0 here because every earlier trap was taken at level 0.
+.section .text, "ax"
+.global run_user
+run_user:
+    la t0, k_ctx
+    sw ra, 0(t0)
+    sw sp, 4(t0)
+    sw s0, 8(t0)
+    sw s1, 12(t0)
+    sw s2, 16(t0)
+    sw s3, 20(t0)
+    sw s4, 24(t0)
+    sw s5, 28(t0)
+    sw s6, 32(t0)
+    sw s7, 36(t0)
+    sw s8, 40(t0)
+    sw s9, 44(t0)
+    sw s10, 48(t0)
+    sw s11, 52(t0)
+    sw gp, 56(t0)
+    sw tp, 60(t0)
+    li t1, 0x1800               # MPP = U
+    csrc mstatus, t1
+    li t1, 0x80                 # MPIE = 1
+    csrs mstatus, t1
+    csrw mepc, a0
+    mv sp, a1
+    mv a0, a2
+    mv a1, a3
+    mv gp, zero
+    mv tp, zero
+    mret
+
+.section .bss
+.balign 4
+k_ctx: .space 64
+
+# U-mode stubs, on their own 4 KB page (.utext, granted R+X to U). a7 = 0: echo (the kernel returns a0 + 1);
+# a7 = 1: exit with a0.
+.section .utext, "ax"
+.balign 4
+.global u_echo
+u_echo:
+    li a7, 0
+    ecall
+    li a7, 1
+    ecall
+.global u_load
+u_load:
+    lw a0, 0(a0)
+    li a7, 1
+    ecall
+.global u_store
+u_store:
+    sw a1, 0(a0)
+    li a7, 1
+    ecall
+# Spin a0 times (long enough for several ticks), then an illegal word: the fault must still arrive after preemption.
+.global u_spin_illegal
+u_spin_illegal:
+    addi a0, a0, -1
+    bnez a0, u_spin_illegal
+.global u_illegal_at
+u_illegal_at:
+    .word 0

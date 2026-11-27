@@ -25,7 +25,6 @@ use lichen_kcore::handles;
 mod csr;
 #[cfg(feature = "qemu-virt")]
 mod loader;
-#[cfg(feature = "qemu-virt")]
 mod pmp;
 #[cfg(feature = "qemu-virt")]
 mod sched;

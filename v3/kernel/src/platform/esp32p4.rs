@@ -21,6 +21,16 @@ pub fn enter_fatal() {
 
 pub fn init() {}
 
+pub use lichen_kcore::image::Slot;
+const SLOT_TEXT: usize = 0x4FF6_0000;
+const SLOT_DATA: usize = 0x4FF7_0000;
+const SLOT_LEN: usize = 0x8000;
+
+/// App slot i (plan on #642): 32 KB NAPOT text and data regions in NOLOAD L2MEM, above the kernel's bss and stacks.
+pub fn slot(i: usize) -> Slot {
+    Slot { text: SLOT_TEXT + i * SLOT_LEN, data: SLOT_DATA + i * SLOT_LEN, len: SLOT_LEN }
+}
+
 /// Queue one byte for UART0 and push out whatever the FIFO has room for. Never blocks: a full ring drops its oldest
 /// byte (counted, see `take_dropped`), so a dead UART cannot stall the kernel.
 pub fn putc(b: u8) {

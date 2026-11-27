@@ -13,12 +13,17 @@ MEMORY {
 }
 SECTIONS {
   .text : { _load_start = .; KEEP(*(.text.boot)) *(.text.trap) *(.text .text.*) } > LOAD
+  .utext : ALIGN(4096) { _utext = .; KEEP(*(.utext)) . = ALIGN(4096); _eutext = .; } > LOAD
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > LOAD
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _load_end = .; } > LOAD
   .bss (NOLOAD) : ALIGN(4) { _noload_start = .; _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD
   .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 4K; _trap_stack_top = .; . += 2K; _fault_stack_top = .; _noload_end = .; } > NOLOAD
+  /* U data page for the stubs (#612): the first data slot of the plan (0x4FF70000), 4 KB of it. */
+  .udata 0x4FF70000 (NOLOAD) : { _udata = .; . += 4K; _eudata = .; } > NOLOAD
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
   ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
+  ASSERT(_eutext - _utext == 4096, "the U stub page must be exactly one 4 KB NAPOT page")
+  ASSERT(_noload_end <= 0x4FF60000, "kernel bss and stacks must stay below the app slots at 0x4FF60000")
   ASSERT(_noload_end <= 0x4FF80000, "NOLOAD memory runs into the L2 cache carve")
   ASSERT(ORIGIN(LOAD) == 0x4FF10000 && ORIGIN(NOLOAD) == 0x4FF40000, "memory map drifted from platform/esp32p4 mem.rs")
 }

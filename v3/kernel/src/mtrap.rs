@@ -39,8 +39,21 @@ pub struct Caught {
     pub tval: u32,
 }
 
+/// What one U run did (`run_u`).
+#[derive(Clone, Copy, Default)]
+pub struct URun {
+    pub echoes: u32,
+    pub preempts: u32,
+    /// a0 of the exit ecall, if the run ended with one.
+    pub exit: Option<usize>,
+    /// The exception that ended the run otherwise.
+    pub fault: Option<Caught>,
+}
+
 struct State {
     tick: Option<Tick>,
+    /// Some while a U run is in progress.
+    user: Option<URun>,
     /// Set by `expect_fault`: the next exception at this pc is recorded and skipped instead of ending the run.
     expect_pc: Option<u32>,
     caught: Option<Caught>,
@@ -48,7 +61,7 @@ struct State {
 }
 
 /// Touched by the handler and by kernel code with MIE clear only (see the module invariant).
-static STATE: Global<State> = Global::new(State { tick: None, expect_pc: None, caught: None, stray: 0 });
+static STATE: Global<State> = Global::new(State { tick: None, user: None, expect_pc: None, caught: None, stray: 0 });
 
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     hw::trap::irq_disable();
@@ -152,9 +165,48 @@ fn on_timer(s: &mut State) {
     hw::clint::set_cmp(next);
 }
 
+extern "C" {
+    fn run_user(entry: usize, sp: usize, a0: usize, a1: usize);
+}
+
+/// Run U code at `entry` (on the U stub page, under the PMP view the caller applied) until it exits or faults.
+pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
+    with(|s| s.user = Some(URun::default()));
+    // SAFETY: run_user saves the kernel's callee-saved registers and returns here through to_kernel when m_trap ends
+    // the run; no &mut into STATE is live across it (the `with` borrow above has ended).
+    unsafe { run_user(entry, sp, a0, a1) };
+    with(|s| s.user.take().unwrap_or_default())
+}
+
+fn set_mepc(v: u32) {
+    // SAFETY: mepc is only read by the coming mret; the callers pass the trapped pc + 4 (norvc, 4-byte instructions).
+    unsafe { core::arch::asm!("csrw mepc, {0}", in(reg) v, options(nomem, nostack)) };
+}
+
+/// A trap from U: 0 = resume U, 1 = the run is over (to_kernel).
+fn from_user(s: &mut State, frame: &mut Frame, mcause: u32, c: Cause) -> usize {
+    let Some(u) = s.user.as_mut() else {
+        platform::enter_fatal();
+        dump("KERNEL FAULT (U trap with no U run)", mcause, c);
+        platform::exit(3)
+    };
+    let epc = hw::trap::mepc();
+    if c.code == trap::EXC_ECALL_U {
+        if frame.a[7] == 0 {
+            u.echoes += 1;
+            frame.a[0] = frame.a[0].wrapping_add(1);
+            set_mepc(epc + 4);
+            return 0;
+        }
+        u.exit = Some(frame.a[0]);
+        return 1;
+    }
+    u.fault = Some(Caught { cause: mcause, epc, tval: hw::trap::mtval() });
+    1
+}
+
 #[no_mangle]
-extern "C" fn m_trap(frame: *mut Frame) {
-    let _ = frame;
+extern "C" fn m_trap(frame: *mut Frame) -> usize {
     let mcause = hw::trap::mcause();
     let c = trap::decode(mcause);
     // SAFETY: trap entry; the kernel holds no &mut into STATE while MIE can be set (module invariant), and a nested
@@ -163,20 +215,28 @@ extern "C" fn m_trap(frame: *mut Frame) {
     if c.interrupt {
         if c.code == trap::IRQ_MTIMER {
             on_timer(s);
+            if c.mpp == 0 {
+                if let Some(u) = s.user.as_mut() {
+                    u.preempts += 1;
+                }
+            }
         } else {
             hw::clic::set_enabled(c.code as usize, false);
             s.stray += 1;
         }
-        return;
+        return 0;
+    }
+    if c.mpp == 0 {
+        // SAFETY: trap_entry passes its own frame on the trap stack; nothing else references it during m_trap.
+        return from_user(s, unsafe { &mut *frame }, mcause, c);
     }
     let epc = hw::trap::mepc();
     if s.expect_pc == Some(epc) {
         dump("MFAULT", mcause, c);
         s.caught = Some(Caught { cause: mcause, epc, tval: hw::trap::mtval() });
         s.expect_pc = None;
-        // SAFETY: skips the one 4-byte instruction the bring-up planted at this pc (it is built with norvc).
-        unsafe { core::arch::asm!("csrw mepc, {0}", in(reg) epc + 4, options(nomem, nostack)) };
-        return;
+        set_mepc(epc + 4);
+        return 0;
     }
     platform::enter_fatal();
     dump("KERNEL FAULT", mcause, c);
