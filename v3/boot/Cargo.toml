@@ -1,0 +1,20 @@
+# The Lichen v3 boot stage (#615): its own workspace, excluded from v3/Cargo.toml. Never `--workspace` for the target
+# build: boot-core is host-tested, boot-esp32p4 is the chip crate (see check.sh).
+[workspace]
+resolver = "2"
+members = ["boot-core", "boot-esp32p4"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+
+# The stage is written into 0x2000-0x7FFF (24 KB) one day: size matters, so opt-level z.
+[profile.release]
+opt-level = "z"
+debug = false
+panic = "abort"
+lto = true
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
