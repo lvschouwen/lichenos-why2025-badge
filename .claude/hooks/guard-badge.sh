@@ -28,6 +28,17 @@ deny() {
 # The on-air allow list (rule 3) is editable from the main session (#487: one dev badge, the bench adds its test
 # nodes); only what it lets on air is judged below.
 [ -n "$cmd" ] || finish
+# 0. Subagents and teammates (the hook input carries an agent_id) reach the badge only through tools/v3-load-ram.sh
+#    (#614: RAM-bounded, locked, no flash). Any other badge.sh verb, ssh and the flashing tools are refused, in command
+#    position (after a separator, a quote or a wrapper word), so a grep or a commit message naming them passes. Main
+#    has no agent_id and is judged by the rules below only.
+agent_id=$(printf '%s' "$input" | jq -r '.agent_id // empty' 2>/dev/null || true)
+if [ -n "$agent_id" ]; then
+  cw="(^|[;&|(\`'\"{]|\\b(then|do|else|exec|command|env|sudo|time|xargs|nohup|bash|sh|timeout[[:space:]]+[0-9.]+[smh]?))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:];&|'\"]*/)?"
+  if printf '%s\n' "$cmd" | grep -qE "${cw}(badge\.sh|ssh|scp|esptool(\.py)?)([[:space:]]|\$)"; then
+    deny "agents may run only tools/v3-load-ram.sh toward the badge; every other badge.sh verb, ssh and esptool is main's (#614)"
+  fi
+fi
 if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
 fi

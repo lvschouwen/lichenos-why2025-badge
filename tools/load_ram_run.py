@@ -6,9 +6,13 @@ mode, loads the image segments into SRAM and jumps to the entry; the output is r
 a fresh open resets the badge. Ends at a line 'END ...' or after the time limit, then hard-resets into the active
 slot. Nothing is written to flash.
 
-    load_ram_run.py <port> <image.bin> <seconds>
+    load_ram_run.py <port> <image.bin> <seconds> [<baud>] [--follow]
+
+--follow ignores the END line and runs to the time limit; SIGINT, SIGHUP and SIGTERM (Ctrl-C, a dropped connection)
+still reach the hard reset below.
 """
 import re
+import signal
 import sys
 import time
 
@@ -16,11 +20,16 @@ from esptool.cmds import detect_chip, load_ram
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    args = [a for a in sys.argv[1:] if a != "--follow"]
+    follow = len(args) != len(sys.argv) - 1
+    if len(args) not in (3, 4):
         print(__doc__, file=sys.stderr)
         return 2
-    port, image, secs = sys.argv[1], sys.argv[2], int(sys.argv[3] or 20)
-    esp = detect_chip(port, 115200, "default-reset")
+    port, image, secs = args[0], args[1], int(args[2] or 20)
+    baud = int(args[3]) if len(args) == 4 else 115200
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, signal.default_int_handler)
+    esp = detect_chip(port, baud, "default-reset")
     if esp.CHIP_NAME != "ESP32-P4":
         print(f"refusing: chip on {port} is {esp.CHIP_NAME}, not ESP32-P4", file=sys.stderr)
         esp._port.close()
@@ -39,11 +48,17 @@ def main() -> int:
             buf += chunk
             sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
-            if re.search(rb"(^|\n)END [^\r\n]*\r?\n", buf):
+            if not follow and re.search(rb"(^|\n)END [^\r\n]*\r?\n", buf):
                 rc = 0
                 break
-        if rc:
+        if rc and follow:
+            rc = 0
+            print(f"\nload-ram: followed for {secs} s", file=sys.stderr)
+        elif rc:
             print(f"\nload-ram: no END line within {secs} s (watchdog reset or hang?)", file=sys.stderr)
+    except KeyboardInterrupt:
+        rc = 0 if follow else 3
+        print("\nload-ram: interrupted", file=sys.stderr)
     finally:
         time.sleep(0.2)
         esp.hard_reset()
