@@ -244,6 +244,41 @@ pub fn core_local_rows(t: &mut Tally) {
     window_probe(t, sp);
     sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
     sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
+    sweep(t, sp, "u.sweep.userclic", USER_CLIC_BASE, CLIC_LEN);
+    stride_loads(t, sp);
+}
+
+const USER_CLIC_BASE: usize = 0x20B0_0000;
+
+/// One U load per 64 KB over the whole window outside the CLINT, CLIC and core 1's CLIC pages (swept or probed
+/// elsewhere): every one must fault with code 5, none may return data. A BEGIN line per MB names a hang.
+fn stride_loads(t: &mut Tally, sp: usize) {
+    let (mut n, mut bad) = (0u32, 0u32);
+    for mb in 0..256usize {
+        let base = 0x2000_0000 + mb * 0x10_0000;
+        kprintln!("BEGIN u.stride {base:#010x}");
+        platform::flush();
+        for k in 0..16usize {
+            let a = base + k * 0x1_0000 + 0x40;
+            if a < 0x2001_0000 || (CLIC_BASE..CLIC_BASE + 0x2_0000).contains(&a) {
+                continue;
+            }
+            let (fault, exit) = run(u_load, sp, a, 0);
+            n += 1;
+            if !fault.is_some_and(|(code, tval, _)| code == 5 && tval == a) || exit.is_some() {
+                bad += 1;
+                if bad <= 16 {
+                    kprintln!("FINDING u.stride: U load at {a:#010x} did not fault: {fault:x?} exit {exit:x?}");
+                }
+            }
+        }
+    }
+    record(
+        t,
+        "u.stride",
+        bad == 0,
+        format_args!("{n} U loads, one per 64 KB over 0x20000000..0x30000000, {bad} did not fault code 5"),
+    );
 }
 
 /// One U load then one U store per address, each with its own BEGIN line so a hang names the address and the access.
