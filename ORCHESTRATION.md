@@ -52,8 +52,8 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27, 15:30)
-- Badge runs fw-de4b4493 (main), C6 bundle consistent (IDENT match). Wave-595 bench part 1 done (state on #595); the owner steps remain (card out for the no-card path, 4b-4g). Checklist: session scratchpad bench-wave-595.md (rebuild from #595 if gone).
-- Owner order: no Bluetooth merge (#598 wt-5, #599 wt-6) before the #595 bench closes. #598 first (check that esp_hid does not come back in lichen_ble's CMakeLists, #558), then #599.
-- #585 (wt-3, uncommitted, no agent) resumes after #595; then #597. wt-2 #587 claimed, idle.
-- Owner to run: `agent-wt done wt-1 --force` and `agent-wt done wt-4 --force` (#600/#595 content merged, SHAs differ); remove wt-5/firmware/build-stale-598.
+## Live (2026-11-27, 16:40)
+- Badge runs fw-1c07dd0f (main 1c07dd0f; 2f7f9b5b has the same image code), C6 IDENT match, card stays in (memory sd-card-stays-in).
+- Next: #585 (wt-3, uncommitted, impl-585 idle: read its git log and diff first), then #597. wt-2 #587 claimed, idle.
+- #600 open for owner steps: 5b UTF-8 name written on a PC (Wi-Fi and console refuse non-ASCII paths), 5e C6 console on USB; 5d reproducible image (host).
+- Owner to run: `agent-wt done wt-1 --force`, `agent-wt done wt-4 --force` (content merged, SHAs differ); remove wt-5/firmware/build-stale-598.
