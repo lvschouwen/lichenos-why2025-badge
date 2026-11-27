@@ -17,6 +17,7 @@ SECTIONS {
   .utext : { _utext = .; KEEP(*(.utext)) _eutext = .; } > ULOAD
   .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD
   .mstack (NOLOAD) : ALIGN(16) { . += 8K; _mstack_top = .; . += 4K; _trap_stack_top = .; } > NOLOAD
+  .mstack1 (NOLOAD) : ALIGN(16) { . += 4K; _mstack1_top = .; . += 2K; _trap_stack1_top = .; } > NOLOAD
   .ustack (NOLOAD) : { _ustack_bottom = .; . += 4K; _ustack_top = .; } > USTACK
   /DISCARD/ : { *(.eh_frame*) }
 }

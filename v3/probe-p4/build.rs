@@ -3,4 +3,5 @@ fn main() {
     println!("cargo:rustc-link-arg=-T{dir}/link.ld");
     println!("cargo:rerun-if-changed=link.ld");
     println!("cargo:rerun-if-changed=src/asm.S");
+    println!("cargo:rerun-if-env-changed=LICHEN_PROBE_CORE0");
 }

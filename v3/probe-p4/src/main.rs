@@ -1,14 +1,18 @@
-//! #608 bench probe for the #604 isolation matrix: B5, B1, A5, B3, B6, B4 and B2 (last: locks hold until reset)
-//! on core 0 of the ESP32-P4 rev v1.0, in ROM download-mode state, loaded by `esptool load-ram`.
+//! #608 bench probe for the #604 isolation matrix on the ESP32-P4 rev v1.0, in ROM download-mode state, loaded by
+//! `esptool load-ram`. Default (run 8): core 0 starts core 1 and watches it; core 1 runs B5, B1, B3 and a U read of the
+//! CPU-subsystem window (`core1.rs`). LICHEN_PROBE_CORE0=1 builds the core-0 suite instead: B5, B1, A5, B3, B6, B4
+//! and B2 (last: locks hold until reset).
 //! Output: one `CHECK <id> <PASS|FAIL|INFO> ...` line per result, `BEGIN <id>` before each risky step, `END` last.
 #![no_std]
 #![no_main]
 
+#[macro_use]
 mod hw;
+mod core1;
 
 use core::arch::global_asm;
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
-use hw::{csr_read, csr_try, m_lbu, m_lw, m_sb, m_sw, napot, pmp_cfg_byte, pmp_off, pmp_set, user, Trap};
+use hw::{m_lbu, m_lw, m_sb, m_sw, napot, pmp_cfg_byte, pmp_off, pmp_set, user, Trap};
 use hw::{L, NAPOT, R, TOR, W, X};
 
 global_asm!(include_str!("asm.S"));
@@ -30,6 +34,7 @@ extern "C" {
 }
 
 const PROBE_ID: &str = env!("LICHEN_PROBE_ID");
+const CORE0_SUITE: bool = option_env!("LICHEN_PROBE_CORE0").is_some();
 
 // PMP entries the probe owns (cleared first, skipped when the ROM left them locked).
 const E_UTEXT: usize = 4;
@@ -42,7 +47,7 @@ const E_LOCK_NAPOT: usize = 12;
 const E_COVER_PERI: usize = 14; // B2: locked M cover of 0x5000_0000-0x5010_0000 (UART0, PMS, GPIO)
 const E_COVER_RAM: usize = 15; // B2: locked M cover of 0x4FF0_0000-0x4FF8_0000 (all probe memory)
 
-const UTEXT: usize = 0x4FF1_8000;
+pub(crate) const UTEXT: usize = 0x4FF1_8000;
 const UDATA: usize = 0x4FF5_8000;
 const SCRATCH: usize = 0x4FF5_A000; // L2MEM test buffer (4 KB, cached alias)
 const SCRATCH_UNCACHED: usize = SCRATCH + 0x4000_0000; // soc.h:223-224 uncached alias
@@ -50,21 +55,21 @@ const LOCK_A: usize = 0x4FF5_B000; // B2 NAPOT, 256 B
 const LOCK_B: usize = 0x4FF5_B800; // B2 TOR, 256 B
 
 // CLIC (clic_reg.h): per-core window, other core at +0x10000; line i control word at CTRL + 4 * i.
-const CLIC_THRESH: usize = 0x2080_0008;
+pub(crate) const CLIC_THRESH: usize = 0x2080_0008;
 const CLIC_CTRL: usize = 0x2080_1000;
 const TEST_CPU_LINE: usize = 25;
 const TEST_ID: usize = 16 + TEST_CPU_LINE; // CLIC_EXT_INTR_NUM_OFFSET
-const fn clic_byte(core_off: usize, id: usize, byte: usize) -> usize {
+pub(crate) const fn clic_byte(core_off: usize, id: usize, byte: usize) -> usize {
     CLIC_CTRL + core_off + 4 * id + byte // 0 ip, 1 ie, 2 attr, 3 ctl
 }
 // CLINT, own core (TRM v1.0 sec. 2.9.3.5; documented for v3.x, unconfirmed on v1.0 until this probe reads it).
-const CLINT: usize = 0x2000_0000;
+pub(crate) const CLINT: usize = 0x2000_0000;
 const MSIP: usize = CLINT;
 const MTIMECMP_LO: usize = CLINT + 0x4000;
 const MTIMECMP_HI: usize = CLINT + 0x4004;
 const MTIMELOAD_LO: usize = CLINT + 0x4008;
 const MTIMECTL: usize = CLINT + 0x4010;
-const MTIME_LO: usize = CLINT + 0xBFF8;
+pub(crate) const MTIME_LO: usize = CLINT + 0xBFF8;
 const MTIME_HI: usize = CLINT + 0xBFFC;
 const MTIP_ID: usize = 7;
 const CLIC_USER: usize = 0x20B0_0000; // "CLIC user" window (TRM Table 2.8-1)
@@ -77,25 +82,30 @@ const PMS_UM_REG0: usize = 0x500A_5018; // bit 2 L2MEM
 const PMS_UM_REG3: usize = 0x500A_5024; // bit 0 HP GPIO
 const GPIO_BASE: usize = 0x500E_0000;
 
-fn check(id: &str, ok: Option<bool>, detail: core::fmt::Arguments) {
+/// "C1." on core 1, so its CHECK ids stay apart from the core-0 rows in #604.
+fn tag() -> &'static str {
+    if csr_read!("mhartid") == 0 { "" } else { "C1." }
+}
+pub(crate) fn check(id: &str, ok: Option<bool>, detail: core::fmt::Arguments) {
     let verdict = match ok {
         Some(true) => "PASS",
         Some(false) => "FAIL",
         None => "INFO",
     };
-    pl!("CHECK {id} {verdict} {detail}");
+    pl!("CHECK {}{id} {verdict} {detail}", tag());
 }
-fn begin(id: &str) {
-    pl!("BEGIN {id}");
+pub(crate) fn begin(id: &str) {
+    pl!("BEGIN {}{id}", tag());
     hw::drain();
+    core1::stage_step();
 }
-fn uaddr(f: unsafe extern "C" fn()) -> usize {
+pub(crate) fn uaddr(f: unsafe extern "C" fn()) -> usize {
     f as usize
 }
-fn show(r: Result<u32, Trap>) -> ShowR {
+pub(crate) fn show(r: Result<u32, Trap>) -> ShowR {
     ShowR(r)
 }
-struct ShowR(Result<u32, Trap>);
+pub(crate) struct ShowR(Result<u32, Trap>);
 impl core::fmt::Display for ShowR {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self.0 {
@@ -112,23 +122,12 @@ fn unlocked(i: usize) -> bool {
 extern "C" fn pmain() -> ! {
     hw::spin(2_000_000); // let esptool finish reading the MEM_END reply
     pl!("");
+    if !CORE0_SUITE {
+        core1::launch(PROBE_ID);
+    }
     pl!("lichen-probe-p4 {PROBE_ID} (#608), core 0, ROM download-mode state");
     b5_dump();
-    let owned = [E_UTEXT, E_UDATA, E_T1, E_T2, E_TOR_LO, E_TOR_HI, E_LOCK_NAPOT, E_COVER_PERI, E_COVER_RAM];
-    let mut all_free = true;
-    for i in owned {
-        if unlocked(i) {
-            pmp_off(i);
-        } else {
-            all_free = false;
-            check("SETUP", Some(false), format_args!("pmp entry {i} is locked by the ROM: tests that use it are void"));
-        }
-    }
-    if all_free {
-        check("SETUP", None, format_args!("pmp entries 4-7, 10-12, 14 and 15 unlocked and cleared"));
-    }
-    pmp_set(E_UTEXT, napot(UTEXT, 0x1000), NAPOT | R | X);
-    pmp_set(E_UDATA, napot(UDATA, 0x1000), NAPOT | R | W);
+    setup_pmp();
     b1_user_mode();
     a5_dedicated_gpio();
     b3_interrupt_in_u();
@@ -144,12 +143,32 @@ extern "C" fn pmain() -> ! {
     }
 }
 
-fn b5_dump() {
+/// Clear the PMP entries the probe owns (this hart's), then grant U its text and stack windows.
+pub(crate) fn setup_pmp() {
+    let owned = [E_UTEXT, E_UDATA, E_T1, E_T2, E_TOR_LO, E_TOR_HI, E_LOCK_NAPOT, E_COVER_PERI, E_COVER_RAM];
+    let mut all_free = true;
+    for i in owned {
+        if unlocked(i) {
+            pmp_off(i);
+        } else {
+            all_free = false;
+            check("SETUP", Some(false), format_args!("pmp entry {i} is locked by the ROM: tests that use it are void"));
+        }
+    }
+    if all_free {
+        check("SETUP", None, format_args!("pmp entries 4-7, 10-12, 14 and 15 unlocked and cleared"));
+    }
+    pmp_set(E_UTEXT, napot(UTEXT, 0x1000), NAPOT | R | X);
+    pmp_set(E_UDATA, napot(UDATA, 0x1000), NAPOT | R | W);
+}
+
+pub(crate) fn b5_dump() {
     begin("B5");
     pl!("B5 misa={:#010x} mhartid={} mstatus={:#010x}", csr_read!("misa"), csr_read!("mhartid"), csr_read!("mstatus"));
     pl!("B5 marchid={} mimpid={} mtvec={:#010x}", ShowU(csr_try!("0xf12")), ShowU(csr_try!("0xf13")), csr_read!("mtvec"));
     pl!("B5 mtvt(0x307)={} mintstatus(0x346)={} prv(0x810)={}", ShowU(csr_try!("0x307")), ShowU(csr_try!("0x346")), ShowU(csr_try!("0x810")));
     pl!("B5 M-fault path control, unimplemented CSR 0x5c0: {}", ShowU(csr_try!("0x5c0")));
+    begin("B5.clic");
     pl!("B5 clic_thresh={} clic_info={}", show(m_lw(CLIC_THRESH)), show(m_lw(0x2080_0004)));
     for j in 0..4 {
         pl!("B5 pmpcfg{j}={:#010x}", hw::pmpcfg_r(j));
@@ -167,7 +186,7 @@ fn b5_dump() {
          10: "0xbca" "0xbda", 11: "0xbcb" "0xbdb", 12: "0xbcc" "0xbdc", 13: "0xbcd" "0xbdd", 14: "0xbce" "0xbde",
          15: "0xbcf" "0xbdf");
     let locked = (0..16).filter(|&i| !unlocked(i)).count();
-    check("B5.rom", None, format_args!("core 0 after the ROM loader: {locked} of 16 PMP entries locked (dump above)"));
+    check("B5.rom", None, format_args!("core {} after the ROM: {locked} of 16 PMP entries locked (dump above)", csr_read!("mhartid")));
 }
 struct ShowU(Result<usize, Trap>);
 impl core::fmt::Display for ShowU {
@@ -179,7 +198,7 @@ impl core::fmt::Display for ShowU {
     }
 }
 
-fn b1_user_mode() {
+pub(crate) fn b1_user_mode() {
     begin("B1");
     let t = user(uaddr(u_ecall), 0, 0, false);
     let ok = t.is_ecall_u() && t.epc == uaddr(u_ecall) && (t.mstatus >> 11) & 3 == 0;
@@ -284,7 +303,7 @@ fn b3_timer() {
         }
     }
 }
-fn b3_interrupt_in_u() {
+pub(crate) fn b3_interrupt_in_u() {
     begin("B3");
     let saved: [Result<u8, Trap>; 4] = core::array::from_fn(|b| m_lbu(clic_byte(0, TEST_ID, b)));
     let thresh = m_lw(CLIC_THRESH);
@@ -302,6 +321,12 @@ fn b3_interrupt_in_u() {
     let _ = m_sb(clic_byte(0, TEST_ID, 0), 1);
     let ip = m_lbu(clic_byte(0, TEST_ID, 0));
     let mut source = "clic-ip";
+    if ip != Ok(1) && csr_read!("mhartid") != 0 {
+        // The fallback below drives core 0's interrupt matrix: no use on core 1.
+        check("B3", Some(false), format_args!("clic-ip not settable on this core (ip read {}): B3 skipped", ShowB(ip)));
+        let _ = m_sb(clic_byte(0, TEST_ID, 1), 0);
+        return;
+    }
     if ip != Ok(1) {
         // Source 2: the interrupt matrix, from-CPU-0 routed to the test line.
         source = "from-cpu-0";

@@ -25,6 +25,20 @@ park:
     wfi
     j park
 
+# Core 1 entry: core 0 hands this address to the ROM (ets_set_appcpu_boot_addr). Own stacks, own mtvec and mscratch;
+# bss belongs to core 0 (already zeroed).
+.global _start1
+_start1:
+    csrci mstatus, 8
+    la t0, trap_entry
+    ori t0, t0, 3
+    csrw mtvec, t0
+    la sp, _mstack1_top
+    la t0, _trap_stack1_top
+    csrw mscratch, t0
+    call p1main
+    j park
+
 # Exceptions and non-vectored interrupts land here (mtvec base, 64-byte aligned at least).
 # trap_rust returns 0 to resume the trapped context with mret, 1 to end a U run and return to the harness.
 .section .text.trap, "ax"

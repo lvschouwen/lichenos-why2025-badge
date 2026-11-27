@@ -1,5 +1,6 @@
 //! Probe hardware layer: UART0 output, trap bookkeeping, guarded M-mode accesses, PMP access, the M -> U harness.
-//! Single hart, interrupts off in M: the statics are only touched by pmain and by trap_rust, never concurrently.
+//! One hart at a time, interrupts off in M: the statics are only touched by the hart running the tests (core 0's pmain,
+//! or core 1's p1main while core 0 only watches the stage word) and by its trap_rust, never concurrently.
 
 use core::arch::asm;
 use core::fmt::{self, Write};
@@ -97,7 +98,6 @@ macro_rules! csr_read {
         v
     }};
 }
-pub(crate) use csr_read;
 
 #[no_mangle]
 extern "C" fn trap_rust(frame: *mut [usize; 32]) -> usize {
@@ -175,7 +175,6 @@ macro_rules! csr_try {
         })
     };
 }
-pub(crate) use csr_try;
 
 pub fn m_lw(a: usize) -> Result<u32, Trap> {
     guarded(|| {
