@@ -32,7 +32,7 @@ pub extern "C" fn app_main(test: usize, a1: usize, a2: usize, a3: usize) -> isiz
                 let f: extern "C" fn() = core::mem::transmute(p);
                 f();
             }
-            5 => core::ptr::write_volatile(app_main as usize as *mut u32, 0),
+            5 => core::ptr::write_volatile(app_main as *const () as usize as *mut u32, 0),
             6 => {
                 core::ptr::read_volatile(a1 as *const u32);
             }

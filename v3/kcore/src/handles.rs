@@ -35,7 +35,11 @@ impl Handles {
             .then_some(idx)
     }
     pub fn check(&self, owner: usize, h: usize) -> isize {
-        if self.lookup(owner, h).is_some() { 0 } else { err::EBADF }
+        if self.lookup(owner, h).is_some() {
+            0
+        } else {
+            err::EBADF
+        }
     }
     pub fn close(&mut self, owner: usize, h: usize) -> isize {
         match self.lookup(owner, h) {
@@ -53,5 +57,54 @@ impl Handles {
     }
     pub fn first_of(&self, owner: usize) -> Option<usize> {
         self.e.iter().position(|e| e.owner == Some(owner)).map(|i| (self.e[i].gen as usize) << 8 | i)
+    }
+}
+
+impl Default for Handles {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_check_close() {
+        let mut h = Handles::new();
+        let a = h.open(0) as usize;
+        assert_eq!(h.check(0, a), 0);
+        assert_eq!(h.check(1, a), err::EBADF, "another owner cannot use it");
+        assert_eq!(h.close(0, a), 0);
+        assert_eq!(h.check(0, a), err::EBADF, "stale after close");
+        assert_eq!(h.close(0, a), err::EBADF);
+    }
+    #[test]
+    fn per_app_and_global_limits() {
+        let mut h = Handles::new();
+        for _ in 0..PER_APP {
+            assert!(h.open(0) >= 0);
+        }
+        assert_eq!(h.open(0), err::EMFILE);
+        for _ in 0..(SLOTS - PER_APP) {
+            assert!(h.open(1) >= 0);
+        }
+        assert_eq!(h.open(2), err::EMFILE);
+    }
+    #[test]
+    fn release_owner_invalidates_copies() {
+        let mut h = Handles::new();
+        let a = h.open(3) as usize;
+        h.release_owner(3);
+        assert_eq!(h.check(3, a), err::EBADF);
+        assert_eq!(h.first_of(3), None);
+    }
+    #[test]
+    fn forged_values_fail() {
+        let h = Handles::new();
+        for v in [0usize, 0xFF, 0x0100_0000, usize::MAX] {
+            assert_eq!(h.check(0, v), err::EBADF);
+        }
     }
 }

@@ -1,53 +1,10 @@
 //! App image loader. An image is linked for one slot (fixed addresses, see apps/app.ld.in) and starts with a header:
 //! magic, ABI version, entry, heap start, image end. Everything in the header is checked against the slot before a
 //! single byte is copied; a bad image is refused and nothing runs.
-use crate::sched::{Kernel, Slot, State, Task};
+use crate::sched::{Kernel, State, Task};
 use crate::trap::Context;
-use lichen_abi::{ABI_VERSION, IMAGE_MAGIC};
 
-/// Room kept free for the app's stack at the top of its data region; sbrk may not grow into it.
-pub const STACK_RESERVE: usize = 4096;
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum LoadError {
-    TooSmall,
-    TooBig,
-    Magic,
-    Abi,
-    Entry,
-    Heap,
-    ImageEnd,
-}
-
-fn word(b: &[u8], i: usize) -> usize {
-    u32::from_le_bytes([b[4 * i], b[4 * i + 1], b[4 * i + 2], b[4 * i + 3]]) as usize
-}
-
-pub fn validate(blob: &[u8], s: &Slot) -> Result<(usize, usize), LoadError> {
-    if blob.len() < 20 {
-        return Err(LoadError::TooSmall);
-    }
-    if blob.len() > s.len {
-        return Err(LoadError::TooBig);
-    }
-    if word(blob, 0) != IMAGE_MAGIC as usize {
-        return Err(LoadError::Magic);
-    }
-    if word(blob, 1) != ABI_VERSION as usize {
-        return Err(LoadError::Abi);
-    }
-    let (entry, heap, end) = (word(blob, 2), word(blob, 3), word(blob, 4));
-    if entry < s.text + 20 || entry >= s.text + blob.len() || entry % 2 != 0 {
-        return Err(LoadError::Entry);
-    }
-    if heap < s.data || heap > s.data + s.len - STACK_RESERVE {
-        return Err(LoadError::Heap);
-    }
-    if end != s.text + blob.len() {
-        return Err(LoadError::ImageEnd);
-    }
-    Ok((entry, heap))
-}
+pub use lichen_kcore::image::{validate, LoadError, Slot, STACK_RESERVE};
 
 pub fn load(
     k: &mut Kernel,

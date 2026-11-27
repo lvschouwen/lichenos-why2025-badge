@@ -99,7 +99,13 @@ pub fn boot(k: &mut Kernel) -> ! {
         kprintln!("boot: heartbeat image refused: {e:?}");
         platform::exit(6);
     }
-    kprintln!("boot: B loaded ({} bytes) at text {:#x} data {:#x}, A image {} bytes", HEARTBEAT.len(), s.text, s.data, ATTACKER.len());
+    kprintln!(
+        "boot: B loaded ({} bytes) at text {:#x} data {:#x}, A image {} bytes",
+        HEARTBEAT.len(),
+        s.text,
+        s.data,
+        ATTACKER.len()
+    );
     platform::timer_init();
     csr::enable_timer_irq();
     k.current = B;

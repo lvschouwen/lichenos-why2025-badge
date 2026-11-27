@@ -37,7 +37,7 @@ pub extern "C" fn app_main(_a0: usize, _a1: usize, _a2: usize, _a3: usize) -> is
         if abi::handle_use(h as usize) != 0 {
             return 3;
         }
-        if n % 20000 == 0 {
+        if n.is_multiple_of(20000) {
             let mut l = abi::Line::new();
             let _ = writeln!(l, "B: alive, round {n}");
             abi::write(l.as_str());

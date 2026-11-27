@@ -67,7 +67,11 @@ pub fn report() {
     for i in 0..16 {
         let c = cfg_byte(i);
         if c != 0 {
-            kprintln!("pmp: entry {i:2} cfg={c:#04x} addr={:#010x}{}", read_addr(i), if c & LOCK != 0 { " LOCKED" } else { "" });
+            kprintln!(
+                "pmp: entry {i:2} cfg={c:#04x} addr={:#010x}{}",
+                read_addr(i),
+                if c & LOCK != 0 { " LOCKED" } else { "" }
+            );
         }
         // Entry 3 counts too: a locked TOR entry 3 freezes pmpaddr2, which would silently void the deny-all entry.
         if i < 4 && c & LOCK != 0 {

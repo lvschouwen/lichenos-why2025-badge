@@ -18,3 +18,10 @@ macro_rules! kprint {
 macro_rules! kprintln {
     ($($a:tt)*) => {{ $crate::kprint!($($a)*); $crate::kprint!("\n"); }};
 }
+/// One bench protocol line: `CHECK <id> <PASS|FAIL|INFO> <detail>` (see lichen_kcore::check).
+#[macro_export]
+macro_rules! kcheck {
+    ($id:expr, $v:expr, $($a:tt)*) => {{
+        let _ = lichen_kcore::check::write_check(&mut $crate::console::Console, $id, $v, format_args!($($a)*));
+    }};
+}

@@ -1,9 +1,9 @@
 //! System call dispatch. Every pointer is checked against the caller's own regions with overflow-safe arithmetic,
 //! and the bytes are copied into a kernel buffer before use. (Single hart and the app is stopped during the call,
 //! so there is no TOCTOU window today; with a second core the copy-first rule is what keeps it safe.)
+use crate::kprint;
 use crate::loader::STACK_RESERVE;
 use crate::sched::{end_task, End, Kernel, Task};
-use crate::kprint;
 use lichen_abi::{err, sys, WRITE_MAX};
 
 fn in_region(ptr: usize, len: usize, base: usize, size: usize) -> bool {

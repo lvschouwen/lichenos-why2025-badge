@@ -55,6 +55,8 @@ pub fn syscall(_n: usize, _a0: usize, _a1: usize, _a2: usize) -> isize {
     err::ENOSYS
 }
 
+// The kernel ends the task on EXIT, so the loop is never reached; an app that survives has nowhere to go.
+#[allow(clippy::empty_loop)]
 pub fn exit(code: isize) -> ! {
     syscall(sys::EXIT, code as usize, 0, 0);
     loop {}

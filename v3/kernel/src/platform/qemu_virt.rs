@@ -62,5 +62,8 @@ pub fn exit(code: u32) -> ! {
         let v = if code == 0 { 0x5555 } else { (code << 16) | 0x3333 };
         core::ptr::write_volatile(TEST_DEV as *mut u32, v);
     }
-    loop {}
+    // SAFETY: wfi parks the hart after the exit device was written; QEMU ends the run before this returns.
+    loop {
+        unsafe { core::arch::asm!("wfi") };
+    }
 }

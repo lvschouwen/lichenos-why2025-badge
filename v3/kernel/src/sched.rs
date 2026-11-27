@@ -20,12 +20,7 @@ pub enum End {
     Budget,
 }
 
-#[derive(Clone, Copy)]
-pub struct Slot {
-    pub text: usize,
-    pub data: usize,
-    pub len: usize,
-}
+pub use lichen_kcore::image::Slot;
 
 pub struct Task {
     pub state: State,

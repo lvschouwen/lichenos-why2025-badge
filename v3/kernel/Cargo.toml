@@ -12,7 +12,9 @@ bench = false
 [features]
 default = ["qemu-virt"]
 qemu-virt = []
-esp32p4 = []
+esp32p4 = ["dep:lichen-platform-esp32p4"]
 
 [dependencies]
 lichen-abi = { path = "../abi" }
+lichen-kcore = { path = "../kcore" }
+lichen-platform-esp32p4 = { path = "../platform/esp32p4", optional = true }

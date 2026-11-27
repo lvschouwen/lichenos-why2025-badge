@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# The v3 gate (#611): fmt, clippy -D warnings, host tests (proptest), release builds for qemu-virt and esp32p4, the
+# image check, the QEMU harness, a size report and the licence check. Run by `agent-check` (CHECK=./v3/check.sh).
+# Never `--workspace`: feature unification would switch on lichen-abi/rt for the kernel (see build.sh).
+set -euo pipefail
+cd "$(dirname "$0")"
+HOST=x86_64-unknown-linux-gnu
+TARGET=riscv32imac-unknown-none-elf
+SYSROOT_BIN=$(rustc --print sysroot)/lib/rustlib/$HOST/bin
+step() { printf '\n== %s\n' "$*"; }
+export CARGO_TERM_COLOR=never
+
+# Everything except probe-p4: another lane owns it, and it is not rustfmt-clean.
+FMT_PKGS=(-p lichen-abi -p lichen-kcore -p lichen-kernel -p lichen-platform-esp32p4 -p heartbeat -p attacker)
+step "rustfmt"
+cargo fmt "${FMT_PKGS[@]}" -- --check
+
+step "host tests (kcore, abi; proptest)"
+cargo test --locked -q -p lichen-kcore -p lichen-abi --target $HOST
+
+step "python tests (bench report, image check, licence check)"
+python3 -I -m unittest discover -s tools -p 'test_*.py'
+
+step "release build: qemu-virt (apps first, then the kernel)"
+./build.sh qemu-virt
+step "release build: esp32p4 (RAM-only bring-up image)"
+./build.sh esp32p4
+step "release build: probe-p4 (unchanged PoC, must keep building)"
+LICHEN_PROBE_ID=check cargo build --locked -q --release -p lichen-probe-p4 --target $TARGET --target-dir target/probe-p4
+
+step "clippy -D warnings"
+CL=(cargo clippy --locked -q --target-dir target/clippy)
+"${CL[@]}" -p lichen-kcore -p lichen-abi --all-targets --target $HOST -- -D warnings
+"${CL[@]}" -p lichen-platform-esp32p4 --target $TARGET -- -D warnings
+for app in heartbeat attacker; do
+  LICHEN_APP_LD=$PWD/target/lichen/qemu-virt/$app.ld "${CL[@]}" -p $app --target $TARGET -- -D warnings
+done
+LICHEN_APP_HEARTBEAT=$PWD/target/lichen/qemu-virt/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/target/lichen/qemu-virt/attacker.bin \
+  "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features qemu-virt -- -D warnings
+"${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 -- -D warnings
+
+step "image check (RAM-only, inside the limits)"
+python3 -I tools/check_image.py target/lichen/esp32p4/kernel.elf target/lichen/esp32p4/kernel.bin
+
+step "QEMU harness (21 isolation cases)"
+QLOG=target/qemu-run.log
+set +e
+timeout 60 qemu-system-riscv32 -machine virt -bios none -nographic -m 128M \
+  -kernel target/kernel-qemu-virt/$TARGET/release/lichen-kernel > $QLOG 2>&1
+QRC=$?
+set -e
+grep -E '^(TEST|SUMMARY)' $QLOG | tail -3
+if [ $QRC -ne 0 ] || ! grep -q '^SUMMARY: 21 pass, 0 fail' $QLOG; then
+  echo "QEMU harness failed (exit $QRC); full log in v3/$QLOG" >&2
+  exit 1
+fi
+
+step "size report"
+for img in target/lichen/esp32p4/kernel.elf target/kernel-qemu-virt/$TARGET/release/lichen-kernel; do
+  echo "$img"
+  "$SYSROOT_BIN/llvm-size" "$img"
+done
+echo "esp32p4 loaded image: $(stat -c %s target/lichen/esp32p4/kernel.bin) bytes (limit 0x2AFC0 = 175040)"
+
+step "licences (MIT or Apache-2.0 only)"
+python3 -I tools/check_licences.py
+
+printf '\nv3/check.sh: OK\n'
