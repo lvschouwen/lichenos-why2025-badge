@@ -9,6 +9,8 @@ pub mod cache;
 pub mod gpio;
 pub mod mem;
 pub mod mmio;
+// Owned by #620.
+pub mod psram;
 pub mod uart;
 
 // Stubs for #612.
