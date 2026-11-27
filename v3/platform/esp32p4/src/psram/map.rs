@@ -83,28 +83,67 @@ pub const fn mmu_word(ppage: u32) -> u32 {
     (ppage & 0x3FF) | MMU_VALID | MMU_ACCESS_PSRAM
 }
 
-/// Write the MMU entries, then write back and invalidate every mapped run of the window so no line of an earlier mapping
-/// survives. Returns the number of failed cache syncs (0 = fine).
+/// Which window pages are mapped right now (one bit per 64 KB page): the cache lines of a page that is about to lose its entry
+/// must be written back and dropped while the entry still exists.
+static MAPPED: [core::sync::atomic::AtomicU32; MMU_ENTRIES / 32] =
+    [const { core::sync::atomic::AtomicU32::new(0) }; MMU_ENTRIES / 32];
+
+fn is_mapped(p: usize) -> bool {
+    MAPPED[p / 32].load(core::sync::atomic::Ordering::Relaxed) & (1 << (p % 32)) != 0
+}
+fn set_mapped(p: usize, on: bool) {
+    let (w, m) = (&MAPPED[p / 32], 1u32 << (p % 32));
+    if on {
+        w.fetch_or(m, core::sync::atomic::Ordering::Relaxed);
+    } else {
+        w.fetch_and(!m, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The next run of pages at or after `from` (below `pages`) for which `valid` is true, as `(start, count)`.
+pub fn next_run(valid: &dyn Fn(usize) -> bool, from: usize, pages: usize) -> Option<(usize, usize)> {
+    let mut p = from;
+    while p < pages && !valid(p) {
+        p += 1;
+    }
+    if p >= pages {
+        return None;
+    }
+    let start = p;
+    while p < pages && valid(p) {
+        p += 1;
+    }
+    Some((start, p - start))
+}
+
+/// Apply `f(address, bytes)` to every run of pages for which `valid` is true; returns the sum of its results.
+unsafe fn for_runs(valid: &dyn Fn(usize) -> bool, pages: usize, f: unsafe fn(usize, usize) -> i32) -> i32 {
+    let (mut failed, mut from) = (0, 0);
+    while let Some((start, n)) = next_run(valid, from, pages) {
+        failed += f(CACHED_BASE + start * PAGE_BYTES, n * PAGE_BYTES);
+        from = start + n;
+    }
+    failed
+}
+
+/// IDF's order for a remap: write back and invalidate the pages mapped NOW (dirty lines reach PSRAM through the old entries, and
+/// pages that lose their entry leave nothing cached), write the new entries, then invalidate the pages that are valid now
+/// (nothing of an older mapping survives). Returns the number of failed cache operations (0 = fine).
 unsafe fn map_pages(pages: usize, with_hole: bool) -> i32 {
     assert!(pages <= MMU_ENTRIES);
-    let valid = |p: usize| with_hole || !overlaps_excluded(p * PAGE_BYTES, PAGE_BYTES);
-    for p in 0..pages {
-        write32(MMU_INDEX, p as u32);
-        write32(MMU_CONTENT, if valid(p) { mmu_word(p as u32) } else { 0 });
-    }
-    let mut failed = 0;
-    let mut p = 0;
-    while p < pages {
-        if !valid(p) {
-            p += 1;
-            continue;
+    let new_valid = |p: usize| with_hole || !overlaps_excluded(p * PAGE_BYTES, PAGE_BYTES);
+    let mut failed = for_runs(&is_mapped, MMU_ENTRIES, cache_writeback_invalidate);
+    for p in 0..MMU_ENTRIES {
+        let on = p < pages && new_valid(p);
+        if p < pages {
+            write32(MMU_INDEX, p as u32);
+            write32(MMU_CONTENT, if on { mmu_word(p as u32) } else { 0 });
         }
-        let start = p;
-        while p < pages && valid(p) {
-            p += 1;
+        if p < pages || is_mapped(p) {
+            set_mapped(p, on);
         }
-        failed += cache_writeback_invalidate(CACHED_BASE + start * PAGE_BYTES, (p - start) * PAGE_BYTES);
     }
+    failed += for_runs(&|p| p < pages && new_valid(p), MMU_ENTRIES, cache_invalidate);
     failed
 }
 
@@ -172,16 +211,22 @@ pub const fn sync_range(addr: u32, len: u32, line: u32) -> Option<(u32, u32)> {
     Some((addr - plus, rounded & !(line - 1)))
 }
 
-/// Polls of SYNC_DONE before a sync gives up (a few ms of CPU time; a 32 MB sync is well inside it).
+/// Polls of SYNC_DONE before a sync gives up (50 M polls of a few cycles each: seconds, far beyond the longest legitimate sync).
 const SYNC_SPINS: u32 = 50_000_000;
 
-/// One sync operation; 0 when the controller reported DONE twice, 1 on a timeout. Lives in RAM (`.text.ram`: the linker script
+static SYNC_BROKEN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// One sync operation (sticky failure: after one timeout every later call returns 1 without touching the controller); 0 when the controller reported DONE twice, 1 on a timeout. Lives in RAM (`.text.ram`: the linker script
 /// must keep that input section in internal RAM) and touches registers directly, so it stays safe once the code runs from
 /// flash or PSRAM and the operation covers the lines of the code itself.
 #[inline(never)]
 #[link_section = ".text.ram.cache_sync"]
 unsafe fn sync(ctrl_op: u32, addr: usize, len: usize) -> i32 {
     use core::ptr::{read_volatile as rd, write_volatile as wr};
+    // After a timeout the controller may still be busy with the old operation: refuse everything until the program restarts.
+    if SYNC_BROKEN.load(core::sync::atomic::Ordering::Relaxed) {
+        return 1;
+    }
     let l1 = line_bytes_from_reg(rd(L1D_BLOCKSIZE as *const u32)) as u32;
     let l2 = line_bytes_from_reg(rd(L2_BLOCKSIZE as *const u32)) as u32;
     let Some((a, s)) = sync_range(addr as u32, len as u32, l1.max(l2)) else { return 0 };
@@ -195,6 +240,7 @@ unsafe fn sync(ctrl_op: u32, addr: usize, len: usize) -> i32 {
         while rd(SYNC_CTRL as *const u32) & SYNC_DONE == 0 {
             n += 1;
             if n > SYNC_SPINS {
+                SYNC_BROKEN.store(true, core::sync::atomic::Ordering::Relaxed);
                 return 1;
             }
         }
@@ -320,6 +366,21 @@ mod tests {
         assert_eq!(align_to_line(0x4800_0000, 0x1_0000, 128), (0x4800_0000, 0x1_0000));
         assert_eq!(align_to_line(0x4800_007F, 2, 64), (0x4800_0040, 128)); // straddles two lines
         assert_eq!(align_to_line(0x4800_0040, 1, 64), (0x4800_0040, 64));
+    }
+
+    #[test]
+    fn runs_follow_the_valid_pages() {
+        let hole = |p: usize| !(0x540000 / PAGE_BYTES..0x5C0000 / PAGE_BYTES).contains(&p);
+        assert_eq!(next_run(&hole, 0, 512), Some((0, 0x540000 / PAGE_BYTES)));
+        assert_eq!(
+            next_run(&hole, 0x540000 / PAGE_BYTES, 512),
+            Some((0x5C0000 / PAGE_BYTES, 512 - 0x5C0000 / PAGE_BYTES))
+        );
+        assert_eq!(next_run(&hole, 0x5C0000 / PAGE_BYTES, 0x5C0000 / PAGE_BYTES), None);
+        // with the hole mapped the old mapping is one run, so a remap without it writes the hole's lines back first
+        let all = |p: usize| p < 512;
+        assert_eq!(next_run(&all, 0, 512), Some((0, 512)));
+        assert_eq!(next_run(&|_| false, 0, 512), None);
     }
 
     #[test]

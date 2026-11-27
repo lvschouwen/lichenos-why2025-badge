@@ -2,6 +2,9 @@
 """Check the v3 ESP32-P4 bring-up image is RAM-only and inside the limits (#611).
 
     check_image.py <kernel.elf> <kernel.bin>
+    check_image.py --ram-text <image.elf>
+
+--ram-text: the output section `.text.ram` (cache maintenance, platform psram/map.rs) must exist and sit in L2MEM.
 
 ELF: every PT_LOAD with file content lies in the load window [LOAD_BASE, LOAD_LIMIT); every PT_LOAD without file
 content (NOLOAD: bss, stacks) lies in [NOLOAD_BASE, NOLOAD_LIMIT); nothing is mapped anywhere else (no flash, no
@@ -17,6 +20,8 @@ LOAD_LIMIT = 0x4FF28ED0
 NOLOAD_BASE = 0x4FF40000
 NOLOAD_LIMIT = 0x4FF80000
 PT_LOAD = 1
+L2MEM_BASE = 0x4FF00000
+L2MEM_LIMIT = 0x4FFC0000
 
 
 def check_elf_bytes(d: bytes) -> list[str]:
@@ -45,6 +50,23 @@ def check_elf_bytes(d: bytes) -> list[str]:
     return errs
 
 
+def check_ram_text_bytes(d: bytes) -> list[str]:
+    """The `.text.ram` output section exists and lies inside L2MEM."""
+    if d[:4] != b"\x7fELF" or d[4] != 1 or d[5] != 1:
+        raise ValueError("not a little-endian ELF32")
+    shoff, = struct.unpack_from("<I", d, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 0x2E)
+    secs = [struct.unpack_from("<10I", d, shoff + i * shentsize) for i in range(shnum)]
+    stroff = secs[shstrndx][4]
+    for name_off, _type, _flags, addr, _off, size, *_ in secs:
+        end = d.index(b"\0", stroff + name_off)
+        if d[stroff + name_off:end] == b".text.ram":
+            if size and L2MEM_BASE <= addr and addr + size <= L2MEM_LIMIT:
+                return []
+            return [f".text.ram {addr:#x}+{size:#x} is not inside L2MEM {L2MEM_BASE:#x}..{L2MEM_LIMIT:#x}"]
+    return [".text.ram section missing (the cache sync code must be placed explicitly)"]
+
+
 def check_bin_bytes(d: bytes) -> list[str]:
     if len(d) < 24 or d[0] != 0xE9:
         raise ValueError("not an esptool image")
@@ -69,6 +91,17 @@ def check_bin_bytes(d: bytes) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) == 3 and argv[1] == "--ram-text":
+        try:
+            errs = check_ram_text_bytes(open(argv[2], "rb").read())
+        except (OSError, ValueError, struct.error) as e:
+            print(f"check_image: {e}", file=sys.stderr)
+            return 2
+        for e in errs:
+            print(f"check_image: {e}")
+        if not errs:
+            print("check_image: .text.ram is in L2MEM")
+        return 1 if errs else 0
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
         return 2

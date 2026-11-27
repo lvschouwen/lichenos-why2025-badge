@@ -141,7 +141,9 @@ pub unsafe fn quiesce() {
 /// # Safety
 /// `tx` and `rx` point to the first descriptor of chains built by `build_chain` in internal RAM; the hardware writes the
 /// descriptors back, so they must not be read through other references meanwhile. Buffers and caches follow the contract at the
-/// top of this file. Call after `init`.
+/// top of this file. The TX chain's total length must equal the RX chain's capacity (RX is the one the hardware ends on: a
+/// shorter TX leaves it waiting, a longer one overruns the destination): `build_chain` of both with the same length. Call after
+/// `init`.
 pub unsafe fn run(tx: *mut Desc, rx: *mut Desc, spins: u32) -> Result<(), DmaError> {
     assert!(is_desc_addr(tx as u32) && is_desc_addr(rx as u32), "descriptors must be in internal RAM, 8-byte aligned");
     write32(RX_INT_CLR, 0xFFFF_FFFF);

@@ -8,6 +8,8 @@ MEMORY {
   NOLOAD (rw)  : ORIGIN = 0x4FF40000, LENGTH = 0x40000
 }
 SECTIONS {
+  /* code that must stay in internal RAM even if the rest later moves (cache maintenance, platform psram/map.rs) */
+  .text.ram : { *(.text.ram .text.ram.*) } > LOAD
   .text : { KEEP(*(.text.boot)) *(.text.trap) *(.text .text.*) } > LOAD
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > LOAD
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _load_end = .; } > LOAD
