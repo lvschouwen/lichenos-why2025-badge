@@ -689,6 +689,29 @@ static void secured_link(void) {
     free(b.s);
 }
 
+// Glare when the inviter is not Visible itself (it found the other one, the other found it a moment before it went
+// invisible): the glare still resolves on both sides, whoever wins
+static void glare_not_visible(uint32_t nonce_a, uint32_t nonce_b) {
+    glare_t g;
+    uint8_t d[PEER_HDR + 1];
+    glare_start(&g, nonce_a, nonce_b);
+    peer_session_set_visible(g.A, 1, false);
+    peer_rx_t at_a = peer_session_on_frame(g.A, 2, 2, KEY_B, g.fb, g.nb);
+    size_t    da   = at_a == PEER_RX_REFUSE ? peer_session_refusal(g.A, d, sizeof(d)) : 0;
+    peer_rx_t at_b = peer_session_on_frame(g.B, 2, 22, KEY_A, g.fa, g.na);
+    if (nonce_a > nonce_b) {
+        CHECK(at_a == PEER_RX_REFUSE && da == PEER_HDR + 1 && d[PEER_HDR] == PEER_WHY_GLARE);
+        CHECK(at_b == PEER_RX_YIELD);
+        glare_finish(g.A, 1, KEY_B, g.B, 22);
+    } else {
+        CHECK(at_a == PEER_RX_YIELD); // A yields though it is not Visible: it is the badge A invited
+        CHECK(at_b == PEER_RX_REFUSE);
+        glare_finish(g.B, 21, KEY_A, g.A, 2);
+    }
+    free(g.A);
+    free(g.B);
+}
+
 static void glare_cap(void) {
     ble_conns_t c = {0};
     CHECK(ble_conn_add(&c, LICHEN_BT_ROLE_CENTRAL) && ble_conn_add(&c, LICHEN_BT_ROLE_PERIPHERAL)); // a glare's two
@@ -872,6 +895,8 @@ int main(void) {
     glare_crossing(7, 7);
     glare_decline_first();
     glare_cap();
+    glare_not_visible(9, 5);
+    glare_not_visible(5, 9);
     glare_wait_ends();
     secured_link();
     pairing_edges();

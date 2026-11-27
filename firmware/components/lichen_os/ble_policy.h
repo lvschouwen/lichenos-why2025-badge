@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 // The Bluetooth service's rules (#73, #599), pure and host-tested (ble_policy_test.c): no NimBLE, no ESP headers, no
-// statics; every call gets the caller's state and the time (a monotonic ms counter; differences are wrap-safe, and what
-// runs out is latched by ble_pair_tick). Not linked into the image until the service (#73 B2) uses it.
+// statics; every call gets the caller's state and the time (a monotonic ms counter; differences are wrap-safe, and
+// what runs out is latched by ble_pair_tick). Not linked into the image until the service (#73 B2) uses it.
 // - Pairing (OS-only): a window of BLE_PAIR_WINDOW_MS opened from Settings > Bluetooth; one pairing at a time;
 //   BLE_PAIR_FAILS_MAX failures lock pairing out for BLE_PAIR_LOCKOUT_MS (re-opening the window keeps the lockout);
 //   a full bond store refuses (the person forgets a device first, nothing is evicted). A success closes the window.
@@ -15,8 +15,8 @@
 // - The connection cap: BLE_CONN_MAX links, at most BLE_CONN_PERIPHERAL_MAX that peers made to us and
 //   BLE_CONN_CENTRAL_MAX that we made.
 // - A stranger's link: one a peer made to us that is not bonded with authenticated keys is dropped
-//   BLE_UNBONDED_DROP_MS after it came up, or BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's GATT client) and the peer session's links
-//   (never bonded, the session has its own timeouts) are not strangers.
+//   BLE_UNBONDED_DROP_MS after it came up, or BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's
+//   GATT client) and the peer session's links (never bonded, the session has its own timeouts) are not strangers.
 // - The passkey: 6 digits drawn without bias, shown "123 456".
 // - The peer session's links pair by numeric comparison outside all of this: no window, no lockout, no bond store
 //   (they are never bonded); its own invite rate limit and the person's key press guard them (peer_session.h).
@@ -24,7 +24,8 @@
 #define BLE_PAIR_WINDOW_MS      120000u
 #define BLE_PAIR_FAILS_MAX      3u
 #define BLE_PAIR_LOCKOUT_MS     60000u
-#define BLE_PAIR_SMP_MS         30000u // the SMP timeout (Core spec, vol 3 part H 3.4): a pairing under way ends by then
+// The SMP timeout (Core spec, vol 3 part H 3.4): a pairing under way ends by then
+#define BLE_PAIR_SMP_MS         30000u
 #define BLE_UNBONDED_DROP_MS    10000u
 #define BLE_BONDS_MAX           3u
 #define BLE_CONN_MAX            3u
@@ -57,8 +58,9 @@ void               ble_pair_init(ble_pair_t *p);
 // Settings opened (or re-opened) the window: BLE_PAIR_WINDOW_MS from now. A lockout stays.
 void               ble_pair_open(ble_pair_t *p, uint32_t now_ms);
 void               ble_pair_close(ble_pair_t *p);
-// Latches what ran out (the window closes, a lockout ends, a pairing under way past BLE_PAIR_SMP_MS fails): call it on the service's timer, at least daily, so a
-// window or lockout never reads as current again after the ms counter wraps (49.7 days). ble_pair_begin does it too.
+// Latches what ran out (the window closes, a lockout ends, a pairing under way past BLE_PAIR_SMP_MS fails): call it
+// on the service's timer, at least daily, so a window or lockout never reads as current again after the ms counter
+// wraps (49.7 days). ble_pair_begin does it too.
 void               ble_pair_tick(ble_pair_t *p, uint32_t now_ms);
 bool               ble_pair_is_open(ble_pair_t const *p, uint32_t now_ms);
 // The window's time left (the countdown on screen), 0 when closed
@@ -70,7 +72,9 @@ ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds
 // The pairing that began ended: bonded, and with MITM-protected keys (authenticated). Anything less is a failure: it
 // counts towards the lockout, the window stays open, and true says disconnect the link and delete any bond the stack
 // stored for it (a Just Works bond is never kept). True too for an end without a begin (stale, or the pairing timed
-// out in ble_pair_tick): whatever it bonded is not trusted.
+// out in ble_pair_tick): whatever it bonded is not trusted. Call it only for a pairing ble_pair_begin returned GO
+// for, never on every encryption change: a bonded phone that comes back re-encrypts without pairing and would be
+// dropped.
 bool               ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool bonded, bool authenticated);
 
 // ---- Access levels ----

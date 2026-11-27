@@ -291,11 +291,11 @@ static peer_rx_t on_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, ui
         take_invite(s, now_ms, link, &inv);
         return PEER_RX_OK;
     }
+    if (s->state == PEER_INVITING && key == s->invited_key) {
+        return on_glare(s, now_ms, link, &inv); // the badge we invite: we need not be Visible for it
+    }
     if (!peer_session_visible(s, now_ms)) {
         return PEER_RX_REFUSE;
-    }
-    if (s->state == PEER_INVITING && key == s->invited_key) {
-        return on_glare(s, now_ms, link, &inv);
     }
     if (s->state != PEER_IDLE || cooling(s, now_ms) || !rate_take(s, now_ms, key)) {
         return PEER_RX_REFUSE; // busy (or CLOSED and not reset yet), the cooldown, or this peer's rate limit
