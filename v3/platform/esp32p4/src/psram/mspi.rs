@@ -162,6 +162,50 @@ impl ModeRegs {
     }
 }
 
+/// The read-register dummy that matches the chip's CURRENT latency. After a failed speed change the chip may still be at the
+/// old latency while `set_timing` already holds the new dummies, and mode registers read with the wrong dummy are garbage. Each
+/// candidate is `(rd_reg_dummy, MR0 read latency field)` of a known speed; the first one whose MR0 read with that dummy shows its own
+/// latency field wins (the current dummy is tried first); none consistent keeps the current one. With a single candidate nothing is
+/// read (the default 120 MHz build behaves exactly as before).
+pub fn pick_reg_dummy(candidates: &[(u32, u8)], current: u32, read_mr0: &mut dyn FnMut(u32) -> u8) -> u32 {
+    if candidates.len() < 2 {
+        return current;
+    }
+    let consistent = |d: u32, read: &mut dyn FnMut(u32) -> u8| {
+        let field = (read(d) >> 2) & 7;
+        candidates.iter().any(|&(cd, rl)| cd == d && rl == field)
+    };
+    if consistent(current, read_mr0) {
+        return current;
+    }
+    for &(d, _) in candidates {
+        if d != current && consistent(d, read_mr0) {
+            return d;
+        }
+    }
+    current
+}
+
+/// Switch the read-register dummy alone (see `pick_reg_dummy`).
+pub fn set_reg_dummy(bits: u32) {
+    RD_REG_DUMMY.store(bits, Relaxed);
+}
+
+/// The current read-register dummy.
+pub fn reg_dummy() -> u32 {
+    rd_reg_dummy()
+}
+
+/// MR0 read with an explicit dummy.
+///
+/// # Safety
+/// As `xact`.
+pub unsafe fn read_mr0_with(dummy: u32) -> u8 {
+    let mut r = [0u32; 1];
+    xact(REG_READ, 0, dummy, None, Some((&mut r, 16)));
+    byte(&r, 0)
+}
+
 /// MR0 as IDF writes it: drive strength 0, read latency `RD_LATENCY`, fixed latency, the other bits kept.
 pub const fn mr0_value(read_back: u8, rl: u8) -> u8 {
     (read_back & 0xC0) | (rl << 2) | (1 << 5)
@@ -283,6 +327,46 @@ mod tests {
         assert!(!ModeRegs { mr1: 0x00, ..ok }.matches_init(2, 2)); // wrong vendor
         assert!(!ModeRegs { mr2: 0xd5, ..ok }.matches_init(2, 2)); // wrong density
         assert!(!ModeRegs { mr8: 0x00, ..ok }.matches_init(2, 2));
+    }
+
+    /// A chip at the given MR0 latency field: a read with that field's own dummy returns the register, any other dummy garbage.
+    fn fake_chip(field: u8, dummy_of_field: &'static [(u32, u8)]) -> impl FnMut(u32) -> u8 {
+        move |d| {
+            if dummy_of_field.iter().any(|&(dd, f)| dd == d && f == field) {
+                0x20 | (field << 2)
+            } else {
+                0x81 // shifted garbage: latency field 0
+            }
+        }
+    }
+
+    const KNOWN: &[(u32, u8)] = &[(8, 2), (10, 3)];
+
+    #[test]
+    fn retry_after_a_failed_160_reads_an_lc5_chip_with_the_lc5_dummy() {
+        // dummies are still those of 160 (10) but the chip stayed at LC5 (field 2)
+        let mut chip = fake_chip(2, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 10, &mut chip), 8);
+    }
+
+    #[test]
+    fn an_lc6_chip_with_120_dummies_is_found_too() {
+        let mut chip = fake_chip(3, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 8, &mut chip), 10);
+    }
+
+    #[test]
+    fn a_consistent_current_dummy_is_kept_and_nothing_is_probed_with_one_speed() {
+        let mut chip = fake_chip(3, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 10, &mut chip), 10);
+        let mut never = |_| -> u8 { panic!("a single known speed must not probe") };
+        assert_eq!(pick_reg_dummy(&[(8, 2)], 8, &mut never), 8);
+    }
+
+    #[test]
+    fn nothing_consistent_keeps_the_current_dummy() {
+        let mut dead = |_| 0xFFu8;
+        assert_eq!(pick_reg_dummy(KNOWN, 10, &mut dead), 10);
     }
 
     #[test]

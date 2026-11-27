@@ -190,6 +190,18 @@ unsafe fn init_run(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> Resul
     ));
 
     // 3. the chip: mode registers (latency codes, refresh 4x, burst), then the connection check
+    // A failed earlier speed change can leave the chip at another latency than the dummies say: read MR0 with the dummy that
+    // matches the chip before trusting any mode-register read (a no-op in the default build).
+    if speed::KNOWN_REG_DUMMIES.len() > 1 {
+        let picked = mspi::pick_reg_dummy(speed::KNOWN_REG_DUMMIES, mspi::reg_dummy(), &mut |d| mspi::read_mr0_with(d));
+        if picked != mspi::reg_dummy() {
+            log(format_args!(
+                "chip: mode registers answer to read dummy {picked}, not {}: using it",
+                mspi::reg_dummy()
+            ));
+            mspi::set_reg_dummy(picked);
+        }
+    }
     info.modes_before = mspi::read_mode_regs();
     log(format_args!(
         "chip: modes before: mr0={:#04x} mr1={:#04x} mr2={:#04x} mr3={:#04x} mr4={:#04x} mr8={:#04x}",

@@ -42,6 +42,14 @@ pub const fn axi_dummy_fields(sp: &Speed) -> (u32, u32) {
     ((sp.rd_dummy - 1) << 6, (sp.wr_dummy - 1) << 22)
 }
 
+/// `(rd_reg_dummy, MR0 read latency field)` of every speed this build can program: what `mspi::pick_reg_dummy` chooses from.
+/// One entry (120 MHz) in the default build, so nothing is probed there.
+pub const KNOWN_REG_DUMMIES: &[(u32, u8)] = &[
+    (SPEED_120.rd_reg_dummy, SPEED_120.rd_lat),
+    #[cfg(feature = "bench-experiments")]
+    (SPEED_160.rd_reg_dummy, SPEED_160.rd_lat),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
