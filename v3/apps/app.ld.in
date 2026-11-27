@@ -1,0 +1,18 @@
+/* Lichen v3 PoC app image: linked at its slot's fixed addresses (the build fills @TEXT@ @DATA@ @LEN@).
+   Image = header + text + rodata + .data initialisers, all in TEXT (RX); .data/.bss/heap/stack live in DATA (RW). */
+ENTRY(_start)
+MEMORY {
+  TEXT (rx) : ORIGIN = @TEXT@, LENGTH = @LEN@
+  DATA (rw) : ORIGIN = @DATA@, LENGTH = @LEN@
+}
+SECTIONS {
+  .header : { LONG(0x5050414C) LONG(1) LONG(_start) LONG(_heap_start) LONG(_image_end) } > TEXT
+  .text : { KEEP(*(.text.start)) *(.text .text.*) } > TEXT
+  .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) . = ALIGN(4); } > TEXT
+  .data : ALIGN(4) { _sdata = .; *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _edata = .; } > DATA AT> TEXT
+  _sidata = LOADADDR(.data);
+  _image_end = LOADADDR(.data) + SIZEOF(.data);
+  .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > DATA
+  _heap_start = ALIGN(_ebss, 16);
+  /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
+}
