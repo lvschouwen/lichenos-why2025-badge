@@ -282,3 +282,35 @@ CONFIG_MDNS_MAX_SERVICES=2
 
 # #586: stack canary (-fstack-protector) in functions with char arrays or alloca; an overrun panics with a backtrace
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+
+# #598 (epic #73): the NimBLE host on the P4, the controller stays on the C6 (HCI over esp_hosted, the P4 never owns
+# it, #503). Built but never started: nothing calls esp_hosted_bt_host_stack_setup or nimble_port_init yet. The
+# esp_hosted 2.x switches (ESP_HOSTED_ENABLE_BT_NIMBLE, ESP_HOSTED_NIMBLE_HCI_VHCI) are removed and fail the build.
+CONFIG_ESP_HOSTED_HOST_FEAT_BT=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+# NimBLE defaults to an H4 UART transport when there is no local controller; HCI goes over esp_hosted instead (its
+# bridge gives the ble_transport_to_ll_* functions)
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+# The full role set: Lichen is peripheral to a phone and central to a keyboard or another badge (plan v3 on #73)
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_GATT_CLIENT=y
+# Services come and go at runtime (apps, SD apps), also under a live connection
+CONFIG_BT_NIMBLE_DYNAMIC_SERVICE=y
+# LE Secure Connections only (passkey pairing), bonds kept in NVS: 3 bonds, 3 connections (owner, #73)
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_SM_SC_ONLY=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+CONFIG_BT_NIMBLE_MAX_BONDS=3
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=185
+# Privacy (RPA): the host privacy APIs; resolving runs in the C6 controller (host-based privacy is ESP32-only)
+CONFIG_BT_NIMBLE_HS_PVCY=y
+# NimBLE's pools in PSRAM (internal RAM is tight). The host task is created by xTaskCreatePinnedToCore, so its stack
+# stays internal: NVS bond writes run with the cache off.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

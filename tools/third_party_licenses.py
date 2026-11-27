@@ -117,11 +117,18 @@ ENTRIES = [
     ("FreeBSD net80211 (in Espressif's Wi-Fi library)", "https://github.com/freebsd/freebsd-src", "C6",
      "BSD-2-Clause",
      ("text", "Copyright (c) 2004-2008 Sam Leffler, Errno Consulting\nAll rights reserved.\n\n" + BSD_2)),
+    ("Apache Mynewt NimBLE, NOTICE (Bluetooth LE host in ESP-IDF, #598)", "https://github.com/apache/mynewt-nimble",
+     "P4", "Apache-2.0 (text below)",
+     ("file", "idf", "components/bt/host/nimble/nimble/NOTICE")),
+    ("TinyCrypt with micro-ecc (NimBLE's pairing crypto in ESP-IDF, #598)", "https://github.com/intel/tinycrypt",
+     "P4", "BSD-3-Clause, BSD-2-Clause",
+     ("file", "idf", "components/bt/common/tinycrypt/LICENSE")),
     ("micro-ecc (in Espressif's Bluetooth controller)", "https://github.com/kmackay/micro-ecc", "C6", "BSD-2-Clause",
      ("file", "idf", "components/bootloader/subproject/components/micro-ecc/micro-ecc/LICENSE.txt")),
 ]
 
-# Apache-2.0 code needs the license text once; none of these ships a NOTICE file (checked in #18).
+# Apache-2.0 code needs the license text once; none of these ships a NOTICE file (checked in #18) except NimBLE, whose
+# NOTICE is an entry above (#598).
 APACHE = [
     ("ESP-IDF (Espressif's own code, Wi-Fi/Bluetooth/PHY libraries, Mbed TLS, NimBLE)", "P4, C6"),
     ("ESP-Hosted MCU (our fork; dual GPL-2.0-only OR Apache-2.0 files used under Apache-2.0)", "P4, C6"),
