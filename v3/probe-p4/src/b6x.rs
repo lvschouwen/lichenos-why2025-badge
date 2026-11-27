@@ -102,34 +102,58 @@ fn icm(when: &str) {
     pl!("B6 ICM {when}: {}={} {}={} {}={} {}={}", ICM[4].0, show(m_lw(ICM[4].1)), ICM[5].0, show(m_lw(ICM[5].1)),
         ICM[6].0, show(m_lw(ICM[6].1)), ICM[7].0, show(m_lw(ICM[7].1)));
 }
-fn changed() -> [Result<u32, Trap>; 4] {
-    [m_lw(ICM[3].1), m_lw(ICM[4].1), m_lw(ICM[6].1), m_lw(ICM[7].1)]
+const ICM_INT_CLR: usize = 0x500A_4018; // bit 2 CPU_ADDRHOLE
+fn rec() -> (Result<u32, Trap>, Result<u32, Trap>, Result<u32, Trap>) {
+    (m_lw(ICM[3].1), m_lw(ICM[6].1), m_lw(ICM[7].1))
+}
+fn rec_line(step: &str) {
+    let (raw, addr, info) = rec();
+    pl!("B6 record after {step}: int_raw={} cpu_hole_addr={} cpu_hole_info={}", show(raw), show(addr), show(info));
+}
+fn clear_record() {
+    let _ = m_sw(ICM_INT_CLR, 1 << 2);
+}
+/// U load of `addr` with a 4 KB PMP read grant while `bit` of the PMS UM register `reg` is cleared.
+fn u_apm_fault(reg: usize, saved: u32, bit: u32, addr: usize) -> Trap {
+    pmp_set(E_T1, napot(addr & !0xFFF, 0x1000), NAPOT | R);
+    let _ = m_sw(reg, saved & !(1 << bit));
+    let t = user(uaddr(crate::u_load), addr, 0, false);
+    let _ = m_sw(reg, saved);
+    pmp_off(E_T1);
+    t
 }
 
 pub fn violation_record() {
     begin("B6.record");
     icm("before");
-    let before = changed();
     let (Ok(reg0), Ok(reg3)) = (m_lw(PMS_UM_REG0), m_lw(PMS_UM_REG3)) else {
         check("B6.record", Some(false), format_args!("PMS registers not readable: skipped"));
         return;
     };
-    // U read of GPIO with the UM HP_GPIO bit cleared (run 6: load-access-fault, mtval 0x500e0000).
-    pmp_set(E_T1, napot(GPIO_BASE, 0x1000), NAPOT | R);
-    let _ = m_sw(PMS_UM_REG3, reg3 & !1);
-    let t_gpio = user(uaddr(crate::u_load), GPIO_BASE, 0, false);
-    let _ = m_sw(PMS_UM_REG3, reg3);
-    pmp_off(E_T1);
-    icm("after U GPIO fault");
-    let after_gpio = changed();
-    // U read of the uncached L2MEM alias with the UM L2MEM bit cleared (run 6: fault, mtval 0x8ff5a000).
-    pmp_set(E_T1, napot(SCRATCH_UNCACHED, 0x1000), NAPOT | R);
-    let _ = m_sw(PMS_UM_REG0, reg0 & !(1 << 2));
-    let t_l2 = user(uaddr(crate::u_load), SCRATCH_UNCACHED, 0, false);
-    let _ = m_sw(PMS_UM_REG0, reg0);
-    pmp_off(E_T1);
-    icm("after U L2MEM fault");
-    let after_l2 = changed();
-    check("B6.record", None, format_args!("U GPIO {t_gpio}: ICM record {}; U uncached L2MEM {t_l2}: ICM record {}",
-        if after_gpio == before { "unchanged" } else { "CHANGED" }, if after_l2 == after_gpio { "unchanged" } else { "CHANGED" }));
+    let t = u_apm_fault(PMS_UM_REG3, reg3, 0, GPIO_BASE);
+    rec_line("U GPIO fault at +0");
+    let first = rec();
+    let t2 = u_apm_fault(PMS_UM_REG3, reg3, 0, GPIO_BASE + 4);
+    rec_line("second U GPIO fault at +4, no clear");
+    let second = rec();
+    check("B6.record-gpio", Some(first.1 == Ok(GPIO_BASE as u32) && t.code() == 5),
+        format_args!("U GPIO {t}: record addr {}; second fault {t2}: {}", show(first.1),
+            if second.1 == first.1 { "record LATCHED (first kept)" } else { "record OVERWRITTEN" }));
+    clear_record();
+    rec_line("int_clr bit 2");
+    let cleared = rec();
+    check("B6.record-clear", None, format_args!("after ICM_INT_CLR bit 2: int_raw {}, addr {} ({})", show(cleared.0), show(cleared.1),
+        if cleared.1 == first.1 { "addr kept, only the flag clears" } else { "addr reset" }));
+    let t3 = u_apm_fault(PMS_UM_REG0, reg0, 2, SCRATCH_UNCACHED);
+    rec_line("U uncached L2MEM fault");
+    let l2 = rec();
+    check("B6.record-l2mem", None, format_args!("U uncached L2MEM {t3}: record {}",
+        if l2 == cleared { "unchanged (L2MEM APM not reported through the ICM)" } else { "CHANGED" }));
+    clear_record();
+    let before = rec();
+    let t4 = user(uaddr(crate::u_load), crate::SCRATCH, 0, false);
+    let pmp_only = rec();
+    check("B6.record-pmp", None, format_args!("U load with no PMP grant {t4}: record {}",
+        if pmp_only == before { "unchanged (PMP faults stay inside the core)" } else { "CHANGED" }));
+    clear_record();
 }
