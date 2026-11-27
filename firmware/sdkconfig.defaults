@@ -11,7 +11,7 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # mbedTLS stays at -Os (#588): upstream 69f55d8852 makes it follow the -O2 above, +13 KB P4 crypto for no measured need
 CONFIG_MBEDTLS_COMPILER_OPTIMIZATION_SIZE=y
-# Brownout at 2.42 V (level 5; the IDF default 7 is 2.6 V): the badge's 3.3 V rail dips under Wi-Fi and LoRa bursts, a higher level resets on those
+# Brownout: lowest threshold (2.42 V vs the 2.6 V default); reason not recorded
 CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
 # 8 KB main task (IDF default 3.5 KB): app_main runs the whole boot sequence on it
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
@@ -25,32 +25,28 @@ CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 
 # PSRAM is ordinary malloc memory: big buffers, lwIP and the UI live there, internal RAM stays for DMA
 CONFIG_SPIRAM=y
-# 80 MHz is only the compile-time boot clock; SPIRAM_SPEED_RUNTIME_SELECT below switches to 120 MHz at runtime (default since #353).
-# 80 MHz (Lucas, 2026-11-01, #89). At 200 MHz this badge flips bit 8/9 of PSRAM words, 0->1, anywhere a pattern tickles
-# the lane (the "weak cells" of #86 grew from 1.3 to 2.6 MB in a day; four LVGL crashes from flipped object metadata;
-# a heap canary flipped 1 s after it was written). At 80 MHz the same memory is clean with no quarantine. Cost: PSRAM
-# reads ~2x slower (the UI feels fine; numbers in #93), no internal RAM (the 12 KB once blamed on it were the c6link
-# supervisor's task stacks, #14). psram_guard stays as the watchdog (canaries + boot check, #93); the quarantine
-# machinery of #86 was removed in #93 (last commit with it: 7392597).
-# 120 MHz trial 2026-11-01 to -02 (#94, ended by #120 below): not an IDF option; tools/idf-patches/0001-esp32p4-psram-120mhz.patch adds it
-# (MPLL 480 / 4; the 80 MHz latency codes are good to 133 MHz); build.sh refuses to build 120 MHz without the patch. 133 MHz
-# (400 / 3) does not work: an odd divider gives the DDR bus a 33 % duty clock and the chip is not found at boot. If the
-# bit flips come back (`fw psram` canaries, `ui_check: FOUND`, CORRUPT HEAP), go back to CONFIG_SPIRAM_SPEED_80M=y.
-# Back at 80 MHz since 2026-11-02 (#120, #121): at 120 MHz, DMA transfers between the SD card and PSRAM flipped bit 3
-# at a fixed spot in every 1 KB (29 of 30 journal read passes; 0 of 150 at 80 MHz). The CPU-side canaries never saw it.
-# Any new PSRAM clock needs a DMA-path test (`fw mesh hist scan 100`, #121) before it ships.
+# The image boots at 80 MHz (CONFIG_SPIRAM_SPEED_80M is only the compile-time boot clock). SPIRAM_SPEED_RUNTIME_SELECT below
+# restarts into 120 MHz, the default since #353; a cold boot, panic, WDT or brownout comes back at 80 (docs/psram-speed-switch.md).
+# History: 200 MHz flipped bit 8/9 of PSRAM words (0->1) anywhere a pattern tickled the lane (#86, #89): four LVGL crashes
+# from flipped object metadata, a heap canary flipped 1 s after it was written. 80 MHz was clean; psram_guard stays as the
+# watchdog (canaries + boot check, #93). 120 MHz is not an IDF option: tools/idf-patches/0001-esp32p4-psram-120mhz.patch adds
+# it (MPLL 480 / 4); 133 MHz (400 / 3) does not work, an odd divider gives the DDR bus a 33 % duty clock. 120 MHz was backed
+# out in #120 (DMA transfers between the SD card and PSRAM flipped bit 3 at a fixed spot in every 1 KB, 29 of 30 journal read
+# passes, 0 of 150 at 80 MHz) and came back as the runtime choice (#121, #353). Any new PSRAM clock needs a DMA-path test
+# (`fw mesh hist scan 100`, #121) before it ships; if bit flips return (`fw psram` canaries, `ui_check: FOUND`, CORRUPT HEAP)
+# the fallback is a plain CONFIG_SPIRAM_SPEED_80M=y without the runtime select.
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
 CONFIG_SPIRAM_SPEED_80M=y
-# 80 or 120 MHz chosen at runtime (#121): needs tools/idf-patches/0001 + 0003 in the IDF; build.sh refuses an IDF without 0003
-# (#588), as Kconfig would drop the unknown symbol and build a plain 80 MHz image. The runtime default is 120 MHz since #353.
+# 80 or 120 MHz chosen at PSRAM init (#121): needs tools/idf-patches/0001 + 0003 in the IDF; build.sh refuses an IDF without 0003
+# (#588), as Kconfig would drop the unknown symbol and build a plain 80 MHz image. The default is 120 MHz since #353.
 CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 # Always 4x refresh (#569): the AP HEX chip boots letting its die temperature pick the refresh rate and picks slow on a
 # cool die; at 120 MHz one weak cell then lost bit 9 (0 -> 1) in data left unread for 3.5-5 s (9 of 20 bench sessions,
 # none when the data was re-read every 200 ms). Needs tools/idf-patches/0004; build.sh refuses an IDF without it.
 CONFIG_SPIRAM_HEX_REFRESH_4X=y
 CONFIG_SPIRAM_USE_MALLOC=y
-# NVS page cache and key hash list in PSRAM (#600): they are read only by NVS code, never from an ISR or with the flash cache off
+# NVS page cache and key hash list in PSRAM (#600), internal RAM saved; trade-off against #569 (PSRAM data left unread for seconds): decision pending
 CONFIG_NVS_ALLOCATE_CACHE_IN_SPIRAM=y
 # A plain malloc of up to 4 KB is internal first, a bigger one PSRAM first (IDF default 16 KB, #261): internal RAM is
 # nearly all DMA-capable, and every ordinary 4-16 KB block took it from esp_hosted's Wi-Fi frames. Safe because nothing
@@ -61,7 +57,7 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Big statics that need no DMA or cache-off access live in PSRAM via EXT_RAM_BSS_ATTR (#107)
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
-# 256 KB L2 cache (the P4 maximum): every PSRAM read (UI, lwIP, heap) goes through it, a bigger cache means fewer slow PSRAM fetches
+# 256 KB L2 cache (128/256/512): taken from internal L2MEM, a trade between PSRAM hit rate and internal RAM
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
@@ -169,7 +165,6 @@ CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
 CONFIG_ESP_HOSTED_HOST_FEAT_WIFI_EXT_ENT=y
 CONFIG_WIFI_RMT_ENTERPRISE_SUPPORT=y
 CONFIG_WIFI_RMT_SUITE_B_192=n
-CONFIG_WIFI_RMT_EAP_TLS1_3=n
 # Liveness between the chips (#277): c6sup asks the C6 (its side is compiled in already) for one heartbeat event every
 # 30 s after each link-up and counts the ones that do not come (c6_watch)
 CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y
