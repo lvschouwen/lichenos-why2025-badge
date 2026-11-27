@@ -481,7 +481,7 @@ pub fn perf(cpu_mhz: u32) {
         map::map_identity(PSRAM_BYTES / PAGE_BYTES);
         map::cache_invalidate(CACHED_BASE, PSRAM_BYTES);
     }
-    pl!("PERF psram.clock mhz={}", lichen_platform_esp32p4::psram::PSRAM_MHZ);
+    pl!("PERF psram.clock mhz={}", lichen_platform_esp32p4::psram::current_mhz());
     let mhz = if cpu_mhz == 0 { 40 } else { cpu_mhz } as u64;
     let rate = |cycles: u32| -> u64 { LEN as u64 * mhz / cycles.max(1) as u64 }; // bytes per us = MB/s
                                                                                  // SAFETY: cycle counter reads.
@@ -535,7 +535,7 @@ pub fn run(cpu_mhz: u32) -> u32 {
     pl!(
         "CHECK 620.pattern {} at {} MHz, cpu {} MHz",
         if fails == 0 { "PASS" } else { "FAIL" },
-        lichen_platform_esp32p4::psram::PSRAM_MHZ,
+        lichen_platform_esp32p4::psram::current_mhz(),
         cpu_mhz
     );
     fails

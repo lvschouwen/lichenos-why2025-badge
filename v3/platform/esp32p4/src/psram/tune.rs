@@ -105,6 +105,8 @@ pub fn best_delayline(len: usize, end: usize) -> usize {
 pub struct Tuned {
     pub phase_id: usize,
     pub phase_ok: bool,
+    /// Which of the four DQS phases read the reference data back (the phase eye).
+    pub phase_good: [bool; 4],
     pub phase_run: usize,
     pub delayline_id: usize,
     pub delayline_ok: bool,
@@ -156,6 +158,7 @@ pub unsafe fn sweep(read_matches: &mut dyn FnMut() -> bool) -> Tuned {
     Tuned {
         phase_id,
         phase_ok: plen > 0,
+        phase_good,
         phase_run: plen,
         delayline_id,
         delayline_ok: dlen > 1,

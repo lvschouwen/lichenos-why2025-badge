@@ -27,6 +27,26 @@ pub const RD_REG_DUMMY_BITLEN: u32 = 2 * (5 - 1);
 pub const WR_DUMMY_BITLEN: u32 = 2 * (5 - 1);
 pub const RD_LATENCY: u8 = 2;
 pub const WR_LATENCY: u8 = 2;
+use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
+static RD_DUMMY: AtomicU32 = AtomicU32::new(RD_DUMMY_BITLEN);
+static RD_REG_DUMMY: AtomicU32 = AtomicU32::new(RD_REG_DUMMY_BITLEN);
+static WR_DUMMY: AtomicU32 = AtomicU32::new(WR_DUMMY_BITLEN);
+/// Dummy bits of the FIFO-path transactions for the running speed (the constants above are the 80 and 120 MHz values;
+/// `psram::Speed` sets the others, e.g. 160 MHz: LC6 / WLC6, 2 * (12 - 1), 2 * (6 - 1), 2 * (6 - 1)).
+pub fn set_timing(rd: u32, rd_reg: u32, wr: u32) {
+    RD_DUMMY.store(rd, Relaxed);
+    RD_REG_DUMMY.store(rd_reg, Relaxed);
+    WR_DUMMY.store(wr, Relaxed);
+}
+fn rd_dummy() -> u32 {
+    RD_DUMMY.load(Relaxed)
+}
+fn rd_reg_dummy() -> u32 {
+    RD_REG_DUMMY.load(Relaxed)
+}
+fn wr_dummy() -> u32 {
+    WR_DUMMY.load(Relaxed)
+}
 pub const FIFO_MAX_BYTES: usize = 64;
 pub const REF_DATA: u32 = 0x5a6b_7c8d;
 
@@ -119,12 +139,12 @@ impl ModeRegs {
 }
 
 /// MR0 as IDF writes it: drive strength 0, read latency `RD_LATENCY`, fixed latency, the other bits kept.
-pub const fn mr0_value(read_back: u8) -> u8 {
-    (read_back & 0xC0) | (RD_LATENCY << 2) | (1 << 5)
+pub const fn mr0_value(read_back: u8, rl: u8) -> u8 {
+    (read_back & 0xC0) | (rl << 2) | (1 << 5)
 }
 /// MR4 as IDF (with Lichen patch 0004) writes it: write latency, refresh 0 = always 4x, PASR kept.
-pub const fn mr4_value(read_back: u8) -> u8 {
-    (read_back & 0x07) | (WR_LATENCY << 5)
+pub const fn mr4_value(read_back: u8, wl: u8) -> u8 {
+    (read_back & 0x07) | (wl << 5)
 }
 /// MR8 as IDF writes it: burst length 3 (2 KB), hybrid burst off, row-boundary crossing on, x16; reserved bits kept.
 pub const fn mr8_value(read_back: u8) -> u8 {
@@ -143,15 +163,15 @@ fn word2(lo: u8, hi: u8) -> [u32; 1] {
 ///
 /// # Safety
 /// As `xact`.
-pub unsafe fn init_mode_regs() {
+pub unsafe fn init_mode_regs(rl: u8, wl: u8) {
     let mut r = [0u32; 1];
-    xact(REG_READ, 0, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 16)));
+    xact(REG_READ, 0, rd_reg_dummy(), None, Some((&mut r, 16)));
     let (m0, m1) = (byte(&r, 0), byte(&r, 1));
-    xact(REG_READ, 4, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 16)));
+    xact(REG_READ, 4, rd_reg_dummy(), None, Some((&mut r, 16)));
     let (m4, m5) = (byte(&r, 0), byte(&r, 1));
-    xact(REG_WRITE, 0, 0, Some((&word2(mr0_value(m0), m1), 16)), None);
-    xact(REG_WRITE, 4, 0, Some((&word2(mr4_value(m4), m5), 16)), None);
-    xact(REG_READ, 8, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 8)));
+    xact(REG_WRITE, 0, 0, Some((&word2(mr0_value(m0, rl), m1), 16)), None);
+    xact(REG_WRITE, 4, 0, Some((&word2(mr4_value(m4, wl), m5), 16)), None);
+    xact(REG_READ, 8, rd_reg_dummy(), None, Some((&mut r, 8)));
     let m8 = byte(&r, 0);
     xact(REG_WRITE, 8, 0, Some((&word2(mr8_value(m8), 0), 16)), None);
 }
@@ -163,13 +183,13 @@ pub unsafe fn init_mode_regs() {
 pub unsafe fn read_mode_regs() -> ModeRegs {
     let mut r = [0u32; 1];
     let mut m = ModeRegs::default();
-    xact(REG_READ, 0, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 16)));
+    xact(REG_READ, 0, rd_reg_dummy(), None, Some((&mut r, 16)));
     (m.mr0, m.mr1) = (byte(&r, 0), byte(&r, 1));
-    xact(REG_READ, 2, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 16)));
+    xact(REG_READ, 2, rd_reg_dummy(), None, Some((&mut r, 16)));
     (m.mr2, m.mr3) = (byte(&r, 0), byte(&r, 1));
-    xact(REG_READ, 4, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 8)));
+    xact(REG_READ, 4, rd_reg_dummy(), None, Some((&mut r, 8)));
     m.mr4 = byte(&r, 0);
-    xact(REG_READ, 8, RD_REG_DUMMY_BITLEN, None, Some((&mut r, 8)));
+    xact(REG_READ, 8, rd_reg_dummy(), None, Some((&mut r, 8)));
     m.mr8 = byte(&r, 0);
     m
 }
@@ -180,9 +200,9 @@ pub unsafe fn read_mode_regs() -> ModeRegs {
 /// As `xact`.
 pub unsafe fn check_connected() -> bool {
     let w = [REF_DATA];
-    xact(SYNC_WRITE, 0, WR_DUMMY_BITLEN, Some((&w, 32)), None);
+    xact(SYNC_WRITE, 0, wr_dummy(), Some((&w, 32)), None);
     let mut r = [0u32; 1];
-    xact(SYNC_READ, 0, RD_DUMMY_BITLEN, None, Some((&mut r, 32)));
+    xact(SYNC_READ, 0, rd_dummy(), None, Some((&mut r, 32)));
     r[0] == REF_DATA
 }
 
@@ -192,7 +212,7 @@ pub unsafe fn check_connected() -> bool {
 /// As `xact`.
 pub unsafe fn write_data(data: &[u32], mut addr: u32) {
     for chunk in data.chunks(FIFO_MAX_BYTES / 4) {
-        xact(SYNC_WRITE, addr, WR_DUMMY_BITLEN, Some((chunk, chunk.len() as u32 * 32)), None);
+        xact(SYNC_WRITE, addr, wr_dummy(), Some((chunk, chunk.len() as u32 * 32)), None);
         addr += chunk.len() as u32 * 4;
     }
 }
@@ -204,7 +224,7 @@ pub unsafe fn write_data(data: &[u32], mut addr: u32) {
 pub unsafe fn read_data(out: &mut [u32], mut addr: u32) {
     for chunk in out.chunks_mut(FIFO_MAX_BYTES / 4) {
         let bits = chunk.len() as u32 * 32;
-        xact(SYNC_READ, addr, RD_DUMMY_BITLEN, None, Some((chunk, bits)));
+        xact(SYNC_READ, addr, rd_dummy(), None, Some((chunk, bits)));
         addr += bits / 8;
     }
 }
@@ -216,11 +236,14 @@ mod tests {
     #[test]
     fn mode_register_values_follow_idf() {
         // MR0: drive strength 0, read latency field 2 at [4:2], LT fixed (bit 5); bits 6 and 7 kept
-        assert_eq!(mr0_value(0x00), 0b0010_1000);
-        assert_eq!(mr0_value(0xC3), 0b1110_1000);
+        assert_eq!(mr0_value(0x00, RD_LATENCY), 0b0010_1000);
+        assert_eq!(mr0_value(0xC3, RD_LATENCY), 0b1110_1000);
         // MR4: write latency field 2 at [7:5], RF = 0 (4x), PASR kept
-        assert_eq!(mr4_value(0x00), 0x40);
-        assert_eq!(mr4_value(0xFF), 0x47);
+        assert_eq!(mr4_value(0x00, WR_LATENCY), 0x40);
+        assert_eq!(mr4_value(0xFF, WR_LATENCY), 0x47);
+        // 160 MHz: read latency field 3 (LC6), write latency field 6 (110b = WLC6)
+        assert_eq!(mr0_value(0x00, 3), 0b0010_1100);
+        assert_eq!(mr4_value(0x00, 6), 0xC0);
         // MR8: BL 3, BT 0, RBX 1, X16 1; reserved bits 4, 5 and 7 kept
         assert_eq!(mr8_value(0x00), 0b0100_1011);
         assert_eq!(mr8_value(0xFF), 0b1111_1011);

@@ -27,7 +27,46 @@ use crate::mmio::{modify32, read32, write32};
 
 pub const PSRAM_MHZ: u32 = 120;
 pub const MPLL_MHZ: u32 = 480;
-const BUS_DIV: u32 = MPLL_MHZ / PSRAM_MHZ;
+
+/// A PSRAM speed: MPLL, bus divider (MPLL / PSRAM, even), latency codes and dummy bits (APS256XXN latency tables: LC5/WLC5 up
+/// to 133 MHz, LC6/WLC6 up to 166 MHz, LC7/WLC7 up to 200 MHz; IDF's own 200 MHz setting is LC7/WLC7).
+#[derive(Clone, Copy, Debug)]
+pub struct Speed {
+    pub mhz: u32,
+    pub mpll: u32,
+    /// MR0 [4:2], read latency code field: cycles = 2 * field + 6.
+    pub rd_lat: u8,
+    /// MR4 [7:5], write latency code field (010b = WLC5, 110b = WLC6, 001b = WLC7).
+    pub wr_lat: u8,
+    pub rd_dummy: u32,
+    pub rd_reg_dummy: u32,
+    pub wr_dummy: u32,
+}
+/// The default and floor: 120 MHz = MPLL 480 / 4.
+pub const SPEED_120: Speed = Speed {
+    mhz: 120,
+    mpll: 480,
+    rd_lat: 2,
+    wr_lat: 2,
+    rd_dummy: 2 * (10 - 1),
+    rd_reg_dummy: 2 * (5 - 1),
+    wr_dummy: 2 * (5 - 1),
+};
+/// Experiment (#645): 160 MHz = MPLL 320 / 2 (an even divider; 480 / 3 would give the DDR bus a 33 % duty clock), LC6 / WLC6.
+pub const SPEED_160: Speed = Speed {
+    mhz: 160,
+    mpll: 320,
+    rd_lat: 3,
+    wr_lat: 6,
+    rd_dummy: 2 * (12 - 1),
+    rd_reg_dummy: 2 * (6 - 1),
+    wr_dummy: 2 * (6 - 1),
+};
+static CURRENT_MHZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(PSRAM_MHZ);
+/// PSRAM clock of the last `init`.
+pub fn current_mhz() -> u32 {
+    CURRENT_MHZ.load(core::sync::atomic::Ordering::Relaxed)
+}
 const LOW_SPEED_MHZ: u32 = 20; // mspi_timing_get_psram_low_speed_freq_mhz(): reference data and tuning start
 
 /// How far `init` goes (the probe runs the stages one image at a time).
@@ -67,10 +106,10 @@ pub type Log<'a> = &'a mut dyn FnMut(core::fmt::Arguments);
 
 /// `psram_ctrlr_ll_set_core_clock_div(1)` + `enable_core_clock` + both bus clocks for `mhz`
 /// (`mspi_timing_config_set_psram_clock`: divider = MPLL / core divider 1 / mhz).
-unsafe fn set_psram_clock(mhz: u32) {
+unsafe fn set_psram_clock(mpll: u32, mhz: u32) {
     modify32(regs::PERI_CLK_CTRL00, regs::CORE_CLOCK_DIV_MASK, 0);
     modify32(regs::PERI_CLK_CTRL00, 0, regs::CORE_CLOCK_EN);
-    regs::set_bus_clock(MPLL_MHZ / mhz);
+    regs::set_bus_clock(mpll / mhz);
 }
 
 /// `mspi_timing_psram_config_clear_tuning_regs`
@@ -93,7 +132,17 @@ pub struct TuneOverride {
 /// Owns the PSRAM supply, MPLL, the PSRAM controller and its pins: call once, from the boot hart, with nothing else
 /// using PSRAM or the MSPI IOMUX. Reads two eFuse read registers (`ldo::read_ldo_efuse`) and writes none.
 pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Error> {
+    init_with(upto, over, SPEED_120, log)
+}
+
+/// `init` at an explicit speed (120 MHz is the default and the floor; `SPEED_160` is an experiment).
+///
+/// # Safety
+/// As `init`.
+pub unsafe fn init_with(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> Result<Info, Error> {
     let mut info = Info::default();
+    CURRENT_MHZ.store(sp.mhz, core::sync::atomic::Ordering::Relaxed);
+    mspi::set_timing(sp.rd_dummy, sp.rd_reg_dummy, sp.wr_dummy);
 
     // 1. LDO, then MPLL (esp_clk_tree_mpll_acquire, esp_clk_tree_mpll_freq_set)
     let e = ldo::read_ldo_efuse();
@@ -115,9 +164,9 @@ pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Err
         return Ok(info);
     }
     pll::mpll_enable();
-    let mpll = pll::mpll_configure(MPLL_MHZ, 2_000_000).ok_or(Error::MpllCalibration)?;
+    let mpll = pll::mpll_configure(sp.mpll, 2_000_000).ok_or(Error::MpllCalibration)?;
     info.mpll_mhz = mpll;
-    log(format_args!("mpll: configured {MPLL_MHZ} MHz, analog registers read back {mpll} MHz"));
+    log(format_args!("mpll: configured {} MHz, analog registers read back {mpll} MHz", sp.mpll));
     if upto == Upto::Mpll {
         return Ok(info);
     }
@@ -132,13 +181,20 @@ pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Err
     regs::pin_drv_set(2);
     regs::apply(&regs::DQS_ON);
     regs::apply(&regs::CS_AND_ECC);
-    regs::set_bus_clock(BUS_DIV);
+    regs::set_bus_clock(sp.mpll / sp.mhz);
     regs::apply(&regs::DLL_ON);
-    log(format_args!("ctrl: module clock on, reset, MPLL source, bus clock 480 / {BUS_DIV} = {PSRAM_MHZ} MHz, DLL on"));
+    log(format_args!(
+        "ctrl: module clock on, reset, MPLL source, bus clock {} / {} = {} MHz (words {:#010x} / {:#010x} read back), DLL on",
+        sp.mpll,
+        sp.mpll / sp.mhz,
+        sp.mhz,
+        read32(regs::BUS_CLOCK_SPIMEM2),
+        read32(regs::BUS_CLOCK_SPIMEM3)
+    ));
 
     // 3. the chip: mode registers (latency codes, refresh 4x, burst), then the connection check
     info.modes_before = mspi::read_mode_regs();
-    mspi::init_mode_regs();
+    mspi::init_mode_regs(sp.rd_lat, sp.wr_lat);
     if !mspi::check_connected() {
         return Err(Error::NotConnected);
     }
@@ -161,11 +217,22 @@ pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Err
 
     // 4. AXI configuration and tuning (mspi_timing_psram_tuning)
     regs::apply(&regs::CONFIG_FOR_PSRAM);
-    set_psram_clock(LOW_SPEED_MHZ);
+    if sp.mhz != PSRAM_MHZ {
+        // AXI-side dummy cycles: read [11:6] = bits - 1 (enable bit 4), write [27:22] = bits - 1 (the table holds the 120 MHz values)
+        modify32(regs::SPIMEM2 + 0x40, 0x0000_0FC0, (sp.rd_dummy - 1) << 6);
+        modify32(regs::SPIMEM2 + 0x40, 0x0FC0_0000, (sp.wr_dummy - 1) << 22);
+        log(format_args!(
+            "ctrl: AXI dummies rd {} wr {} bits, SPIMEM2+0x40 = {:#010x} read back",
+            sp.rd_dummy,
+            sp.wr_dummy,
+            read32(regs::SPIMEM2 + 0x40)
+        ));
+    }
+    set_psram_clock(sp.mpll, LOW_SPEED_MHZ);
     clear_tuning();
     mspi::write_data(&tune::REFERENCE, tune::TEST_ADDR);
     regs::apply(&[regs::VAR_DUMMY_FIFO_OFF]);
-    set_psram_clock(PSRAM_MHZ);
+    set_psram_clock(sp.mpll, sp.mhz);
     let mut matches = || {
         let mut got = [0u32; tune::TEST_WORDS];
         mspi::read_data(&mut got, tune::TEST_ADDR);
@@ -173,7 +240,8 @@ pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Err
     };
     let t = tune::sweep(&mut matches);
     log(format_args!(
-        "tune: phase id {} (run {}{}), delay line id {} data {} dqs {} (run {}{}); good reads of 100 per delay line: {:?}",
+        "tune: phase eye {:?}; phase id {} (run {}{}), delay line id {} data {} dqs {} (run {}{}); good reads of 100 per delay line: {:?}",
+        t.phase_good,
         t.phase_id,
         t.phase_run,
         if t.phase_ok { "" } else { ", FALLBACK" },
@@ -192,7 +260,7 @@ pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Err
         regs::set_delaylines(t.data_dl, t.dqs_dl);
         log(format_args!("tune: OVERRIDE phase {phase} data {} dqs {}", t.data_dl, t.dqs_dl));
     }
-    set_psram_clock(PSRAM_MHZ);
+    set_psram_clock(sp.mpll, sp.mhz);
     regs::apply(&regs::VAR_DUMMY_ON);
     info.tuned = Some(t);
     Ok(info)

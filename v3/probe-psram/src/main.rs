@@ -92,11 +92,15 @@ extern "C" fn pmain() -> ! {
     let mut stage = STAGE;
     let mut cpu_mhz = 40;
     if let Some(rest) = STAGE.strip_prefix("cpu") {
-        let target = 360;
+        // "cpu400-..." asks for 400 MHz (explicit experiment, #645); "cpu-..." stays at 360
+        let (target, rest) = match rest.strip_prefix("400") {
+            Some(r) => (400, r),
+            None => (360, rest),
+        };
         stage = rest.strip_prefix('-').unwrap_or("");
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, boot hart, RAM-only image (see clock::cpu_to_360).
-        match unsafe { clock::cpu_to_360(&mut log) } {
+        match unsafe { clock::cpu_to_mhz(&mut log, target) } {
             Ok((_, Some(a))) => {
                 cpu_mhz = a;
                 pl!("PERF cpu.clock mhz={cpu_mhz}");
@@ -113,7 +117,7 @@ extern "C" fn pmain() -> ! {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" | "eye" | "diag" | "perf" | "regs" | "variants" | "isolate" | "workaround" => {
+        "tune" | "all" | "eye" | "diag" | "perf" | "regs" | "variants" | "isolate" | "workaround" | "psram160" => {
             Some(psram::Upto::Tuned)
         }
         _ => None,
@@ -121,9 +125,18 @@ extern "C" fn pmain() -> ! {
     if let Some(upto) = upto {
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, on the boot hart, in a RAM-only image that owns the machine (load-ram).
-        match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
+        let res =
+            if stage == "psram160" { init_160(&mut log) } else { unsafe { psram::init(upto, OVERRIDE, &mut log) } };
+        match res {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
+                if stage == "psram160" {
+                    // the 160 MHz experiment already ran inside init (see `init_160` below); the suite follows
+                    pl!("PERF psram.clock mhz={}", psram::current_mhz());
+                    workaround::run(cpu_mhz);
+                    variants::aia_base();
+                    tests::perf(cpu_mhz);
+                }
                 if stage == "workaround" {
                     workaround::run(cpu_mhz);
                     tests::perf(cpu_mhz);
@@ -182,6 +195,20 @@ fn regs_dump() {
         }
     }
     pl!("REGS mspi2 int_raw {:#010x} (bit 26 rx overflow, bit 27 tx underflow)", rd(0x5008_E000 + 0xC8));
+}
+
+/// The 160 MHz experiment (#645): init at 160 MHz; if the link breaks or tuning finds no window, say so and bring 120 MHz back.
+fn init_160(log: &mut dyn FnMut(core::fmt::Arguments)) -> Result<psram::Info, psram::Error> {
+    // SAFETY: the one init call of this image (boot hart, RAM-only).
+    let r = unsafe { psram::init_with(psram::Upto::Tuned, OVERRIDE, psram::SPEED_160, log) };
+    let ok = matches!(&r, Ok(i) if i.tuned.is_some_and(|t| t.phase_ok && t.delayline_ok));
+    if ok {
+        pl!("CHECK 645.psram160 PASS: calibrated at 160 MHz");
+        return r;
+    }
+    pl!("CHECK 645.psram160 FAIL: {:?}; restoring 120 MHz in this run", r.as_ref().err());
+    // SAFETY: as above; a full re-init at the default speed.
+    unsafe { psram::init_with(psram::Upto::Tuned, OVERRIDE, psram::SPEED_120, log) }
 }
 
 /// The clocks the pattern tests ran at, read back right before them.

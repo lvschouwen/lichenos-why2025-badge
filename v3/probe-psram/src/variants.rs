@@ -297,3 +297,8 @@ pub fn isolate() {
     iso_case("address, sb x4", &addr, Store::Byte, 0);
     iso_case("address, sb x4, 1 us gap", &addr, Store::Byte, 360);
 }
+
+/// The uncached address-in-address diagnostic once (for comparing speeds), after the window is mapped by the caller.
+pub fn aia_base() {
+    run("base", format_args!("no change, uncached single-word stores (diagnostic only)"));
+}
