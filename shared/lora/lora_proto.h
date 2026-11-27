@@ -206,6 +206,12 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out);
 // config with this one function: the P4 before it sends one, the C6 when it gets one.
 bool lora_config_valid(lora_config_t const *c);
 
+// Whether the C6 hands a received packet on (#592). A packet whose header says "no CRC" was never checked by the radio,
+// so a corrupted one would reach MeshCore as valid: drop it, as MeshCore dev does. info_err is the status of the header
+// read (RadioLib getLoRaRxHeaderInfo); when it failed the flag is unknown and the packet is kept, since readData() has
+// already vetted it as far as it can and an SPI hiccup must not eat good packets.
+bool lora_rx_keep(int16_t info_err, bool header_has_crc);
+
 // The C6's last line against a stuck carrier (#452): no single SEND keys the PA for longer than this. Above every
 // MeshCore preset's full 255-byte frame at LORA_PREAMBLE_MAX (the longest, Costa Rica, about 5.9 s), so only a custom
 // slow config (SF12 at 125 kHz or less) with a long packet is refused.

@@ -87,6 +87,7 @@ static bool                  radio_started;    // the last start (begin and the 
 static int8_t                applied_power_dbm; // the power of that start
 static uint32_t              applied_frf;       // the SetRfFrequency steps tune() wrote last, 0 for none
 static uint32_t              reg_served;        // REG_GET / REG_SET answered, for the heartbeat
+static uint32_t              nocrc_drops;       // packets dropped because their header had no CRC (#592), in the heartbeat
 
 // RadioLib 8 keeps the modem settings it gave the chip in private members without getters, and the SX126x has no
 // command that reads them back. These read them, and reach the protected frequency and packet status commands, without
@@ -500,6 +501,9 @@ static void handle_radio_event(void) {
                 status.crc_errors++;
             } else if (err != RADIOLIB_ERR_NONE) {
                 status.last_radio_err = err;
+            } else if (bool has_crc = true; !lora_rx_keep(radio.getLoRaRxHeaderInfo(nullptr, &has_crc), has_crc)) {
+                // The header said "no CRC", so the radio checked nothing (#592)
+                nocrc_drops++;
             } else {
                 msg.u.rx.len      = (uint8_t)len;
                 msg.u.rx.rssi_x10 = lora_rb_signal_rssi_x10((radio.*peek(peek_pkt_status{}))());
@@ -532,7 +536,7 @@ static void log_heartbeat(void) {
     fill_health(&h);
     ESP_LOGI(
         TAG,
-        "alive up %u s heap %u/%u stack %u state %u packets %u dropped %u reg %u",
+        "alive up %u s heap %u/%u stack %u state %u packets %u dropped %u nocrc %u reg %u",
         (unsigned)h.uptime_s,
         (unsigned)h.heap_free,
         (unsigned)h.heap_min,
@@ -540,6 +544,7 @@ static void log_heartbeat(void) {
         (unsigned)status.state,
         (unsigned)status.packets,
         (unsigned)(status.dropped + callback_dropped.load()),
+        (unsigned)nocrc_drops,
         (unsigned)reg_served
     );
 }

@@ -385,3 +385,7 @@ bool lora_sweep_req_valid(lora_sweep_req_t const *r) {
     uint64_t last = (uint64_t)r->start_hz + (uint64_t)r->step_hz * (r->count - 1u);
     return r->start_hz >= 862000000 && last <= 928000000;
 }
+
+bool lora_rx_keep(int16_t info_err, bool header_has_crc) {
+    return info_err != 0 || header_has_crc;
+}

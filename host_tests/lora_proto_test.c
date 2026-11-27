@@ -453,7 +453,15 @@ static void reg_old_peer_drops(void) {
     CHECK(lora_decode(buf, n, &out) == LORA_DEC_OK && out.u.reg_val.type == 0x55);
 }
 
+static void rx_keep_needs_crc(void) {
+    CHECK(lora_rx_keep(0, true));
+    CHECK(!lora_rx_keep(0, false)); // header says no CRC: unchecked, dropped
+    CHECK(lora_rx_keep(-1, false)); // flag unreadable: kept
+    CHECK(lora_rx_keep(-1, true));
+}
+
 int main(void) {
+    rx_keep_needs_crc();
     round_trip_each_type();
     encode_layout_pinned();
     encode_short_buffer();
