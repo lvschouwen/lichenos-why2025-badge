@@ -318,9 +318,10 @@ fn print_perf(name: &str, samples: &mut [u32], note: &str) {
     };
     let (lo, m, p, hi) = (us(min), us(med), us(p95), us(max));
     let sname = if src() == Src::Mcycle { "mcycle" } else { "mtime" };
+    // Conditions go on their own line: perf_report.py accepts only key=number pairs on a PERF line.
+    kprintln!("perf: {name}: timebase {sname}, {note}");
     kprintln!(
-        "PERF {name} median_us={}.{:02} p95_us={}.{:02} min_us={}.{:02} max_us={}.{:02} n={} timebase={sname} \
-         clock_mhz={} cpu_hz={} {note}",
+        "PERF {name} median_us={}.{:02} p95_us={}.{:02} min_us={}.{:02} max_us={}.{:02} n={} clock_mhz={} cpu_hz={}",
         m.0,
         m.1,
         p.0,
@@ -411,7 +412,7 @@ fn syscall_perf(udata: usize) {
     begin("perf.syscall");
     pmp::apply(addrs().0, udata, UPAGE);
     if src() != Src::Mcycle {
-        kprintln!("PERF syscall.local skipped: no cycle counter");
+        kprintln!("perf: syscall.local skipped: no cycle counter");
         return;
     }
     const SAMPLES: usize = 256;
@@ -421,7 +422,7 @@ fn syscall_perf(udata: usize) {
     // SAFETY: as above.
     unsafe { bp_write_counteren(0) };
     if u.echoes as usize != SAMPLES || u.fault.is_some() {
-        kprintln!("PERF syscall.local skipped: {} echoes, fault {}", u.echoes, u.fault.is_some());
+        kprintln!("perf: syscall.local skipped: {} echoes, fault {}", u.echoes, u.fault.is_some());
         return;
     }
     let mut s = [0u32; SAMPLES];
