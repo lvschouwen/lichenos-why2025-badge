@@ -346,3 +346,19 @@ u_mret:
 u_csrw_pmp:
     csrw pmpcfg0, zero
     ecall
+# #609 check 5: U writes a1 to a dedicated-GPIO CSR, then reads it back into a0.
+.global u_csrw803
+u_csrw803:
+    csrw 0x803, a1
+    csrr a0, 0x803
+    ecall
+.global u_csrw804
+u_csrw804:
+    csrw 0x804, a1
+    csrr a0, 0x804
+    ecall
+.global u_csrw805
+u_csrw805:
+    csrw 0x805, a1
+    csrr a0, 0x805
+    ecall

@@ -12,6 +12,7 @@ mod hw;
 mod b6x;
 mod core1;
 mod app_desc;
+mod s609;
 
 use core::arch::global_asm;
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
@@ -44,7 +45,21 @@ const RUN: &str = match option_env!("LICHEN_PROBE_RUN") {
     None => "b5",
 };
 const fn run_is(name: &str) -> bool {
-    let (a, b) = (RUN.as_bytes(), name.as_bytes());
+    str_eq(RUN, name)
+}
+/// #609: LICHEN_PROBE_SUITE picks one of the five check suites (s609.rs) inside the app image; unset, the app image
+/// is the step-3b one.
+const SUITE: &str = match option_env!("LICHEN_PROBE_SUITE") {
+    Some(s) => s,
+    None => "",
+};
+const _: () = assert!(SUITE.is_empty() || (run_is("app") && s609::known(SUITE)),
+    "LICHEN_PROBE_SUITE needs LICHEN_PROBE_RUN=app and one of c1pmp, pmp1, c1timer, dgpio");
+const fn suite_is(name: &str) -> bool {
+    str_eq(SUITE, name)
+}
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
         return false;
     }
@@ -156,6 +171,9 @@ extern "C" fn pmain() -> ! {
             // SAFETY: park; the host hard-resets the badge after END.
             unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
         }
+    }
+    if const { run_is("app") && !suite_is("") } {
+        s609::run(); // never returns: ends in the same ROM reset as step 3b
     }
     if const { run_is("app") } {
         pl!("lichen-probe-p4 {PROBE_ID} (#608 step 3b), core 0, v6.1 bootloader state: app image in ota_1");

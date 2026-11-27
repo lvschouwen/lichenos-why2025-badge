@@ -1,9 +1,11 @@
 //! #608 run 8: core 0 starts core 1 with IDF's start_other_core sequence (hw_ver1 registers) and then only watches
 //! a stage word; core 1 runs the tests and is the only hart that prints or traps until it reports done.
 //! A core-1 hang therefore shows as "silent at stage N" from core 0, which also tells whether core 0 survived it.
+//! #609 (app image behind the v6.1 bootloader) reuses start(), watches with watch_mtime() and tears down with stop().
 
 use crate::hw::{self, m_lw, m_sw, napot, pmp_off, pmp_set, user, NAPOT, R, W};
-use crate::{begin, check, show, uaddr, CLIC_THRESH, CLINT, E_T1, E_T2, MTIME_LO};
+use crate::{begin, check, show, uaddr, CLIC_THRESH, CLINT, E_T1, E_T2, MTIME_HI, MTIME_LO};
+use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicU32, Ordering::SeqCst};
 
 // hw_ver1 reg_base.h / hp_sys_clkrst_reg.h / hp_system_reg.h / pmu_reg.h
@@ -34,9 +36,8 @@ fn regs(when: &str) {
         show(m_lw(CLK_CTRL0)), show(m_lw(RST_EN0)), show(m_lw(PMU_SW_STALL)), show(m_lw(CORESTALLED_ST)));
 }
 
-/// Core 0: start core 1, watch it, end the run. Never returns.
-pub fn launch(id: &str) -> ! {
-    pl!("lichen-probe-p4 {id} (#608 run 8), core 0 launches core 1 and watches; core 1 runs the tests");
+/// Core 0: IDF's start_other_core order (v6.1 cpu_start.c): unstall, clock on, out of reset, then the ROM boot address.
+pub fn start() {
     regs("before");
     // esp_cpu_unstall(1): stall code 0xFF, then wait (bounded) for the stalled bit to drop.
     if let Ok(v) = m_lw(PMU_SW_STALL) {
@@ -64,7 +65,12 @@ pub fn launch(id: &str) -> ! {
     // SAFETY: ROM function `void ets_set_appcpu_boot_addr(uint32_t)` at its esp32p4.rom.ld address.
     let set_boot: extern "C" fn(u32) = unsafe { core::mem::transmute(ETS_SET_APPCPU_BOOT_ADDR) };
     set_boot(_start1 as *const () as usize as u32);
+}
 
+/// Core 0: start core 1, watch it, end the run. Never returns.
+pub fn launch(id: &str) -> ! {
+    pl!("lichen-probe-p4 {id} (#608 run 8), core 0 launches core 1 and watches; core 1 runs the tests");
+    start();
     let (mut last, mut idle) = (0u32, 0u32);
     let stage = loop {
         hw::spin(10_000);
@@ -99,10 +105,71 @@ pub fn launch(id: &str) -> ! {
     }
 }
 
+/// Core 0 mtime, raw: while core 1 runs, core 0 must not use the guarded accessors (GUARD and MFAULT are shared
+/// statics, and core 1 arms them). The caller has read mtime guarded once before starting core 1.
+pub fn mtime_raw() -> u64 {
+    loop {
+        // SAFETY: own-core CLINT mtime, an M read without side effects (pmp0 is the bootloader's locked RW grant).
+        let (hi, lo, hi2) = unsafe {
+            (read_volatile(MTIME_HI as *const u32), read_volatile(MTIME_LO as *const u32), read_volatile(MTIME_HI as *const u32))
+        };
+        if hi == hi2 {
+            return ((hi as u64) << 32) | lo as u64;
+        }
+    }
+}
+
+/// Core 0, #609: wait for core 1's DONE. Some(stage) once core 1 shows no stage change for `idle_ms`, timed by mtime
+/// (40 MHz, #608 run 9) because spin counts were calibrated in ROM state and the bootloader's CPU clock differs.
+pub fn watch_mtime(idle_ms: u64) -> Option<u32> {
+    let limit = idle_ms * 40_000;
+    let (mut last, mut since) = (0u32, mtime_raw());
+    loop {
+        hw::spin(1000);
+        let s = STAGE.load(SeqCst);
+        if s == DONE {
+            return None;
+        }
+        let now = mtime_raw();
+        if s != last {
+            (last, since) = (s, now);
+        } else if now.wrapping_sub(since) > limit {
+            return Some(s);
+        }
+    }
+}
+
+/// Core 0, #609, before the reset: as esp_restart_noos, clear the ROM's boot address and stall core 1, so nothing
+/// hands `_start1` to core 1 again while the bootloader reloads RAM.
+pub fn stop() {
+    // SAFETY: ROM function `void ets_set_appcpu_boot_addr(uint32_t)` at its esp32p4.rom.ld address.
+    let set_boot: extern "C" fn(u32) = unsafe { core::mem::transmute(ETS_SET_APPCPU_BOOT_ADDR) };
+    set_boot(0);
+    // cpu_utility_ll_stall_cpu(1): stall code 0x86. The stalled bit is not checked (a core in WFI never sets it).
+    if let Ok(v) = m_lw(PMU_SW_STALL) {
+        let _ = m_sw(PMU_SW_STALL, (v & !0x00FF_0000) | 0x0086_0000);
+    }
+}
+
+/// Core 1, #609: report done to core 0 and park.
+pub fn done() -> ! {
+    pl!("C1 done");
+    hw::drain();
+    STAGE.store(DONE, SeqCst);
+    loop {
+        // SAFETY: park; core 0 stalls this core and resets the chip.
+        unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+    }
+}
+
 #[no_mangle]
 extern "C" fn p1main() -> ! {
     STAGE.store(1, SeqCst);
     pl!("C1 up: mhartid={} mstatus={:#010x} mtvec={:#010x}", csr_read!("mhartid"), csr_read!("mstatus"), csr_read!("mtvec"));
+    if const { !crate::suite_is("") } {
+        crate::s609::core1_suite(); // #609 checks 1 and 3; run 8's body below stays as it was
+        done();
+    }
     crate::b5_dump();
     crate::setup_pmp();
     crate::b1_user_mode();

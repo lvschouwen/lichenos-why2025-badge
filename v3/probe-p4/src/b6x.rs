@@ -29,7 +29,7 @@ const ICM: [(&str, usize); 8] = [
 ];
 const BAUD: u64 = 115_200;
 
-fn systimer() -> Option<u64> {
+pub(crate) fn systimer() -> Option<u64> {
     m_sw(ST_UNIT0_OP, 1 << 30).ok()?;
     for _ in 0..10_000 {
         if m_lw(ST_UNIT0_OP).ok()? & (1 << 29) != 0 {

@@ -25,7 +25,11 @@ const fn put(mut d: [u8; 256], at: usize, s: &[u8]) -> [u8; 256] {
 const fn desc() -> [u8; 256] {
     let mut d = [0u8; 256];
     d = put(d, 0, &0xABCD_5432u32.to_le_bytes()); // magic_word
-    d = put(d, 16, super::PROBE_ID.as_bytes()); // version[32] (an 8-hex id, -dirty at most)
+    d = put(d, 16, super::PROBE_ID.as_bytes()); // version[32] (an 8-hex id, -dirty at most, then -<#609 suite>)
+    if !super::SUITE.is_empty() {
+        d = put(d, 16 + super::PROBE_ID.len(), b"-");
+        d = put(d, 17 + super::PROBE_ID.len(), super::SUITE.as_bytes());
+    }
     d = put(d, 48, b"lichen-probe-p4"); // project_name[32]
     d = put(d, 112, b"none (bare-metal probe)"); // idf_ver[32]
     // app_elf_sha256[32] at 144: esptool fills it

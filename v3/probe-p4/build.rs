@@ -13,4 +13,5 @@ fn main() {
     println!("cargo:rerun-if-changed=link-app.ld");
     println!("cargo:rerun-if-changed=src/asm.S");
     println!("cargo:rerun-if-env-changed=LICHEN_PROBE_RUN");
+    println!("cargo:rerun-if-env-changed=LICHEN_PROBE_SUITE");
 }
