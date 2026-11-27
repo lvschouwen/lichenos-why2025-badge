@@ -138,4 +138,3 @@ size	libstdc++.a	1634
 size	libstorage.a	2378
 size	libtfpsacrypto.a	80464
 size	libvfs.a	5051
-stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872
