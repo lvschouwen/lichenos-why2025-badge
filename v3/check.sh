@@ -65,4 +65,7 @@ echo "esp32p4 loaded image: $(stat -c %s target/lichen/esp32p4/kernel.bin) bytes
 step "licences (MIT or Apache-2.0 only)"
 python3 -I tools/check_licences.py
 
+step "boot stage (#615): its own workspace and gate"
+./boot/check.sh
+
 printf '\nv3/check.sh: OK\n'
