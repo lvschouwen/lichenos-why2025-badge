@@ -10,12 +10,25 @@ pub const NAME: &str = "esp32p4";
 const LOG_RING: usize = 4096;
 
 static RING: Global<Ring<LOG_RING>> = Global::new(Ring::new());
+/// Set once by a fatal trap path: from then on `putc` writes straight to the UART and never touches RING, which the
+/// faulting code may have been in the middle of updating.
+static FATAL: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Switch the console to the raw, ring-free path for a fault dump. One way: the run ends after the dump.
+pub fn enter_fatal() {
+    FATAL.store(true, core::sync::atomic::Ordering::Relaxed);
+}
 
 pub fn init() {}
 
 /// Queue one byte for UART0 and push out whatever the FIFO has room for. Never blocks: a full ring drops its oldest
 /// byte (counted, see `take_dropped`), so a dead UART cannot stall the kernel.
 pub fn putc(b: u8) {
+    if FATAL.load(core::sync::atomic::Ordering::Relaxed) {
+        while !uart::tx_ready() {}
+        uart::put_byte(b);
+        return;
+    }
     // SAFETY: single hart, no interrupts or traps use the console (Global invariant); the &mut ends in this call.
     let r = unsafe { RING.get() };
     r.push(b);
@@ -33,6 +46,10 @@ fn pump(r: &mut Ring<LOG_RING>) {
 
 /// Block until every queued byte has left the UART.
 pub fn flush() {
+    if FATAL.load(core::sync::atomic::Ordering::Relaxed) {
+        uart::drain();
+        return;
+    }
     // SAFETY: as `putc`.
     let r = unsafe { RING.get() };
     while !r.is_empty() {

@@ -28,6 +28,9 @@ pub fn set_cmp(t: u64) {
         write32(MTIMECMP_HI, u32::MAX);
         write32(MTIMECMP_LO, t as u32);
         write32(MTIMECMP_HI, (t >> 32) as u32);
+        // Read back so the posted write has reached the CLINT (and the level line has dropped) before the handler's
+        // mret can re-enable MIE; otherwise the same interrupt could be taken twice (review of 8d0b0003).
+        let _ = read32(MTIMECMP_HI);
     }
 }
 

@@ -4,7 +4,9 @@
 //! state is ever live when the handler runs, and the handler cannot nest (the CPU clears MIE on entry; a fault inside
 //! the handler goes to `nested_fault`, see boot_esp32p4.S).
 //!
-//! Exceptions are fatal (dump, END fatal), except one the bring-up arms on purpose with `expect_fault`: that one is
+//! A synchronous exception can come from anywhere, also from code holding the console ring, so the fatal paths switch
+//! the console to its raw ring-free mode (`platform::enter_fatal`) before they print. Exceptions are fatal (dump,
+//! END fatal), except one the bring-up arms on purpose with `expect_fault`: that one is
 //! dumped through the same path, recorded, and skipped, so the bench sees a real dump and the run still ends cleanly.
 use crate::global::Global;
 use crate::platform::{self, hw};
@@ -134,6 +136,11 @@ fn on_timer(s: &mut State) {
         return;
     };
     let now = hw::clint::mtime();
+    if now < t.cmp {
+        // The line fired before its deadline: not a tick (spurious, or a stale level). Count it, keep the deadline.
+        s.stray += 1;
+        return;
+    }
     t.stats.record(t.cmp, now);
     if t.stats.count >= t.target {
         hw::clint::disarm();
@@ -171,6 +178,7 @@ extern "C" fn m_trap(frame: *mut Frame) {
         unsafe { core::arch::asm!("csrw mepc, {0}", in(reg) epc + 4, options(nomem, nostack)) };
         return;
     }
+    platform::enter_fatal();
     dump("KERNEL FAULT", mcause, c);
     kcheck!("trap.fatal", Verdict::Fail, "unexpected M-mode exception, see the dump above");
     platform::exit(3)
@@ -180,6 +188,7 @@ extern "C" fn m_trap(frame: *mut Frame) {
 #[no_mangle]
 extern "C" fn nested_fault() -> ! {
     let mcause = hw::trap::mcause();
+    platform::enter_fatal();
     dump("NESTED FAULT", mcause, trap::decode(mcause));
     platform::exit(4)
 }

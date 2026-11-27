@@ -83,6 +83,7 @@ trap_entry:
     mret
 
 nested_trap:
+    csrw mscratch, zero
     la sp, _fault_stack_top
     call nested_fault
     j park
@@ -91,6 +92,7 @@ nested_trap:
 # mtrap::expect_fault with this address first, so the handler dumps it and skips the 4-byte word.
 .section .text, "ax"
 .global planted_fault
+.balign 4
 planted_fault:
     .word 0
     ret

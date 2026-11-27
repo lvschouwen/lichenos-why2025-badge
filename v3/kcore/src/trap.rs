@@ -68,7 +68,9 @@ pub const fn ticks_to_us(ticks: u64) -> u64 {
 /// The next compare value of a periodic tick. It advances from the previous compare, not from "now", so handler
 /// latency never accumulates into drift. If the handler ran so late that the next deadline has already passed, it
 /// skips whole periods to the first deadline after `now` and reports how many it skipped.
+/// `period` must be nonzero.
 pub const fn next_deadline(prev_cmp: u64, period: u64, now: u64) -> (u64, u64) {
+    debug_assert!(period > 0);
     let next = prev_cmp + period;
     if next > now {
         return (next, 0);
@@ -213,6 +215,9 @@ mod tests {
         assert!(!boot_info_in_range(e - 8, 16, b, e));
         assert!(boot_info_in_range(0x4FF4_0000, 16, b, e));
         assert!(boot_info_in_range(e - 16, 16, b, e));
+        // A size larger than the whole range must not underflow into a pass.
+        assert!(!boot_info_in_range(b, e - b + 4, b, e));
+        assert!(boot_info_in_range(b, e - b, b, e));
     }
 
     proptest! {
