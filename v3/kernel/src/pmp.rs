@@ -69,12 +69,13 @@ pub fn report() {
         if c != 0 {
             kprintln!("pmp: entry {i:2} cfg={c:#04x} addr={:#010x}{}", read_addr(i), if c & LOCK != 0 { " LOCKED" } else { "" });
         }
-        if i < 3 && c & LOCK != 0 {
+        // Entry 3 counts too: a locked TOR entry 3 freezes pmpaddr2, which would silently void the deny-all entry.
+        if i < 4 && c & LOCK != 0 {
             locked_low = true;
         }
     }
     if locked_low {
-        kprintln!("pmp: entries 0..2 are locked by an earlier stage: isolation is NOT possible this way");
+        kprintln!("pmp: entries 0..3 are locked by an earlier stage: isolation is NOT possible this way");
         crate::platform::exit(4);
     }
     // Granularity: with entry 0 OFF, write all ones and read back; G = trailing zero bits.
@@ -82,8 +83,17 @@ pub fn report() {
     write_addr(0, usize::MAX);
     let back = read_addr(0);
     let g = back.trailing_zeros();
-    kprintln!("pmp: pmpaddr0 readback {back:#010x} -> granularity {} bytes", 1usize << (g + 2));
     write_addr(0, 0);
+    if back == 0 {
+        kprintln!("pmp: pmpaddr0 is not writable: no PMP, refusing to run apps");
+        crate::platform::exit(4);
+    }
+    let gran = 1usize << (g + 2);
+    kprintln!("pmp: pmpaddr0 readback {back:#010x} -> granularity {gran} bytes");
+    if gran > crate::platform::slot(0).len {
+        kprintln!("pmp: granularity {gran} is coarser than an app slot: refusing to run apps");
+        crate::platform::exit(4);
+    }
 }
 
 /// Program entries 0..2 for one app. Called on every switch to that app.
@@ -94,4 +104,13 @@ pub fn apply(text: usize, data: usize, len: usize) {
     write_addr(2, ALL);
     let cfg = (NAPOT | R | X) as usize | (((NAPOT | R | W) as usize) << 8) | ((NAPOT as usize) << 16);
     write_cfg0(cfg);
+    // Fail closed: if any write did not stick (locked or unimplemented bits), never enter U-mode with this view.
+    if read_cfg(0) & 0x00FF_FFFF != cfg
+        || read_addr(0) != napot(text, len)
+        || read_addr(1) != napot(data, len)
+        || read_addr(2) != ALL
+    {
+        kprintln!("pmp: readback mismatch after apply: halting");
+        crate::platform::exit(4);
+    }
 }
