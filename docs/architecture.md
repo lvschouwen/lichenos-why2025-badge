@@ -779,7 +779,7 @@ OS v2 (#216) on the same lessons:
 
 ### Flash drive (`/storage`, #300)
 
-- **LittleFS** (esp_littlefs 1.23.1, `components/storage`), partition subtype `littlefs`, label `storage`. Copy-on-write
+- **LittleFS** (esp_littlefs 1.23.3, `components/storage`), partition subtype `littlefs`, label `storage`. Copy-on-write
   and power-loss safe: a cut write leaves the old file and no lost space (the FAT drive before it lost ~40 % to orphaned
   clusters, #300). Never formatted on a failed mount (#110); only the factory reset formats it. littlefs's asserts are
   off (`CONFIG_LITTLEFS_ASSERTS`): a damaged drive fails the mount and stays unmounted instead of a panic at every boot.

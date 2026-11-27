@@ -29,7 +29,7 @@ from littlefs import LittleFS, LittleFSError, UserContext
 
 PARTITION_SIZE = 0x4C0000  # firmware/partitions.csv, storage (check-config holds the two together)
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# The badge's lfs_config, from esp_littlefs 1.23.1 (components/storage/idf_component.yml) and the CONFIG_LITTLEFS_*
+# The badge's lfs_config, from esp_littlefs 1.23.3 (components/storage/idf_component.yml) and the CONFIG_LITTLEFS_*
 # values in firmware/sdkconfig.defaults. name_max: esp_littlefs leaves cfg.name_max 0, so littlefs uses LFS_NAME_MAX
 # (255) and a drive the badge formats records 255; file_max and attr_max are littlefs's defaults the same way.
 CONFIG = {

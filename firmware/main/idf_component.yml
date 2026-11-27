@@ -7,7 +7,7 @@ dependencies:
     override_path: '../../esp_hosted'
   espressif/esp-serial-flasher: '^2.1.0'
   lvgl/lvgl: '^9.2.0'
-  espressif/esp_lvgl_port: '^2.6.0'
+  espressif/esp_lvgl_port: '^2.9.2'
   espressif/i2c_bus: '^1.5.2'
   espressif/mdns: '^1.4.0'
   espressif/elf_loader: '~2.1.0'
