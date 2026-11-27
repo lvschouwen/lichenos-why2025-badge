@@ -135,6 +135,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
         None => record(&mut t, "l2.cache", Some(false), format_args!("unreadable size reg={reg:#x}")),
     }
 
+    mtime_rate(&mut t);
     timer(&mut t);
     fault(&mut t);
     user(&mut t);
@@ -151,13 +152,30 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     platform::park()
 }
 
+/// The mtime rate against SYSTIMER (#654), before anything converts microseconds to ticks. `perf.clock` later puts
+/// the CPU clock next to it (mcycle may still be inhibited here).
+fn mtime_rate(t: &mut Tally) {
+    begin("timebase");
+    let m = crate::timebase::remeasure();
+    let detail = format_args!("{} mtime ticks over {} SYSTIMER ticks (16 MHz)", m.mtime_ticks, m.systimer_ticks);
+    match m.hz {
+        Some(hz) => record(t, "timebase.mtime", Some(true), format_args!("mtime_hz={hz}: {detail}")),
+        None => record(
+            t,
+            "timebase.mtime",
+            Some(false),
+            format_args!("not measured, timing rows use {} Hz unverified: {detail}", crate::timebase::hz()),
+        ),
+    }
+}
+
 /// 10k CLINT ticks through the CLIC and the real trap vector, taken from the kernel's wait loop.
 fn timer(t: &mut Tally) {
     begin("timer");
     let mtvec = hw::trap::mtvec();
     record(t, "trap.mtvec", Some(mtvec & 3 == 3), format_args!("mtvec={mtvec:#010x} (mode 3 = CLIC)"));
     let before = hw::clic::line(lichen_kcore::trap::IRQ_MTIMER as usize);
-    let period = lichen_kcore::trap::us_to_ticks(TICK_US);
+    let period = crate::timebase::us_to_ticks(TICK_US);
     kprintln!("timer: mtimectl={:#x} line 7 before ip/ie/attr/ctl {before:?}", hw::clint::ctl());
     platform::flush();
     // Nothing prints while the tick runs: the UART pump runs with MIE clear and would delay ticks.
@@ -182,10 +200,10 @@ fn timer(t: &mut Tally) {
         format_args!(
             "{} of {TICKS} ticks in {} us (period {TICK_US} us)",
             s.count,
-            lichen_kcore::trap::ticks_to_us(elapsed)
+            crate::timebase::ticks_to_us(elapsed)
         ),
     );
-    let tol = lichen_kcore::trap::us_to_ticks(TICK_TOL_US);
+    let tol = crate::timebase::us_to_ticks(TICK_TOL_US);
     record(
         t,
         "timer.period",
@@ -315,7 +333,7 @@ fn user(t: &mut Tally) {
     );
 
     begin("u.preempt");
-    mtrap::tick_start(lichen_kcore::trap::us_to_ticks(100), u32::MAX);
+    mtrap::tick_start(crate::timebase::us_to_ticks(100), u32::MAX);
     let u = mtrap::run_u(fnaddr(u_spin_illegal), sp, U_SPIN, 0);
     let tick = mtrap::tick_stop();
     let (code, epc, _) = fault_line(&u);

@@ -72,16 +72,6 @@ pub const fn exception_name(code: u16) -> &'static str {
     }
 }
 
-/// mtime runs at XTAL = 40 MHz on the P4 (#608 run 9, against SYSTIMER): 40 ticks per microsecond, 25 ns per tick.
-pub const MTIME_TICKS_PER_US: u64 = 40;
-
-pub const fn us_to_ticks(us: u64) -> u64 {
-    us * MTIME_TICKS_PER_US
-}
-pub const fn ticks_to_us(ticks: u64) -> u64 {
-    ticks / MTIME_TICKS_PER_US
-}
-
 /// The next compare value of a periodic tick. It advances from the previous compare, not from "now", so handler
 /// latency never accumulates into drift. If the handler ran so late that the next deadline has already passed, it
 /// skips whole periods to the first deadline after `now` and reports how many it skipped.
@@ -200,8 +190,6 @@ mod tests {
 
     #[test]
     fn tick_maths() {
-        assert_eq!(us_to_ticks(1000), 40_000);
-        assert_eq!(ticks_to_us(40_000), 1000);
         assert_eq!(next_deadline(1000, 100, 1050), (1100, 0));
         // Ran past two deadlines (1100 and 1200): the next one is 1300, two skipped.
         assert_eq!(next_deadline(1000, 100, 1250), (1300, 2));

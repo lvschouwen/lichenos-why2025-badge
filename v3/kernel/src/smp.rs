@@ -177,7 +177,7 @@ impl Link {
     /// Send `op` and wait up to `ms` for its own reply: a reply to an earlier, timed-out call is dropped and counted,
     /// so one timeout does not shift every later answer by one (review L1).
     pub fn call(&mut self, op: u32, a: [u32; 6], ms: u64) -> Option<Msg> {
-        let deadline = hw::clint::mtime() + lichen_kcore::trap::us_to_ticks(ms * 1000);
+        let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(ms * 1000);
         let seq = self.next_seq();
         if !self.send(Msg { op, seq, a }, deadline) {
             return None;
@@ -267,7 +267,7 @@ fn park() -> ! {
 
 /// `count` ticks of `period_us` on this hart's CLINT + CLIC, taken in mtrap's wait window as on core 0.
 fn tick_run(period_us: u64, count: u32) -> [u32; 6] {
-    let period = lichen_kcore::trap::us_to_ticks(period_us);
+    let period = crate::timebase::us_to_ticks(period_us);
     let stray0 = mtrap::stray_irqs();
     mtrap::tick_start(period, count);
     let deadline = hw::clint::mtime() + period * (count as u64 + 1000);
@@ -284,7 +284,7 @@ fn tick_run(period_us: u64, count: u32) -> [u32; 6] {
 /// instruction at its end still arrives.
 fn u_spin(spin: usize) -> [u32; 6] {
     let udata = u_view();
-    mtrap::tick_start(lichen_kcore::trap::us_to_ticks(U_TICK_US), u32::MAX);
+    mtrap::tick_start(crate::timebase::us_to_ticks(U_TICK_US), u32::MAX);
     let u = mtrap::run_u(u_spin_illegal as *const () as usize, udata + UPAGE, spin, 0);
     let ticks = mtrap::tick_stop().map_or(0, |k| k.stats.count);
     let (code, epc) = u.fault.map_or((0xFFF, 0), |f| (lichen_kcore::trap::decode(f.cause).code as u32, f.epc));

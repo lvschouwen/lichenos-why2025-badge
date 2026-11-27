@@ -4,10 +4,11 @@
 //! with BEGIN, so a silent core 1 gives a FAIL row and still an END.
 use crate::platform::{self, hw};
 use crate::smp::{self, Link, Msg, REPLY};
+use crate::timebase::{self, us_to_ticks};
 use crate::{kcheck, kprintln};
 use lichen_kcore::check::{Tally, Verdict};
 use lichen_kcore::perf::{self, Us, Us100};
-use lichen_kcore::trap::{us_to_ticks, EXC_ILLEGAL};
+use lichen_kcore::trap::EXC_ILLEGAL;
 
 const PINGS: usize = 1000;
 const BURST: u32 = 16;
@@ -15,7 +16,7 @@ const BURST: u32 = 16;
 const C1_TICK_US: u64 = 1000;
 const C1_TICKS: u32 = 5000;
 /// Jitter target (#612): under 2 us.
-const JITTER_TARGET_TICKS: u64 = 2 * 40;
+const JITTER_TARGET_US: u64 = 2;
 const U_SPIN: u32 = 4_000_000;
 const UPAGE: usize = 4096;
 
@@ -213,8 +214,9 @@ fn clic1_sweep(t: &mut Tally) {
     crate::bringup_u::sweep(t, udata + UPAGE, "u.sweep.clic-core1", 0x2081_0000, 0x2000);
 }
 
-/// CPU clock from mcycle against mtime over 2 ms (mtime is 40 MHz, #608 run 9). Clears mcountinhibit.CY first if a
-/// boot stage left mcycle stopped. Returns (hz, mcountinhibit as found).
+/// CPU clock from mcycle against mtime over 2 ms, at the mtime rate measured against SYSTIMER at boot (#654), so the
+/// result is anchored to the fixed 16 MHz reference. Clears mcountinhibit.CY first if a boot stage left mcycle stopped.
+/// Returns (hz, mcountinhibit as found).
 fn cpu_hz() -> (u64, u32) {
     let inhibit = smp::mcountinhibit();
     if inhibit & 1 != 0 {
@@ -223,7 +225,7 @@ fn cpu_hz() -> (u64, u32) {
     let (c0, m0) = (smp::cycles(), hw::clint::mtime());
     while hw::clint::mtime() < m0 + us_to_ticks(2000) {}
     let (c1, m1) = (smp::cycles(), hw::clint::mtime());
-    (c1.wrapping_sub(c0) as u64 * 40_000_000 / (m1 - m0).max(1), inhibit)
+    (c1.wrapping_sub(c0) as u64 * timebase::hz() / (m1 - m0).max(1), inhibit)
 }
 
 /// One ping, timed in mcycle from just before the push to just after the pop. The deadline is checked only every
@@ -356,7 +358,7 @@ fn timer(t: &mut Tally, l: &mut Link) {
     record(
         t,
         "core1.timer",
-        Some(count == C1_TICKS && missed == 0 && stray == 0 && jitter < JITTER_TARGET_TICKS),
+        Some(count == C1_TICKS && missed == 0 && stray == 0 && jitter < us_to_ticks(JITTER_TARGET_US)),
         format_args!(
             "{count} of {C1_TICKS} ticks on core 1's own CLINT+CLIC, gap min/max {gmin}/{gmax} (want {period}), \
              latency max {lat_max}, missed {missed}, stray {stray}"
@@ -368,8 +370,8 @@ fn timer(t: &mut Tally, l: &mut Link) {
     );
     kprintln!(
         "PERF kernel.timer_jitter max_us={} p2p_us={} n={count} period_us={C1_TICK_US}",
-        Us(jitter),
-        Us((gmax.saturating_sub(gmin)) as u64)
+        Us { ticks: jitter, hz: timebase::hz() },
+        Us { ticks: (gmax.saturating_sub(gmin)) as u64, hz: timebase::hz() }
     );
 }
 

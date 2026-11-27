@@ -28,6 +28,8 @@ mod bringup_u;
 mod mtrap;
 #[cfg(feature = "esp32p4")]
 mod smp;
+#[cfg(feature = "esp32p4")]
+mod timebase;
 
 #[cfg(feature = "qemu-virt")]
 use lichen_kcore::handles;

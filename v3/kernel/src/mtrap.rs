@@ -201,7 +201,7 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
         (!live, if live { None } else { s.tick.take() })
     });
     if watchdog {
-        tick_start(trap::us_to_ticks(WATCHDOG_US), u32::MAX);
+        tick_start(crate::timebase::us_to_ticks(WATCHDOG_US), u32::MAX);
     }
     with(|s| s.user = Some(URun::default()));
     // SAFETY: run_user saves the kernel's callee-saved registers and returns here through to_kernel when m_trap ends

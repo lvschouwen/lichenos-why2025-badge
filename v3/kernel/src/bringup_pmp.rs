@@ -70,7 +70,6 @@ extern "C" {
 }
 
 const UPAGE: usize = 4096;
-const MTIME_HZ: u64 = 40_000_000;
 
 fn begin(id: &str) {
     kprintln!("BEGIN {id}");
@@ -240,7 +239,8 @@ enum Src {
     Mcycle = 1,
 }
 static SRC: AtomicU8 = AtomicU8::new(0);
-static HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(MTIME_HZ as u32);
+/// The timebase's rate in Hz; 0 until `calibrate` picks a source (`ticks_to_ns` then gives 0, never a wrong number).
+static HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 fn src() -> Src {
     if SRC.load(Ordering::Relaxed) == 1 {
@@ -268,9 +268,10 @@ fn survives(stub: usize, run: impl FnOnce()) -> bool {
 }
 
 /// The kernel's cycle counter is mcycle (the P4 has no other): read mcountinhibit, clear it, calibrate against mtime
-/// (40 MHz). Falls back to mtime ticks (25 ns) when mcycle does not count.
+/// at the rate measured against SYSTIMER at boot (#654). Falls back to mtime ticks when mcycle does not count.
 fn calibrate(t: &mut Tally) {
     begin("perf.clock");
+    let mtime_hz = crate::timebase::hz();
     // SAFETY: stubs hold one CSR instruction each; a fault is caught by expect_fault.
     let inhibit = unsafe { bp_read_inhibit() };
     survives(bp_clear_inhibit as *const () as usize, || unsafe { bp_clear_inhibit() });
@@ -280,9 +281,10 @@ fn calibrate(t: &mut Tally) {
     if usable {
         SRC.store(Src::Mcycle as u8, Ordering::Relaxed);
         let (c0, m0) = (now(), hw::clint::mtime());
-        while hw::clint::mtime() - m0 < 4000 {} // 100 us
+        let window = crate::timebase::us_to_ticks(100);
+        while hw::clint::mtime() - m0 < window {}
         let (c1, m1) = (now(), hw::clint::mtime());
-        let f = perf::clock_hz(c1.wrapping_sub(c0), (m1 - m0) as u32, MTIME_HZ);
+        let f = perf::clock_hz(c1.wrapping_sub(c0), (m1 - m0) as u32, mtime_hz);
         if (10_000_000..1_000_000_000).contains(&f) {
             HZ.store(f as u32, Ordering::Relaxed);
             record(
@@ -290,7 +292,8 @@ fn calibrate(t: &mut Tally) {
                 "perf.clock",
                 None,
                 format_args!(
-                    "timebase mcycle, CPU clock {} MHz (calibrated against mtime 40 MHz), mcountinhibit at boot {inhibit:#x}",
+                    "timebase mcycle, CPU clock {} MHz (calibrated against mtime at {mtime_hz} Hz, measured against \
+                     SYSTIMER 16 MHz), mcountinhibit at boot {inhibit:#x}",
                     f / 1_000_000
                 ),
             );
@@ -299,12 +302,15 @@ fn calibrate(t: &mut Tally) {
         kprintln!("perf: mcycle counted {} over {} mtime ticks -> {f} Hz", c1.wrapping_sub(c0), m1 - m0);
     }
     SRC.store(Src::Mtime as u8, Ordering::Relaxed);
-    HZ.store(MTIME_HZ as u32, Ordering::Relaxed);
+    HZ.store(mtime_hz as u32, Ordering::Relaxed);
     record(
         t,
         "perf.clock",
         None,
-        format_args!("timebase mtime 40 MHz (25 ns); mcycle not usable, mcountinhibit at boot {inhibit:#x}"),
+        format_args!(
+            "timebase mtime at {mtime_hz} Hz (measured against SYSTIMER); mcycle not usable, mcountinhibit at boot \
+             {inhibit:#x}"
+        ),
     );
 }
 

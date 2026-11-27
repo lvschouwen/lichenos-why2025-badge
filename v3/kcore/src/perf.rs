@@ -1,6 +1,6 @@
 //! Percentiles and time conversion for the PERF lines (#612). Pure. Checkpoint 3 adds timer jitter and microseconds
 //! with two decimals, since a polled cross-core round trip is near 1 us at full clock.
-use crate::trap::MTIME_TICKS_PER_US;
+use crate::timebase;
 use core::fmt;
 
 /// Median and 95th percentile (nearest rank) of `v`, sorting it in place. None for an empty slice.
@@ -35,12 +35,16 @@ pub fn jitter_max(period: u64, gap_min: u64, gap_max: u64) -> u64 {
     period.saturating_sub(gap_min).max(gap_max.saturating_sub(period))
 }
 
-/// mtime ticks shown as microseconds with two decimals (`1.85`), rounded to the nearest hundredth.
+/// mtime ticks at the measured mtime rate (Hz, #654) shown as microseconds with two decimals (`1.85`), rounded to
+/// the nearest hundredth.
 #[derive(Clone, Copy)]
-pub struct Us(pub u64);
+pub struct Us {
+    pub ticks: u64,
+    pub hz: u64,
+}
 impl fmt::Display for Us {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Us100((self.0 * 100 + MTIME_TICKS_PER_US / 2) / MTIME_TICKS_PER_US).fmt(f)
+        Us100(timebase::ticks_to_us100(self.ticks, self.hz)).fmt(f)
     }
 }
 
@@ -54,7 +58,8 @@ impl fmt::Display for Us100 {
 }
 
 /// CPU cycles at `hz` as hundredths of a microsecond, rounded (0 for an unknown clock). The cross-core round trip
-/// is a few hundred cycles, below mtime's 25 ns resolution's comfort, so the RTT row counts mcycle.
+/// is a few hundred cycles, too few for mtime's resolution at the ROM clock (25 ns at 40 MHz), so the RTT row counts
+/// mcycle.
 pub fn cycles_to_us100(cycles: u32, hz: u64) -> u64 {
     if hz == 0 {
         return 0;
@@ -87,9 +92,9 @@ mod tests {
     }
     #[test]
     fn jitter_from_the_checkpoint_1_run() {
-        // gap min/max 39928/40002 at a 40000 period: 72 ticks = 1.80 us.
+        // gap min/max 39928/40002 at a 40000 period: 72 ticks = 1.80 us at the 40 MHz that run measured.
         assert_eq!(jitter_max(40_000, 39_928, 40_002), 72);
-        assert_eq!(format!("{}", Us(72)), "1.80");
+        assert_eq!(format!("{}", Us { ticks: 72, hz: 40_000_000 }), "1.80");
         assert_eq!(jitter_max(100, 100, 100), 0);
     }
     #[test]
@@ -102,10 +107,15 @@ mod tests {
     }
     #[test]
     fn formats_microseconds() {
-        assert_eq!(format!("{}", Us(0)), "0.00");
-        assert_eq!(format!("{}", Us(1)), "0.03"); // 25 ns rounds to 0.03
-        assert_eq!(format!("{}", Us(40)), "1.00");
-        assert_eq!(format!("{}", Us(2000)), "50.00");
-        assert_eq!(format!("{}", Us(41)), "1.03");
+        let at = |ticks, hz| format!("{}", Us { ticks, hz });
+        assert_eq!(at(0, 40_000_000), "0.00");
+        assert_eq!(at(1, 40_000_000), "0.03"); // 25 ns rounds to 0.03
+        assert_eq!(at(40, 40_000_000), "1.00");
+        assert_eq!(at(2000, 40_000_000), "50.00");
+        assert_eq!(at(41, 40_000_000), "1.03");
+        // At 360 MHz the same tick counts are nine times shorter.
+        assert_eq!(at(360, 360_000_000), "1.00");
+        assert_eq!(at(2000, 360_000_000), "5.56");
+        assert_eq!(at(5, 0), "0.00");
     }
 }

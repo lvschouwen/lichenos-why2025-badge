@@ -326,7 +326,7 @@ fn soak(t: &mut Tally, sp: usize) {
             }
         }
         if n == 4096 {
-            let us = (hw::clint::mtime() - t0) / 40;
+            let us = crate::timebase::ticks_to_us(hw::clint::mtime() - t0);
             kprintln!("perf: u.soak: 4096 loads in {us} us, estimate for 64M loads: {} s", us * 16384 / 1_000_000);
             platform::flush();
         }

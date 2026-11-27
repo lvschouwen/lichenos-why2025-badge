@@ -12,4 +12,5 @@ pub mod pma;
 pub mod pmp;
 pub mod ring;
 pub mod slots;
+pub mod timebase;
 pub mod trap;

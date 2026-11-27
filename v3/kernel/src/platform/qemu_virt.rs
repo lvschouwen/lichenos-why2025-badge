@@ -6,7 +6,9 @@ pub const UART_BASE: usize = 0x1000_0000;
 const CLINT_MTIMECMP: usize = 0x0200_4000;
 const CLINT_MTIME: usize = 0x0200_BFF8;
 const TEST_DEV: usize = 0x0010_0000;
-const TICK: u64 = 10_000; // 1 ms
+/// The virt machine's CLINT runs at a fixed 10 MHz (QEMU's RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ); nothing to measure.
+const MTIME_HZ: u64 = 10_000_000;
+const TICK: u64 = lichen_kcore::timebase::us_to_ticks(1000, MTIME_HZ); // 1 ms
 const SLOT_TEXT: usize = 0x8040_0000;
 const SLOT_DATA: usize = 0x8080_0000;
 const SLOT_LEN: usize = 0x1_0000;
