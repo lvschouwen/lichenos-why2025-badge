@@ -174,6 +174,35 @@ int ota_hash_range(ota_read_fn read, void *ctx, size_t off, size_t len, uint8_t 
     return 0;
 }
 
+int ota_readback_check(ota_read_fn read, void *ctx, size_t len, uint8_t *scratch, size_t scratch_len,
+                       char const *want_hex) {
+    uint8_t digest[SHA256_DIGEST_LEN];
+    if (!lower_hex64(want_hex) || ota_hash_range(read, ctx, 0, len, scratch, scratch_len, digest) != 0) {
+        return -1;
+    }
+    static char const hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < sizeof(digest); i++) {
+        if (want_hex[2 * i] != hex[digest[i] >> 4] || want_hex[2 * i + 1] != hex[digest[i] & 15]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+size_t ota_first_diff_block(ota_read_fn read, void *ctx, uint8_t const *data, size_t len, uint8_t *scratch,
+                            size_t scratch_len, size_t block) {
+    for (size_t at = 0; at < len; at += scratch_len) {
+        size_t n = len - at < scratch_len ? len - at : scratch_len;
+        if (read(ctx, at, scratch, n) != 0) {
+            return (size_t)-1;
+        }
+        if (memcmp(scratch, data + at, n) != 0) {
+            return at / block * block;
+        }
+    }
+    return (size_t)-1;
+}
+
 size_t ota_pieces_check_read(ota_pieces_t const *p, ota_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len,
                              size_t *bad, size_t max) {
     size_t differ = 0;

@@ -96,6 +96,16 @@ typedef int (*ota_read_fn)(void *ctx, size_t off, uint8_t *buf, size_t n);
 int ota_hash_range(ota_read_fn read, void *ctx, size_t off, size_t len, uint8_t *scratch, size_t scratch_len,
                    uint8_t digest[32]);
 
+// Read-back of a file just written (#593): hash len bytes of the store and compare with want_hex (lowercase, 64 chars).
+// 0 = equal, 1 = differs, -1 = a read failed or want_hex is not a SHA-256.
+int ota_readback_check(ota_read_fn read, void *ctx, size_t len, uint8_t *scratch, size_t scratch_len,
+                       char const *want_hex);
+
+// Offset (rounded down to a multiple of block) of the first block where the store differs from data, for the log after
+// ota_readback_check failed; (size_t)-1 when none differs or a read fails. scratch_len must divide block.
+size_t ota_first_diff_block(ota_read_fn read, void *ctx, uint8_t const *data, size_t len, uint8_t *scratch,
+                            size_t scratch_len, size_t block);
+
 // ota_pieces_check over a store: indices of the pieces that differ (an unreadable piece counts as differing)
 size_t ota_pieces_check_read(ota_pieces_t const *p, ota_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len,
                              size_t *bad, size_t max);

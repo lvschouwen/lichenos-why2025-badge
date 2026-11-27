@@ -83,6 +83,29 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
     return fclose(f) == 0 && ok;
 }
 
+static int file_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    FILE *f = ctx;
+    return fseek(f, (long)off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n ? 0 : -1;
+}
+
+// Read the temp file back and compare its SHA-256 with the whole file's (#593): a bit that flipped between the check
+// in PSRAM and the flash is caught here, before the swap, instead of at the next boot. The bounce buffer is internal.
+__attribute__((noinline)) static bool written_ok(char const *temp, uint8_t const *data, size_t len, char const *sha_hex) {
+    FILE *f = fopen(temp, "rb");
+    if (!f) {
+        return false;
+    }
+    uint8_t bounce[FLASH_CHUNK_BOUNCE];
+    int     res = ota_readback_check(file_read, f, len, bounce, sizeof(bounce), sha_hex);
+    if (res != 0) {
+        size_t bad = ota_first_diff_block(file_read, f, data, len, bounce, sizeof(bounce), 4096);
+        ESP_LOGW(TAG, "read-back of %s %s, first differing 4 KB block at %zu", temp,
+                 res < 0 ? "failed" : "differs", bad == (size_t)-1 ? (size_t)0 : bad);
+    }
+    fclose(f);
+    return res == 0;
+}
+
 // Room for an upload of size bytes on the drive vms names (#299), else a 507 now instead of a failed write after the
 // transfer. A drive whose free space can't be read is let through: the write reports that.
 // body: bytes of a request body not read yet (0: none, or the client waits for 100 Continue), dropped before the reply.
@@ -129,13 +152,18 @@ ota_place_t ota_swap_temp(char const *path, char const *temp, bool sd) {
 // FLASH0: is LittleFS (#300): one rename replaces the old file atomically. SD0: is FAT, whose rename refuses an
 // existing target: the old file is removed first, so there a power cut between the two leaves the data in the temp
 // file (OTA_PLACE_LOST when the second rename fails: the temp stays). A target another task has open stays put on either.
-static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8_t const *data, size_t len, int *err) {
+static ota_place_t place_file(char const *path, char const *temp, bool sd, uint8_t const *data, size_t len, char const *sha_hex,
+                            int *err) {
     if (ota_is_directory(path)) { // the early check in the handler ran outside the card's lock
         return OTA_PLACE_DIR;
     }
     ota_mkdir_parents(path);
     unlink(temp); // left by an upload that was cut; only the target's own directory is cleaned
     ota_place_t step = write_file(temp, data, len) ? OTA_PLACE_OK : OTA_PLACE_WRITE;
+    if (step == OTA_PLACE_OK && !written_ok(temp, data, len, sha_hex)) {
+        step = OTA_PLACE_VERIFY; // the old file stays; the temp is dropped
+        errno = EIO;
+    }
     if (step == OTA_PLACE_OK) {
         step = ota_swap_temp(path, temp, sd);
     }
@@ -157,6 +185,10 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
         ota_respond(fd, 500, "couldn't write %s, file left as it was", n->temp);
         return false;
     }
+    if (step == OTA_PLACE_VERIFY) {
+        ota_respond(fd, 400, "%s arrived damaged in storage (read-back differs), file left as it was, send it again", vms);
+        return false;
+    }
     if (step == OTA_PLACE_LOST) {
         ota_respond(fd, 500, "old file removed, new data kept as ota_upload.tmp (%s)", strerror(err));
         return false;
@@ -172,7 +204,8 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
 }
 
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
-bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent) {
+bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent,
+                     char const *sha_hex) {
     char path[OTA_PATH_MAX + 16];
     char temp[sizeof(path) + sizeof(OTA_TEMP_NAME)];
     if (!ota_path_to_posix(vms, path, sizeof(path)) || !ota_temp_to_posix(vms, temp, sizeof(temp))) {
@@ -191,7 +224,7 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         return false;
     }
     int err  = 0;
-    ota_place_t step = place_file(path, temp, sd, data, len, &err);
+    ota_place_t step = place_file(path, temp, sd, data, len, sha_hex, &err);
     if (sd) {
         sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
     }
@@ -417,7 +450,7 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
         }
         return;
     }
-    hook_end(ota_finish_file(fd, req->path, mem.data, mem.len, ota_last_received), false);
+    hook_end(ota_finish_file(fd, req->path, mem.data, mem.len, ota_last_received, sha_hex), false);
     free(mem.data);
 }
 

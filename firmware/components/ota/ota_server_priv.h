@@ -102,7 +102,8 @@ typedef struct {
     char const *temp;
 } ota_place_names_t;
 bool        ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const *names, size_t len, long long sent);
-bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent);
+bool        ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent,
+                            char const *sha_hex);
 bool        ota_finish_assets(int fd, uint8_t const *data, size_t len, long long sent);
 bool ota_install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t handle, size_t len, long long sent);
 void ota_respond_begin_failed(int fd, esp_err_t err);

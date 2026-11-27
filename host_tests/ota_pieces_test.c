@@ -354,6 +354,24 @@ int main(void) {
     CHECK(memcmp(whole, expect, 32) == 0);
     CHECK(ota_hash_range(fake_read, &f, 10, sizeof(data), scratch, sizeof(scratch), whole) == -1);
 
+    // Read-back of a written file (#593): equal, one flipped bit, an unreadable store, a bad hash string
+    char want[65];
+    for (int i = 0; i < 32; i++) {
+        snprintf(want + 2 * i, 3, "%02x", expect[i]);
+    }
+    CHECK(ota_readback_check(fake_read, &f, sizeof(data), scratch, sizeof(scratch), want) == 0);
+    CHECK(ota_first_diff_block(fake_read, &f, data, sizeof(data), scratch, sizeof(scratch), 64) == (size_t)-1);
+    uint8_t good[sizeof(data)];
+    memcpy(good, data, sizeof(data));
+    data[777] ^= 0x02; // what the store holds after the fault
+    CHECK(ota_readback_check(fake_read, &f, sizeof(data), scratch, sizeof(scratch), want) == 1);
+    CHECK(ota_first_diff_block(fake_read, &f, good, sizeof(data), scratch, sizeof(scratch), 64) == 768);
+    data[777] ^= 0x02;
+    f.len = 700;
+    CHECK(ota_readback_check(fake_read, &f, sizeof(data), scratch, sizeof(scratch), want) == -1);
+    f.len = sizeof(data);
+    CHECK(ota_readback_check(fake_read, &f, sizeof(data), scratch, sizeof(scratch), "nothex") == -1);
+
     // Flash pieces: sector-aligned start; whole sectors long unless last
     CHECK(ota_piece_flash_ok(0, 131072, 1784656, 4096));
     CHECK(ota_piece_flash_ok(1703936, 80720, 1784656, 4096)); // the last, ragged piece

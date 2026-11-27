@@ -37,6 +37,7 @@ bool ota_sd_missing(char const *vms, bool mounted);
 size_t ota_cluster_bytes(char const *vms);
 // How an upload ended (place_file). OTA_PLACE_LOST: on SD0: the old file was removed and the second rename failed, so
 // the new data exists only as the temp file and must stay there
-typedef enum { OTA_PLACE_OK, OTA_PLACE_WRITE, OTA_PLACE_SWAP, OTA_PLACE_DIR, OTA_PLACE_LOST } ota_place_t;
+typedef enum { OTA_PLACE_OK, OTA_PLACE_WRITE, OTA_PLACE_SWAP, OTA_PLACE_DIR, OTA_PLACE_LOST,
+               OTA_PLACE_VERIFY } ota_place_t; // VERIFY: the temp file read back differently (#593)
 // Whether the temp file is removed after an upload ended this way
 bool ota_place_drops_temp(ota_place_t step);

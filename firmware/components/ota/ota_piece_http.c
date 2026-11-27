@@ -522,7 +522,8 @@ static void piece_done(int fd, bool hold) {
         return;
     }
     finished = staged.route == OTA_ROUTE_ASSETS ? ota_finish_assets(fd, staged.data, staged.total, staged.sent)
-                                                : ota_finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
+                                                : ota_finish_file(fd, staged.path, staged.data, staged.total, staged.sent,
+                                                              staged.file_sha256);
     hook_end(finished, finished && staged.route == OTA_ROUTE_ASSETS && !hold);
     staged_reset();
 }
