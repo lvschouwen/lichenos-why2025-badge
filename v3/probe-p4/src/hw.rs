@@ -81,6 +81,7 @@ impl fmt::Display for Trap {
 }
 
 static mut GUARD: bool = false;
+static mut MTRAP_PRINTS: u32 = 0;
 static mut MFAULT: Option<Trap> = None;
 static mut UTRAP: Trap = Trap { cause: 0, epc: 0, tval: 0, mstatus: 0, a0: 0, a1: 0 };
 pub static mut IRQ_COUNT: u32 = 0;
@@ -120,6 +121,12 @@ extern "C" fn trap_rust(frame: *mut [usize; 32]) -> usize {
         }
         if (t.mstatus >> 11) & 3 == 3 {
             if read_volatile(addr_of!(GUARD)) {
+                let n = read_volatile(addr_of!(MTRAP_PRINTS));
+                if n < 8 {
+                    write_volatile(addr_of_mut!(MTRAP_PRINTS), n + 1);
+                    pl!("MTRAP {t}");
+                    drain();
+                }
                 write_volatile(addr_of_mut!(MFAULT), Some(t));
                 asm!("csrw mepc, {0}", in(reg) t.epc + 4, options(nomem, nostack));
                 return 0;

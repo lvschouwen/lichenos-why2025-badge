@@ -137,6 +137,7 @@ fn b5_dump() {
     pl!("B5 misa={:#010x} mhartid={} mstatus={:#010x}", csr_read!("misa"), csr_read!("mhartid"), csr_read!("mstatus"));
     pl!("B5 marchid={} mimpid={} mtvec={:#010x}", ShowU(csr_try!("0xf12")), ShowU(csr_try!("0xf13")), csr_read!("mtvec"));
     pl!("B5 mtvt(0x307)={} mintstatus(0x346)={} prv(0x810)={}", ShowU(csr_try!("0x307")), ShowU(csr_try!("0x346")), ShowU(csr_try!("0x810")));
+    pl!("B5 M-fault path control, unimplemented CSR 0x5c0: {}", ShowU(csr_try!("0x5c0")));
     pl!("B5 clic_thresh={} clic_info={}", show(m_lw(CLIC_THRESH)), show(m_lw(0x2080_0004)));
     for j in 0..4 {
         pl!("B5 pmpcfg{j}={:#010x}", hw::pmpcfg_r(j));
