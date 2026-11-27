@@ -8,9 +8,9 @@ MEMORY {
   NOLOAD (rw)  : ORIGIN = 0x4FF40000, LENGTH = 0x40000
 }
 SECTIONS {
-  /* code that must stay in internal RAM even if the rest later moves (cache maintenance, platform psram/map.rs) */
-  .text.ram : { *(.text.ram .text.ram.*) } > LOAD
-  .text : { KEEP(*(.text.boot)) *(.text.trap) *(.text .text.*) } > LOAD
+  /* .text.ram: code that must stay in internal RAM (cache maintenance, platform psram/map.rs); right after the entry code so
+     .text.boot keeps ORIGIN(LOAD); its range is marked for tools/check_image.py --ram-text */
+  .text : { KEEP(*(.text.boot)) _ram_text_start = .; *(.text.ram .text.ram.*) _ram_text_end = .; *(.text.trap) *(.text .text.*) } > LOAD
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > LOAD
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _load_end = .; } > LOAD
   .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD

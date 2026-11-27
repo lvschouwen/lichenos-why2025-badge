@@ -324,6 +324,55 @@ fn dma_selftest() {
     }
 }
 
+/// With-hole -> identity remap: dirty lines of the hole must reach the hole's own PSRAM through the old entries and leave the cache;
+/// nothing may land in the usable range, and the API refuses the hole afterwards.
+fn remap_case() {
+    const U: [usize; 2] = [0x53_0000, 0x5C_0000]; // usable pages next to the hole
+    const H: [usize; 2] = [0x54_0000, 0x5B_0000]; // first and last hole page
+    let (pu, ph) = (Pat::Rand(0x1111_1111), Pat::Rand(0x2222_2222));
+    // SAFETY: MMU window and cache maintenance of this stage, the hole mapped for the control only.
+    rc(unsafe { map::map_identity_with_hole(TOTAL / PAGE_BYTES) });
+    let (mut t, mut c) = (Tally::new(), Tally::new());
+    for &o in &U {
+        cached_chunk(pu, o, false, &mut t, &mut c);
+    }
+    for &o in &H {
+        let base = caddr(o, true);
+        for a in (0..CHUNK).step_by(4) {
+            // SAFETY: mapped window, cached alias; left dirty on purpose (no write-back).
+            unsafe { write_volatile((base + a) as *mut u32, word(ph, o + a)) };
+        }
+    }
+    // SAFETY: as above.
+    rc(unsafe { map::map_identity(TOTAL / PAGE_BYTES) });
+    if cached_addr(H[0]).is_some() || cached_addr(H[1]).is_some() {
+        t.bad += 1;
+    }
+    // a stray write-back over the usable range would show now
+    for (lo, hi) in [(0, EXCLUDED_START), (EXCLUDED_END, TOTAL)] {
+        wb_inv(CACHED_BASE + lo, hi - lo);
+    }
+    for &o in &U {
+        for a in (0..CHUNK).step_by(4) {
+            t.add(o + a, word(pu, o + a), rd_truth(o + a, false));
+        }
+    }
+    // the hole must hold what was written dirty
+    // SAFETY: as above.
+    rc(unsafe { map::map_identity_with_hole(TOTAL / PAGE_BYTES) });
+    for &o in &H {
+        for a in (0..CHUNK).step_by(4) {
+            t.add(o + a, word(ph, o + a), rd_truth(o + a, true));
+        }
+    }
+    t.show(
+        format_args!("(d) with-hole -> identity remap, dirty hole lines, usable neighbours and the hole read back"),
+        format_args!("hole refused by cached_addr, usable range untouched"),
+    );
+    // SAFETY: back to the usable-only map.
+    rc(unsafe { map::map_identity(TOTAL / PAGE_BYTES) });
+}
+
 pub fn run(cpu_mhz: u32) {
     // SAFETY: ROM cache maintenance, MMU window, DMA block; this stage owns all of them. The hole pages stay unmapped until the
     // control cases need them.
@@ -351,6 +400,7 @@ pub fn run(cpu_mhz: u32) {
     full_cached("(c) hole, random 0xA5A55A5A, cached write + write-back", Pat::Rand(0xA5A5_5A5A), true);
     full_dma("(b) hole control, address-in-address, DMA", Pat::Addr, true);
     full_dma("(b) hole control, random 0x0BADF00D, DMA", Pat::Rand(0x0BAD_F00D), true);
+    remap_case();
     pl!("WORKAROUND elapsed {} s", now_us().saturating_sub(t0) / 1_000_000);
     let (bad, derr, cfail) = (BAD.load(Relaxed), DMA_ERR.load(Relaxed), CACHE_FAIL.load(Relaxed));
     let ok = bad == 0 && derr == 0 && cfail == 0;

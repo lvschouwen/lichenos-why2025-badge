@@ -126,6 +126,18 @@ unsafe fn for_runs(valid: &dyn Fn(usize) -> bool, pages: usize, f: unsafe fn(usi
     failed
 }
 
+/// What a remap does to the entry of page `p`: `Some(valid)` = write it (the new word, or 0 to clear it), `None` = leave it. Every
+/// page inside the new map is written; a page outside it is cleared when it was mapped, so hardware and shadow cannot diverge.
+pub const fn entry_update(was_mapped: bool, p: usize, pages: usize, new_valid: bool) -> Option<bool> {
+    if p < pages {
+        Some(new_valid)
+    } else if was_mapped {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// IDF's order for a remap: write back and invalidate the pages mapped NOW (dirty lines reach PSRAM through the old entries, and
 /// pages that lose their entry leave nothing cached), write the new entries, then invalidate the pages that are valid now
 /// (nothing of an older mapping survives). Returns the number of failed cache operations (0 = fine).
@@ -134,12 +146,9 @@ unsafe fn map_pages(pages: usize, with_hole: bool) -> i32 {
     let new_valid = |p: usize| with_hole || !overlaps_excluded(p * PAGE_BYTES, PAGE_BYTES);
     let mut failed = for_runs(&is_mapped, MMU_ENTRIES, cache_writeback_invalidate);
     for p in 0..MMU_ENTRIES {
-        let on = p < pages && new_valid(p);
-        if p < pages {
+        if let Some(on) = entry_update(is_mapped(p), p, pages, new_valid(p)) {
             write32(MMU_INDEX, p as u32);
             write32(MMU_CONTENT, if on { mmu_word(p as u32) } else { 0 });
-        }
-        if p < pages || is_mapped(p) {
             set_mapped(p, on);
         }
     }
@@ -152,7 +161,8 @@ unsafe fn map_pages(pages: usize, with_hole: bool) -> i32 {
 ///
 /// # Safety
 /// Writes the PSRAM MMU: only after `init` reached `Upto::Tuned`; `pages` at most `MMU_ENTRIES`. Returns 0, or the number of
-/// cache syncs that timed out.
+/// cache syncs that timed out. The shadow of mapped pages starts at zero: that relies on callers running
+/// `cache_invalidate_all_l2` first (nothing of an unknown earlier mapping is cached) and on nothing else writing the PSRAM MMU.
 pub unsafe fn map_identity(pages: usize) -> i32 {
     map_pages(pages, false)
 }
@@ -366,6 +376,17 @@ mod tests {
         assert_eq!(align_to_line(0x4800_0000, 0x1_0000, 128), (0x4800_0000, 0x1_0000));
         assert_eq!(align_to_line(0x4800_007F, 2, 64), (0x4800_0040, 128)); // straddles two lines
         assert_eq!(align_to_line(0x4800_0040, 1, 64), (0x4800_0040, 64));
+    }
+
+    #[test]
+    fn remap_clears_what_the_new_map_drops() {
+        // smaller remap: a mapped page past the new end is cleared, an unmapped one is left alone
+        assert_eq!(entry_update(true, 300, 200, false), Some(false));
+        assert_eq!(entry_update(false, 300, 200, false), None);
+        // inside the new map every page is written, valid or not
+        assert_eq!(entry_update(true, 10, 200, true), Some(true));
+        assert_eq!(entry_update(true, 10, 200, false), Some(false));
+        assert_eq!(entry_update(false, 10, 200, false), Some(false));
     }
 
     #[test]

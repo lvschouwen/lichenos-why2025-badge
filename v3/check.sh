@@ -60,6 +60,7 @@ fi
 
 step "image check (RAM-only, inside the limits)"
 python3 -I tools/check_image.py target/lichen/esp32p4/kernel.elf target/lichen/esp32p4/kernel.bin
+# TODO when the kernel uses psram::map: add kernel.elf here too (its link script already carries the markers)
 python3 -I tools/check_image.py --ram-text target/probe-psram/$TARGET/release/lichen-probe-psram
 
 step "QEMU harness (21 isolation cases)"

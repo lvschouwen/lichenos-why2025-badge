@@ -4,7 +4,8 @@
     check_image.py <kernel.elf> <kernel.bin>
     check_image.py --ram-text <image.elf>
 
---ram-text: the output section `.text.ram` (cache maintenance, platform psram/map.rs) must exist and sit in L2MEM.
+--ram-text: the `.text.ram*` input sections (cache maintenance, platform psram/map.rs), bounded by the link-script symbols
+_ram_text_start/_ram_text_end, must be a non-empty range in L2MEM.
 
 ELF: every PT_LOAD with file content lies in the load window [LOAD_BASE, LOAD_LIMIT); every PT_LOAD without file
 content (NOLOAD: bss, stacks) lies in [NOLOAD_BASE, NOLOAD_LIMIT); nothing is mapped anywhere else (no flash, no
@@ -51,20 +52,28 @@ def check_elf_bytes(d: bytes) -> list[str]:
 
 
 def check_ram_text_bytes(d: bytes) -> list[str]:
-    """The `.text.ram` output section exists and lies inside L2MEM."""
+    """The link-script markers `_ram_text_start` / `_ram_text_end` (the `.text.ram*` input sections) bound a non-empty range
+    inside L2MEM."""
     if d[:4] != b"\x7fELF" or d[4] != 1 or d[5] != 1:
         raise ValueError("not a little-endian ELF32")
     shoff, = struct.unpack_from("<I", d, 0x20)
-    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 0x2E)
+    shentsize, shnum, _shstrndx = struct.unpack_from("<HHH", d, 0x2E)
     secs = [struct.unpack_from("<10I", d, shoff + i * shentsize) for i in range(shnum)]
-    stroff = secs[shstrndx][4]
-    for name_off, _type, _flags, addr, _off, size, *_ in secs:
-        end = d.index(b"\0", stroff + name_off)
-        if d[stroff + name_off:end] == b".text.ram":
-            if size and L2MEM_BASE <= addr and addr + size <= L2MEM_LIMIT:
-                return []
-            return [f".text.ram {addr:#x}+{size:#x} is not inside L2MEM {L2MEM_BASE:#x}..{L2MEM_LIMIT:#x}"]
-    return [".text.ram section missing (the cache sync code must be placed explicitly)"]
+    syms = {}
+    for _name, typ, _flags, _addr, off, size, link, *_ in secs:
+        if typ != 2:  # SHT_SYMTAB
+            continue
+        stroff = secs[link][4]
+        for i in range(size // 16):
+            st_name, st_value, *_ = struct.unpack_from("<IIIBBH", d, off + 16 * i)
+            end = d.index(b"\0", stroff + st_name)
+            syms[d[stroff + st_name:end]] = st_value
+    lo, hi = syms.get(b"_ram_text_start"), syms.get(b"_ram_text_end")
+    if lo is None or hi is None:
+        return ["_ram_text_start/_ram_text_end missing (the cache sync code must be placed explicitly)"]
+    if not (lo < hi and L2MEM_BASE <= lo and hi <= L2MEM_LIMIT):
+        return [f".text.ram {lo:#x}..{hi:#x} is empty or not inside L2MEM {L2MEM_BASE:#x}..{L2MEM_LIMIT:#x}"]
+    return []
 
 
 def check_bin_bytes(d: bytes) -> list[str]:
