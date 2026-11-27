@@ -18,6 +18,7 @@ ESP32-P4 runs Lichen (ESP-IDF 6.1, LVGL 9.6); ESP32-C6 is a radio coprocessor (W
 - GPL or BadgeVMS code in `c6/` or `shared/lora/` (Apache-2.0). New libraries: `.claude/rules/licences.md`.
 - IPs, MACs, host names, SSIDs or tokens in code, commits or issues.
 - Flash, console, OTA outside the main session (`lichen-bench` skill). `--wipe-storage` only when Lucas decides. Wait 75 s after a reboot.
+- Write or burn any eFuse (espefuse burn-*, Secure Boot or flash-encryption options, eFuse-controller writes in v3) without Lucas's explicit permission for that write. Reading a summary is fine.
 
 ## Where to look
 - `docs/architecture.md`, `docs/app-api.md`, `docs/shell-design.md`, `docs/code-standard.md`, `docs/ui-standard.md` (12 UI rules; cite numbers in reviews).

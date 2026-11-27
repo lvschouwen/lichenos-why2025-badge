@@ -28,3 +28,4 @@ graphify-out/
 .claude/first-run
 .claude/assistant-daemon-state.json
 .claude/onair-allow.local
+v3/target/
