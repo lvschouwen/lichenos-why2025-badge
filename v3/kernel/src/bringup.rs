@@ -41,7 +41,7 @@ fn record(t: &mut Tally, id: &str, ok: Option<bool>, detail: core::fmt::Argument
     kcheck!(id, v, "{detail}");
 }
 
-pub fn run() -> ! {
+pub fn run(hart: usize, boot_info: *const u8) -> ! {
     platform::init();
     hw::uart::spin(2_000_000); // esptool is still reading the MEM_END reply
     kprintln!("");
@@ -52,12 +52,18 @@ pub fn run() -> ! {
     );
     let mut t = Tally::new();
 
-    record(&mut t, "boot.hart", Some(hartid() == 0), format_args!("mhartid={}", hartid()));
+    record(&mut t, "boot.hart", Some(hartid() == 0 && hart == 0), format_args!("mhartid={} a0={hart}", hartid()));
+    record(
+        &mut t,
+        "boot.info",
+        None,
+        format_args!("a1={boot_info:p} ({})", if boot_info.is_null() { "load-ram" } else { "stage-booted" }),
+    );
 
     // SAFETY: linker-defined symbols; only their addresses are used.
     let (ls, le, ns, ne) = unsafe { (addr(&_load_start), addr(&_load_end), addr(&_noload_start), addr(&_noload_end)) };
     let fits = ls >= hw::mem::LOAD_BASE
-        && le <= hw::mem::ROM_STACK_TOP
+        && le <= hw::mem::LOAD_LIMIT
         && ns >= hw::mem::NOLOAD_BASE
         && ne <= hw::mem::NOLOAD_LIMIT;
     record(

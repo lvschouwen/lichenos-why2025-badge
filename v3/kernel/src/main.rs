@@ -58,10 +58,12 @@ extern "C" fn kmain() -> ! {
     tests::boot(k)
 }
 
+/// Entry contract (same for the stage-booted and the load-ram route): M-mode, interrupts off, a0 = hart id, a1 = pointer
+/// to the boot-info struct (#615 owns it) or NULL under load-ram. The struct is not interpreted here.
 #[cfg(feature = "esp32p4")]
 #[no_mangle]
-extern "C" fn kmain() -> ! {
-    bringup::run()
+extern "C" fn kmain(hart: usize, boot_info: *const u8) -> ! {
+    bringup::run(hart, boot_info)
 }
 
 #[panic_handler]

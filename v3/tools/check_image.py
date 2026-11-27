@@ -3,7 +3,7 @@
 
     check_image.py <kernel.elf> <kernel.bin>
 
-ELF: every PT_LOAD with file content lies in the load window [LOAD_BASE, ROM_STACK_TOP); every PT_LOAD without file
+ELF: every PT_LOAD with file content lies in the load window [LOAD_BASE, LOAD_LIMIT); every PT_LOAD without file
 content (NOLOAD: bss, stacks) lies in [NOLOAD_BASE, NOLOAD_LIMIT); nothing is mapped anywhere else (no flash, no
 cache window). BIN (the esptool image the ROM loads): same window for every segment, and the entry is inside it.
 The numbers mirror platform/esp32p4/src/mem.rs and kernel/link-esp32p4.ld.
@@ -13,7 +13,7 @@ import struct
 import sys
 
 LOAD_BASE = 0x4FF10000
-ROM_STACK_TOP = 0x4FF3AFC0
+LOAD_LIMIT = 0x4FF28ED0
 NOLOAD_BASE = 0x4FF40000
 NOLOAD_LIMIT = 0x4FF80000
 PT_LOAD = 1
@@ -30,7 +30,7 @@ def check_elf_bytes(d: bytes) -> list[str]:
         if p_type != PT_LOAD or memsz == 0:
             continue
         if filesz:
-            lo, hi, what = LOAD_BASE, ROM_STACK_TOP, "loaded"
+            lo, hi, what = LOAD_BASE, LOAD_LIMIT, "loaded"
             span = (paddr, paddr + filesz)
         else:
             lo, hi, what = NOLOAD_BASE, NOLOAD_LIMIT, "NOLOAD"
@@ -58,8 +58,8 @@ def check_bin_bytes(d: bytes) -> list[str]:
             raise ValueError("truncated image")
         addr, size = struct.unpack_from("<II", d, off)
         spans.append((addr, addr + size))
-        if not (LOAD_BASE <= addr and addr + size <= ROM_STACK_TOP):
-            errs.append(f"bin segment {i} {addr:#x}..{addr + size:#x} outside {LOAD_BASE:#x}..{ROM_STACK_TOP:#x}")
+        if not (LOAD_BASE <= addr and addr + size <= LOAD_LIMIT):
+            errs.append(f"bin segment {i} {addr:#x}..{addr + size:#x} outside {LOAD_BASE:#x}..{LOAD_LIMIT:#x}")
         off += 8 + size
     if nseg == 0:
         errs.append("bin has no segments")

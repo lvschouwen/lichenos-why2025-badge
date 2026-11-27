@@ -34,7 +34,7 @@ class ElfTests(unittest.TestCase):
         self.assertIn("outside", errs[0])
 
     def test_loaded_image_into_rom_stack(self):
-        self.assertTrue(ci.check_elf_bytes(elf([(0x4FF10000, 0x2B000, 0x2B000)])))
+        self.assertTrue(ci.check_elf_bytes(elf([(0x4FF10000, 0x19000, 0x19000)])))
 
     def test_noload_into_cache_carve(self):
         self.assertTrue(ci.check_elf_bytes(elf([(0x4FF40000, 0, 0x50000)])))

@@ -1,6 +1,6 @@
 /* v3 bring-up image for the ESP32-P4, loaded by the ROM download mode (esptool load-ram), never written to flash. RAM only:
  * no segment outside L2MEM. Numbers mirror platform/esp32p4/src/mem.rs and v3/tools/check_image.py.
- *  - LOAD   0x4FF10000 up to the ROM stack at 0x4FF3AFC0: what the ROM copies in. It is where esptool's own rev1 stub
+ *  - LOAD   0x4FF10000 up to 0x4FF28ED0: what the ROM copies in, and below the v3 boot stage (#615) that sits at 0x4FF28ED0..0x4FF3ABD0. It is where esptool's own rev1 stub
  *           keeps its text, so download mode is known to leave it alone.
  *  - NOLOAD from 0x4FF40000 up to the L2 cache carve (0x4FF80000 for the 256 KB reset-state cache; the kernel reads the
  *           real size at boot and CHECKs it): bss and stacks, zeroed by the kernel itself, untouched while loading.
@@ -8,7 +8,7 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 MEMORY {
-  LOAD   (rwx) : ORIGIN = 0x4FF10000, LENGTH = 0x2AFC0
+  LOAD   (rwx) : ORIGIN = 0x4FF10000, LENGTH = 0x18ED0
   NOLOAD (rw)  : ORIGIN = 0x4FF40000, LENGTH = 0x40000
 }
 SECTIONS {
@@ -18,7 +18,7 @@ SECTIONS {
   .bss (NOLOAD) : ALIGN(4) { _noload_start = .; _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD
   .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 2K; _trap_stack_top = .; _noload_end = .; } > NOLOAD
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
-  ASSERT(_load_end <= 0x4FF3AFC0, "loaded image runs into the ROM stack")
+  ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
   ASSERT(_noload_end <= 0x4FF80000, "NOLOAD memory runs into the L2 cache carve")
   ASSERT(ORIGIN(LOAD) == 0x4FF10000 && ORIGIN(NOLOAD) == 0x4FF40000, "memory map drifted from platform/esp32p4 mem.rs")
 }

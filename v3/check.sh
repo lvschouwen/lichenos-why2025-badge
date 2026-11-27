@@ -60,7 +60,7 @@ for img in target/lichen/esp32p4/kernel.elf target/kernel-qemu-virt/$TARGET/rele
   echo "$img"
   "$SYSROOT_BIN/llvm-size" "$img"
 done
-echo "esp32p4 loaded image: $(stat -c %s target/lichen/esp32p4/kernel.bin) bytes (limit 0x2AFC0 = 175040)"
+echo "esp32p4 loaded image: $(stat -c %s target/lichen/esp32p4/kernel.bin) bytes (limit 0x18ED0 = 102096)"
 
 step "licences (MIT or Apache-2.0 only)"
 python3 -I tools/check_licences.py

@@ -6,7 +6,8 @@ SPI mode:DIO, clock div:1
 entry 0x4ff10000
 
 lichen-v3 151b0540 platform esp32p4 abi 1 (#611 bring-up, RAM only)
-CHECK boot.hart PASS mhartid=0
+CHECK boot.hart PASS mhartid=0 a0=0
+CHECK boot.info INFO a1=0x0 (load-ram)
 CHECK image.layout PASS loaded 0x4ff10000..0x4ff1190c (6412 B), noload 0x4ff40000..0x4ff44800 (18432 B)
 BEGIN c6
 CHECK c6.strap PASS gpio13 level=1

@@ -21,7 +21,7 @@ class ParseTests(unittest.TestCase):
     def test_fixture_is_clean(self):
         r = rep.parse(load())
         self.assertEqual((r.build_id, r.platform, r.end), ("151b0540", "esp32p4", "ok"))
-        self.assertEqual(len(r.checks), 7)
+        self.assertEqual(len(r.checks), 8)
         self.assertEqual(rep.verdict(r, rep.DEFAULT_REQUIRED), [])
 
     def test_first_end_wins_over_later_noise(self):
