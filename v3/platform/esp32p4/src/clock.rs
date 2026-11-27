@@ -334,7 +334,7 @@ unsafe fn cpu_to(log: Log, target: CpuClock) -> Result<(Option<u32>, Option<u32>
     put(log, "cpu source CPLL", LP_CLKRST_HP_CLK_CTRL, 3, 1);
     // SAFETY (transmute): ROM ets_update_cpu_frequency(mhz) so the ROM delay loops keep their scale
     let upd: extern "C" fn(u32) = core::mem::transmute(ROM_UPDATE_CPU_FREQ);
-    upd(360);
+    upd(rom_cpu_mhz(target));
     uart::spin(100_000);
     state(log);
     let after = measure_mhz();
@@ -342,7 +342,28 @@ unsafe fn cpu_to(log: Log, target: CpuClock) -> Result<(Option<u32>, Option<u32>
     Ok((before, after))
 }
 
+/// The MHz `ets_update_cpu_frequency` gets after the switch: the target's own clock, or the ROM delay loops run short
+/// (#653: a fixed 360 made them about 10% short at 400 MHz).
+const fn rom_cpu_mhz(target: CpuClock) -> u32 {
+    target.mhz()
+}
+// The gate's host tests run without `bench-experiments`; its feature-on clippy and probe-psram builds evaluate this.
+#[cfg(feature = "bench-experiments")]
+const _: () = assert!(rom_cpu_mhz(CpuClock::Mhz400) == 400);
+
 unsafe fn bus_update() {
     modify32(ROOT0, 0, 1 << 4);
     while read32(ROOT0) & (1 << 4) != 0 {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rom_delay_scale_follows_the_target() {
+        assert_eq!(rom_cpu_mhz(CpuClock::Mhz360), 360);
+        #[cfg(feature = "bench-experiments")]
+        assert_eq!(rom_cpu_mhz(CpuClock::Mhz400), 400);
+    }
 }
