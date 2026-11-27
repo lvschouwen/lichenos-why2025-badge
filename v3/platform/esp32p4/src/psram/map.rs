@@ -1,0 +1,87 @@
+//! PSRAM address space: the MMU pages that put the chip at 0x4800_0000 (cached) and 0x8800_0000 (uncached alias),
+//! and the cache maintenance the pattern tests need. Entries as in ESP-IDF v6.1 `ext_mem_defs.h` (SOC_MMU_PSRAM_VALID
+//! bit 11, SOC_MMU_ACCESS_PSRAM bit 10, 64 KB pages, 1024 entries) written through the PSRAM controller's MMU window
+//! (index register SPIMEM2 + 0x380, content register + 0x37C), as the #609 probe did.
+use crate::mmio::write32;
+use crate::psram::regs::SPIMEM2;
+
+/// Virtual base of the cached alias (SOC_MMU_PSRAM_VADDR_BASE).
+pub const CACHED_BASE: usize = 0x4800_0000;
+/// Offset of the uncached alias (SOC_NON_CACHEABLE_OFFSET_PSRAM): the same bytes at CACHED_BASE + 0x4000_0000.
+pub const UNCACHED_OFFSET: usize = 0x4000_0000;
+pub const PAGE_BYTES: usize = 0x1_0000;
+pub const MMU_ENTRIES: usize = 1024;
+
+const MMU_CONTENT: usize = SPIMEM2 + 0x37C;
+const MMU_INDEX: usize = SPIMEM2 + 0x380;
+const MMU_VALID: u32 = 1 << 11;
+const MMU_ACCESS_PSRAM: u32 = 1 << 10;
+
+/// MMU content word of a mapping to physical page `ppage` (psram page numbers are below 1024).
+pub const fn mmu_word(ppage: u32) -> u32 {
+    (ppage & 0x3FF) | MMU_VALID | MMU_ACCESS_PSRAM
+}
+
+/// Map virtual pages `0..pages` of the PSRAM window to physical pages `0..pages` (a straight 64 KB-page mapping).
+///
+/// # Safety
+/// Writes the PSRAM MMU: only after `init` reached `Upto::Tuned`; `pages` at most `MMU_ENTRIES`.
+pub unsafe fn map_identity(pages: usize) {
+    assert!(pages <= MMU_ENTRIES);
+    for p in 0..pages {
+        write32(MMU_INDEX, p as u32);
+        write32(MMU_CONTENT, mmu_word(p as u32));
+    }
+}
+
+const ROM_CACHE_INVALIDATE_ADDR: usize = 0x4FC0_03E4;
+const ROM_CACHE_WRITEBACK_INVALIDATE_ADDR: usize = 0x4FC0_03FC;
+/// CACHE_MAP_L1_DCACHE | CACHE_MAP_L2_CACHE (rom/cache.h)
+const MAP_DATA: u32 = (1 << 4) | (1 << 5);
+
+const ROM_CACHE_INVALIDATE_ALL: usize = 0x4FC0_0404;
+/// CACHE_MAP_L2_CACHE
+const MAP_L2: u32 = 1 << 5;
+
+/// Invalidate the whole L2 cache (IDF `cache_hal_init_l2_cache`: `Cache_Invalidate_All(CACHE_MAP_L2_CACHE)`). L2 caches only
+/// external memory, so no internal-RAM data is lost. The L2 tags are not defined after a download-mode boot: a stale dirty
+/// line would be written back to a random PSRAM address when its set is next used.
+///
+/// # Safety
+/// Calls mask ROM code; discards every dirty L2 line.
+pub unsafe fn cache_invalidate_all_l2() -> i32 {
+    let f: extern "C" fn(u32) -> i32 = core::mem::transmute(ROM_CACHE_INVALIDATE_ALL);
+    f(MAP_L2)
+}
+
+/// Drop `[addr, addr + len)` from the data caches without writing it back (the next cached read fetches PSRAM).
+/// Returns the ROM's status (0 = ok).
+///
+/// # Safety
+/// Calls mask ROM code; discards dirty lines in the range.
+pub unsafe fn cache_invalidate(addr: usize, len: usize) -> i32 {
+    let f: extern "C" fn(u32, u32, u32) -> i32 = core::mem::transmute(ROM_CACHE_INVALIDATE_ADDR);
+    f(MAP_DATA, addr as u32, len as u32)
+}
+
+/// Write dirty lines of `[addr, addr + len)` back to PSRAM, then drop them. Returns the ROM's status (0 = ok).
+///
+/// # Safety
+/// Calls mask ROM code.
+pub unsafe fn cache_writeback_invalidate(addr: usize, len: usize) -> i32 {
+    let f: extern "C" fn(u32, u32, u32) -> i32 = core::mem::transmute(ROM_CACHE_WRITEBACK_INVALIDATE_ADDR);
+    f(MAP_DATA, addr as u32, len as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mmu_words() {
+        assert_eq!(mmu_word(0), 0xC00);
+        assert_eq!(mmu_word(0x10), 0xC10);
+        assert_eq!(mmu_word(511), 0xC00 | 511);
+        assert_eq!(mmu_word(0xFFFF), 0xC00 | 0x3FF); // page numbers are 10 bits
+    }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "lichen-probe-psram"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "#620: PSRAM bring-up probe for the ESP32-P4, run RAM-only through load-ram."
+
+[[bin]]
+name = "lichen-probe-psram"
+test = false
+bench = false
+
+[dependencies]
+lichen-platform-esp32p4 = { path = "../platform/esp32p4" }
