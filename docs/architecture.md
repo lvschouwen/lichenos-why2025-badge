@@ -302,11 +302,12 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   through a short-lived internal buffer, `esp_ota_end`, the slot read back with `esp_partition_read` and hashed
   (`esp_partition_get_sha256` returns the image's appended hash, never the file's), the attempt recorded, then
   `esp_ota_set_boot_partition` and `system_restart_asked`. The boot screen's *update* row (`BOOT_UPDATE`) shows the
-  write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). Without the Wi-Fi marker
-  `badge_fw.bin.wifi` the arrival is marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is
-  physical access, so the trial needs no Wi-Fi (#411). Any Wi-Fi write or delete under the folder leaves that marker
-  first (`ota_file_change_begin` -> `ota_sd_update_mark_wifi`; no marker, no write), `sd-prep` removes it, and an image
-  that came over Wi-Fi keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls back. A bad image rolls back and the
+  write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). Any Wi-Fi write or delete under the
+  folder first sets `SDU_REC_WIFI` in the attempt record (NVS, not the card, so no Wi-Fi delete or overwrite can take it
+  away; `ota_file_change_begin` -> `ota_sd_update_mark_wifi`, not saved means not written). Without it the arrival is
+  marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is physical access, so the trial needs
+  no Wi-Fi (#411). With it the image keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls back; the install's own
+  record clears it (`sdu_flags_after`), and a card changed by hand after a Wi-Fi push gets the stricter rule once. A bad image rolls back and the
   record keeps it from installing again (one notice). A card pulled or a bad file before `set_boot` leaves the boot slot
   alone, with a notice. A power cut between the record and `set_boot` blocks that image until the file changes. An image that matched its `.sha256` but failed after the copy
   (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and

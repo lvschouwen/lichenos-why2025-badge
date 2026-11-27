@@ -132,8 +132,9 @@ static void test_result_records(void) {
 
 // Review M3 and M4: the trial rule by provenance, and the boot screen's row after the step
 static void test_trial_and_step(void) {
-    CHECK(sdu_trial_without_wifi(false)); // prepared by hand (sd-prep removes the marker): physical access
-    CHECK(!sdu_trial_without_wifi(true)); // came over Wi-Fi: the Wi-Fi rule, so one that breaks Wi-Fi rolls back
+    CHECK(sdu_trial_without_wifi(0));             // prepared by hand: physical access
+    CHECK(!sdu_trial_without_wifi(SDU_REC_WIFI)); // came over Wi-Fi: the Wi-Fi rule, so one that breaks Wi-Fi rolls back
+    CHECK(!sdu_trial_without_wifi(SDU_REC_WIFI | SDU_REC_TOLD | SDU_REC_FAILED));
     CHECK(sdu_step_of(SDU_SKIP_ABSENT, SDU_DONE) == SDU_STEP_SKIPPED);
     CHECK(sdu_step_of(SDU_SKIP_SAME, SDU_DONE) == SDU_STEP_DONE);
     CHECK(sdu_step_of(SDU_SKIP_TRIED, SDU_DONE) == SDU_STEP_SKIPPED);
@@ -148,6 +149,30 @@ static void test_trial_and_step(void) {
     CHECK(sdu_step_of((sdu_action_t)99, SDU_DONE) == SDU_STEP_SKIPPED);
 }
 
+// Security review of M3: the Wi-Fi provenance lives in the attempt record, not on the card. Whatever a Wi-Fi client
+// writes or deletes in the folder (a "marker" file included, if one were there) only ever sets the bit, and only an
+// install's own record clears it; the image a Wi-Fi push put there can't be made to look prepared by hand
+static void test_wifi_provenance(void) {
+    uint8_t f = 0;
+    f         = sdu_flags_marked_wifi(f); // a Wi-Fi push of badge_fw.bin
+    CHECK(f & SDU_REC_WIFI);
+    f = sdu_flags_marked_wifi(f); // then a Wi-Fi delete of any file there (an old marker name, the .sha256): still set
+    CHECK(f == SDU_REC_WIFI);
+    f = sdu_flags_marked_wifi((uint8_t)(f | SDU_REC_TOLD)); // an overwrite after a told skip keeps both
+    CHECK(f == (SDU_REC_WIFI | SDU_REC_TOLD));
+    CHECK(!sdu_trial_without_wifi(f));
+    // The install: the attempt starts afresh (its trial took the bit into account), a failed image keeps it
+    CHECK(sdu_flags_after(SDU_REC_WIFI, SDU_DONE) == 0);
+    CHECK(sdu_flags_after(SDU_REC_WIFI, SDU_FAIL_IMAGE) == (SDU_REC_WIFI | SDU_REC_FAILED | SDU_REC_TOLD));
+    CHECK(sdu_flags_after(0, SDU_FAIL_READBACK) == (SDU_REC_FAILED | SDU_REC_TOLD));
+    for (int r = SDU_FAIL_READ; r <= SDU_FAIL_BOOT; r++) {
+        if (!sdu_result_records((sdu_result_t)r)) {
+            CHECK(sdu_flags_after(SDU_REC_WIFI, (sdu_result_t)r) == SDU_REC_WIFI); // not the image's: nothing cleared
+        }
+    }
+    // The card's update folder is what sets it, every spelling of it (ota_path_test pins ota_path_in_sd_update)
+}
+
 int main(void) {
     test_head();
     test_decide_table();
@@ -155,6 +180,7 @@ int main(void) {
     test_sha_text();
     test_result_records();
     test_trial_and_step();
+    test_wifi_provenance();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

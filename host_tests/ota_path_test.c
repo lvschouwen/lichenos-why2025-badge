@@ -80,6 +80,9 @@ static void test_onair_held(void) {
     CHECK(ota_path_in_sd_update("//sd//lichen//update//badge_fw.bin.sha256"));
     CHECK(ota_path_in_sd_update("/sd/lichen/apps/../update/badge_fw.bin"));
     CHECK(ota_path_in_sd_update("/sd/./x"));
+    // Security review: a Wi-Fi delete or overwrite of a marker-like name in the folder is a write there like any other
+    CHECK(ota_path_in_sd_update("/sd/lichen/update/badge_fw.bin.wifi"));
+    CHECK(ota_path_in_sd_update("/sd/lichen/update/BADGE_FW.BIN.WIFI. "));
     CHECK(!ota_path_in_sd_update("/sd/lichen/apps/x/app.elf"));
     CHECK(!ota_path_in_sd_update("/sd/lichen/updates/badge_fw.bin"));
     CHECK(!ota_path_in_sd_update("/sd/lichen"));

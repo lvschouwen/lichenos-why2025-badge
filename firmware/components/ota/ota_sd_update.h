@@ -11,7 +11,7 @@
 // and whether the "tried before" notice for it was raised. ota may not open NVS (#235): main binds the settings' blob.
 typedef struct {
     uint8_t elf_sha[32]; // all zero: none (an image without an ELF sha is never installed)
-    uint8_t flags;       // SDU_REC_TOLD, SDU_REC_FAILED (sd_update_policy.h)
+    uint8_t flags;       // SDU_REC_TOLD, SDU_REC_FAILED, SDU_REC_WIFI (sd_update_policy.h)
 } ota_sd_record_t;
 
 typedef struct {
@@ -34,7 +34,7 @@ typedef struct {
 // `fw slot other`); a bad image still rolls back, and the attempt record keeps it from being installed again.
 void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks);
 
-// Review M3: the update server is about to write or delete under OTA_SD_UPDATE_DIR over Wi-Fi: leave the Wi-Fi marker
-// first (SDU_WIFI_MARK), so the next install from there keeps the Wi-Fi trial rule. Takes the card's batch lock (not
-// held by the caller). False: not written, so the change must not go ahead.
+// Review M3: the update server is about to write or delete under OTA_SD_UPDATE_DIR over Wi-Fi: set SDU_REC_WIFI in the
+// attempt record first (NVS through the hooks ota_sd_update_boot was given; nothing on the card), so the next install
+// from there keeps the Wi-Fi trial rule. False: not saved (or no store bound), so the change must not go ahead.
 bool ota_sd_update_mark_wifi(void);

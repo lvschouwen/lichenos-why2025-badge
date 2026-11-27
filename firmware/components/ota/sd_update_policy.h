@@ -70,6 +70,7 @@ char const *sdu_result_text(sdu_result_t r);
 // The attempt record's flags byte (ota_sd_record_t.flags)
 #define SDU_REC_TOLD   0x01 // the "not installed again" notice was raised for this image
 #define SDU_REC_FAILED 0x02 // it failed its check after the copy (sdu_result_records), rather than being installed
+#define SDU_REC_WIFI   0x04 // the update folder was written or deleted in over Wi-Fi since the last install (M3)
 // The notice for an image skipped as tried, by the record's flags
 char const *sdu_tried_text(uint8_t flags);
 
@@ -79,12 +80,18 @@ char const *sdu_tried_text(uint8_t flags);
 typedef enum { SDU_STEP_DONE, SDU_STEP_SKIPPED, SDU_STEP_FAILED } sdu_step_t;
 sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r);
 
-// Review M3: a Wi-Fi push into the update folder leaves the marker SDU_WIFI_MARK next to the image (written before the
-// file; tools/badge.sh sd-prep removes it). The install's trial needs no Wi-Fi only without it: a card prepared by hand
-// is physical access (like `fw slot other`), an image that came over Wi-Fi keeps the Wi-Fi rule (#411), so one that
-// breaks Wi-Fi still rolls back.
-#define SDU_WIFI_MARK "badge_fw.bin.wifi"
-bool sdu_trial_without_wifi(bool wifi_mark);
+// Review M3: the provenance of the folder's contents, kept off the card (a file there could be deleted or overwritten
+// over Wi-Fi). Every Wi-Fi write or delete under the update folder sets SDU_REC_WIFI in the attempt record (NVS, through
+// main's hooks) before it touches the card (sdu_flags_marked_wifi); nothing a Wi-Fi client sends clears it. The install's
+// trial needs no Wi-Fi only without it: a card prepared by hand is physical access (like `fw slot other`), an image that
+// came over Wi-Fi keeps the Wi-Fi rule (#411), so one that breaks Wi-Fi still rolls back.
+uint8_t sdu_flags_marked_wifi(uint8_t flags);
+bool    sdu_trial_without_wifi(uint8_t flags);
+// The flags of the record an install writes, from the ones it read at the start (old). The attempt before set_boot
+// (SDU_DONE) starts afresh: its trial has taken the Wi-Fi bit into account, and only a new Wi-Fi write sets it again.
+// A failure of the image (sdu_result_records) is recorded failed and told, keeping the Wi-Fi bit; any other result
+// keeps old as it is (the record is not about this image).
+uint8_t sdu_flags_after(uint8_t old, sdu_result_t r);
 
 // The text of badge_fw.bin.sha256 (sha256sum's format: 64 hex digits, either case, then the end, white space or the
 // file name) names digest

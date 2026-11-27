@@ -1056,8 +1056,6 @@ cmd_sd_prep() {
     c6_check_local "$c6dir" || exit 1
     dest=$mnt/lichen/update
     mkdir -p "$dest/c6"
-    # Prepared by hand: the install's trial needs no Wi-Fi, unlike one pushed over Wi-Fi (badge_fw.bin.wifi, #595 M3)
-    rm -f -- "$dest/badge_fw.bin.wifi"
     sd_prep_put "$bin" "$dest/badge_fw.bin"
     (cd "$dest" && sha256sum badge_fw.bin > badge_fw.bin.sha256.tmp && mv -f badge_fw.bin.sha256.tmp badge_fw.bin.sha256)
     for name in "${C6_BUNDLE_FILES[@]}"; do

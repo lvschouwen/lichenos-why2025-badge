@@ -101,8 +101,22 @@ sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r) {
     }
 }
 
-bool sdu_trial_without_wifi(bool wifi_mark) {
-    return !wifi_mark;
+uint8_t sdu_flags_marked_wifi(uint8_t flags) {
+    return (uint8_t)(flags | SDU_REC_WIFI);
+}
+
+bool sdu_trial_without_wifi(uint8_t flags) {
+    return !(flags & SDU_REC_WIFI);
+}
+
+uint8_t sdu_flags_after(uint8_t old, sdu_result_t r) {
+    if (r == SDU_DONE) {
+        return 0;
+    }
+    if (sdu_result_records(r)) {
+        return (uint8_t)(SDU_REC_FAILED | SDU_REC_TOLD | (old & SDU_REC_WIFI));
+    }
+    return old;
 }
 
 static int hex_digit(char c) {
