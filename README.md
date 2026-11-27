@@ -49,6 +49,7 @@ git clone --recurse-submodules https://github.com/lvschouwen/lichenos-why2025-ba
 git -C ~/esp/esp-idf fetch origin release/v6.1
 git -C ~/esp/esp-idf worktree add --detach ~/esp/esp-idf-v6.1-head c112a7898c
 (cd ~/esp/esp-idf-v6.1-head && git submodule update --init --recursive && ./install.sh esp32p4,esp32c6)
+(. ~/esp/esp-idf-v6.1-head/export.sh && python -m pip install esptool==5.7.0)
 for p in 0001-esp32p4-psram-120mhz 0003-esp32p4-psram-runtime-80-120 0004-esp32p4-psram-hex-refresh-4x; do
     git -C ~/esp/esp-idf-v6.1-head apply "$PWD/tools/idf-patches/$p.patch"
 done
@@ -57,7 +58,7 @@ BADGE_IDF_PATH=~/esp/esp-idf-v6.1-head ./firmware/build.sh build
 
 The patches add a 120 MHz PSRAM clock (the IDF's own choices are 80 and 200), the boot-time choice between 80 and 120
 MHz, and the 4x PSRAM refresh; see `tools/idf-patches/` for why and the license note. Apply them in that order (0002
-is an unused alternative to 0001). `build.sh` refuses to build without 0001 and 0004 while `sdkconfig.defaults` asks
+is an unused alternative to 0001). `build.sh` refuses to build without 0001, 0003 and 0004 while `sdkconfig.defaults` asks
 for them.
 
 `firmware/build.sh build` runs the host tests (`host_tests/`), builds the C6 image (`c6/`), puts it on Lichen's

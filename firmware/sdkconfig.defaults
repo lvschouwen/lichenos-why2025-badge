@@ -38,8 +38,8 @@ CONFIG_SPIRAM=y
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
 CONFIG_SPIRAM_SPEED_80M=y
-# 80 or 120 MHz chosen at boot (#121): needs tools/idf-patches/0001 + 0003 in the IDF; without 0003 this symbol is unknown to
-# Kconfig and the build is a plain 80 MHz one (Settings > PSRAM speed is then hidden). Default stays 80 MHz.
+# 80 or 120 MHz chosen at boot (#121): needs tools/idf-patches/0001 + 0003 in the IDF; build.sh refuses an IDF without 0003
+# (#588), as Kconfig would drop the unknown symbol and build a plain 80 MHz image. Default stays 80 MHz.
 CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 # Always 4x refresh (#569): the AP HEX chip boots letting its die temperature pick the refresh rate and picks slow on a
 # cool die; at 120 MHz one weak cell then lost bit 9 (0 -> 1) in data left unread for 3.5-5 s (9 of 20 bench sessions,

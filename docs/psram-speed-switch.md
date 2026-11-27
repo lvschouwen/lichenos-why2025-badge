@@ -117,8 +117,9 @@ moves journal data into or out of PSRAM (none known: the display reads PSRAM, SD
 
 The badge's IDF carries `tools/idf-patches/0001` and `0003` (`git -C ~/esp/esp-idf-v6.1-head apply` each, 0001 first), and
 `firmware/sdkconfig.defaults` sets `CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y`, so the normal build
-(`BADGE_IDF_PATH=~/esp/esp-idf-v6.1-head ./firmware/build.sh build`) is the switchable image. An IDF without 0003 still builds:
-the symbol is unknown to Kconfig, the app reports 80 MHz and "not supported", and the Settings row is hidden.
+(`BADGE_IDF_PATH=~/esp/esp-idf-v6.1-head ./firmware/build.sh build`) is the switchable image. build.sh refuses to build against an IDF
+without 0003 while the defaults ask for it (#588): Kconfig would drop the unknown symbol and the image would silently
+stay at 80 MHz with the Settings row hidden.
 
 `tools/idf-patches/0004` (after 0003) sets the chip's MR4 refresh field to "always 4x" at PSRAM init, behind
 `CONFIG_SPIRAM_HEX_REFRESH_4X` (on in `firmware/sdkconfig.defaults`, #569). Without it the AP HEX chip lets its die
