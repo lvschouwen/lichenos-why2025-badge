@@ -54,7 +54,7 @@ const SUITE: &str = match option_env!("LICHEN_PROBE_SUITE") {
     None => "",
 };
 const _: () = assert!(SUITE.is_empty() || (run_is("app") && s609::known(SUITE)),
-    "LICHEN_PROBE_SUITE needs LICHEN_PROBE_RUN=app and one of c1pmp, pmp1, c1timer, dgpio");
+    "LICHEN_PROBE_SUITE needs LICHEN_PROBE_RUN=app and one of c1pmp, pmp1, c1timer, psram, dgpio");
 const fn suite_is(name: &str) -> bool {
     str_eq(SUITE, name)
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the #608 load-ram probe: ELF, then an esptool image (RAM segments only) with its id stamped in.
 #   ./probe-p4/build.sh   -> target/lichen/probe-p4/probe-p4.bin (+ .elf), prints the probe id
-#   LICHEN_PROBE_RUN=app LICHEN_PROBE_SUITE=<c1pmp|pmp1|c1timer|dgpio> ./probe-p4/build.sh
+#   LICHEN_PROBE_RUN=app LICHEN_PROBE_SUITE=<c1pmp|pmp1|c1timer|psram|dgpio> ./probe-p4/build.sh
 #                         -> target/lichen/probe-p4/probe-p4-<suite>.bin, one #609 check per app image (src/s609.rs)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +13,7 @@ ID=$(git rev-parse --short=8 HEAD)$(git diff --quiet -- probe-p4 || echo -dirty)
 SUITE=${LICHEN_PROBE_SUITE:-}
 NAME=probe-p4
 if [ -n "$SUITE" ]; then
-    case $SUITE in c1pmp|pmp1|c1timer|dgpio) ;; *) echo "unknown LICHEN_PROBE_SUITE $SUITE" >&2; exit 2 ;; esac
+    case $SUITE in c1pmp|pmp1|c1timer|psram|dgpio) ;; *) echo "unknown LICHEN_PROBE_SUITE $SUITE" >&2; exit 2 ;; esac
     [ "${LICHEN_PROBE_RUN:-}" = app ] || { echo "LICHEN_PROBE_SUITE needs LICHEN_PROBE_RUN=app" >&2; exit 2; }
     NAME=probe-p4-$SUITE
 fi

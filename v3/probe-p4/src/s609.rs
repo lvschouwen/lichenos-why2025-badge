@@ -3,6 +3,7 @@
 //! - c1pmp (check 1): core 0 starts core 1 (core1.rs, IDF's order); core 1 dumps its PMP and PMA (B5).
 //! - pmp1 (check 2): U reads and writes the CPU-peripheral window that the bootloader's locked pmp1 grants every mode.
 //! - c1timer (check 3): core 1's CLINT timer preempts a U spin loop TICKS times; period and jitter in mtime ticks.
+//! - psram (check 4): the probe maps one PSRAM page; U exec and write through the cached and uncached aliases.
 //! - dgpio (check 5): U reads and writes of the dedicated-GPIO CSRs 0x803-0x805.
 //!
 //! Each suite ends in one verdict, `CHECK [C1.]609.<n> PASS|FAIL <probe id> ...` (C1. when core 1 prints it). PASS
@@ -13,11 +14,11 @@
 use crate::hw::{self, m_lbu, m_lw, m_sb, m_sw, napot, pmp_cfg_byte, pmp_off, pmp_set, pmpaddr_r, user, Trap};
 use crate::hw::{NAPOT, R, W, X};
 use crate::{app_desc, b6x, begin, check, clic_byte, core1, show, suite_is, uaddr, unlocked, ShowB, ShowU};
-use crate::{CLIC_THRESH, E_UDATA, E_UTEXT, GPIO_BASE, MTIMECMP_HI, MTIMECMP_LO, MTIMECTL, MTIME_LO, MTIP_ID};
+use crate::{CLIC_THRESH, E_T1, E_T2, E_UDATA, E_UTEXT, GPIO_BASE, MTIMECMP_HI, MTIMECMP_LO, MTIMECTL, MTIME_LO, MTIP_ID};
 use crate::{PROBE_ID, SUITE, UDATA, UTEXT};
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
 
-const SUITES: [&str; 4] = ["c1pmp", "pmp1", "c1timer", "dgpio"];
+const SUITES: [&str; 5] = ["c1pmp", "pmp1", "c1timer", "psram", "dgpio"];
 pub const fn known(s: &str) -> bool {
     let mut i = 0;
     while i < SUITES.len() {
@@ -54,6 +55,9 @@ pub fn run() -> ! {
     }
     if const { suite_is("pmp1") } {
         pmp1();
+    }
+    if const { suite_is("psram") } {
+        psram();
     }
     if const { suite_is("dgpio") } {
         dgpio();
@@ -387,6 +391,221 @@ fn pmp1_reg(r: &Reg, same: bool) -> [Seen; 2] {
     check(r.id, None, format_args!("{:#x}: M writes {test:#x}, reads {} (sticks: {sticks}); U writes it: {t}; M then reads {}: {write}; restored {}",
         r.addr, show(m_back), show(after), show(restored)));
     [read, write]
+}
+
+// Check 4 -----------------------------------------------------------------------------------------------------------
+// The PSRAM controller and chip are not touched by the bootloader. Lichen's esp_restart is a CPU reset that pulses
+// only the MSPI AXI reset (system_internal.c), so IDF's PSRAM setup is expected to survive into this image; the
+// bootloader's mmu_hal_init unmapped every PSRAM MMU entry, so the probe maps its own page.
+const PSRAM_MSPI: usize = 0x5008_E000; // DR_REG_PSRAM_MSPI0_BASE
+const S_CACHE_FCTRL: usize = PSRAM_MSPI + 0x3C; // bit 0 AXI_REQ_EN, bit 31 CLOSE_AXI_INF_EN
+const S_SRAM_DWR_CMD: usize = PSRAM_MSPI + 0x4C; // [15:0] 0x8080: AP hex SYNC_WRITE, set by s_config_mspi_for_psram
+const S_MMU_CONTENT: usize = PSRAM_MSPI + 0x37C; // SPI_MEM_S_MMU_ITEM_CONTENT_REG
+const S_MMU_INDEX: usize = PSRAM_MSPI + 0x380; // SPI_MEM_S_MMU_ITEM_INDEX_REG
+const PSRAM_SHOW: [(&str, usize); 10] = [("fctrl", S_CACHE_FCTRL), ("sctrl", PSRAM_MSPI + 0x40), ("sram_cmd", PSRAM_MSPI + 0x44),
+    ("drd_cmd", PSRAM_MSPI + 0x48), ("dwr_cmd", S_SRAM_DWR_CMD), ("sram_clk", PSRAM_MSPI + 0x50), ("smem_ddr", PSRAM_MSPI + 0xD8),
+    ("pms0_attr", PSRAM_MSPI + 0x130), ("mmu_power", PSRAM_MSPI + 0x384), ("date", PSRAM_MSPI + 0x3FC)];
+const PERI_CLK_CTRL00: usize = 0x500E_6030; // bit 14 PSRAM_PLL_CLK_EN, bit 15 PSRAM_CORE_CLK_EN, [13:12] source
+const PSRAM_SYS_CLK: u32 = 1 << 31; // SOC_CLK_CTRL0
+const MMU_PSRAM: u32 = (1 << 11) | (1 << 10); // SOC_MMU_PSRAM_VALID | SOC_MMU_ACCESS_PSRAM (ext_mem_defs.h)
+const PS_PPAGE: u32 = 0x10; // physical 64 KB page 16 (1 MB in): v2 re-initialises PSRAM after the reset
+const PS_VADDR: usize = 0x4800_0000; // SOC_MMU_PSRAM_VADDR_BASE: PSRAM MMU entry 0
+const PS_UNCACHED: usize = 0x4000_0000; // SOC_NON_CACHEABLE_OFFSET_PSRAM
+// 4 KB grants inside the mapped 64 KB page, so the addresses just outside stay mapped and M-accessible: a deny there
+// is the PMP's. The two grants cover different bytes, so the aliases never share a line.
+const CA_GRANT: usize = PS_VADDR + 0x4000;
+const UA_GRANT: usize = PS_VADDR + PS_UNCACHED + 0xA000;
+const ROM_CACHE_INVALIDATE_ADDR: usize = 0x4FC0_03E4; // esp32p4.rom.ld (same in the rev<3 eco0_4 ROM)
+const CACHE_MAP_ALL: u32 = 0x33; // L1 ICache 0 and 1, L1 DCache, L2 (rom/cache.h)
+const STUB: [u32; 2] = [0x600D_0537, 0x0000_0073]; // lui a0, 0x600d0; ecall
+const MAGIC: usize = 0x600D_0000;
+const UVAL: u32 = 0x0BAD_C0DE;
+
+fn cache_invalidate() -> i32 {
+    // SAFETY: ROM `int Cache_Invalidate_Addr(uint32_t map, uint32_t addr, uint32_t size)`, called from M on core 0.
+    let f: extern "C" fn(u32, u32, u32) -> i32 = unsafe { core::mem::transmute(ROM_CACHE_INVALIDATE_ADDR) };
+    f(CACHE_MAP_ALL, PS_VADDR as u32, 0x1_0000)
+}
+fn mmu_entry0(write: Option<u32>) -> Result<u32, Trap> {
+    let _ = m_sw(S_MMU_INDEX, 0);
+    if let Some(v) = write {
+        let _ = m_sw(S_MMU_CONTENT, v);
+        let _ = m_sw(S_MMU_INDEX, 0);
+    }
+    m_lw(S_MMU_CONTENT)
+}
+/// Is IDF's PSRAM setup still there? Only registers, no PSRAM access: a dead controller could stall the bus.
+fn psram_alive() -> bool {
+    begin("609.4.clk");
+    let (Ok(c0), Ok(p0)) = (m_lw(SOC_CLK_CTRL0), m_lw(PERI_CLK_CTRL00)) else {
+        verdict(false, format_args!("void: clock registers not readable"));
+        return false;
+    };
+    pl!("609.4 soc_clk_ctrl0 {c0:#010x} (bit 31 PSRAM_SYS_CLK_EN), peri_clk_ctrl00 {p0:#010x} (bits 14-15 PSRAM PLL/core clock)");
+    if c0 & PSRAM_SYS_CLK == 0 || p0 & (3 << 14) != 3 << 14 {
+        verdict(false, format_args!("void: PSRAM clocks off behind the bootloader, so no PSRAM access was tried (a v3 kernel needs its own PSRAM init)"));
+        return false;
+    }
+    begin("609.4.mspi");
+    for (name, a) in PSRAM_SHOW {
+        pl!("609.4 mspi2 {name} {:#x} = {}", a, show(m_lw(a)));
+    }
+    if m_lw(S_SRAM_DWR_CMD).map(|v| v & 0xFFFF) != Ok(0x8080) {
+        verdict(false, format_args!("void: PSRAM MSPI not in IDF's configured state (dwr_cmd above, expect 0x8080 in [15:0]), so no PSRAM access was tried"));
+        return false;
+    }
+    if let Ok(f) = m_lw(S_CACHE_FCTRL) {
+        if f & 1 == 0 || f & (1 << 31) != 0 {
+            // What psram_ctrlr_ll_enable_axi_access does; the restart's AXI reset may have cleared it.
+            let _ = m_sw(S_CACHE_FCTRL, (f | 1) & !(1 << 31));
+            pl!("609.4 AXI access was off: fctrl {f:#010x} -> {}", show(m_lw(S_CACHE_FCTRL)));
+        }
+    }
+    true
+}
+/// M writes and reads PSRAM through both aliases: no PSRAM, no isolation result.
+fn psram_m_control() -> bool {
+    begin("609.4.m-control");
+    hw::drain();
+    let at = PS_VADDR + 0x8000;
+    let (p, q) = (0x5AA5_C33Cu32, 0xA55A_3CC3u32);
+    let _ = m_sw(at + PS_UNCACHED, p);
+    let _ = m_sw(at + PS_UNCACHED + 4, q);
+    let un = (m_lw(at + PS_UNCACHED), m_lw(at + PS_UNCACHED + 4));
+    let inv = cache_invalidate();
+    let ca = (m_lw(at), m_lw(at + 4));
+    let ok = un == (Ok(p), Ok(q)) && ca == (Ok(p), Ok(q));
+    check("609.4.m-control", Some(ok), format_args!("M wrote {p:#x} {q:#x} at {:#x} uncached: reads uncached {} {}, cached {} {} (invalidate ret {inv})",
+        at + PS_UNCACHED, show(un.0), show(un.1), show(ca.0), show(ca.1)));
+    ok
+}
+#[derive(Clone, Copy)]
+enum Op {
+    Exec,
+    Store,
+}
+/// One U access in PSRAM. Allowed: an exec runs the stub (a0 = MAGIC), a store lands. Denied: the precise PMP fault,
+/// and a denied store leaves the word M zeroed.
+fn ps_case(id: &str, op: Op, addr: usize, allow: bool) -> bool {
+    begin(id);
+    let (t, ran, landed) = match op {
+        Op::Exec => {
+            let t = user(addr, 0, 0, false);
+            (t, t.is_ecall_u() && t.a0 == MAGIC, None)
+        }
+        Op::Store => {
+            let _ = m_sw(addr, 0);
+            let t = user(uaddr(crate::u_store), addr, UVAL as usize, false);
+            (t, t.is_ecall_u(), Some(m_lw(addr)))
+        }
+    };
+    let denied = match op {
+        Op::Exec => t.cause >> 31 == 0 && t.code() == 1 && t.epc == addr,
+        Op::Store => t.code() == 7 && t.tval == addr,
+    };
+    let ok = if allow {
+        ran && landed.map_or(true, |b| b == Ok(UVAL))
+    } else {
+        denied && landed.map_or(true, |b| b == Ok(0))
+    };
+    let what = match op {
+        Op::Exec => "exec",
+        Op::Store => "store",
+    };
+    let back = match landed {
+        Some(b) => ShowStore(Some(b)),
+        None => ShowStore(None),
+    };
+    check(id, Some(ok), format_args!("U {what} {addr:#x}: {t} a0={:#x}{back}; expect {}", t.a0, if allow { "allowed" } else { "PMP deny" }));
+    ok
+}
+struct ShowStore(Option<Result<u32, Trap>>);
+impl core::fmt::Display for ShowStore {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self.0 {
+            Some(b) => write!(f, "; M reads back {}", show(b)),
+            None => Ok(()),
+        }
+    }
+}
+/// Eight cases around one 4 KB grant `g` (RWX in PMP entry `e`); `alias` is the same bytes through the other alias.
+fn ps_grant(tag: &str, e: usize, g: usize, alias: usize) -> u32 {
+    pmp_set(e, napot(g, 0x1000), NAPOT | R | W | X);
+    pl!("609.4 {tag}: U grant entry {e} NAPOT RWX {g:#x}-{:#x} (cfg {:#04x})", g + 0xFFF, pmp_cfg_byte(e));
+    let cases: [(&str, Op, usize, bool); 8] = [
+        ("x-in", Op::Exec, g + 0x100, true),
+        ("x-above", Op::Exec, g + 0x1000, false),
+        ("x-below", Op::Exec, g - 8, false),
+        ("x-alias", Op::Exec, alias + 0x100, false),
+        ("w-in", Op::Store, g + 0x200, true),
+        ("w-above", Op::Store, g + 0x1000, false),
+        ("w-below", Op::Store, g - 4, false),
+        ("w-alias", Op::Store, alias + 0x200, false),
+    ];
+    let mut ok = 0;
+    for (name, op, addr, allow) in cases {
+        let mut id = IdBuf::new();
+        let _ = core::fmt::Write::write_fmt(&mut id, format_args!("609.4.{tag}.{name}"));
+        ok += ps_case(id.as_str(), op, addr, allow) as u32;
+    }
+    pmp_off(e);
+    ok
+}
+/// A small stack string for the per-case CHECK ids.
+struct IdBuf {
+    b: [u8; 32],
+    n: usize,
+}
+impl IdBuf {
+    fn new() -> Self {
+        IdBuf { b: [0; 32], n: 0 }
+    }
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.b[..self.n]).unwrap_or("609.4.?")
+    }
+}
+impl core::fmt::Write for IdBuf {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let s = s.as_bytes();
+        let n = s.len().min(self.b.len() - self.n);
+        self.b[self.n..self.n + n].copy_from_slice(&s[..n]);
+        self.n += n;
+        Ok(())
+    }
+}
+fn psram() {
+    begin("609.4");
+    setup_u();
+    if !psram_alive() {
+        return;
+    }
+    let before = mmu_entry0(None);
+    let after = mmu_entry0(Some(PS_PPAGE | MMU_PSRAM));
+    pl!("609.4 PSRAM MMU entry 0 ({PS_VADDR:#x}): {} -> {} (physical page {PS_PPAGE:#x})", show(before), show(after));
+    if after != Ok(PS_PPAGE | MMU_PSRAM) {
+        verdict(false, format_args!("void: the PSRAM MMU entry did not take {:#x}", PS_PPAGE | MMU_PSRAM));
+        return;
+    }
+    if psram_m_control() {
+        // Stubs go in through the uncached alias, then the caches drop the range, so a cached fetch reads PSRAM.
+        for g in [CA_GRANT, UA_GRANT] {
+            for site in [g + 0x100, g + 0x1000, g - 8] {
+                let u = if site < PS_VADDR + PS_UNCACHED { site + PS_UNCACHED } else { site };
+                let _ = m_sw(u, STUB[0]);
+                let _ = m_sw(u + 4, STUB[1]);
+            }
+        }
+        let inv = cache_invalidate();
+        pl!("609.4 stubs ({:#010x} {:#010x}) at grant+0x100, grant+0x1000 and grant-8 of both grants; invalidate ret {inv}", STUB[0], STUB[1]);
+        let ok = ps_grant("cached", E_T1, CA_GRANT, CA_GRANT + PS_UNCACHED) + ps_grant("uncached", E_T2, UA_GRANT, UA_GRANT - PS_UNCACHED);
+        verdict(ok == 16, format_args!("{ok} of 16 PSRAM cases as expected (U exec and write inside a 4 KB grant, denied just above, just below and through the other alias), cached grant {CA_GRANT:#x}, uncached grant {UA_GRANT:#x}"));
+    } else {
+        verdict(false, format_args!("void: M cannot read back PSRAM through both aliases (609.4.m-control above), so no U case was run"));
+    }
+    if let Ok(v) = before {
+        let _ = mmu_entry0(Some(v));
+    }
+    let _ = cache_invalidate();
 }
 
 // Check 5 -----------------------------------------------------------------------------------------------------------
