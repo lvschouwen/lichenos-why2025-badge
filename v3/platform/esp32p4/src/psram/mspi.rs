@@ -200,9 +200,7 @@ pub fn reg_dummy() -> u32 {
 
 /// MR0 and MR1 from one 16-bit register read with an explicit dummy.
 ///
-/// With a dummy that does not match the chip's latency the ROM `cmd_start` still waits for data that never arrives in the
-/// expected cycle; it has no timeout, so a badly wrong dummy could in principle hang here. The known speeds' dummies differ by
-/// a few cycles only, which has answered with shifted data on the bench so far.
+/// Not yet benched: a wrong dummy could hang the ROM `cmd_start`, which has no timeout.
 ///
 /// # Safety
 /// As `xact`.
@@ -344,8 +342,8 @@ mod tests {
     }
 
     /// A chip at the given MR0 latency field. A read with that field's own dummy returns (MR0, MR1) as they are; any other dummy
-    /// shifts a neighbouring register into place: toward a longer dummy MR1 (0x8D) and MR2 (0xDF), toward a shorter one MR8
-    /// (0x4B) and a zero byte.
+    /// shifts a neighbouring register into place: toward a longer dummy MR1 (0x8D) and MR2 (0xDF); toward a shorter one a made-up
+    /// (0x4B, 0x00), not a measured shift.
     fn fake_chip(field: u8, dummy_of_field: &'static [(u32, u8)]) -> impl FnMut(u32) -> (u8, u8) {
         move |d| {
             if dummy_of_field.iter().any(|&(dd, f)| dd == d && f == field) {
@@ -369,7 +367,7 @@ mod tests {
 
     #[test]
     fn an_lc6_chip_with_120_dummies_is_found_too() {
-        // the misread is MR8 = 0x4B, "field 2" = LC5, the field of the dummy in use
+        // the made-up short-dummy misread (0x4B, 0x00) has "field 2" = LC5, the field of the dummy in use
         let mut chip = fake_chip(3, KNOWN);
         assert_eq!(pick_reg_dummy(KNOWN, 8, &mut chip), 10);
     }
@@ -383,6 +381,15 @@ mod tests {
         let mut lc5 = fake_chip(2, KNOWN);
         assert_eq!(pick_reg_dummy(KNOWN, 10, &mut lc5), 8);
         let mut lc6 = fake_chip(3, KNOWN);
+        assert_eq!(pick_reg_dummy(KNOWN, 8, &mut lc6), 10);
+    }
+
+    #[test]
+    fn a_wrong_dummy_that_still_returns_the_true_registers_is_refused_by_its_own_field() {
+        // whatever the dummy, the chip answers with its true (MR0, MR1): the speed's field must still match
+        let mut lc5 = |_d: u32| (0x28u8, 0x8Du8);
+        assert_eq!(pick_reg_dummy(KNOWN, 10, &mut lc5), 8);
+        let mut lc6 = |_d: u32| (0x2Cu8, 0x8Du8);
         assert_eq!(pick_reg_dummy(KNOWN, 8, &mut lc6), 10);
     }
 
