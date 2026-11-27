@@ -95,9 +95,10 @@ extern "C" fn pmain() -> ! {
     if let Some(rest) = STAGE.strip_prefix("cpu") {
         // "cpu400-..." asks for 400 MHz (explicit experiment, #645); "cpu-..." stays at 360
         let (target, rest) = match rest.strip_prefix("400") {
-            Some(r) => (400, r),
-            None => (360, rest),
+            Some(r) => (clock::CpuClock::Mhz400, r),
+            None => (clock::CpuClock::Mhz360, rest),
         };
+        let tmhz = target.mhz();
         stage = rest.strip_prefix('-').unwrap_or("");
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, boot hart, RAM-only image (see clock::cpu_to_360).
@@ -106,13 +107,13 @@ extern "C" fn pmain() -> ! {
                 cpu_mhz = a;
                 pl!("PERF cpu.clock mhz={cpu_mhz}");
                 pl!(
-                    "CHECK 645.cpu{target} {} measured {cpu_mhz} MHz ({target} expected)",
-                    if cpu_mhz * 100 >= target * 97 && cpu_mhz * 100 <= target * 103 { "PASS" } else { "FAIL" }
+                    "CHECK 645.cpu{tmhz} {} measured {cpu_mhz} MHz ({tmhz} expected)",
+                    if cpu_mhz * 100 >= tmhz * 97 && cpu_mhz * 100 <= tmhz * 103 { "PASS" } else { "FAIL" }
                 );
             }
             Ok(_) => pl!("psram: clock set, timer did not count: no measurement"),
             Err(e) => {
-                pl!("CHECK 645.cpu{target} FAIL {e:?}: PSRAM init skipped");
+                pl!("CHECK 645.cpu{tmhz} FAIL {e:?}: PSRAM init skipped");
                 clock_failed = true;
             }
         }
@@ -212,7 +213,7 @@ fn init_160(log: &mut dyn FnMut(core::fmt::Arguments)) -> Result<psram::Info, ps
     }
     pl!("CHECK 645.psram160 FAIL: {:?}; restoring 120 MHz in this run", r.as_ref().err());
     // SAFETY: as above; a full re-init at the default speed.
-    unsafe { psram::init_with(psram::Upto::Tuned, OVERRIDE, psram::SPEED_120, log) }
+    unsafe { psram::init_with(psram::Upto::Tuned, OVERRIDE, psram::speed::SPEED_120, log) }
 }
 
 /// The clocks the pattern tests ran at, read back right before them.

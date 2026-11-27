@@ -11,4 +11,4 @@ test = false
 bench = false
 
 [dependencies]
-lichen-platform-esp32p4 = { path = "../platform/esp32p4" }
+lichen-platform-esp32p4 = { path = "../platform/esp32p4", features = ["bench-experiments"] }

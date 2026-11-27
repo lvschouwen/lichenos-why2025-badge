@@ -31,7 +31,7 @@ use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 static RD_DUMMY: AtomicU32 = AtomicU32::new(RD_DUMMY_BITLEN);
 static RD_REG_DUMMY: AtomicU32 = AtomicU32::new(RD_REG_DUMMY_BITLEN);
 static WR_DUMMY: AtomicU32 = AtomicU32::new(WR_DUMMY_BITLEN);
-/// Dummy bits of the FIFO-path transactions for the running speed (the constants above are the 80 and 120 MHz values;
+/// Dummy bits of the FIFO-path transactions for the speed the chip is programmed for (set after its mode registers are written) (the constants above are the 80 and 120 MHz values;
 /// `psram::Speed` sets the others, e.g. 160 MHz: LC6 / WLC6, 2 * (12 - 1), 2 * (6 - 1), 2 * (6 - 1)).
 pub fn set_timing(rd: u32, rd_reg: u32, wr: u32) {
     RD_DUMMY.store(rd, Relaxed);
@@ -155,9 +155,10 @@ impl ModeRegs {
 pub const fn mr0_value(read_back: u8, rl: u8) -> u8 {
     (read_back & 0xC0) | (rl << 2) | (1 << 5)
 }
-/// MR4 as IDF (with Lichen patch 0004) writes it: write latency, refresh 0 = always 4x, PASR kept.
-pub const fn mr4_value(read_back: u8, wl: u8) -> u8 {
-    (read_back & 0x07) | (wl << 5)
+/// MR4 as IDF (with Lichen patch 0004) writes it: write latency, refresh 0 = always 4x, PASR 0 (the whole array keeps
+/// refreshing, whatever a read made with the wrong latency returned).
+pub const fn mr4_value(_read_back: u8, wl: u8) -> u8 {
+    wl << 5
 }
 /// MR8 as IDF writes it: burst length 3 (2 KB), hybrid burst off, row-boundary crossing on, x16; reserved bits kept.
 pub const fn mr8_value(read_back: u8) -> u8 {
@@ -253,8 +254,8 @@ mod tests {
         assert_eq!(mr0_value(0xC3, RD_LATENCY), 0b1110_1000);
         // MR4: write latency field 2 at [7:5], RF = 0 (4x), PASR kept
         assert_eq!(mr4_value(0x00, WR_LATENCY), 0x40);
-        assert_eq!(mr4_value(0xFF, WR_LATENCY), 0x47);
-        // 160 MHz: read latency field 3 (LC6), write latency field 6 (110b = WLC6)
+        assert_eq!(mr4_value(0xFF, WR_LATENCY), 0x40); // PASR is always written 0
+                                                       // 160 MHz: read latency field 3 (LC6), write latency field 6 (110b = WLC6)
         assert_eq!(mr0_value(0x00, 3), 0b0010_1100);
         assert_eq!(mr4_value(0x00, 6), 0xC0);
         // MR8: BL 3, BT 0, RBX 1, X16 1; reserved bits 4, 5 and 7 kept

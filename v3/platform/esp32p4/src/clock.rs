@@ -184,18 +184,48 @@ pub fn state(log: Log) {
 /// Changes the core supply (HP/LP regulator bias, DCDC) and the CPU clock tree; RAM-only bring-up on the boot hart with
 /// nothing else running. Stop and report on a hang or brownout; do not retry blindly.
 pub unsafe fn cpu_to_360(log: Log) -> Result<(Option<u32>, Option<u32>), Error> {
-    cpu_to_mhz(log, 360)
+    cpu_to(log, CpuClock::Mhz360)
 }
 
-/// Experiment (#645, owner decision): the same bring-up at 400 MHz, the values IDF uses on rev 3.x (CPLL div register 10, CPU
-/// div 1, MEM div 2, APB div 2, same dbias and DCDC). IDF has no 400 MHz setting for rev < 3, and the kernel default stays 360.
-/// Only 360 and 400 are accepted.
+/// CPU clock targets. 400 MHz exists only with the `bench-experiments` feature (rev 1.0 maximum is 360).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CpuClock {
+    Mhz360,
+    #[cfg(feature = "bench-experiments")]
+    Mhz400,
+}
+impl CpuClock {
+    pub const fn mhz(self) -> u32 {
+        match self {
+            CpuClock::Mhz360 => 360,
+            #[cfg(feature = "bench-experiments")]
+            CpuClock::Mhz400 => 400,
+        }
+    }
+    /// `clk_ll_cpll_set_config` divider register, rev >= 1.
+    const fn cpll_div(self) -> u8 {
+        match self {
+            CpuClock::Mhz360 => 9,
+            #[cfg(feature = "bench-experiments")]
+            CpuClock::Mhz400 => 10,
+        }
+    }
+}
+
+/// Experiment (#645, owner decision): the bring-up at a chosen target, 400 MHz being the values IDF uses on rev 3.x (CPLL div
+/// register 10, CPU div 1, MEM div 2, APB div 2, same dbias and DCDC). IDF has no 400 MHz setting for rev < 3, and the kernel
+/// default stays 360. Only with the `bench-experiments` feature.
 ///
 /// # Safety
 /// As `cpu_to_360`.
-pub unsafe fn cpu_to_mhz(log: Log, mhz: u32) -> Result<(Option<u32>, Option<u32>), Error> {
-    assert!(mhz == 360 || mhz == 400);
-    let cpll_div: u8 = if mhz == 400 { 10 } else { 9 }; // clk_ll_cpll_set_config, rev >= 1
+#[cfg(feature = "bench-experiments")]
+pub unsafe fn cpu_to_mhz(log: Log, target: CpuClock) -> Result<(Option<u32>, Option<u32>), Error> {
+    cpu_to(log, target)
+}
+
+unsafe fn cpu_to(log: Log, target: CpuClock) -> Result<(Option<u32>, Option<u32>), Error> {
+    let mhz = target.mhz();
+    let cpll_div = target.cpll_div();
     state(log);
     let before = measure_mhz();
     log(format_args!("clk: before: measured {before:?} MHz"));
