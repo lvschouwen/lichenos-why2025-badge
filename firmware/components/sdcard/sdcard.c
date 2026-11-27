@@ -20,6 +20,8 @@
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "psram_dma_cmd.h"
 #include "sdmmc_cmd.h"
+#include "soc/hp_sys_clkrst_struct.h"
+#include "soc/sdmmc_struct.h"
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -381,24 +383,8 @@ static FRESULT make_fat(void) {
     return res;
 }
 
-// A card that chose High Speed and then failed (the SCR read back at 50 MHz, a timeout) gets one more try at the
-// default speed, power cycled, so a card or a contact that cannot take 50 MHz still mounts (#583)
-static sd_mount_outcome_t probe_with_fallback(char *reason, size_t cap) {
-    sd_mount_outcome_t outcome = power_and_probe(SD_CLOCK_HS_KHZ, reason, cap);
-    bool     failed    = outcome != SD_MOUNT_OK && card;
-    uint32_t retry_khz = failed ? sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, card->max_freq_khz) : 0;
-    if (retry_khz == 0) {
-        return outcome;
-    }
-    ESP_LOGW(TAG, "card init at %u kHz failed (%s): again at %u kHz", (unsigned)SD_CLOCK_HS_KHZ, reason,
-             (unsigned)retry_khz);
-    bring_down();
-    reason[0] = '\0';
-    return power_and_probe(retry_khz, reason, cap);
-}
-
-static sd_mount_outcome_t bring_up(bool format, char *reason, size_t cap) {
-    sd_mount_outcome_t outcome = probe_with_fallback(reason, cap);
+static sd_mount_outcome_t bring_up(bool format, uint32_t freq_khz, char *reason, size_t cap) {
+    sd_mount_outcome_t outcome = power_and_probe(freq_khz, reason, cap);
     if (outcome != SD_MOUNT_OK) {
         return outcome;
     }
@@ -447,6 +433,42 @@ static sd_mount_outcome_t bring_up(bool format, char *reason, size_t cap) {
     return SD_MOUNT_OK;
 }
 
+// "fw sd"'s live SDMMC clock (#583): the controller's source select and divider and both slots' card dividers, read
+// from the registers (as sdmmc_ll_get_clock_div decodes them), never through sdmmc_host_get_real_freq (sd_policy.h).
+// Only while the controller exists: its registers are not clocked otherwise.
+bool sd_bus_status(char *out, size_t cap) {
+    sdmmc_host_state_t state = {0};
+    if (sdmmc_host_get_state(&state) != ESP_OK || !state.host_initialized) {
+        return false;
+    }
+    uint32_t src_mhz  = HP_SYS_CLKRST.peri_clk_ctrl01.reg_sdio_ls_clk_src_sel ? 200 : 160;
+    bool     bypass   = HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_h == 0 &&
+                  HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_n == 0 &&
+                  HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_l == 0;
+    uint32_t host_div = bypass ? 1 : HP_SYS_CLKRST.peri_clk_ctrl02.reg_sdio_ls_clk_edge_l + 1;
+    uint32_t clkdiv   = SDMMC.clkdiv.val;
+    sd_bus_line(src_mhz, host_div, clkdiv & 0xFF, (clkdiv >> 8) & 0xFF, out, cap);
+    return true;
+}
+
+// A card that took High Speed and then failed, in its card init (the SCR read back at 50 MHz) or in f_mount's first
+// reads, gets one more try at the default speed (#583, sd_policy_fallback_khz), so a card or a contact that cannot take
+// 50 MHz still mounts. The retry starts from scratch: volume, slot and LDO released and made again, the card reset by
+// CMD0 (there is no guaranteed off-time for its VDD).
+static sd_mount_outcome_t bring_up_with_fallback(bool format, char *reason, size_t cap) {
+    sd_mount_outcome_t outcome    = bring_up(format, SD_CLOCK_HS_KHZ, reason, cap);
+    uint32_t           negotiated = card ? card->max_freq_khz : 0;
+    uint32_t           retry_khz  = sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, negotiated, outcome);
+    if (retry_khz == 0) {
+        return outcome;
+    }
+    ESP_LOGW(TAG, "mount at %u kHz failed (%s): again at %u kHz", (unsigned)SD_CLOCK_HS_KHZ, reason,
+             (unsigned)retry_khz);
+    bring_down();
+    reason[0] = '\0';
+    return bring_up(format, retry_khz, reason, cap);
+}
+
 // With `lock` held. Logs one line either way: the default log level hides ESP_LOGI, and the bench wants to see it.
 static bool mount_locked(bool format) {
     char reason[sizeof(info.reason)] = "";
@@ -455,7 +477,7 @@ static bool mount_locked(bool format) {
     memset(info.reason, 0, sizeof(info.reason));
     portEXIT_CRITICAL(&info_lock);
 
-    sd_mount_outcome_t outcome = bring_up(format, reason, sizeof(reason));
+    sd_mount_outcome_t outcome = bring_up_with_fallback(format, reason, sizeof(reason));
     sd_mount_plan_t    plan    = sd_policy_after_mount(outcome);
     if (!plan.keep_power) {
         bring_down();

@@ -18,8 +18,23 @@ sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome) {
     }
 }
 
-uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz) {
-    return tried_khz > SD_CLOCK_DEFAULT_KHZ && negotiated_khz != 0 ? SD_CLOCK_DEFAULT_KHZ : 0;
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome) {
+    bool failed = outcome == SD_MOUNT_ERROR || outcome == SD_MOUNT_NO_CARD;
+    return failed && tried_khz > SD_CLOCK_DEFAULT_KHZ && negotiated_khz > SD_CLOCK_DEFAULT_KHZ ? SD_CLOCK_DEFAULT_KHZ
+                                                                                             : 0;
+}
+
+uint32_t sd_bus_khz(uint32_t src_mhz, uint32_t host_div, uint32_t card_div) {
+    if (host_div == 0) {
+        return 0;
+    }
+    return src_mhz * 1000u / host_div / (card_div == 0 ? 1u : 2u * card_div);
+}
+
+void sd_bus_line(uint32_t src_mhz, uint32_t host_div, uint32_t card_div0, uint32_t card_div1, char *out, size_t cap) {
+    snprintf(out, cap, "sdmmc live: %lu MHz / %lu, slot 0 %lu kHz, slot 1 %lu kHz", (unsigned long)src_mhz,
+             (unsigned long)host_div, (unsigned long)sd_bus_khz(src_mhz, host_div, card_div0),
+             (unsigned long)sd_bus_khz(src_mhz, host_div, card_div1));
 }
 
 sd_io_t sd_io_from_errno(int err) {

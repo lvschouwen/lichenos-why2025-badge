@@ -30,6 +30,9 @@ static void reply_status(void) {
     char line[160];
     sd_status_line(&info, line, sizeof(line));
     console_reply("%s", line);
+    if (sd_bus_status(line, sizeof(line))) {
+        console_reply("%s", line); // the bench's proof of both slots' clocks (#583)
+    }
 }
 
 // "sd test" and "sd cat" are debug commands (#378): with LICHEN_DEV_COMMANDS off (the release build) neither their

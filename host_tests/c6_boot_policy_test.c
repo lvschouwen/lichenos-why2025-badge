@@ -247,18 +247,20 @@ static void test_plan_exhaustive(void) {
     }
 }
 
-// #420: the on-air list waits while the staged bundle could still change the C6; a boot whose C6 proved it, or with no
-// bundle staged, does not (else the list could never be switched on); a failed flash (IDENT no match) still waits
-// #583: IDF's SDIO init leaves the link at 40 MHz; raise it to the configured 50, never lower it, never on no slot
+// #583: IDF's SDIO init leaves a High Speed link at 40 MHz; raise it to the configured 50, never a default-speed link
+// (20 MHz: the C6 refused High Speed), never lower, never on no slot
 static void test_sdio_raise(void) {
     CHECK(c6_sdio_raise_khz(50000, 40000) == 50000);
     CHECK(c6_sdio_raise_khz(50000, 50000) == 0);
+    CHECK(c6_sdio_raise_khz(50000, 20000) == 0);
     CHECK(c6_sdio_raise_khz(40000, 40000) == 0);
     CHECK(c6_sdio_raise_khz(20000, 40000) == 0);
     CHECK(c6_sdio_raise_khz(50000, 0) == 0);
     CHECK(c6_sdio_raise_khz(50000, -1) == 0);
 }
 
+// #420: the on-air list waits while the staged bundle could still change the C6; a boot whose C6 proved it, or with no
+// bundle staged, does not (else the list could never be switched on); a failed flash (IDENT no match) still waits
 static void test_bundle_pending(void) {
     CHECK(!c6_bundle_pending(false, true, true, true));   // the usual boot: proven
     CHECK(!c6_bundle_pending(false, true, false, false)); // nothing staged: the flasher leaves the C6 alone

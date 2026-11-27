@@ -399,28 +399,34 @@ static bool plan_full_check(bool force, char *key, size_t key_cap) {
 #error "c6link_raise_sdio_clock assumes the C6 link on SDMMC slot 1"
 #endif
 
-// IDF's SDIO card init applies at most SDMMC_FREQ_HIGHSPEED (40 MHz, sdmmc_io_enable_hs_mode) whatever esp_hosted asks
-// for, so after each attach slot 1 is set to the configured clock (#583). The card is already in SDIO High Speed mode,
-// which the C6 runs up to 50 MHz. This only stores the slot's clock (under IDF's spinlock); the next transfer on slot 1
-// programs it under the controller mutex, so it needs no lock of ours. Until then the link runs at 40, or at 50 when
-// the SD card's slot last programmed the same 200 MHz source / 4: both inside High Speed.
+// IDF's SDIO card init sets exactly SDMMC_FREQ_HIGHSPEED (40 MHz, sdmmc_io_enable_hs_mode) when the C6 took High Speed
+// mode, whatever esp_hosted asks for, so after each attach slot 1 is set to the configured clock (#583); the C6 runs
+// High Speed up to 50 MHz. sdmmc_host_set_card_clk only stores the slot's clock (under IDF's spinlock); the next
+// transfer on slot 1 programs the controller, under its mutex, so no lock of ours.
+// That transfer reprograms only when the slot's clock computed from the live divider and the slot's stored source
+// differs from the new request. sdmmc_host_get_real_freq is no read-back: it recomputes the dividers for the request
+// and on the way stores that request's source (sd_host_slot_get_clk_dividers). Called between the set and the first
+// transfer it would store the 200 MHz source while the controller still runs 160 MHz / 4, the check would read
+// 200 / 4 = 50000 as done, and the link would stay at 40 (and the SD card at 50 with it). So it is read only before
+// the set, where it recomputes the request the card init made (40000: the source it stores is the one in use), and
+// the line logs the requested clock. The live clock is in "fw sd" (sd_bus_line).
 void c6link_raise_sdio_clock(void) {
     int applied = 0;
     if (sdmmc_host_get_real_freq(SDMMC_HOST_SLOT_1, &applied) != ESP_OK) {
         ESP_LOGW(TAG, "SDIO clock not readable: left as the card init set it");
         return;
     }
-    uint32_t  khz = c6_sdio_raise_khz(CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ, applied);
-    esp_err_t err = khz ? sdmmc_host_set_card_clk(SDMMC_HOST_SLOT_1, khz) : ESP_OK;
-    int       now = applied;
-    if (khz && err == ESP_OK) {
-        sdmmc_host_get_real_freq(SDMMC_HOST_SLOT_1, &now);
+    uint32_t khz = c6_sdio_raise_khz(CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ, applied);
+    if (khz == 0) {
+        ESP_LOGI(TAG, "SDIO link clock %d kHz, left as the card init set it", applied);
+        return;
     }
-    // The bench's proof of the link clock (#583); the SD card's is in its mount line and "fw sd"
+    esp_err_t err = sdmmc_host_set_card_clk(SDMMC_HOST_SLOT_1, khz); // no sdmmc_host_get_real_freq after this
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "SDIO link clock %d kHz (card init %d kHz)", now, applied);
+        ESP_LOGI(TAG, "SDIO link clock %u kHz requested (card init %d kHz)", (unsigned)khz, applied);
     } else {
-        ESP_LOGW(TAG, "SDIO link clock %d kHz: raise to %u failed: %s", now, (unsigned)khz, esp_err_to_name(err));
+        ESP_LOGW(TAG, "SDIO link clock stays %d kHz: raise to %u failed: %s", applied, (unsigned)khz,
+                 esp_err_to_name(err));
     }
 }
 

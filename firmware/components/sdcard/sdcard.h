@@ -58,6 +58,9 @@ void sd_file_landed(char const *path);
 // after every sd_end and by "fw sd".
 void sd_info(sd_info_t *out);
 
+// The live SDMMC clock line (#583, sd_bus_line), read from the registers; false while no slot has made the controller
+bool sd_bus_status(char *out, size_t cap);
+
 // "fw sd format": erases the card and makes one FAT volume over all of it (FAT32 from about 256 MB up, cluster size
 // chosen by FatFs from the card size, label LICHEN), then mounts it. Waits for the current batch first.
 bool sd_format(void);

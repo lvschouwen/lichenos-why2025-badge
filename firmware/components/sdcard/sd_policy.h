@@ -31,19 +31,37 @@ typedef struct {
 sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome);
 
 // The card's clock (Lucas, #583): SD High Speed, 50 MHz, from the SDMMC's 200 MHz source / 4, the same source and
-// divider as the C6 link on slot 1. IDF re-applies the shared source and divider on a slot switch only when the slot's
-// clock, computed from the live divider and the slot's own source, differs from what it asked for. So two slots on
-// different sources must never share a divider: slot 0 must never be set to exactly 40000 (160 MHz / 4) while slot 1
-// runs at 50000 (200 MHz / 4), or the card would run at 50 and its check would still read 40. 50 and 20 (the default
-// speed, a card that refuses High Speed: divider 8) are both safe. The one mixed state that does occur, the link at
-// IDF's 40 for the first transfers after its card init next to a card at 50, can only make either slot run at 40 or 50:
-// both inside High Speed.
+// divider as the C6 link on slot 1. The source and divider belong to the controller, the card divider to each slot.
+// IDF reprograms them at a slot's transfer only when that slot's clock, computed from the live divider, its own card
+// divider and the source it stored, differs from its request. So:
+// - Two slots on different sources must never share a divider: slot 0 must never be set to exactly 40000 (160 MHz / 4)
+//   while slot 1 runs at 50000 (200 MHz / 4), or the card would run at 50 while its check reads 40. 50, and 20 for a
+//   card that refuses High Speed (divider 8), are both safe.
+// - The one mixed state that does occur, the link at IDF's 40 (160 MHz / 4) for its first transfers after a card init
+//   next to a card at 50, can only make either slot run at 40 or 50: both inside High Speed. c6link's next request
+//   (50000) then computes 160 / 4 = 40000 against it and reprograms both onto 200 MHz / 4.
+// - sdmmc_host_get_real_freq is no read-back: it recomputes the dividers of the request and stores that request's
+//   source. Between a sdmmc_host_set_card_clk and the slot's next transfer it would turn the check above into a false
+//   "already there" (200 / 4 = 50000 while the controller runs 160 / 4). IDF's own card init does call it there for
+//   slot 0, which is harmless only because slot 0's card divider still holds the probe's 20 (no match). Lichen never
+//   calls it between a set and a transfer; the live clock comes from the registers (sd_bus_line).
 #define SD_CLOCK_HS_KHZ      50000
 #define SD_CLOCK_DEFAULT_KHZ 20000
 
-// After a failed card init at tried_khz: the clock of the one retry (power cycled), or 0 for none. negotiated_khz is
-// card->max_freq_khz, 0 when the card never got as far as the speed choice (no card: the retry would only repeat that).
-uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz);
+// After a mount attempt at tried_khz ended in outcome, on a card that chose negotiated_khz (card->max_freq_khz; 0 when
+// the card never got as far as the speed choice): the clock of the one retry, or 0 for none. Only a card that took
+// High Speed and then failed (card init, or the first reads of f_mount: SD_MOUNT_ERROR or a timeout reported as
+// SD_MOUNT_NO_CARD) is retried, at the default speed; a missing card, a card without FAT and a card that refused High
+// Speed (already at 20) are not.
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz, sd_mount_outcome_t outcome);
+
+// The live SDMMC clock (#583): src_mhz / host_div, then / (2 * card_div) unless card_div is 0 (bypass). 0 for a
+// host_div of 0.
+uint32_t sd_bus_khz(uint32_t src_mhz, uint32_t host_div, uint32_t card_div);
+
+// "fw sd"'s second line: "sdmmc live: 200 MHz / 4, slot 0 50000 kHz, slot 1 50000 kHz". The registers hold what the
+// last reprogramming slot set, plus each slot's own card divider: a slot whose check matches runs at its value here.
+void sd_bus_line(uint32_t src_mhz, uint32_t host_div, uint32_t card_div0, uint32_t card_div1, char *out, size_t cap);
 
 // How a batch of file work went (sd_end). NEUTRAL: it failed, but not because of the card (full, a bad name, no
 // memory), so it says nothing about whether the card is still there.

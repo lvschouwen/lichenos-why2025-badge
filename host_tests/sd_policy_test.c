@@ -28,13 +28,31 @@ static void test_mount_plan(void) {
     CHECK(p.state == SD_STATE_ERROR && !p.keep_power);
 }
 
-// #583: a card that fails at 50 MHz after the speed choice gets one retry at 20; a missing card and a 20 MHz try none
+// #583: a card that took High Speed and failed at 50 MHz (card init, or f_mount's first reads) gets one retry at 20;
+// a missing card, a card without FAT, a card that refused High Speed and a 20 MHz try get none
 static void test_clock_fallback(void) {
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ) == SD_CLOCK_DEFAULT_KHZ);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_DEFAULT_KHZ) == SD_CLOCK_DEFAULT_KHZ);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, 0) == 0);
-    CHECK(sd_policy_fallback_khz(SD_CLOCK_DEFAULT_KHZ, SD_CLOCK_DEFAULT_KHZ) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_ERROR) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NO_CARD) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_OK) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ, SD_MOUNT_NOT_FAT) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR) == 0); // refused HS: at 20
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, 0, SD_MOUNT_NO_CARD) == 0);                  // never answered
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_DEFAULT_KHZ, SD_CLOCK_DEFAULT_KHZ, SD_MOUNT_ERROR) == 0);
     CHECK(SD_CLOCK_HS_KHZ == 50000 && SD_CLOCK_DEFAULT_KHZ == 20000);
+}
+
+// #583: the live clock from the registers: 200 / 4 = 50 MHz, 160 / 4 = 40 (the stuck state), the probe's 400 kHz
+static void test_bus_clock(void) {
+    CHECK(sd_bus_khz(200, 4, 0) == 50000);
+    CHECK(sd_bus_khz(160, 4, 0) == 40000);
+    CHECK(sd_bus_khz(160, 8, 0) == 20000);
+    CHECK(sd_bus_khz(160, 10, 20) == 400);
+    CHECK(sd_bus_khz(200, 0, 0) == 0);
+    char line[96];
+    sd_bus_line(200, 4, 0, 0, line, sizeof(line));
+    CHECK(strcmp(line, "sdmmc live: 200 MHz / 4, slot 0 50000 kHz, slot 1 50000 kHz") == 0);
+    sd_bus_line(160, 10, 20, 0, line, sizeof(line));
+    CHECK(strcmp(line, "sdmmc live: 160 MHz / 10, slot 0 400 kHz, slot 1 16000 kHz") == 0);
 }
 
 static void test_io_run(void) {
@@ -164,6 +182,7 @@ static void test_confirm(void) {
 int main(void) {
     test_mount_plan();
     test_clock_fallback();
+    test_bus_clock();
     test_io_run();
     test_errno();
     test_sizes();

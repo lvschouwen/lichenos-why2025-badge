@@ -63,7 +63,9 @@ bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool 
 // proved the staged bundle is not pending, nor one with no bundle staged (the flasher then leaves the C6 alone).
 bool c6_bundle_pending(bool changed, bool checked, bool staged, bool ident_ok);
 
-// The SDIO link clock (#583). IDF's SDIO card init applies at most SDMMC_FREQ_HIGHSPEED (40000 kHz) whatever the host
-// asks for; the C6 runs High Speed mode up to 50000. After an attach that left slot 1 at applied_khz, the clock to set
-// (configured_khz), or 0 to leave it: already there, nothing applied (no slot), or configured below what is running.
+// The SDIO link clock (#583). IDF's SDIO card init sets exactly SDMMC_FREQ_HIGHSPEED (C6_SDIO_HS_CAP_KHZ) when the card
+// took High Speed mode, whatever the host asked for; the C6 runs High Speed up to 50000. After an attach that left
+// slot 1 at applied_khz, the clock to set (configured_khz), or 0 to leave it: not in High Speed (20000, the default
+// speed, must stay there), nothing applied (no slot), or configured at or below the cap.
+#define C6_SDIO_HS_CAP_KHZ 40000
 uint32_t c6_sdio_raise_khz(uint32_t configured_khz, int applied_khz);

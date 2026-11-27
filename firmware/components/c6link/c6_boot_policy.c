@@ -114,5 +114,5 @@ bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool 
 }
 
 uint32_t c6_sdio_raise_khz(uint32_t configured_khz, int applied_khz) {
-    return applied_khz > 0 && (uint32_t)applied_khz < configured_khz ? configured_khz : 0;
+    return applied_khz == C6_SDIO_HS_CAP_KHZ && configured_khz > C6_SDIO_HS_CAP_KHZ ? configured_khz : 0;
 }
