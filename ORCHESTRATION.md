@@ -53,5 +53,4 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-27, epic #591 dependency wave in flight)
-- State table and merge notes: the latest #591 comment. Agents impl-588 (wt-1), impl-589 (wt-5), impl-590 (wt-6), impl-592 (wt-7), impl-371 (wt-4, uncommitted superproject work: don't reset the slot).
-- Merge #588 first (CHECK moves to ~/esp/esp-idf-v6.1-head; move the stale bootloader caches aside), then #589/#590/#592, then #371 after its review. One bench at the end covers #583/#586 too.
+- State: the latest #591 comment. #588/#589/#590/#592 are merged. impl-371 (wt-4) is making the review fixes and rebasing; then the fork push `why2025-badge-main`, the #371 merge and ONE bench (#583/#586 too).
