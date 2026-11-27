@@ -91,15 +91,11 @@ extern "C" fn pmain() -> ! {
     let mut stage = STAGE;
     let mut cpu_mhz = 40;
     if let Some(rest) = STAGE.strip_prefix("cpu") {
-        // "cpu400-..." asks for 400 MHz (owner decision, #645); "cpu-..." stays at 360
-        let (target, rest) = match rest.strip_prefix("400") {
-            Some(r) => (400, r),
-            None => (360, rest),
-        };
+        let target = 360;
         stage = rest.strip_prefix('-').unwrap_or("");
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, boot hart, RAM-only image (see clock::cpu_to_360).
-        match unsafe { clock::cpu_to_mhz(&mut log, target) } {
+        match unsafe { clock::cpu_to_360(&mut log) } {
             Ok((_, Some(a))) => {
                 cpu_mhz = a;
                 pl!("PERF cpu.clock mhz={cpu_mhz}");
