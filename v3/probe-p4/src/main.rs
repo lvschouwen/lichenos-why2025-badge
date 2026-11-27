@@ -11,6 +11,7 @@
 mod hw;
 mod b6x;
 mod core1;
+mod app_desc;
 
 use core::arch::global_asm;
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
@@ -36,7 +37,8 @@ extern "C" {
 }
 
 const PROBE_ID: &str = env!("LICHEN_PROBE_ID");
-/// LICHEN_PROBE_RUN picks the suite: "b5" (default, run 10), "b6" (run 9), "core1" (run 8) or "core0" (runs 1-7).
+/// LICHEN_PROBE_RUN picks the suite: "b5" (default, run 10), "b6" (run 9), "core1" (run 8), "core0" (runs 1-7) or
+/// "app" (step 3b): an app image the v6.1 bootloader loads from ota_1, see app_desc.rs.
 const RUN: &str = match option_env!("LICHEN_PROBE_RUN") {
     Some(r) => r,
     None => "b5",
@@ -154,6 +156,16 @@ extern "C" fn pmain() -> ! {
             // SAFETY: park; the host hard-resets the badge after END.
             unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
         }
+    }
+    if const { run_is("app") } {
+        pl!("lichen-probe-p4 {PROBE_ID} (#608 step 3b), core 0, v6.1 bootloader state: app image in ota_1");
+        b5_dump(); // first, and drained: a locked entry or a B1 fault after it cannot cost the dump
+        hw::drain();
+        setup_pmp();
+        b1_user_mode();
+        pl!("END ok");
+        hw::drain();
+        app_desc::reset(); // the bootloader then finds ota_1 still pending-verify, marks it aborted, boots ota_0
     }
     if const { run_is("b6") } {
         pl!("lichen-probe-p4 {PROBE_ID} (#608 run 9), core 0, ROM download-mode state: B6 mtime clock and violation record");
