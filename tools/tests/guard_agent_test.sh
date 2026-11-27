@@ -5,13 +5,20 @@
 # judged exactly as before: badge.sh verbs pass there.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-hook="$here/../../.claude/hooks/guard-badge.sh"
 tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT
 printf '# test node\nTESTNODE\nscope #ZZ-Bench\n' > "$tmp/allow"
 # A main checkout and a slot (a git worktree of it), as the agents see them
 main=$tmp/main slot=$tmp/main/.claude/worktrees/wt-1
 git init -q "$main" && git -C "$main" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
 git -C "$main" worktree add -q "$slot" -b slotbranch
+# the hook anchors trust on its own checkout, so it runs from a copy inside the fake main checkout
+mkdir -p "$main/.claude/hooks" "$main/tools"
+cp "$here/../../.claude/hooks/guard-badge.sh" "$main/.claude/hooks/"
+cp "$here/../onair_guard.sh" "$main/tools/"
+hook=$main/.claude/hooks/guard-badge.sh
+# an agent's own repo with its own wrapper copy
+evil=$tmp/evil
+git init -q "$evil" && mkdir -p "$evil/tools"
 W=$main/tools/v3-load-ram.sh
 fail=0
 decision() { # $1 = command, $2 = agent id (empty for main), $3 = cwd; prints deny, ask or pass
@@ -45,7 +52,11 @@ expect deny "xargs $W k.bin"
 expect deny "BADGE_PORT=/dev/ttyACM0 $W k.bin"
 expect deny "cd /x && $W k.bin"
 expect deny "bash -c '$W k.bin'"
-expect deny "$W k.bin" agent-1 "$tmp"     # no checkout to resolve: nothing is trusted
+expect pass "$W k.bin" agent-1 "$tmp"     # trust does not depend on the agent's cwd
+expect deny "$evil/tools/v3-load-ram.sh k.bin" agent-1 "$evil"   # a repo the agent cd'd into is not trusted
+expect deny "rm -f ~/badge-logs/bench.lock"
+expect deny "touch /home/x/badge-logs/bench.lock"
+expect pass "rm -f ~/badge-logs/bench.lock" ""   # main owns it
 # Agents: injections after or around the wrapper are denied
 expect deny "$W k.bin; ls"
 expect deny "$W k.bin && ls"

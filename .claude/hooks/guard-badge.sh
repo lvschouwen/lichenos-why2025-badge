@@ -32,17 +32,25 @@ deny() {
 #    tools/v3-load-ram.sh (#614: RAM-bounded, locked, no flash), and only as one plain invocation: its absolute path,
 #    then arguments of [A-Za-z0-9_./+:=@%,-] separated by spaces. No separator, expansion, redirect, newline, wrapper
 #    or variable prefix gets through, and a slot's own (editable) copy is refused. The main checkout is the git common
-#    dir's parent, never the agent's slot. Everything else naming badge.sh, ssh, scp or esptool in command position
+#    dir's parent (of this hook's checkout, not the
+#    agent's cwd), never the agent's slot. Everything else naming badge.sh, ssh, scp or esptool in command position
 #    (after a separator, a quote or a wrapper word) is refused, so a grep or a commit message naming them passes.
 #    Main has no agent_id and is judged by the rules below only.
 agent_id=$(printf '%s' "$input" | jq -r '.agent_id // empty' 2>/dev/null || true)
 if [ -n "$agent_id" ]; then
-  common=$(git -C "${cwd:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  # Trust is anchored on this hook's own checkout (settings run it from $CLAUDE_PROJECT_DIR, the main checkout),
+  # never on the cwd in the hook input: an agent that cd's into a repo of its own must not get that repo's copy trusted
+  hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  common=$(git -C "$hook_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
   trusted=
   case $common in /*/.git) trusted=${common%/.git}/tools/v3-load-ram.sh ;; esac
   wrapper_re='^(/[A-Za-z0-9_./-]+)( +[A-Za-z0-9_./+:=@%,-]+)* *$'
   if [ -n "$trusted" ] && [[ $cmd =~ $wrapper_re ]] && [ "${BASH_REMATCH[1]}" = "$trusted" ]; then
     finish
+  fi
+  # the bench lock is main's: an agent that removed it could load-ram during main's flash or soak
+  if printf '%s' "$cmd" | grep -q 'bench\.lock'; then
+    deny "the bench lock (badge-logs/bench.lock) is main's bench claim; agents never create, remove or touch it (#614)"
   fi
   cw="(^|[;&|(\`'\"{]|\\b(then|do|else|exec|command|env|sudo|time|xargs|nohup|bash|sh|source|timeout[[:space:]]+[0-9.]+[smh]?))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:];&|'\"]*/)?"
   if printf '%s\n' "$cmd" | grep -qE "${cw}(badge\.sh|v3-load-ram\.sh|ssh|scp|esptool(\.py)?)([[:space:]]|\$)"; then

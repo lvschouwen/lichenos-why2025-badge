@@ -2492,6 +2492,7 @@ add_test(NAME badge_sd_route_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../to
 add_test(NAME guard_onair_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/guard_onair_test.sh)
 add_test(NAME guard_agent_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/guard_agent_test.sh)
 add_test(NAME v3_load_ram_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/v3_load_ram_test.py)
+add_test(NAME load_ram_run_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/load_ram_run_test.py)
 add_test(NAME check_release_image_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_release_image_test.sh)
 add_test(NAME build_plan_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/build_plan_test.sh)
 add_test(NAME badge_console_ctrl_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_console_ctrl_test.sh)

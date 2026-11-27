@@ -19,7 +19,7 @@
 # the checker from the main checkout (found through git's common dir) with a fixed PATH.
 #
 # Env: BADGE_PORT, else the first line of ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/port, is the serial port on the
-# flash host; it must look like /dev/ttyACM0, /dev/ttyUSB0 or /dev/serial/by-id/<name>. --timeout N seconds (default
+# flash host (a port from that file is also passed as BADGE_EXTRA_PORTS, so a CH340 bridge works); it must look like /dev/ttyACM0, /dev/ttyUSB0 or /dev/serial/by-id/<name>. --timeout N seconds (default
 # 20; with --follow default 120; 1..900); --follow keeps the kernel running until the timeout instead of stopping at
 # its 'END' line.
 set -euo pipefail
@@ -48,7 +48,15 @@ fi
 { [ "$secs" -ge 1 ] && [ "$secs" -le 900 ]; } || { echo "refusing: --timeout must be 1..900" >&2; exit 2; }
 [ -f "$image" ] || { echo "refusing: no such image: $image" >&2; exit 1; }
 
-port=${BADGE_PORT:-$(head -n1 "${XDG_CONFIG_HOME:-$HOME/.config}/why2025-badge/port" 2>/dev/null || true)}
+port_file=${XDG_CONFIG_HOME:-$HOME/.config}/why2025-badge/port
+port=${BADGE_PORT:-}
+extra_ports=${BADGE_EXTRA_PORTS:-}
+if [ -z "$port" ]; then
+    port=$(head -n1 "$port_file" 2>/dev/null || true)
+    # the owner wrote this port down as the badge, so it may be a CH340 (1a86) that badge.sh's Espressif vendor check
+    # would refuse; a port from the environment gets no such pass
+    extra_ports=$port
+fi
 [ -n "$port" ] || { echo "refusing: no port (set BADGE_PORT or write it to ~/.config/why2025-badge/port)" >&2; exit 1; }
 [[ $port =~ ^/dev/(serial/by-id/[A-Za-z0-9_.:-]+|tty(ACM|USB)[0-9]+)$ ]] ||
     { echo "refusing: port '$port' is not /dev/ttyACMn, /dev/ttyUSBn or /dev/serial/by-id/<name>" >&2; exit 1; }
@@ -60,7 +68,10 @@ image=$tmp/input
 check=$root/tools/v3_load_ram_check.py
 python3 -I "$check" "$image" || exit 1
 if [ "$(head -c4 "$image")" = $'\x7fELF' ]; then
-    esptool_bin=$(command -v esptool) || { echo "refusing: esptool not found" >&2; exit 1; }
+    # IDF 6.1's esptool first (a pip --user esptool may be broken), then whatever the fixed PATH has
+    esptool_bin=''
+    for c in "$HOME"/.espressif/python_env/idf6.1_*/bin/esptool; do [ -x "$c" ] && { esptool_bin=$c; break; }; done
+    [ -n "$esptool_bin" ] || esptool_bin=$(command -v esptool) || { echo "refusing: esptool not found" >&2; exit 1; }
     "$esptool_bin" --chip esp32p4 elf2image --output "$tmp/image.bin" "$image" >/dev/null
     python3 -I "$check" "$tmp/image.bin" || exit 1
     image=$tmp/image.bin
@@ -75,4 +86,10 @@ flock -n 9 || { echo "refusing: another v3-load-ram run holds the lock" >&2; exi
 ! bench_held || exit 1
 
 # shellcheck disable=SC2086 # $follow is empty or one flag
-"$root/tools/badge.sh" load-ram "$port" "$image" --baud 460800 --timeout "$secs" $follow
+# badge.sh gets a clean environment: no BADGE_VENV, BADGE_BAUD, XDG_CONFIG_HOME or other caller setting reaches it,
+# and the ssh host is checked here, so a host file reading '-oProxyCommand=...' never becomes an ssh option
+host=${BADGE_HOST:-$(cat "$HOME/.config/why2025-badge/host" 2>/dev/null || true)}
+host=${host//[[:space:]]/}
+[[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "refusing: badge host '$host' is not a plain host name" >&2; exit 1; }
+env -i HOME="$HOME" PATH="$PATH" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"} BADGE_HOST="$host" \
+    BADGE_EXTRA_PORTS="$extra_ports" "$root/tools/badge.sh" load-ram "$port" "$image" --baud 460800 --timeout "$secs" $follow

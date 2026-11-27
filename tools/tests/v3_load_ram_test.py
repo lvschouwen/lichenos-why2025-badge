@@ -45,14 +45,17 @@ class WrapperTest(unittest.TestCase):
         for f in ("v3-load-ram.sh", "v3_load_ram_check.py"):
             shutil.copy(os.path.join(TOOLS, f), tools)
         self.record = os.path.join(self.tmp, "badge-args")
-        self.write_exec(os.path.join(tools, "badge.sh"), f'#!/bin/sh\necho "$@" > "{self.record}"\ncp "$3" "{self.tmp}/seen"\n')
+        self.write_exec(os.path.join(tools, "badge.sh"), f'#!/bin/sh\necho "$@" > "{self.record}"\ncp "$3" "{self.tmp}/seen"\n'
+                        f'printf %s "$BADGE_EXTRA_PORTS" > "{self.tmp}/extra"\n'
+                        f'env > "{self.tmp}/env"\n')
         self.good_bin = os.path.join(self.tmp, "good.bin")
         self.put(self.good_bin, image([(RAM, 64)]))
         # stand-in for the elf-to-image converter: always yields the good image, and says it ran
         stub = os.path.join(self.tmp, ".local", "bin")  # the wrapper's fixed PATH ends in $HOME/.local/bin
         os.makedirs(stub)
         self.write_exec(os.path.join(stub, "esptool"), f'#!/bin/sh\ncp "{self.good_bin}" "$5"\ntouch "{self.tmp}/converted"\n')
-        self.env = dict(os.environ, HOME=self.tmp, BADGE_PORT="/dev/ttyACM7", XDG_CONFIG_HOME=self.tmp)
+        self.env = dict(os.environ, HOME=self.tmp, BADGE_PORT="/dev/ttyACM7", XDG_CONFIG_HOME=self.tmp,
+                        BADGE_HOST="flashhost", BADGE_VENV="/evil")
 
     def write_exec(self, path, text):
         with open(path, "w") as f:
@@ -173,6 +176,52 @@ class WrapperTest(unittest.TestCase):
         rc, err = self.run_wrapper(self.good_bin)
         self.assertEqual(rc, 1)
         self.assertIn("no port", err)
+
+    def extra(self):
+        with open(f"{self.tmp}/extra") as f:
+            return f.read()
+
+    def test_port_file_port_passed_as_extra(self):
+        del self.env["BADGE_PORT"]
+        os.makedirs(f"{self.tmp}/why2025-badge")
+        port = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+        with open(f"{self.tmp}/why2025-badge/port", "w") as f:
+            f.write(port + "\n")
+        rc, err = self.run_wrapper(self.good_bin)
+        self.assertEqual(rc, 0, err)
+        with open(self.record) as f:
+            self.assertEqual(f.read().split()[1], port)
+        self.assertEqual(self.extra(), port)
+
+    def test_env_port_gets_no_extra_pass(self):
+        self.assertEqual(self.run_wrapper(self.good_bin)[0], 0)
+        self.assertEqual(self.extra(), "")
+
+    def test_clean_env_for_badge_sh(self):
+        self.assertEqual(self.run_wrapper(self.good_bin)[0], 0)
+        with open(f"{self.tmp}/env") as f:
+            env = dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
+        self.assertEqual(env.get("BADGE_HOST"), "flashhost")
+        self.assertNotIn("BADGE_VENV", env)
+        self.assertNotIn("XDG_CONFIG_HOME", env)
+
+    def test_bad_hosts_refused(self):
+        for host in ["-oProxyCommand=id", "a;b", "", "$(id)"]:
+            self.env["BADGE_HOST"] = host
+            rc, err = self.run_wrapper(self.good_bin)
+            self.assertEqual(rc, 1, host)
+            self.assertIn("plain host name", err)
+            self.assertFalse(self.called())
+
+    def test_host_from_file(self):
+        del self.env["BADGE_HOST"]
+        os.makedirs(f"{self.tmp}/.config/why2025-badge")
+        with open(f"{self.tmp}/.config/why2025-badge/host", "w") as f:
+            f.write("-oProxyCommand=touch\n")
+        self.assertEqual(self.run_wrapper(self.good_bin)[0], 1)
+        with open(f"{self.tmp}/.config/why2025-badge/host", "w") as f:
+            f.write("bench-pi\n")
+        self.assertEqual(self.run_wrapper(self.good_bin)[0], 0)
 
     def test_bad_timeout(self):
         self.assertEqual(self.run_wrapper(self.good_bin, "--timeout", "0")[0], 2)
