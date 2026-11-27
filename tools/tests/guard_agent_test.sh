@@ -56,6 +56,9 @@ expect pass "$W k.bin" agent-1 "$tmp"     # trust does not depend on the agent's
 expect deny "$evil/tools/v3-load-ram.sh k.bin" agent-1 "$evil"   # a repo the agent cd'd into is not trusted
 expect deny "rm -f ~/badge-logs/bench.lock"
 expect deny "touch /home/x/badge-logs/bench.lock"
+expect deny "rm -f ~/badge-logs/bench.l*"
+expect deny "cd ~/badge-logs && rm -f bench.l?ck"
+expect deny "rm -f ~/badge-logs/*"
 expect pass "rm -f ~/badge-logs/bench.lock" ""   # main owns it
 # Agents: injections after or around the wrapper are denied
 expect deny "$W k.bin; ls"

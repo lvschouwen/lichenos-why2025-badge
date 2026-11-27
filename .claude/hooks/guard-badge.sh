@@ -48,8 +48,10 @@ if [ -n "$agent_id" ]; then
   if [ -n "$trusted" ] && [[ $cmd =~ $wrapper_re ]] && [ "${BASH_REMATCH[1]}" = "$trusted" ]; then
     finish
   fi
-  # the bench lock is main's: an agent that removed it could load-ram during main's flash or soak
-  if printf '%s' "$cmd" | grep -q 'bench\.lock'; then
+  # the bench lock is main's: an agent that removed it could load-ram during main's flash or soak. The whole
+  # badge-logs dir is off limits (agents get their output on stdout), so a glob like bench.l* is caught too. A text
+  # match is a guard against mistakes, not against a hostile agent writing a script.
+  if printf '%s' "$cmd" | grep -qE 'badge-logs|bench\.lock|bench\.l[*?[]'; then
     deny "the bench lock (badge-logs/bench.lock) is main's bench claim; agents never create, remove or touch it (#614)"
   fi
   cw="(^|[;&|(\`'\"{]|\\b(then|do|else|exec|command|env|sudo|time|xargs|nohup|bash|sh|source|timeout[[:space:]]+[0-9.]+[smh]?))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:];&|'\"]*/)?"
