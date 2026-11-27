@@ -252,7 +252,7 @@ fn user(t: &mut Tally) {
         "u.ecall",
         Some(u.echoes == 1 && u.exit == Some(0x1235) && u.fault.is_none()),
         format_args!(
-            "U ecall round trip: {} echo(es), exit a0={:#x?}, mintstatus {:#x}",
+            "U ecall round trip: {} echo(es), exit a0={:x?}, mintstatus {:#x}",
             u.echoes,
             u.exit,
             hw::trap::mintstatus()
@@ -269,7 +269,7 @@ fn user(t: &mut Tally) {
         "u.grant",
         Some(st.exit.is_some() && ld.exit == Some(0xA5A5_0612) && m_view == 0xA5A5_0612),
         format_args!(
-            "U store+load of its data page: store {:?}, load {:#x?}, M reads {m_view:#x}",
+            "U store+load of its data page: store {:?}, load {:x?}, M reads {m_view:#x}",
             st.exit.is_some(),
             ld.exit
         ),

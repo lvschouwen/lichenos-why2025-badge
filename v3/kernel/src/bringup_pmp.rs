@@ -230,7 +230,7 @@ fn pma_rows(t: &mut Tally, udata: usize) {
         t,
         "pma.live",
         Some(m == 0x1357_9BDF && u.exit == Some(0x41)),
-        format_args!("M store+load of cached L2MEM {m:#x}, U echo exit {:#x?}", u.exit),
+        format_args!("M store+load of cached L2MEM {m:#x}, U echo exit {:x?}", u.exit),
     );
 }
 
@@ -320,7 +320,7 @@ fn print_perf(name: &str, samples: &mut [u32], note: &str) {
     let sname = if src() == Src::Mcycle { "mcycle" } else { "mtime" };
     kprintln!(
         "PERF {name} median_us={}.{:02} p95_us={}.{:02} min_us={}.{:02} max_us={}.{:02} n={} timebase={sname} \
-         clock_mhz={} {note}",
+         clock_mhz={} cpu_hz={} {note}",
         m.0,
         m.1,
         p.0,
@@ -330,7 +330,8 @@ fn print_perf(name: &str, samples: &mut [u32], note: &str) {
         hi.0,
         hi.1,
         samples.len(),
-        hz / 1_000_000
+        hz / 1_000_000,
+        hz
     );
 }
 

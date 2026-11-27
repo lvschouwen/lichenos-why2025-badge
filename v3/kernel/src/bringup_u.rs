@@ -120,7 +120,7 @@ fn boot_state(t: &mut Tally, udata: usize) {
         t,
         "boot.coproc",
         h2 & 3 == 0 && p2 & 3 == 0,
-        format_args!("HWLP state {h:#x?} -> {h2:#x?}, PIE state {p:#x?} -> {p2:#x?} (low 2 bits 0 = off)"),
+        format_args!("HWLP state {h:#x} -> {h2:#x}, PIE state {p:#x} -> {p2:#x} (low 2 bits 0 = off)"),
     );
 }
 
@@ -131,7 +131,7 @@ fn regs(t: &mut Tally, sp: usize) {
         t,
         "u.regs",
         f.is_none() && exit == Some(0),
-        format_args!("OR of ra gp tp t0-t6 a2-a7 s0-s11 as seen by U: {exit:#x?} (want 0), fault {f:x?}"),
+        format_args!("OR of ra gp tp t0-t6 a2-a7 s0-s11 as seen by U: {exit:x?} (want 0), fault {f:x?}"),
     );
 }
 
@@ -187,6 +187,6 @@ fn ecall(t: &mut Tally, sp: usize) {
         t,
         "u.badcall",
         f.is_none() && exit == Some(ENOSYS_RET),
-        format_args!("unknown ecall returns {exit:#x?} (want {ENOSYS_RET:#x}) and the run goes on, fault {f:x?}"),
+        format_args!("unknown ecall returns {exit:x?} (want {ENOSYS_RET:#x}) and the run goes on, fault {f:x?}"),
     );
 }
