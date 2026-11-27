@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	320553
+size	<merged-strings>	320649
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -79,7 +79,7 @@ size	libesp_libc.a	7910
 size	libesp_mm.a	6067
 size	libesp_netif.a	9456
 size	libesp_partition.a	3466
-size	libesp_psram.a	7806
+size	libesp_psram.a	7846
 size	libesp_ringbuf.a	6409
 size	libesp_rom.a	596
 size	libesp_security.a	2364

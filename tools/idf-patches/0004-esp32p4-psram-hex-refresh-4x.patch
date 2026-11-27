@@ -14,7 +14,17 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
  
      //write
      addr = 0x0;
-@@ -466,6 +469,9 @@
+@@ -332,6 +335,9 @@
+                    reg_val->mr2.density == 0x7 ? 256 : 0);
+     ESP_EARLY_LOGI(TAG, "good-die     : 0x%02x (%s)", reg_val->mr2.kgd, reg_val->mr2.kgd == 6 ? "Pass" : "Fail");
+     ESP_EARLY_LOGI(TAG, "SRF          : 0x%02x (%s Refresh)", reg_val->mr3.srf, reg_val->mr3.srf == 0x1 ? "Fast" : "Slow");
++#if CONFIG_SPIRAM_HEX_REFRESH_4X
++    ESP_EARLY_LOGI(TAG, "RefreshRate  : 0x%02x (MR4 RF; 0: always 4x, 1: 1x when the temperature allows)", reg_val->mr4.rf); // Lichen #569
++#endif
+     ESP_EARLY_LOGI(TAG, "BurstType    : 0x%02x (%s Wrap)", reg_val->mr8.bt, reg_val->mr8.bt == 1 && reg_val->mr8.bl != 3 ? "Hybrid" : "");
+     ESP_EARLY_LOGI(TAG, "BurstLen     : 0x%02x (%d Byte)", reg_val->mr8.bl, reg_val->mr8.bl == 0x00 ? 16 :
+                    reg_val->mr8.bl == 0x01 ? 32 :
+@@ -466,6 +472,9 @@
      mode_reg.mr0.read_latency = AP_HEX_PSRAM_RD_LATENCY;
      mode_reg.mr0.drive_str = 0;
      mode_reg.mr4.wr_latency = AP_HEX_PSRAM_WR_LATENCY;
