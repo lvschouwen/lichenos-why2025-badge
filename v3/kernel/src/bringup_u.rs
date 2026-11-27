@@ -190,10 +190,7 @@ fn run_cases(t: &mut Tally, sp: usize, cases: &[Case]) {
     }
 }
 
-/// A U access to the CPU-subsystem window 0x2000_0000-0x2FFF_FFFF (CLINT, CLIC) HANGS the badge with no trap when the
-/// PMP denies it (5223aad5 bench), while a PMP-granted access is refused by the hardware privilege check (#608 B4).
-/// So these rows run under a view that grants U R+W on the window and rely on that hardware check. Last, each with a
-/// BEGIN line, so a hang names itself.
+/// Core-local accesses (#646): loads fault in the hardware privilege check, stores and fetches in the PMP.
 const CORE_LOCAL: [Case; 9] = [
     ("u.deny.clint-load", u_load, 0x2000_4000, 5),
     ("u.deny.clint-store", u_store, 0x2000_4000, 7),
@@ -222,37 +219,59 @@ fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
     run_cases(t, sp, &cases);
 }
 
-/// EXPERIMENT 0 = production (narrow grant + sweep), 1 = PMP-denied probe (known to hang: for diagnosis only).
+/// 0 = production. 1 = hang reproducer for #646, probe builds only: the view WITHOUT the fixed core-local window
+/// entry, then one PMP-denied U load at the CLINT, which hangs the P4 with no trap.
 const MODE: u8 = 0;
 
-/// Core-local rows: LAST in the bench order, because a hang here must not hide later rows.
+/// Core-local rows: LAST in the bench order, because a hang here must not hide the rows before them. Every U view
+/// carries the fixed R-only window entry (kcore pmp, #646): loads reach the hardware privilege check and fault, stores
+/// and fetches are denied by the PMP.
 pub fn core_local_rows(t: &mut Tally) {
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, udata) = unsafe { (&_utext as *const u8 as usize, &_udata as *const u8 as usize) };
     let sp = udata + UPAGE;
-    use lichen_kcore::pmp::{self as kp, Region};
-    let r = |base: usize, end: u64, perm| Region { base: base as u32, end, perm };
     if MODE == 1 {
-        crate::pmp::apply(utext, udata, UPAGE);
-        kprintln!("DIAG PMP-denied U load at the CLINT: a hang here, with no 'T' from the trap handler, means no trap");
+        let mut plan =
+            lichen_kcore::pmp::plan(&view_base(utext, udata), crate::pmp::gran()).unwrap_or_else(|_| platform::exit(4));
+        plan.entries[lichen_kcore::pmp::WINDOW_INDEX] = lichen_kcore::pmp::Entry::OFF;
+        crate::pmp::load_unchecked(&plan);
+        kprintln!("DIAG PMP-denied U load at the CLINT without the window entry: expected to hang");
         run_cases(t, sp, &CORE_LOCAL[..1]);
         return;
     }
-    let view = [
-        r(utext, (utext + UPAGE) as u64, kp::R | kp::X),
-        r(udata, (udata + UPAGE) as u64, kp::R | kp::W),
-        r(CLINT_BASE, (CLINT_BASE + CLINT_LEN) as u64, kp::R | kp::W),
-        r(CLIC_BASE, (CLIC_BASE + CLIC_LEN) as u64, kp::R | kp::W),
-    ];
-    match crate::pmp::load_regions(&view) {
-        Ok(_) => {
-            run_cases(t, sp, &CORE_LOCAL);
-            sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
-            sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
-        }
-        Err(e) => record(t, "u.deny.core-local", false, format_args!("cannot plan the core-local view: {e:?}")),
-    }
     crate::pmp::apply(utext, udata, UPAGE);
+    run_cases(t, sp, &CORE_LOCAL);
+    window_probe(t, sp);
+    sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
+    sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
+}
+
+/// One U load then one U store per address, each with its own BEGIN line so a hang names the address and the access.
+/// Core 1's CLIC goes last: M access to it while core 1 is in reset is a known hang (#604).
+fn window_probe(t: &mut Tally, sp: usize) {
+    let addrs = [0x2000_4000usize, 0x2040_0000, 0x20B0_0000, 0x2100_0000, 0x2800_0000, 0x2FFF_FFF0, 0x2081_0000];
+    for a in addrs {
+        for (f, want, what) in [(u_load as unsafe extern "C" fn(), 5u16, "load"), (u_store, 7, "store")] {
+            kprintln!("BEGIN u.win.{what} {a:#010x}");
+            platform::flush();
+            let (fault, exit) = run(f, sp, a, 0);
+            let ok = fault.is_some_and(|(code, tval, _)| code == want && tval == a) && exit.is_none();
+            record(
+                t,
+                "u.win",
+                ok,
+                format_args!("U {what} {a:#010x}: fault {fault:x?} exit {exit:x?} (want code {want})"),
+            );
+        }
+    }
+}
+
+fn view_base(utext: usize, udata: usize) -> [lichen_kcore::pmp::Region; 2] {
+    use lichen_kcore::pmp::{Region, R, W, X};
+    [
+        Region { base: utext as u32, end: (utext + UPAGE) as u64, perm: R | X },
+        Region { base: udata as u32, end: (udata + UPAGE) as u64, perm: R | W },
+    ]
 }
 
 const CLINT_BASE: usize = 0x2000_0000;
@@ -260,7 +279,8 @@ const CLINT_LEN: usize = 0x1_0000;
 const CLIC_BASE: usize = 0x2080_0000;
 const CLIC_LEN: usize = 0x2000;
 
-/// U loads and stores every word of the granted pages: every one must fault (hardware privilege check). A word that
+/// U loads and stores every word of the CLINT and CLIC pages: every one must fault (loads: the hardware privilege
+/// check, stores: the PMP). A word that
 /// does not is a FINDING and fails the row. A BEGIN line per 4 KB block names a hang.
 fn sweep(t: &mut Tally, sp: usize, id: &str, base: usize, len: usize) {
     let (mut words, mut bad) = (0u32, 0u32);

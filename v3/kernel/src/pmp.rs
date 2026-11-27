@@ -141,6 +141,15 @@ pub fn report() -> pmp::Discovery {
 /// Program `want`, writing only the registers that differ from the shadow, then verify by reading back. Returns the
 /// number of registers written. Fails closed: a mismatch means U must not run with this view.
 pub fn load(want: &pmp::Plan) -> usize {
+    if !pmp::view_ok(&want.entries) {
+        kprintln!("pmp: view without the fixed window and deny-all entries (#646): halting");
+        crate::platform::exit(4);
+    }
+    load_unchecked(want)
+}
+
+/// `load` without the fixed-entry check. Only the #646 hang reproducer uses it (probe builds).
+pub fn load_unchecked(want: &pmp::Plan) -> usize {
     // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
     let sh = unsafe { SHADOW.get() };
     let mut writes = 0;

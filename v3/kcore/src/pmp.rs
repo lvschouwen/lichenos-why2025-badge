@@ -20,6 +20,13 @@ pub const ENTRIES: usize = 16;
 /// At most this many entries per app (the issue's budget); the window is `0..DYN_BUDGET`.
 pub const DYN_BUDGET: usize = 8;
 pub const DENY_ALL_INDEX: usize = ENTRIES - 1;
+/// The CPU-subsystem window (CLINT, CLIC, other core's CLIC, user CLIC, holes). A PMP-DENIED U load there hangs the
+/// P4 with no trap (#646, bench 5223aad5), while a PMP-allowed one is refused cleanly by the hardware privilege
+/// check and a PMP-denied store or fetch is clean. So every U view carries this fixed R-only entry: U loads reach the
+/// hardware check, stores and fetches are denied by the PMP. Index 14: after the dynamic window, before deny-all.
+pub const WINDOW_INDEX: usize = ENTRIES - 2;
+pub const WINDOW_BASE: u64 = 0x2000_0000;
+pub const WINDOW_END: u64 = 0x3000_0000;
 /// The P4's PMP granularity (pmpaddr0 reads back 0x3fffffe0 in ROM state, #612 bench).
 pub const GRAN_P4: u32 = 128;
 const SPACE: u64 = 1 << 32;
@@ -33,6 +40,8 @@ pub struct Entry {
 impl Entry {
     pub const OFF: Entry = Entry { cfg: 0, addr: 0 };
     pub const DENY_ALL: Entry = Entry { cfg: NAPOT, addr: 0x1FFF_FFFF };
+    /// NAPOT over 0x2000_0000..0x3000_0000 (256 MiB), R only.
+    pub const WINDOW: Entry = Entry { cfg: NAPOT | R, addr: 0x09FF_FFFF };
     fn mode(self) -> u8 {
         self.cfg & MODE_MASK
     }
@@ -61,6 +70,8 @@ pub enum PlanError {
     Overlap,
     /// More regions than the budget, or the plan needs more than `DYN_BUDGET` entries.
     Budget,
+    /// A region touches the CPU-subsystem window, which only the fixed entry may cover (#646).
+    CoreLocal,
     /// A TOR top the pmpaddr cannot hold (the top 128 B of the address space).
     TopOfSpace,
 }
@@ -87,6 +98,9 @@ fn check_region(r: &Region, gran: u32) -> Result<(), PlanError> {
     }
     if r.perm & W != 0 && r.perm & R == 0 {
         return Err(PlanError::WriteOnly);
+    }
+    if (r.base as u64) < WINDOW_END && r.end > WINDOW_BASE {
+        return Err(PlanError::CoreLocal);
     }
     Ok(())
 }
@@ -136,6 +150,7 @@ pub fn plan(regions: &[Region], gran: u32) -> Result<Plan, PlanError> {
     let mut sorted = [Region { base: 0, end: 0, perm: 0 }; DYN_BUDGET];
     let n = normalise(regions, gran, &mut sorted)?;
     let mut entries = [Entry::OFF; ENTRIES];
+    entries[WINDOW_INDEX] = Entry::WINDOW;
     entries[DENY_ALL_INDEX] = Entry::DENY_ALL;
     let mut used = 0usize;
     // The byte address the previous entry's pmpaddr holds, when the next TOR entry may take it as its base.
@@ -167,6 +182,11 @@ pub fn plan(regions: &[Region], gran: u32) -> Result<Plan, PlanError> {
         tor_base = Some(r.end);
     }
     Ok(Plan { entries, used })
+}
+
+/// Does this U view carry the fixed entries (#646)? The kernel refuses to load one that does not.
+pub fn view_ok(entries: &[Entry; ENTRIES]) -> bool {
+    entries[WINDOW_INDEX] == Entry::WINDOW && entries[DENY_ALL_INDEX] == Entry::DENY_ALL
 }
 
 /// What U-mode may do at byte `a` under `entries` (spec semantics: the lowest matching entry decides, no match = deny).
@@ -225,9 +245,9 @@ impl Discovery {
     pub fn free(&self) -> u32 {
         self.free_mask.count_ones()
     }
-    /// Entries 0..DYN_BUDGET and the deny-all entry are all free, which is what the planner's layout needs.
+    /// Entries 0..DYN_BUDGET, the window entry and the deny-all entry are all free, which is what the planner's layout needs.
     pub fn layout_ok(&self) -> bool {
-        let need: u16 = ((1u32 << DYN_BUDGET) - 1) as u16 | 1 << DENY_ALL_INDEX;
+        let need: u16 = ((1u32 << DYN_BUDGET) - 1) as u16 | 1 << WINDOW_INDEX | 1 << DENY_ALL_INDEX;
         self.free_mask & need == need && self.locked_mask & need == 0
     }
 }
@@ -265,7 +285,8 @@ mod tests {
         assert_eq!(p.used, 1);
         assert_eq!(p.entries[0], Entry { cfg: NAPOT | R | W, addr: (0x4FF7_0000 | 0x7FF) >> 2 });
         assert_eq!(p.entries[DENY_ALL_INDEX], Entry::DENY_ALL);
-        assert!(p.entries[1..DENY_ALL_INDEX].iter().all(|e| *e == Entry::OFF));
+        assert!(p.entries[1..WINDOW_INDEX].iter().all(|e| *e == Entry::OFF));
+        assert_eq!(p.entries[WINDOW_INDEX], Entry::WINDOW);
     }
 
     #[test]
@@ -328,9 +349,7 @@ mod tests {
     #[test]
     fn top_of_the_address_space() {
         // Aligned 4 GiB and the top half are NAPOT; an odd span reaching 4 GiB is not expressible as a TOR top.
-        let all = plan(&[rg(0, SPACE, R)], G).unwrap();
-        assert_eq!(all.entries[0].addr, 0x1FFF_FFFF);
-        assert_eq!(u_perms(&all.entries, 0xFFFF_FFFF), R);
+        assert_eq!(plan(&[rg(0, SPACE, R)], G), Err(PlanError::CoreLocal)); // covers the window
         let top = plan(&[rg(0x8000_0000, SPACE, R)], G).unwrap();
         assert_eq!(u_perms(&top.entries, 0xFFFF_FFFF), R);
         assert_eq!(u_perms(&top.entries, 0x7FFF_FFFF), 0);
@@ -338,6 +357,36 @@ mod tests {
         assert_eq!(plan(&[rg(0xFFFF_D000, SPACE, R)], G), Err(PlanError::TopOfSpace)); // 8 KiB: TOR
                                                                                        // Just below the top: a TOR top of 0xFFFF_FF80 is the highest the hardware holds.
         assert!(plan(&[rg(0xFFFF_E000, 0xFFFF_FF80, R)], G).is_ok());
+    }
+
+    #[test]
+    fn every_plan_carries_the_r_only_core_local_window() {
+        let p = plan(&[rg(0x1000, 0x2000, R)], G).unwrap();
+        assert!(view_ok(&p.entries));
+        for a in [0x2000_0000u32, 0x2000_4000, 0x2081_0000, 0x20B0_0000, 0x2FFF_FFFF] {
+            assert_eq!(u_perms(&p.entries, a), R, "{a:#x}");
+        }
+        for a in [0x1FFF_FFFFu32, 0x3000_0000, 0x3010_0000] {
+            assert_eq!(u_perms(&p.entries, a), 0, "{a:#x}");
+        }
+        // The fixed entry is a real, decodable 256 MiB NAPOT, never locked.
+        assert_eq!(Entry::WINDOW.cfg & LOCK, 0);
+        assert_eq!(readback(Entry::WINDOW, G), Entry::WINDOW);
+        let mut e = p.entries;
+        e[WINDOW_INDEX] = Entry::OFF;
+        assert!(!view_ok(&e));
+        e[WINDOW_INDEX] = Entry::WINDOW;
+        e[DENY_ALL_INDEX] = Entry::OFF;
+        assert!(!view_ok(&e));
+    }
+
+    #[test]
+    fn regions_touching_the_window_are_refused() {
+        assert_eq!(plan(&[rg(0x2000_0000, 0x2000_1000, R)], G), Err(PlanError::CoreLocal));
+        assert_eq!(plan(&[rg(0x1FFF_F000, 0x2000_0080, R)], G), Err(PlanError::CoreLocal));
+        assert_eq!(plan(&[rg(0x2FFF_F000, 0x3000_0000, R | W)], G), Err(PlanError::CoreLocal));
+        assert!(plan(&[rg(0x3000_0000, 0x3000_1000, R)], G).is_ok());
+        assert!(plan(&[rg(0x1FFF_F000, 0x2000_0000, R)], G).is_ok());
     }
 
     #[test]
@@ -408,6 +457,9 @@ mod tests {
     fn rom_state_has_sixteen_free_entries() {
         let d = discover(&[0; 16], 0x3FFF_FFE0);
         assert_eq!((d.free(), d.locked_mask, d.layout_ok()), (16, 0, true));
+        let mut cfg = [0u8; 16];
+        cfg[WINDOW_INDEX] = NAPOT | R;
+        assert!(!discover(&cfg, 0x3FFF_FFE0).layout_ok());
     }
 
     #[test]
@@ -487,6 +539,9 @@ mod tests {
     }
 
     fn oracle(rs: &[Region], a: u32) -> u8 {
+        if (WINDOW_BASE..WINDOW_END).contains(&(a as u64)) {
+            return R;
+        }
         rs.iter().filter(|r| (a as u64) >= r.base as u64 && (a as u64) < r.end).fold(0, |p, r| p | r.perm)
     }
 
@@ -516,7 +571,7 @@ mod tests {
                 }
                 Err(e) => {
                     // The only legitimate failures for valid, 128-aligned inputs: overlap, budget, top of space.
-                    prop_assert!(matches!(e, PlanError::Overlap | PlanError::Budget | PlanError::TopOfSpace), "{:?}", e);
+                    prop_assert!(matches!(e, PlanError::Overlap | PlanError::Budget | PlanError::TopOfSpace | PlanError::CoreLocal), "{:?}", e);
                 }
             }
         }
