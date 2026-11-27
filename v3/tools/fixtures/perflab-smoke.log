@@ -1,0 +1,42 @@
+Loaded 1 segments from 'load-ram.bin' to RAM, executing at 0x4ff10000.
++-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
+lichen-v3 4401d881+-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
+CHECK 648.cfg INFO cpu360-ps120-l2k256l64-dma32-ldocal suite smoke
+clk: after: measured Some(359) MHz
+CHECK 648.cpu PASS measured 359 MHz, 360 expected
+CHECK 648.temp INFO die temperature sensor reads (control word 0x00419685)
+PERF lab.temp.start celsius=38.25
+l2: ROM state 256 KB, 64 B lines
+CHECK 648.l2 PASS 256 KB, 64 B lines read back; carve starts at 0x4ff80000
+psram: ldo: now xpd=1 sw_owner=1 tieh=0 dref=12 mul=2
+CHECK 648.psram PASS 120 MHz requested, calibrated: true (None)
+CHECK 648.map PASS 32 MB mapped with the hole, 0 cache sync failures
+PERF lab.config cpu_mhz=360 psram_mhz=120 l2_kb=256 l2_line_b=64 dma_burst_b=32 ldo_dref=12 ldo_mul=2
+CHECK 648.config PASS cpu360-ps120-l2k256l64-dma32-ldocal requested; cpu 360 MHz measured, read back from the registers
+BEGIN mem
+PERF lab.mem.sram.seq_read mb_s=638.39
+PERF lab.mem.sram.seq_write mb_s=239.74
+PERF lab.mem.sram.copy mb_s=234.91
+PERF lab.mem.psram.seq_read mb_s=111.30
+PERF lab.mem.psram.seq_write mb_s=76.47 store_mb_s=77.67
+PERF lab.mem.psram.copy mb_s=46.74
+PERF lab.mem.psram.rand_read mops=1.93 ns=517.01
+PERF lab.mem.chase.psram.ws8k ns=6.25 stride_b=128
+PERF lab.mem.chase.psram.ws128k ns=33.14 stride_b=128
+PERF lab.mem.chase.psram.ws8m ns=519.40 stride_b=128
+PERF lab.mem.chase.psram.ws8m_s64 ns=487.78 stride_b=64
+BEGIN dma
+PERF lab.dma.sram_to_sram mb_s=172.93 cpu_free_pct=98.43 setup_cycles=1070 burst_b=32
+PERF lab.dma.psram_to_psram mb_s=77.52 cpu_free_pct=99.74 setup_cycles=1070 burst_b=32
+BEGIN integrity
+integrity: whole chip 32 MB, hole 0x540000-0x5C0000 included, watch class 0x400 mod 0x800 in 0x540000-0x640000
+PERF lab.integrity.cached.addr mb_s=28.39 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_write.addr mb_s=17.81 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_read.addr mb_s=17.81 words=8388608 bad=0 watch=0
+PERF lab.temp.integrity celsius=39.56
+CHECK 648.integrity PASS 2 pattern passes, each cached and DMA, whole chip, 0 bad words (0 cache sync failures)
+BEGIN park
+CHECK 648.park PASS 5 s untouched, 2 x 1024 KB (cpu-written and dma-written), 0 + 0 bad words
+CHECK 648.run PASS suites done, 0 cache sync failures
+PERF lab.temp.end celsius=38.69
+END ok

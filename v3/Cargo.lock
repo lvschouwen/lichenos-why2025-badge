@@ -100,12 +100,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "lichen-perflab"
+version = "0.1.0"
+dependencies = [
+ "lichen-kcore",
+ "lichen-platform-esp32p4",
+]
+
+[[package]]
 name = "lichen-platform-esp32p4"
 version = "0.1.0"
 
 [[package]]
 name = "lichen-probe-p4"
 version = "0.1.0"
+
+[[package]]
+name = "lichen-probe-perf"
+version = "0.1.0"
+dependencies = [
+ "lichen-kcore",
+ "lichen-perflab",
+ "lichen-platform-esp32p4",
+]
 
 [[package]]
 name = "lichen-probe-psram"

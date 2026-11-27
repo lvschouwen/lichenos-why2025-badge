@@ -1,0 +1,16 @@
+[package]
+name = "lichen-probe-perf"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "#648: perf lab probe for the ESP32-P4, run RAM-only through load-ram. Experiments live here, never in the kernel."
+
+[[bin]]
+name = "lichen-probe-perf"
+test = false
+bench = false
+
+[dependencies]
+lichen-kcore = { path = "../kcore" }
+lichen-perflab = { path = "../perflab" }
+lichen-platform-esp32p4 = { path = "../platform/esp32p4", features = ["bench-experiments"] }

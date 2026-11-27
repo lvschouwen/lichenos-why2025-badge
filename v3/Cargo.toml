@@ -1,7 +1,7 @@
 # Lichen OS v3 feasibility PoC (#607). Experimental: never merged into the v2 firmware tree until validated.
 [workspace]
 resolver = "2"
-members = ["abi", "kcore", "kernel", "apps/heartbeat", "apps/attacker", "platform/esp32p4", "probe-p4", "probe-psram"]
+members = ["abi", "kcore", "kernel", "apps/heartbeat", "apps/attacker", "platform/esp32p4", "probe-p4", "probe-psram", "perflab", "probe-perf"]
 # v3/boot is its own workspace (#615).
 exclude = ["boot"]
 
