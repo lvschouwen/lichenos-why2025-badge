@@ -52,5 +52,5 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27, epic #591 dependency wave in flight)
-- State: the latest #591 comment. #588/#589/#590/#592 are merged. impl-371 (wt-4) is making the review fixes and rebasing; then the fork push `why2025-badge-main`, the #371 merge and ONE bench (#583/#586 too).
+## Live (2026-11-27)
+- #591: all merged, bench blocked by #593. #593: wt-1 holds c0530141 + eec68b03 (unreviewed, unmerged). Next: #595. State: the latest comment on each.
