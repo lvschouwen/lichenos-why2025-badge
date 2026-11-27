@@ -66,6 +66,8 @@ pub enum Error {
     /// Timing tuning found no passing DQS phase or delay line: the chip answers but is not reliable at this speed. The details are
     /// in the `tune:` log line; `Info` is not returned.
     TuningFallback,
+    /// The mode registers read back after the write are not what was written (or the chip is not the expected part).
+    ModeMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -204,6 +206,13 @@ unsafe fn init_run(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> Resul
         return Err(Error::NotConnected);
     }
     info.modes = mspi::read_mode_regs();
+    if !info.modes.matches_init(sp.rd_lat, sp.wr_lat) {
+        log(format_args!(
+            "chip: mode registers do not read back as written (rl {} wl {}): mr0={:#04x} mr1={:#04x} mr2={:#04x} mr4={:#04x} mr8={:#04x}",
+            sp.rd_lat, sp.wr_lat, info.modes.mr0, info.modes.mr1, info.modes.mr2, info.modes.mr4, info.modes.mr8
+        ));
+        return Err(Error::ModeMismatch);
+    }
     info.size_bytes = info.modes.size_bytes();
     log(format_args!(
         "chip: vendor={:#x} density={} ({} MB) good_die={} mr0={:#04x} mr4={:#04x} (refresh={}) mr8={:#04x}",

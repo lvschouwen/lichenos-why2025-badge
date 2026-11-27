@@ -139,6 +139,17 @@ impl ModeRegs {
     pub fn refresh(&self) -> u8 {
         (self.mr4 >> 3) & 3
     }
+    /// Whether the registers read back are what `init_mode_regs(rl, wl)` writes on the expected part (vendor 0xD, 256 Mbit):
+    /// read latency field and fixed latency (MR0), write latency, refresh 4x and PASR 0 (MR4 exact), burst, row crossing and
+    /// x16 (MR8). A chip still at another speed's latency, or a link that reads garbage, fails this.
+    pub fn matches_init(&self, rl: u8, wl: u8) -> bool {
+        self.vendor_id() == 0xD
+            && self.density() == 7
+            && (self.mr0 >> 2) & 7 == rl
+            && self.mr0 & (1 << 5) != 0
+            && self.mr4 == mr4_value(0, wl)
+            && self.mr8 & 0x4B == 0x4B
+    }
     pub fn size_bytes(&self) -> u32 {
         match self.density() {
             1 => 4 << 20,
@@ -252,7 +263,7 @@ mod tests {
         // MR0: drive strength 0, read latency field 2 at [4:2], LT fixed (bit 5); bits 6 and 7 kept
         assert_eq!(mr0_value(0x00, RD_LATENCY), 0b0010_1000);
         assert_eq!(mr0_value(0xC3, RD_LATENCY), 0b1110_1000);
-        // MR4: write latency field 2 at [7:5], RF = 0 (4x), PASR kept
+        // MR4: write latency field 2 at [7:5], RF = 0 (4x), PASR 0
         assert_eq!(mr4_value(0x00, WR_LATENCY), 0x40);
         assert_eq!(mr4_value(0xFF, WR_LATENCY), 0x40); // PASR is always written 0
                                                        // 160 MHz: read latency field 3 (LC6), write latency field 6 (110b = WLC6)
@@ -261,6 +272,17 @@ mod tests {
         // MR8: BL 3, BT 0, RBX 1, X16 1; reserved bits 4, 5 and 7 kept
         assert_eq!(mr8_value(0x00), 0b0100_1011);
         assert_eq!(mr8_value(0xFF), 0b1111_1011);
+    }
+
+    #[test]
+    fn mode_readback_check() {
+        let ok = ModeRegs { mr0: 0x28, mr1: 0x8d, mr2: 0xdf, mr3: 0xa0, mr4: 0x40, mr8: 0x4b };
+        assert!(ok.matches_init(2, 2));
+        assert!(!ok.matches_init(3, 6)); // chip still at LC5 when LC6 was written
+        assert!(!ModeRegs { mr4: 0x47, ..ok }.matches_init(2, 2)); // PASR not 0
+        assert!(!ModeRegs { mr1: 0x00, ..ok }.matches_init(2, 2)); // wrong vendor
+        assert!(!ModeRegs { mr2: 0xd5, ..ok }.matches_init(2, 2)); // wrong density
+        assert!(!ModeRegs { mr8: 0x00, ..ok }.matches_init(2, 2));
     }
 
     #[test]

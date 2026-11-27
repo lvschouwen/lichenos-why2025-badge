@@ -36,6 +36,8 @@ CL=(cargo clippy --locked -q --target-dir target/clippy)
 "${CL[@]}" -p lichen-kcore -p lichen-abi --all-targets --target $HOST -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --target $TARGET -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --all-targets --target $HOST -- -D warnings
+"${CL[@]}" -p lichen-platform-esp32p4 --features bench-experiments --target $TARGET -- -D warnings
+"${CL[@]}" -p lichen-platform-esp32p4 --features bench-experiments --all-targets --target $HOST -- -D warnings
 "${CL[@]}" -p lichen-probe-psram --target $TARGET -- -D warnings
 for app in heartbeat attacker; do
   LICHEN_APP_LD=$PWD/target/lichen/qemu-virt/$app.ld "${CL[@]}" -p $app --target $TARGET -- -D warnings
@@ -43,6 +45,12 @@ done
 LICHEN_APP_HEARTBEAT=$PWD/target/lichen/qemu-virt/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/target/lichen/qemu-virt/attacker.bin \
   "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features qemu-virt -- -D warnings
 "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 -- -D warnings
+
+step "bench-experiments stays out of the kernel"
+if cargo tree --locked -p lichen-kernel --no-default-features --features esp32p4 -e features | grep -q bench-experiments; then
+  echo "bench-experiments is enabled in the kernel's dependency tree" >&2
+  exit 1
+fi
 
 step "image check (RAM-only, inside the limits)"
 python3 -I tools/check_image.py target/lichen/esp32p4/kernel.elf target/lichen/esp32p4/kernel.bin
