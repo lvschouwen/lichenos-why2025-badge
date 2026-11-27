@@ -36,9 +36,11 @@ const E_UTEXT: usize = 4;
 const E_UDATA: usize = 5;
 const E_T1: usize = 6;
 const E_T2: usize = 7;
+const E_TOR_LO: usize = 10;
+const E_TOR_HI: usize = 11;
 const E_LOCK_NAPOT: usize = 12;
-const E_TOR_LO: usize = 13;
-const E_TOR_HI: usize = 14;
+const E_COVER_PERI: usize = 14; // B2: locked M cover of 0x5000_0000-0x5010_0000 (UART0, PMS, GPIO)
+const E_COVER_RAM: usize = 15; // B2: locked M cover of 0x4FF0_0000-0x4FF8_0000 (all probe memory)
 
 const UTEXT: usize = 0x4FF1_8000;
 const UDATA: usize = 0x4FF5_8000;
@@ -101,7 +103,7 @@ extern "C" fn pmain() -> ! {
     pl!("");
     pl!("lichen-probe-p4 {PROBE_ID} (#608), core 0, ROM download-mode state");
     b5_dump();
-    let owned = [E_UTEXT, E_UDATA, E_T1, E_T2, E_LOCK_NAPOT, E_TOR_LO, E_TOR_HI];
+    let owned = [E_UTEXT, E_UDATA, E_T1, E_T2, E_TOR_LO, E_TOR_HI, E_LOCK_NAPOT, E_COVER_PERI, E_COVER_RAM];
     let mut all_free = true;
     for i in owned {
         if unlocked(i) {
@@ -112,7 +114,7 @@ extern "C" fn pmain() -> ! {
         }
     }
     if all_free {
-        check("SETUP", None, format_args!("pmp entries 4-7 and 12-14 unlocked and cleared"));
+        check("SETUP", None, format_args!("pmp entries 4-7, 10-12, 14 and 15 unlocked and cleared"));
     }
     pmp_set(E_UTEXT, napot(UTEXT, 0x1000), NAPOT | R | X);
     pmp_set(E_UDATA, napot(UDATA, 0x1000), NAPOT | R | W);
@@ -373,6 +375,11 @@ fn u_write_probe(id: &str, what: &str, addr: usize, val: u32, byte: bool) {
 }
 fn b4_clic_from_u() {
     begin("B4");
+    // Control: a small 4 KB grant on the CLIC page alone (the big NAPOT below is the bootloader's shape).
+    pmp_set(E_T2, napot(0x2080_0000, 0x1000), NAPOT | R | W);
+    let t = user(uaddr(u_load), CLIC_THRESH, 0, false);
+    check("B4.grant4k", None, format_args!("U read of the CLIC threshold with a 4 KB NAPOT RW grant: {t}"));
+    pmp_off(E_T2);
     // The v6.1 bootloader's locked entry 0 (NAPOT 0x2000_0000-0x3000_0000 RW), mimicked unlocked for U.
     pmp_set(E_T1, napot(0x2000_0000, 0x1000_0000), NAPOT | R | W);
     u_write_probe("B4.thresh", "CLIC threshold", CLIC_THRESH, 0xFF00_0000, false);
@@ -394,12 +401,18 @@ mod hw_clint {
 // B2 (last) -------------------------------------------------------------------------------------------------------------
 fn b2_locks() {
     begin("B2");
-    if !(unlocked(E_LOCK_NAPOT) && unlocked(E_TOR_LO) && unlocked(E_TOR_HI)) {
-        check("B2", Some(false), format_args!("entries 12-14 not free: skipped"));
+    if ![E_TOR_LO, E_TOR_HI, E_LOCK_NAPOT, E_COVER_PERI, E_COVER_RAM].iter().all(|&i| unlocked(i)) {
+        check("B2", Some(false), format_args!("entries 10-12, 14, 15 not free: skipped"));
         return;
     }
     let _ = m_sw(LOCK_A, 0x1111_1111);
     let _ = m_sw(LOCK_B, 0x2222_2222);
+    // Run 2 hung right after locking one R-only entry: if v1 denies M every unmatched address once any entry is
+    // locked, M needs covers first. Locked covers sit above the test entries (lowest index wins).
+    pmp_set(E_COVER_RAM, napot(0x4FF0_0000, 0x8_0000), NAPOT | R | W | X | L);
+    pmp_set(E_COVER_PERI, napot(0x5000_0000, 0x10_0000), NAPOT | R | W | L);
+    pl!("B2 covers locked: entry {E_COVER_RAM} L2MEM 512 KB RWX, entry {E_COVER_PERI} HP peripherals 1 MB RW");
+    hw::drain();
     // a) a locked R-only NAPOT entry binds M and grants U.
     pmp_set(E_LOCK_NAPOT, napot(LOCK_A, 0x100), NAPOT | R | L);
     let m_r = m_lw(LOCK_A);
@@ -427,6 +440,10 @@ fn b2_locks() {
     let lo1 = hw::pmpaddr_r(E_TOR_LO);
     check("B2.tor", None, format_args!("locked TOR entry {E_TOR_HI}: M write {:?} (expect 7); pmpaddr{E_TOR_LO} {lo0:#x} -> {lo1:#x} after a write ({})",
         m_w.err().map(|t| t.code()), if lo1 == lo0 { "locked with i" } else { "still writable" }));
+    // d) with locked entries present, is an address no entry matches still open to M? (uncached L2MEM alias)
+    begin("B2.unmatched");
+    let m_un = m_lw(SCRATCH_UNCACHED);
+    check("B2.unmatched-m", None, format_args!("M read of unmatched {SCRATCH_UNCACHED:#x} with locked entries present: {}", show(m_un)));
 }
 
 #[panic_handler]
