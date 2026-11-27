@@ -50,7 +50,11 @@ extern "C" fn stage_main(hart: u32, a1: u32) -> ! {
     con.hex32(hw::flash_set_size() as u32);
     con.put(b'\n');
     let mut flash = hw::RomFlash;
-    boot_core::proof::run(&mut flash, &mut con, &MEMORY_MAP, &mut || {});
+    let cfg = boot_core::proof::ProofConfig {
+        chip_id: boot_core::image::CHIP_ID_ESP32P4,
+        table_offset: boot_core::partition::TABLE_OFFSET,
+    };
+    boot_core::proof::run(&mut flash, &mut con, &MEMORY_MAP, cfg, &mut || {});
     Uart::drain();
     park()
 }

@@ -48,6 +48,8 @@ pub enum SegClass {
     Forbidden,
     /// Address arithmetic overflows.
     Overflow,
+    /// A non-empty segment whose load address is not 4-byte aligned (the copy loop is word-wise).
+    Unaligned,
     /// Outside everything the map names.
     Outside,
 }
@@ -56,6 +58,9 @@ impl MemoryMap<'_> {
     pub fn classify(&self, addr: u32, len: u32) -> SegClass {
         if addr.checked_add(len).is_none() {
             return SegClass::Overflow;
+        }
+        if len != 0 && !addr.is_multiple_of(4) {
+            return SegClass::Unaligned;
         }
         if self.forbidden.iter().any(|r| r.overlaps(addr, len)) {
             return SegClass::Forbidden;
@@ -85,11 +90,13 @@ mod tests {
         assert_eq!(MAP.classify(0x4FF2_8E00, 0xD0), SegClass::Ram); // ends exactly at the window
         assert_eq!(MAP.classify(0x4FF2_8E00, 0xD1), SegClass::Forbidden);
         assert_eq!(MAP.classify(0x4FF2_8ED0, 1), SegClass::Forbidden);
-        assert_eq!(MAP.classify(0x4FF3_ABCF, 1), SegClass::Forbidden);
+        assert_eq!(MAP.classify(0x4FF3_ABCC, 4), SegClass::Forbidden);
         assert_eq!(MAP.classify(0x4FF3_ABD0, 4), SegClass::Outside);
         assert_eq!(MAP.classify(0x4FF0_FFFC, 8), SegClass::Outside); // starts below the RAM range
         assert_eq!(MAP.classify(0x4200_0020, 0x1000), SegClass::Mapped);
         assert_eq!(MAP.classify(0xFFFF_FFF0, 0x20), SegClass::Overflow);
         assert_eq!(MAP.classify(0x1234, 0), SegClass::Ram);
+        assert_eq!(MAP.classify(0x4FF1_0001, 8), SegClass::Unaligned);
+        assert_eq!(MAP.classify(0x4FF2_8ED2, 8), SegClass::Unaligned); // alignment first, even in the window
     }
 }

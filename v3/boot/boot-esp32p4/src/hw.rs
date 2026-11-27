@@ -101,8 +101,12 @@ const FLASH_SIZE: u32 = 16 * 1024 * 1024;
 
 /// Tell the ROM read the real flash size. Returns the ROM's result code (0 = ok).
 pub fn flash_set_size() -> i32 {
-    // SAFETY: a fixed ROM entry point of this chip with the C signature above; the device id 0 is only used by the
-    // ROM's write paths, which this stage never calls.
+    // Device id 0 is bench-verified for READS only (2026-11-27: reads past 2 MB work after this call). It replaces
+    // the id download mode stored, which only the ROM's write and erase paths use, and this stage never calls them.
+    // IDF passes the stored id back (`rom_spiflash_legacy_data->chip.device_id`), but that pointer's address differs
+    // between the eco0_4 and the base ROM ld files (0x4ff3ffe8 / 0x4ffbffe8), so it is no stable symbol for a v1.0
+    // chip and is not read here. Do not reuse this call in a stage that writes flash.
+    // SAFETY: a fixed ROM entry point of this chip with the C signature above.
     let f: RomConfigParam = unsafe { core::mem::transmute(ROM_SPIFLASH_CONFIG_PARAM) };
     f(0, FLASH_SIZE, 0x10000, 0x1000, 0x100, 0xFFFF)
 }

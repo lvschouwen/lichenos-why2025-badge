@@ -15,11 +15,25 @@ pub struct Outcome {
     pub failed: u8,
 }
 
-pub fn run<F: FlashRead, C: Console>(flash: &mut F, con: &mut C, map: &MemoryMap, tick: &mut dyn FnMut()) -> Outcome {
+/// The chip- and layout-specific numbers the proof needs (the C6 stage passes its own).
+#[derive(Debug, Clone, Copy)]
+pub struct ProofConfig {
+    pub chip_id: u16,
+    /// Flash offset of the partition table.
+    pub table_offset: u32,
+}
+
+pub fn run<F: FlashRead, C: Console>(
+    flash: &mut F,
+    con: &mut C,
+    map: &MemoryMap,
+    cfg: ProofConfig,
+    tick: &mut dyn FnMut(),
+) -> Outcome {
     let mut out = Outcome { chosen: None, verified: 0, failed: 0 };
     con.line("LBOOT proof v1: read-only, no jump");
     con.line("step: partition table");
-    let table = match read_table(flash) {
+    let table = match read_table(flash, cfg.table_offset) {
         Ok(t) => t,
         Err(e) => {
             con.puts("FAIL partition table: ");
@@ -42,12 +56,14 @@ pub fn run<F: FlashRead, C: Console>(flash: &mut F, con: &mut C, map: &MemoryMap
         None => con.puts("none"),
     }
     con.line(")");
+    // The proof reports checksum-only images too; the jump path will set `require_hash`.
+    let opts = image::VerifyOpts { chip_id: cfg.chip_id, require_hash: false };
     for &slot in order.slots() {
         let Some(p) = otadata::resolve(&table, slot) else { continue };
         con.puts("step: verify ");
         slot_name(con, slot);
         con.put(b'\n');
-        match image::verify(flash, p.offset, p.size, tick) {
+        match image::verify(flash, p.offset, p.size, opts, tick) {
             Ok(v) => {
                 out.verified += 1;
                 if out.chosen.is_none() {
@@ -81,18 +97,26 @@ fn end<C: Console>(con: &mut C, out: Outcome) -> Outcome {
     out
 }
 
-fn read_table<F: FlashRead>(flash: &mut F) -> Result<Table, PartError> {
+fn read_table<F: FlashRead>(flash: &mut F, offset: u32) -> Result<Table, PartError> {
     let mut buf = [0u8; partition::TABLE_LEN];
-    flash.read(partition::TABLE_OFFSET, &mut buf).map_err(|_| PartError::Empty)?;
+    flash.read(offset, &mut buf).map_err(|_| PartError::Empty)?;
     partition::parse(&buf)
 }
 
 fn read_otadata<F: FlashRead, C: Console>(flash: &mut F, table: &Table, con: &mut C) -> Option<[Select; 2]> {
     let p = table.otadata()?;
+    if p.size < 2 * otadata::SECTOR {
+        con.line("otadata: partition smaller than two sectors, ignored");
+        return None;
+    }
     let mut sel = [Select { seq: 0, state: 0, crc: 0 }; 2];
     for (i, s) in sel.iter_mut().enumerate() {
         let mut raw = [0u8; otadata::ENTRY_LEN];
-        if flash.read(p.offset + i as u32 * otadata::SECTOR, &mut raw).is_err() {
+        let Some(at) = p.offset.checked_add(i as u32 * otadata::SECTOR) else {
+            con.line("otadata: offset overflows, ignored");
+            return None;
+        };
+        if flash.read(at, &mut raw).is_err() {
             con.line("otadata: flash read failed");
             return None;
         }
@@ -179,6 +203,7 @@ fn class_name(c: SegClass) -> &'static str {
         SegClass::Mapped => "flash-mapped",
         SegClass::Forbidden => "forbidden (stage window)",
         SegClass::Overflow => "overflow",
+        SegClass::Unaligned => "unaligned load address",
         SegClass::Outside => "outside the map",
     }
 }
@@ -205,6 +230,7 @@ fn image_err(e: ImageError) -> &'static str {
         ImageError::BadChecksum => "checksum",
         ImageError::BadHashFlag(_) => "bad hash flag",
         ImageError::BadHash => "sha256 mismatch",
+        ImageError::NoHash => "no appended sha256",
     }
 }
 
@@ -234,6 +260,7 @@ mod tests {
     const FORB: [Range; 1] = [Range::new(0x4FF2_8ED0, 0x4FF3_ABD0)];
     const MAPPED: [Range; 1] = [Range::new(0x4000_0000, 0x4C00_0000)];
     const MAP: MemoryMap = MemoryMap { ram: &RAM, forbidden: &FORB, mapped: &MAPPED };
+    const CFG: ProofConfig = ProofConfig { chip_id: 18, table_offset: 0x8000 };
 
     fn otadata_sector(seq: u32, state: u32) -> Vec<u8> {
         let mut b = vec![0xFFu8; 32];
@@ -256,7 +283,7 @@ mod tests {
     fn reports_both_slots_and_never_jumps() {
         let mut f = badge();
         let mut c = Buf(Vec::new());
-        let o = run(&mut f, &mut c, &MAP, &mut || {});
+        let o = run(&mut f, &mut c, &MAP, CFG, &mut || {});
         let t = c.text();
         assert_eq!(o, Outcome { chosen: Some(Slot::Ota(0)), verified: 2, failed: 0 });
         assert!(t.contains("part ota_0 type 0010 off 0x00020000"), "{t}");
@@ -282,16 +309,28 @@ mod tests {
             VecFlash::sparse(0x80_0000, &[(0x8000, &t), (0x11000, &od), (0x20000, &bad), (0x42_0000, &v3)])
         };
         let mut c = Buf(Vec::new());
-        let o = run(&mut f, &mut c, &MAP, &mut || {});
+        let o = run(&mut f, &mut c, &MAP, CFG, &mut || {});
         assert_eq!(o, Outcome { chosen: Some(Slot::Ota(1)), verified: 1, failed: 1 });
         assert!(c.text().contains("verify ota_0: FAIL checksum"), "{}", c.text());
+    }
+
+    #[test]
+    fn small_otadata_partition_is_ignored() {
+        // otadata of 0x1000: the second copy would lie outside it
+        let mut t = table_bytes(false);
+        t[32 + 8..32 + 12].copy_from_slice(&0x1000u32.to_le_bytes());
+        let v3 = build_image(0x4FF1_0000, &[(0x4FF1_0000, vec![3u8; 64])], true);
+        let mut f = VecFlash::sparse(0x80_0000, &[(0x8000, &t), (0x42_0000, &v3)]);
+        let mut c = Buf(Vec::new());
+        run(&mut f, &mut c, &MAP, CFG, &mut || {});
+        assert!(c.text().contains("otadata: partition smaller than two sectors, ignored"), "{}", c.text());
     }
 
     #[test]
     fn erased_flash_fails_cleanly() {
         let mut f = VecFlash::sparse(0x10000, &[]);
         let mut c = Buf(Vec::new());
-        let o = run(&mut f, &mut c, &MAP, &mut || {});
+        let o = run(&mut f, &mut c, &MAP, CFG, &mut || {});
         assert_eq!(o.chosen, None);
         assert!(c.text().contains("FAIL partition table"), "{}", c.text());
     }

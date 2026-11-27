@@ -8,6 +8,8 @@ use crate::partition::{Entry, Table};
 pub const SECTOR: u32 = 0x1000;
 pub const ENTRY_LEN: usize = 32;
 
+/// `esp_ota_img_states_t`: NEW 0, PENDING_VERIFY 1, VALID 2, INVALID 3, ABORTED 4, UNDEFINED 0xFFFFFFFF.
+pub const STATE_PENDING_VERIFY: u32 = 1;
 pub const STATE_INVALID: u32 = 3;
 pub const STATE_ABORTED: u32 = 4;
 
@@ -24,9 +26,14 @@ impl Select {
         let w = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         Select { seq: w(0), state: w(24), crc: w(28) }
     }
-    /// IDF `bootloader_common_ota_select_invalid`: erased sequence, or marked invalid or aborted.
+    /// IDF `bootloader_common_ota_select_invalid`: erased sequence, or marked invalid or aborted. A PENDING_VERIFY
+    /// copy counts as aborted too: IDF with rollback on (`bootloader_utility.c`, the loop that marks it ABORTED)
+    /// boots a slot that never confirmed itself no more, and this stage cannot write the mark, so it just skips it.
     pub fn invalid(&self) -> bool {
-        self.seq == u32::MAX || self.state == STATE_INVALID || self.state == STATE_ABORTED
+        self.seq == u32::MAX
+            || self.state == STATE_PENDING_VERIFY
+            || self.state == STATE_INVALID
+            || self.state == STATE_ABORTED
     }
     pub fn crc_ok(&self) -> bool {
         self.crc == crc32_le(u32::MAX, &self.seq.to_le_bytes())
@@ -161,6 +168,9 @@ mod tests {
     #[test]
     fn aborted_or_bad_crc_copy_is_ignored() {
         let t = two();
+        // PENDING_VERIFY (an unconfirmed OTA) is not bootable, as IDF with rollback on
+        assert_eq!(boot_order(&t, Some(&[sel(2, STATE_PENDING_VERIFY), sel(1, VALID)])).slots()[0], Slot::Ota(0));
+        assert_eq!(boot_order(&t, Some(&[sel(2, STATE_PENDING_VERIFY), sel(1, VALID)])).active_otadata, Some(1));
         assert_eq!(boot_order(&t, Some(&[sel(2, STATE_ABORTED), sel(1, VALID)])).slots()[0], Slot::Ota(0));
         assert_eq!(boot_order(&t, Some(&[sel(2, STATE_INVALID), sel(1, VALID)])).slots()[0], Slot::Ota(0));
         let mut bad = sel(2, VALID);

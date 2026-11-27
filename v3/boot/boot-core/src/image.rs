@@ -30,6 +30,8 @@ pub enum ImageError {
     /// `hash_appended` is not 0 or 1.
     BadHashFlag(u8),
     BadHash,
+    /// `require_hash` was set and the image has no appended SHA-256.
+    NoHash,
 }
 
 impl From<FlashError> for ImageError {
@@ -67,12 +69,23 @@ impl Verified {
     }
 }
 
+/// What `verify` expects of an image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifyOpts {
+    /// The chip id the header must carry (`CHIP_ID_ESP32P4` for the P4 stage; the C6 stage passes its own).
+    pub chip_id: u16,
+    /// Refuse an image without an appended SHA-256 (`NoHash`). The jump path sets this; the proof may report
+    /// "checksum only" images and so clears it.
+    pub require_hash: bool,
+}
+
 /// Parse and verify the image at flash `base`, which may be at most `max_len` bytes (the partition size).
 /// `tick` runs once per chunk read, for the watchdog.
 pub fn verify<F: FlashRead>(
     flash: &mut F,
     base: u32,
     max_len: u32,
+    opts: VerifyOpts,
     tick: &mut dyn FnMut(),
 ) -> Result<Verified, ImageError> {
     let mut sha = Sha256::new();
@@ -89,11 +102,14 @@ pub fn verify<F: FlashRead>(
         return Err(ImageError::BadSegmentCount(n));
     }
     let chip_id = u16::from_le_bytes([hdr[12], hdr[13]]);
-    if chip_id != CHIP_ID_ESP32P4 {
+    if chip_id != opts.chip_id {
         return Err(ImageError::WrongChip(chip_id));
     }
     if hdr[23] > 1 {
         return Err(ImageError::BadHashFlag(hdr[23]));
+    }
+    if opts.require_hash && hdr[23] != 1 {
+        return Err(ImageError::NoHash);
     }
     sha.update(hdr);
     let mut v = Verified {
@@ -208,6 +224,8 @@ mod tests {
 
     fn nop() {}
 
+    const OPTS: VerifyOpts = VerifyOpts { chip_id: CHIP_ID_ESP32P4, require_hash: false };
+
     fn segs() -> Vec<(u32, Vec<u8>)> {
         vec![(0x4FF1_0000, (0..100u8).collect()), (0x4FF1_1000, vec![7u8; 36])]
     }
@@ -217,7 +235,7 @@ mod tests {
         let img = build_image(0x4FF1_0000, &segs(), true);
         let len = img.len() as u32;
         let mut f = VecFlash::at(0x20000, img.clone());
-        let v = verify(&mut f, 0x20000, 0x10_0000, &mut nop).unwrap();
+        let v = verify(&mut f, 0x20000, 0x10_0000, OPTS, &mut nop).unwrap();
         assert_eq!(v.segment_count, 2);
         assert_eq!(v.segments()[1], Segment { load_addr: 0x4FF1_1000, len: 36, data_off: 24 + 8 + 100 + 8 });
         assert_eq!(v.image_len, len);
@@ -229,7 +247,7 @@ mod tests {
     fn good_image_without_hash() {
         let img = build_image(0x4FF1_0000, &segs(), false);
         let mut f = VecFlash::at(0, img.clone());
-        let v = verify(&mut f, 0, img.len() as u32, &mut nop).unwrap();
+        let v = verify(&mut f, 0, img.len() as u32, OPTS, &mut nop).unwrap();
         assert!(!v.hash_appended);
         assert_eq!(v.image_len as usize, img.len());
     }
@@ -241,27 +259,59 @@ mod tests {
         // one flipped data byte: the xor checksum catches it first
         let mut bad = img.clone();
         bad[40] ^= 1;
-        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, &mut nop), Err(ImageError::BadChecksum));
+        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, OPTS, &mut nop), Err(ImageError::BadChecksum));
         // a flipped header byte keeps the checksum but breaks the SHA
         let mut bad = img.clone();
         bad[4] ^= 1;
-        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, &mut nop), Err(ImageError::BadHash));
+        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, OPTS, &mut nop), Err(ImageError::BadHash));
         // flipped digest byte
         let mut bad = img.clone();
         *bad.last_mut().unwrap() ^= 1;
-        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, &mut nop), Err(ImageError::BadHash));
+        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, OPTS, &mut nop), Err(ImageError::BadHash));
         // magic
         let mut bad = img.clone();
         bad[0] = 0xFF;
-        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, &mut nop), Err(ImageError::BadMagic(0xFF)));
+        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, OPTS, &mut nop), Err(ImageError::BadMagic(0xFF)));
         // wrong chip
         let mut bad = img.clone();
         bad[12] = 5;
-        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, &mut nop), Err(ImageError::WrongChip(5)));
+        assert_eq!(verify(&mut VecFlash::at(0, bad), 0, n, OPTS, &mut nop), Err(ImageError::WrongChip(5)));
         // too long for its partition
-        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n - 1, &mut nop), Err(ImageError::TooLong));
+        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n - 1, OPTS, &mut nop), Err(ImageError::TooLong));
         // flash error
-        assert_eq!(verify(&mut VecFlash::at(0, img[..60].to_vec()), 0, n, &mut nop), Err(ImageError::Flash));
+        assert_eq!(verify(&mut VecFlash::at(0, img[..60].to_vec()), 0, n, OPTS, &mut nop), Err(ImageError::Flash));
+    }
+
+    #[test]
+    fn require_hash_refuses_checksum_only_images() {
+        let strict = VerifyOpts { require_hash: true, ..OPTS };
+        let plain = build_image(0x4FF1_0000, &segs(), false);
+        let n = plain.len() as u32;
+        assert_eq!(
+            verify(&mut VecFlash::at(0, plain.clone()), 0, n, OPTS, &mut nop).map(|v| v.hash_appended),
+            Ok(false)
+        );
+        assert_eq!(verify(&mut VecFlash::at(0, plain), 0, n, strict, &mut nop), Err(ImageError::NoHash));
+        let hashed = build_image(0x4FF1_0000, &segs(), true);
+        let n = hashed.len() as u32;
+        assert!(verify(&mut VecFlash::at(0, hashed), 0, n, strict, &mut nop).is_ok());
+    }
+
+    #[test]
+    fn chip_id_is_a_parameter() {
+        let img = build_image(0x4FF1_0000, &segs(), true); // chip id 18
+        let n = img.len() as u32;
+        let c6 = VerifyOpts { chip_id: 13, require_hash: true };
+        assert_eq!(verify(&mut VecFlash::at(0, img), 0, n, c6, &mut nop), Err(ImageError::WrongChip(18)));
+    }
+
+    #[test]
+    fn refuses_unaligned_load_address() {
+        let s = vec![(0x4FF1_0002, vec![0u8; 8])];
+        assert_eq!(
+            check_loadable(&verified(0x4FF1_0002, &s), &MAP),
+            Err(LoadError::Segment { index: 0, class: SegClass::Unaligned })
+        );
     }
 
     #[test]
@@ -269,18 +319,24 @@ mod tests {
         let mut img = build_image(0x4FF1_0000, &segs(), true);
         img[1] = 0;
         let n = img.len() as u32;
-        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, &mut nop), Err(ImageError::BadSegmentCount(0)));
+        assert_eq!(
+            verify(&mut VecFlash::at(0, img.clone()), 0, n, OPTS, &mut nop),
+            Err(ImageError::BadSegmentCount(0))
+        );
         img[1] = 17;
-        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, &mut nop), Err(ImageError::BadSegmentCount(17)));
+        assert_eq!(
+            verify(&mut VecFlash::at(0, img.clone()), 0, n, OPTS, &mut nop),
+            Err(ImageError::BadSegmentCount(17))
+        );
         img[1] = 2;
         img[23] = 2;
-        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, &mut nop), Err(ImageError::BadHashFlag(2)));
+        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, OPTS, &mut nop), Err(ImageError::BadHashFlag(2)));
         img[23] = 1;
         img[24 + 4] = 99; // data_len 99, not a multiple of 4
-        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, &mut nop), Err(ImageError::SegmentUnaligned));
+        assert_eq!(verify(&mut VecFlash::at(0, img.clone()), 0, n, OPTS, &mut nop), Err(ImageError::SegmentUnaligned));
         img[24 + 4] = 0xFC;
         img[24 + 7] = 0xFF; // huge segment length
-        assert_eq!(verify(&mut VecFlash::at(0, img), 0, n, &mut nop), Err(ImageError::TooLong));
+        assert_eq!(verify(&mut VecFlash::at(0, img), 0, n, OPTS, &mut nop), Err(ImageError::TooLong));
     }
 
     const RAM: [Range; 1] = [Range::new(0x4FF1_0000, 0x4FF2_8ED0)];
@@ -290,7 +346,7 @@ mod tests {
 
     fn verified(entry: u32, segs: &[(u32, Vec<u8>)]) -> Verified {
         let img = build_image(entry, segs, true);
-        verify(&mut VecFlash::at(0, img.clone()), 0, img.len() as u32, &mut nop).unwrap()
+        verify(&mut VecFlash::at(0, img.clone()), 0, img.len() as u32, OPTS, &mut nop).unwrap()
     }
 
     #[test]
@@ -322,7 +378,7 @@ mod tests {
         #[test]
         fn arbitrary_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..600), max in 0u32..2000) {
             let mut f = VecFlash::at(0, bytes);
-            if let Ok(v) = verify(&mut f, 0, max, &mut nop) {
+            if let Ok(v) = verify(&mut f, 0, max, OPTS, &mut nop) {
                 prop_assert!(v.image_len <= max);
             }
         }
@@ -335,7 +391,7 @@ mod tests {
             b.extend(tail);
             let n = b.len() as u32;
             let mut f = VecFlash::at(0, b);
-            let _ = verify(&mut f, 0, n, &mut nop);
+            let _ = verify(&mut f, 0, n, OPTS, &mut nop);
         }
 
         /// Accepted by check_loadable implies every non-empty segment is inside the RAM allowlist and clear of the window.
@@ -344,7 +400,7 @@ mod tests {
             let s: Vec<(u32, Vec<u8>)> = addrs.iter().map(|&(a, w)| (a, vec![1u8; w * 4])).collect();
             let img = build_image(entry, &s, true);
             let n = img.len() as u32;
-            let v = verify(&mut VecFlash::at(0, img), 0, n, &mut nop).unwrap();
+            let v = verify(&mut VecFlash::at(0, img), 0, n, OPTS, &mut nop).unwrap();
             if check_loadable(&v, &MAP).is_ok() {
                 for sg in v.segments() {
                     if sg.len != 0 {

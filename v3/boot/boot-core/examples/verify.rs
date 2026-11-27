@@ -20,7 +20,13 @@ fn main() -> ExitCode {
     };
     let data = std::fs::read(&path).expect("read image");
     let len = data.len() as u32;
-    match boot_core::image::verify(&mut File(data), 0, len, &mut || {}) {
+    match boot_core::image::verify(
+        &mut File(data),
+        0,
+        len,
+        boot_core::image::VerifyOpts { chip_id: boot_core::image::CHIP_ID_ESP32P4, require_hash: true },
+        &mut || {},
+    ) {
         Ok(v) => {
             let hex: String = v.sha256.iter().map(|b| format!("{b:02x}")).collect();
             println!(
