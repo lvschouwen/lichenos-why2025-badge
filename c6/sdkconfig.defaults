@@ -75,3 +75,7 @@ CONFIG_APP_PROJECT_VER_FROM_CONFIG=n
 
 # #586: stack canary (-fstack-protector) in functions with char arrays or alloca; an overrun panics with a backtrace
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+
+# No PHY version banner at every boot (#600): the version is in the image; the line only costs boot log and flash.
+# The secondary console stays USB-Serial-JTAG: the badge's bottom USB-C is the C6's own console and flash port.
+CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=n
