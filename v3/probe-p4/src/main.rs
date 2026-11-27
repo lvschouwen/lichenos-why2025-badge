@@ -1,6 +1,7 @@
 //! #608 bench probe for the #604 isolation matrix on the ESP32-P4 rev v1.0, in ROM download-mode state, loaded by
-//! `esptool load-ram`. Default (run 8): core 0 starts core 1 and watches it; core 1 runs B5, B1, B3 and a U read of the
-//! CPU-subsystem window (`core1.rs`). LICHEN_PROBE_CORE0=1 builds the core-0 suite instead: B5, B1, A5, B3, B6, B4
+//! `esptool load-ram`. LICHEN_PROBE_RUN picks the suite. b6 (default, run 9): mtime clock
+//! and the violation record on core 0 (`b6x.rs`). core1 (run 8): core 0 starts core 1 and watches it; core 1 runs B5, B1, B3 and a U read of the
+//! CPU-subsystem window (`core1.rs`). core0 (runs 1-7): the core-0 suite: B5, B1, A5, B3, B6, B4
 //! and B2 (last: locks hold until reset).
 //! Output: one `CHECK <id> <PASS|FAIL|INFO> ...` line per result, `BEGIN <id>` before each risky step, `END` last.
 #![no_std]
@@ -8,6 +9,7 @@
 
 #[macro_use]
 mod hw;
+mod b6x;
 mod core1;
 
 use core::arch::global_asm;
@@ -34,7 +36,25 @@ extern "C" {
 }
 
 const PROBE_ID: &str = env!("LICHEN_PROBE_ID");
-const CORE0_SUITE: bool = option_env!("LICHEN_PROBE_CORE0").is_some();
+/// LICHEN_PROBE_RUN picks the suite: "b6" (default, run 9), "core1" (run 8) or "core0" (runs 1-7).
+const RUN: &str = match option_env!("LICHEN_PROBE_RUN") {
+    Some(r) => r,
+    None => "b6",
+};
+const fn run_is(name: &str) -> bool {
+    let (a, b) = (RUN.as_bytes(), name.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
 
 // PMP entries the probe owns (cleared first, skipped when the ROM left them locked).
 const E_UTEXT: usize = 4;
@@ -122,8 +142,20 @@ fn unlocked(i: usize) -> bool {
 extern "C" fn pmain() -> ! {
     hw::spin(2_000_000); // let esptool finish reading the MEM_END reply
     pl!("");
-    if !CORE0_SUITE {
+    if run_is("core1") {
         core1::launch(PROBE_ID);
+    }
+    if run_is("b6") {
+        pl!("lichen-probe-p4 {PROBE_ID} (#608 run 9), core 0, ROM download-mode state: B6 mtime clock and violation record");
+        setup_pmp();
+        b6x::timers();
+        b6x::violation_record();
+        pl!("END ok");
+        hw::drain();
+        loop {
+            // SAFETY: park; the host hard-resets the badge after END.
+            unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+        }
     }
     pl!("lichen-probe-p4 {PROBE_ID} (#608), core 0, ROM download-mode state");
     b5_dump();

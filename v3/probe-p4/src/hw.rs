@@ -10,7 +10,7 @@ use core::sync::atomic::{compiler_fence, Ordering::SeqCst};
 const UART0: usize = 0x500C_A000; // DR_REG_UART0_BASE (hw_ver1 reg_base.h:91)
 const UART_STATUS: usize = UART0 + 0x1C; // TXFIFO_CNT in [23:16]
 
-fn txfifo_count() -> u32 {
+pub fn txfifo_count() -> u32 {
     // SAFETY: UART0 status register, a read without side effects.
     (unsafe { read_volatile(UART_STATUS as *const u32) } >> 16) & 0xFF
 }
