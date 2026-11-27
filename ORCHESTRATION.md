@@ -52,12 +52,11 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27, v3 sprint)
-- v3 branch tip 60b81925 (pushed, v3/check.sh green). v3 merges: rebase on v3, ff-only, ./v3/check.sh, push v3.
-- wt-5 feat/612-v3-pmp d684e561 (U-mode, rebased, gate green): review-612 (Opus) reviewing; pmp-612 (Sonnet) doing checkpoint 2 and gets the review fixes.
-- wt-6 feat/612-v3-core1 (from feat/612-v3-pmp): core1-612 (Opus), checkpoint 3; rebases after the review fixes.
-- wt-7 feat/643-v3-perf (from v3): perf-643 (Sonnet), targets.toml + perf_report.py.
-- wt-8 feat/620-v3-psram: psram-620 (teammate from before the clear), uncommitted; owns v3/Cargo.toml and Cargo.lock.
-- Owner targets (v3 must beat v2): #643; every bench row gets PERF lines.
-- wt-2 #587 and wt-3 #585 hold uncommitted v2 work (not redundant). Owner to delete (my -D is denied): chore/600-settings-cleanup, feat/595-sd-update (both on main).
-- #615 next steps (rollback drill, first write) are flash writes: owner.
+## Live (2026-11-27 20:50, v3 sprint)
+- v3 tip ec1bebb4 (pushed): #615 RAM proof plus #643 perf tooling. v3 merges: rebase, ff-only, ./v3/check.sh, push.
+- wt-5 feat/612-v3-pmp (pmp-612, Sonnet): checkpoint 2 + review fixes + #646 (CPU-subsystem window hang). Running mode 4; then a fix commit.
+- wt-6 feat/612-v3-core1 (core1-612, Opus): rebasing onto e244ce2f, then one bench.
+- Then ONE Opus review of d684e561..tip (both branches), then ff onto v3. State is on #612 and #646.
+- wt-8 feat/620-v3-psram (psram-620): #645 CPU 360 MHz (owner approved IDF-style PMU/DCDC, eFuse reads only), then the #620 PSRAM re-run at full clock. State is on #620 and #645.
+- Bench lock: one load-ram at a time, runs of 120 s or less. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
+- #615 next steps are owner flash writes.
