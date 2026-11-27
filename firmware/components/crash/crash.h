@@ -11,6 +11,9 @@ void crash_check(void);
 // and adds "fw crash". Late: after /storage is mounted; hashes the running image, writes the crash record.
 void crash_check_early(void);
 void crash_check_late(void);
+// "fw pmp" (#608, pmp_cmd.c, developer-mode builds only): both cores' PMP and PMA and the ICM violation record.
+// crash_check_early calls it.
+void crash_pmp_register(void);
 
 // The core dump on flash is new since the last recorded crash (what tells a real watchdog reset, ESP_RST_WDT, from the
 // USB-serial reset that reports the same reason on this board). Needs NVS up; read once per boot, writes nothing (#353)

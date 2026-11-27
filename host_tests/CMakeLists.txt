@@ -2441,6 +2441,7 @@ add_custom_target(run_tests
     reg_service_test
     reg_switch_test
     lora_regq_test
+    pmp_fmt_test
     COMMENT "Running all host tests"
 )
 
@@ -3152,3 +3153,9 @@ add_executable(adv_sched_test
 target_include_directories(adv_sched_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(adv_sched_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME adv_sched_test COMMAND adv_sched_test)
+
+# "fw pmp" PMP and PMA entry text (#608)
+add_executable(pmp_fmt_test ${CMAKE_CURRENT_SOURCE_DIR}/pmp_fmt_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash/pmp_fmt.c)
+target_include_directories(pmp_fmt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash)
+target_compile_options(pmp_fmt_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME pmp_fmt_test COMMAND pmp_fmt_test)

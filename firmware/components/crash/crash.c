@@ -511,6 +511,7 @@ void crash_check_early(void) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     console_register_rules("crash", "crash [dump | clear | test panic|wdt|twdt] (crash log and core dump; test: developer mode)",
                            crash_command, CRASH_RULES);
+    crash_pmp_register();
 #else
     console_register_rules("crash", "crash [dump | clear] (crash log and core dump)", crash_command, CRASH_RULES);
 #endif
