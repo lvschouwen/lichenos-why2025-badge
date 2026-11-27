@@ -70,3 +70,6 @@ CONFIG_ESP_HOSTED_CP_FEAT_PEER_DATA=y
 # Reproducible image (#279): no build date in the app descriptor; PROJECT_VER is a content hash (c6/CMakeLists.txt)
 CONFIG_APP_COMPILE_TIME_DATE=n
 CONFIG_APP_PROJECT_VER_FROM_CONFIG=n
+
+# #586: stack canary (-fstack-protector) in functions with char arrays or alloca; an overrun panics with a backtrace
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y

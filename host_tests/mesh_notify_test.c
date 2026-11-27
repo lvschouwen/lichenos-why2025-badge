@@ -218,6 +218,16 @@ static void queue(void) {
     CHECK(mn_queue_take(&q, out, MN_QUEUE_MAX) == MN_QUEUE_MAX && q.n == 0);
     CHECK(strcmp(out[0].title, "#c0") == 0);
 
+    // a take of fewer than are waiting keeps the rest, in order, for the next one (the drain works in batches, #586)
+    for (int i = 0; i < 6; i++) {
+        char name[8];
+        snprintf(name, sizeof(name), "#d%d", i);
+        mesh_chat_key_channel(&other, name);
+        CHECK(mn_queue_push(&q, MN_CHANNEL, &other, name, "t", false));
+    }
+    CHECK(mn_queue_take(&q, out, 4) == 4 && q.n == 2 && strcmp(out[3].title, "#d3") == 0);
+    CHECK(mn_queue_take(&q, out, 4) == 2 && q.n == 0 && strcmp(out[0].title, "#d4") == 0 && strcmp(out[1].title, "#d5") == 0);
+
     // title and body are cut on a character boundary
     char big[400];
     memset(big, 'e', sizeof(big) - 1);

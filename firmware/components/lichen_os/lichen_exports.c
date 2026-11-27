@@ -10,6 +10,8 @@ extern void __extendsfdf2(void);
 extern void __ltdf2(void);
 extern void __moddi3(void);
 extern void __muldi3(void);
+extern void __stack_chk_fail(void);
+extern void __stack_chk_guard(void);
 extern void __truncdfsf2(void);
 extern void __udivdi3(void);
 extern void __umoddi3(void);
@@ -404,6 +406,8 @@ struct esp_elfsym const lichen_exports[] = {
     {"__ltdf2", (void *)__ltdf2},
     {"__moddi3", (void *)__moddi3},
     {"__muldi3", (void *)__muldi3},
+    {"__stack_chk_fail", (void *)__stack_chk_fail},
+    {"__stack_chk_guard", (void *)__stack_chk_guard},
     {"__truncdfsf2", (void *)__truncdfsf2},
     {"__udivdi3", (void *)__udivdi3},
     {"__umoddi3", (void *)__umoddi3},

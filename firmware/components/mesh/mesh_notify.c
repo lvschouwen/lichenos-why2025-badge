@@ -284,7 +284,8 @@ bool mn_queue_push(mn_queue_t *q, mn_kind_t kind, mesh_chat_key_t const *key, ch
 size_t mn_queue_take(mn_queue_t *q, mn_note_t *out, size_t max) {
     size_t n = q->n < max ? q->n : max;
     memcpy(out, q->note, n * sizeof(mn_note_t));
-    q->n = 0;
+    memmove(q->note, q->note + n, (size_t)(q->n - n) * sizeof(mn_note_t)); // what max left out waits for the next take
+    q->n = (uint8_t)(q->n - n);
     return n;
 }
 

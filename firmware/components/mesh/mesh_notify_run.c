@@ -291,15 +291,20 @@ static void handle(mn_note_t const *n, mn_switches_t const *s, bool *read) {
 }
 
 bool mesh_notify_drain(void) {
-    mn_note_t notes[MN_QUEUE_MAX];
-    portENTER_CRITICAL(&mux);
-    size_t n = mn_queue_take(&queue, notes, MN_QUEUE_MAX);
-    portEXIT_CRITICAL(&mux);
+    // In batches of MN_DRAIN_BATCH: the whole queue on the stack (8 notes, ~1.8 KB) outgrew the stack baseline once the
+    // stack canary came in (#586)
+    mn_note_t     notes[MN_DRAIN_BATCH];
     bool          read = false;
     mn_switches_t s    = switches();
-    for (size_t i = 0; i < n; i++) {
-        handle(&notes[i], &s, &read);
-    }
+    size_t        n;
+    do {
+        portENTER_CRITICAL(&mux);
+        n = mn_queue_take(&queue, notes, MN_DRAIN_BATCH);
+        portEXIT_CRITICAL(&mux);
+        for (size_t i = 0; i < n; i++) {
+            handle(&notes[i], &s, &read);
+        }
+    } while (n == MN_DRAIN_BATCH);
     portENTER_CRITICAL(&mux);
     bool was_dirty = dirty;
     dirty          = false;

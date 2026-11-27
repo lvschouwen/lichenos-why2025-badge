@@ -262,3 +262,6 @@ CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
 # CONFIG_MDNS_PREDEF_NETIF_ETH is not set
 CONFIG_MDNS_MAX_INTERFACES=2
 CONFIG_MDNS_MAX_SERVICES=2
+
+# #586: stack canary (-fstack-protector) in functions with char arrays or alloca; an overrun panics with a backtrace
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y

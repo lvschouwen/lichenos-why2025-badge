@@ -94,6 +94,7 @@ typedef struct {
 } mn_note_t;
 
 #define MN_QUEUE_MAX 8
+#define MN_DRAIN_BATCH 4 // notes the drain takes per pass (stack, #586)
 typedef struct {
     mn_note_t note[MN_QUEUE_MAX];
     uint8_t   n;

@@ -6,7 +6,7 @@
 # allow rows); type<TAB>header<TAB>name<TAB>hash: every typedef, struct, enum (and each value), variable and #define of
 # the headers the exports come from and what they include (new = minor bump, changed or removed = major);
 # wrap<TAB>X<TAB>__wrap_X: every -Wl,--wrap=X (informational: a new wrap needs no bump).
-api	2.3
+api	2.4
 wrap	bootloader_random_disable	__wrap_bootloader_random_disable
 wrap	bootloader_random_enable	__wrap_bootloader_random_enable
 wrap	esp_panic_handler	__wrap_esp_panic_handler
@@ -270,6 +270,8 @@ export	__extendsfdf2	__extendsfdf2	allow	76010ff6
 export	__ltdf2	__ltdf2	allow	1612531b
 export	__moddi3	__moddi3	allow	836d03dc
 export	__muldi3	__muldi3	allow	e39a89bc
+export	__stack_chk_fail	__stack_chk_fail	allow	b1f7aef1
+export	__stack_chk_guard	__stack_chk_guard	allow	4b9e47b6
 export	__truncdfsf2	__truncdfsf2	allow	d1e7d2c5
 export	__udivdi3	__udivdi3	allow	7e0b7a10
 export	__umoddi3	__umoddi3	allow	cff7a618

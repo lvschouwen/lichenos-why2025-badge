@@ -217,12 +217,13 @@ build_sdapps() {
             echo "sdapps/$id: the app opens files on the card but its manifest does not declare caps=SD" >&2
             return 1
         fi
-        # The firmware's FreeRTOS config, set and unset lines (#540): an app's pdMS_TO_TICKS and the other FreeRTOS
-        # macros must count the firmware's ticks (1000 Hz, the IDF maximum). A change regenerates the app's sdkconfig,
-        # whose own values would otherwise win over the defaults.
+        # The firmware's stack-check mode (#586: an app carries the canary the OS exports) and FreeRTOS config, set and
+        # unset lines (#540): an app's pdMS_TO_TICKS and the other FreeRTOS macros must count the firmware's ticks
+        # (1000 Hz, the IDF maximum). A change regenerates the app's sdkconfig, whose own values would otherwise win
+        # over the defaults.
         local rtos="$out/sdkconfig.fw-freertos" defaults
         mkdir -p "$out"
-        grep -E '^(# )?CONFIG_FREERTOS_' "$sdkconfig" > "$rtos.new"
+        grep -E '^(# )?CONFIG_(FREERTOS_|COMPILER_STACK_CHECK)' "$sdkconfig" > "$rtos.new"
         if cmp -s "$rtos.new" "$rtos"; then
             rm -f "$rtos.new"
         else

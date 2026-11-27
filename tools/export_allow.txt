@@ -23,6 +23,12 @@
 # The app's SD folder (/sd/lichen/apps/<id>) also holds its own manifest and ELF, and the file calls can overwrite them.
 # Adding a line is an API change (tools/export_table.txt, LICHEN_API_VERSION minor).
 
+# Stack protector (#586): an app built with -fstack-protector reads the firmware's own canary and panics through the
+# firmware's fail handler, so a smash in app code is caught like one in the OS. __stack_chk_guard is data; the table only
+# holds an address, which is all a GOT slot needs.
+__stack_chk_guard
+__stack_chk_fail
+
 # libc: memory and strings
 memcpy
 memmove
