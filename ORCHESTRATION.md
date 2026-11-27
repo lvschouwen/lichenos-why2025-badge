@@ -52,6 +52,9 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
+## Live (2026-11-27 22:40, overnight, owner asleep)
+- Overnight wave (table on #642): agent mtime-654 (Opus, wt-6 `fix/654-v3-mtime-rate`, #654+#653) and harness-613 (Opus, wt-7 `feat/613-v3-isolation-harness`). Merge #654 first, then #613, then dispatch #617. Unattended bench = kernel load-ram at ROM clock only; no #648 matrix, no flash writes.
+
 ## Live (2026-11-27 21:30, v3 sprint)
 - v3 tip 53b00b43 (pushed): #648 Phase 1 merged (perf lab, probe-perf gate inside v3/check.sh). #650 open until the first 200 MHz run. v3 merges: rebase, ff-only, ./v3/check.sh, push from the slot (`git -C <slot> push origin HEAD:refs/heads/v3`), then `git fetch . origin/v3:refs/heads/v3`.
 - v3 slots: `agent-wt done` refuses branches merged into v3 (not main). Recipe: `git -C <slot> checkout --detach origin/v3 && agent-wt release <slot>`; the branch stays (wt-5/6/8 branches kept).
