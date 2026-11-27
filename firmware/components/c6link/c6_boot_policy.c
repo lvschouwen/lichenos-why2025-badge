@@ -116,3 +116,60 @@ bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool 
 uint32_t c6_sdio_raise_khz(uint32_t configured_khz, int applied_khz) {
     return applied_khz == C6_SDIO_HS_CAP_KHZ && configured_khz > C6_SDIO_HS_CAP_KHZ ? configured_khz : 0;
 }
+
+c6_card_t c6_card_classify(unsigned files, char const *card_key, char const *storage_key, bool failed_before) {
+    if (files == 0) {
+        return C6_CARD_NONE;
+    }
+    if (files < 6 || !card_key || !card_key[0]) {
+        return C6_CARD_HALF;
+    }
+    if (storage_key && storage_key[0] && strcmp(card_key, storage_key) == 0) {
+        return C6_CARD_SAME;
+    }
+    return failed_before ? C6_CARD_FAILED : C6_CARD_NEW;
+}
+
+char const *c6_card_name(c6_card_t c) {
+    switch (c) {
+    case C6_CARD_NONE: return "none";
+    case C6_CARD_HALF: return "incomplete";
+    case C6_CARD_SAME: return "same as /storage";
+    case C6_CARD_FAILED: return "failed before";
+    case C6_CARD_NEW: return "new";
+    default: return "?";
+    }
+}
+
+bool c6_card_use(c6_card_t c, bool md5_ok) {
+    return c == C6_CARD_NEW && md5_ok;
+}
+
+bool c6_card_record(char const *card_key, uint8_t const p4_sha[C6_IDENT_SHA_LEN], char *out, size_t cap) {
+    if (!out || !cap) {
+        return false;
+    }
+    out[0] = '\0';
+    if (!card_key || !card_key[0] || !p4_sha) {
+        return false;
+    }
+    int n = snprintf(out, cap, "%s|", card_key);
+    if (n <= 0 || (size_t)n + 2 * C6_IDENT_SHA_LEN >= cap) {
+        out[0] = '\0';
+        return false;
+    }
+    for (int i = 0; i < C6_IDENT_SHA_LEN; i++) {
+        snprintf(out + n + 2 * i, 3, "%02x", p4_sha[i]);
+    }
+    return true;
+}
+
+c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok) {
+    if (!from_card) {
+        return C6_CARD_KEEP;
+    }
+    if (ident_ok) {
+        return C6_CARD_COPY;
+    }
+    return on_c6 ? C6_CARD_RECORD_FAILED : C6_CARD_KEEP;
+}

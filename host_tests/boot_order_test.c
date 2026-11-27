@@ -51,6 +51,14 @@ static void two_chip_rules(void) {
     before(START_BACKLIGHT, START_C6_HOOKS);
     before(START_KEYBOARD, START_C6_HOOKS);
     before(START_LORA, START_C6_HOOKS);
+    // Rule 4 (#595): the card's C6 bundle is flashed before its P4 image installs (the C6 first, as for Wi-Fi updates),
+    // from the mounted card, before any app or the update server could use the card or the slots
+    before(START_C6LINK, START_SD_UPDATE);
+    before(START_SD, START_SD_UPDATE);
+    before(START_NOTICES, START_SD_UPDATE); // a skipped or failed install says so
+    before(START_SD_UPDATE, START_APPS);
+    before(START_SD_UPDATE, START_SD_APPS);
+    before(START_SD_UPDATE, START_OTA);
 }
 
 static void os_rules(void) {

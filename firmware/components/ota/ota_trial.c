@@ -60,7 +60,7 @@ void ota_image_note_slot_switch(esp_partition_t const *slot) {
     take_locked(addr); // this boot's own mark first: the new one is for the next boot
     ota_arrival_mark_switch(&s_mark, slot->address);
     portEXIT_CRITICAL(&s_mark_lock);
-    ESP_LOGI(TAG, "%s chosen at the console: its trial needs no Wi-Fi", slot->label);
+    ESP_LOGI(TAG, "%s chosen by hand (console or SD card): its trial needs no Wi-Fi", slot->label);
 }
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS

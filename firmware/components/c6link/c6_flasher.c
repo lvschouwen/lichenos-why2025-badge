@@ -56,11 +56,13 @@ static bool reset_ota_selection(esp_loader_t *loader, c6_binaries_t *bin) {
     return true;
 }
 
-// force: write all three images even when the C6 already holds them ("fw c6 reflash")
-static bool flash_images(esp_loader_t *loader, c6_binaries_t *bin, bool force) {
+// force: write all three images even when the C6 already holds them ("fw c6 reflash"). *wrote: the C6's flash was
+// about to change (set before the first erase, so a write that fails half way counts too, #595)
+static bool flash_images(esp_loader_t *loader, c6_binaries_t *bin, bool force, bool *wrote) {
     bool boot_ok = !force && image_matches(loader, &bin->boot);
     bool part_ok = !force && image_matches(loader, &bin->part);
     bool app_ok  = !force && image_matches(loader, &bin->app);
+    *wrote       = !boot_ok || !part_ok || !app_ok;
 
     if ((!part_ok || !app_ok) && !reset_ota_selection(loader, bin)) {
         return false;
@@ -88,11 +90,11 @@ static esp_err_t open_serial(esp_loader_t *loader, esp32_port_t *port) {
     return ESP_OK;
 }
 
-static esp_err_t flash_c6_checked(bool force) {
+static esp_err_t flash_c6_checked(bool force, bool *wrote) {
     c6_binaries_t bin;
 
     if (!get_c6_binaries(&bin)) {
-        ESP_LOGE(TAG, "C6 image in " C6_IMAGE_DIR " is missing or invalid, leaving the C6 alone");
+        ESP_LOGE(TAG, "C6 image in %s is missing or invalid, leaving the C6 alone", c6_image_dir());
         free_c6_binaries(&bin);
         return ESP_ERR_NOT_FOUND;
     }
@@ -127,7 +129,7 @@ static esp_err_t flash_c6_checked(bool force) {
     if (target != ESP32C6_CHIP) {
         ESP_LOGE(TAG, "wrong target, expecting ESP32C6_CHIP");
         ret = ESP_ERR_INVALID_RESPONSE;
-    } else if (!flash_images(&loader, &bin, force)) {
+    } else if (!flash_images(&loader, &bin, force, wrote)) {
         ret = ESP_FAIL;
     }
 
@@ -146,9 +148,10 @@ out:
     return ret;
 }
 
-esp_err_t flash_c6_if_needed(bool force) {
+esp_err_t flash_c6_if_needed(bool force, bool *wrote) {
+    *wrote = false;
     backlight_r16_flash(true);
-    esp_err_t r = flash_c6_checked(force);
+    esp_err_t r = flash_c6_checked(force, wrote);
     backlight_r16_flash(false);
     return r;
 }

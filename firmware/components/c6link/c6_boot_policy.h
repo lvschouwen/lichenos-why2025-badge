@@ -69,3 +69,33 @@ bool c6_bundle_pending(bool changed, bool checked, bool staged, bool ident_ok);
 // speed, must stay there), nothing applied (no slot), or configured at or below the cap.
 #define C6_SDIO_HS_CAP_KHZ 40000
 uint32_t c6_sdio_raise_khz(uint32_t configured_khz, int applied_khz);
+
+// The C6 bundle on the SD card (#595): /sd/lichen/update/c6 holds the same six files as /storage/c6. Read once per
+// boot, before the flasher plan, from stat and the .md5 texts only (the full md5 runs only for a NEW bundle).
+typedef enum {
+    C6_CARD_NONE,   // none of the six files: nothing to say
+    C6_CARD_HALF,   // some of the six, or a malformed .md5: ignored with a notice, /storage/c6 is used
+    C6_CARD_SAME,   // the card holds what /storage/c6 holds (the copy after the last card install): nothing to do
+    C6_CARD_FAILED, // this bundle was flashed from the card before and never proven by IDENT under this P4 image
+    C6_CARD_NEW,    // differs from /storage/c6: the source once its md5 check passes
+} c6_card_t;
+// files: how many of the six are there; card_key / storage_key: c6_bundle_key of each ("" when it could not be built);
+// failed_before: the failed record stored in NVS is this card bundle's under the running P4 (c6_card_record)
+c6_card_t   c6_card_classify(unsigned files, char const *card_key, char const *storage_key, bool failed_before);
+char const *c6_card_name(c6_card_t c);
+// Whether the flasher takes the card bundle: only a NEW one whose three .bin files match their .md5
+bool        c6_card_use(c6_card_t c, bool md5_ok);
+
+// The failed record: the card bundle's key and the running P4's ELF sha256 (hex), so the record holds only for the P4
+// image it was made under. A card with a new C6 and a new P4 whose contract changed: the old P4 cannot get IDENT from
+// the new C6 and records it failed, the new P4 then gives it one try of its own instead of reflashing the old C6.
+#define C6_CARD_RECORD_MAX (C6_BUNDLE_KEY_MAX + 1 + 2 * C6_IDENT_SHA_LEN + 1)
+bool c6_card_record(char const *card_key, uint8_t const p4_sha[C6_IDENT_SHA_LEN], char *out, size_t cap);
+
+// After the attach and IDENT, for a boot whose flasher took the card bundle (from_card): COPY it into /storage/c6 once
+// IDENT proved it (the no-card rescue: the C6 is the only Wi-Fi way back in); RECORD_FAILED when the C6's flash holds
+// it (on_c6: the flasher wrote it this boot, or its check found it there already, e.g. flashed under another P4 image)
+// and IDENT did not prove it, so the next boot goes back to /storage/c6; else KEEP (the flasher never reached the C6:
+// nothing is known, the next boot tries again).
+typedef enum { C6_CARD_KEEP, C6_CARD_COPY, C6_CARD_RECORD_FAILED } c6_card_after_t;
+c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok);

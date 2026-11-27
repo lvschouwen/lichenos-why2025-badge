@@ -56,6 +56,13 @@ static bool on_up(uint32_t wait_ms) {
     up_wait = wait_ms;
     return up_answer;
 }
+static int  notices;
+static char notice_title[48];
+static void on_notice(char const *title, char const *body) {
+    notices++;
+    snprintf(notice_title, sizeof(notice_title), "%s", title);
+    (void)body;
+}
 static unsigned on_stack(void) {
     return 1234;
 }
@@ -77,6 +84,8 @@ static void test_unset_defaults(void) {
     CHECK(c6_hooks_driver_down(20000)); // no driver to wait for: the re-attach goes on at once
     CHECK(c6_hooks_driver_up(20000));
     CHECK(c6_hooks_stack_free() == 0);
+    c6_hooks_notice("C6 update", "ignored"); // #595: unset, the log only
+    CHECK(notices == 0);
     CHECK(c6_hooks_image_on_trial()); // #285: nobody said the image is valid, so a reset could roll it back
     CHECK(begins == 0 && ends == 0 && attaches == 0 && no_links == 0 && downs == 0 && ups == 0);
 }
@@ -104,7 +113,7 @@ static void test_partial_tables(void) {
 static void test_full_tables(void) {
     reset_counts();
     c6link_boot_hooks_t const boot = {
-        .begin = on_begin, .progress = on_progress, .end = on_end, .image_on_trial = on_trial};
+        .begin = on_begin, .progress = on_progress, .end = on_end, .image_on_trial = on_trial, .notice = on_notice};
     c6link_net_hooks_t const  net  = {
         .attached = on_attached, .no_link = on_no_link, .driver_down = on_down, .driver_up = on_up, .stack_free = on_stack};
     c6link_set_boot_hooks(&boot);
@@ -113,6 +122,8 @@ static void test_full_tables(void) {
     c6_hooks_step_progress(73);
     c6_hooks_step_end(true, "1200 ms");
     CHECK(begins == 1 && progress_last == 73 && ends == 1 && end_ok && strcmp(end_note, "1200 ms") == 0);
+    c6_hooks_notice("C6 update", "ignored");
+    CHECK(notices == 1 && strcmp(notice_title, "C6 update") == 0);
     c6_hooks_no_link();
     CHECK(no_links == 1);
     // The hook's own answer comes back: a driver that did not go down in time is reported, not hidden

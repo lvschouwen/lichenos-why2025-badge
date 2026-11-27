@@ -33,6 +33,12 @@ void c6_hooks_step_end(bool ok, char const *note) {
     }
 }
 
+void c6_hooks_notice(char const *title, char const *body) {
+    if (boot.notice) {
+        boot.notice(title, body);
+    }
+}
+
 bool c6_hooks_image_on_trial(void) {
     return boot.image_on_trial ? boot.image_on_trial() : true;
 }

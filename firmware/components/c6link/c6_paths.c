@@ -5,12 +5,26 @@
 #include <string.h>
 #include <strings.h>
 
-bool c6_image_path(char const *file, char *out, size_t cap) {
-    if (!*file || strchr(file, '/') || strstr(file, "..")) {
+static char const *s_dir = C6_IMAGE_DIR;
+
+void c6_image_dir_use(char const *dir) {
+    s_dir = dir ? dir : C6_IMAGE_DIR;
+}
+
+char const *c6_image_dir(void) {
+    return s_dir;
+}
+
+bool c6_image_path_in(char const *dir, char const *file, char *out, size_t cap) {
+    if (!dir || !*file || strchr(file, '/') || strstr(file, "..")) {
         return false;
     }
-    int n = snprintf(out, cap, "%s/%s", C6_IMAGE_DIR, file);
+    int n = snprintf(out, cap, "%s/%s", dir, file);
     return n > 0 && (size_t)n < cap;
+}
+
+bool c6_image_path(char const *file, char *out, size_t cap) {
+    return c6_image_path_in(s_dir, file, out, cap);
 }
 
 bool c6_path_in_image_dir(char const *path) {

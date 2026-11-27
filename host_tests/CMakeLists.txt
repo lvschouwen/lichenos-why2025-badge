@@ -765,6 +765,16 @@ target_compile_options(ota_valid_test PRIVATE
 
 add_test(NAME ota_valid_test COMMAND ota_valid_test)
 
+# #595: whether a boot installs the P4 image in the SD card's update folder (D1), and its .sha256 text
+add_executable(sd_update_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sd_update_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/sd_update_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_valid.c
+)
+target_include_directories(sd_update_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
+target_compile_options(sd_update_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sd_update_policy_test COMMAND sd_update_policy_test)
+
 add_executable(restart_gate_test
     ${CMAKE_CURRENT_SOURCE_DIR}/restart_gate_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_valid.c

@@ -23,7 +23,8 @@ typedef enum {
     START_SD,             // the SD card (#60)
     START_RADIO_SWITCHES, // the saved OS radio switches (#108)
     START_LORA_IDENT,     // c6link's IDENT hooks from lora_ident (#36)
-    START_C6LINK,         // c6link_start: esp_hosted, the C6 image check, Wi-Fi
+    START_C6LINK,         // c6link_start: esp_hosted, the C6 image check (from the SD card's bundle when new, #595), Wi-Fi
+    START_SD_UPDATE,      // the P4 image in the SD card's update folder (#595): installed and restarted into when new
     START_BACKLIGHT,      // backlight_start (the C6 drives the backlights)
     START_KEYBOARD,       // the TCA8418 (reset with the C6, #14)
     START_SENSORS,        // on the keyboard's bus

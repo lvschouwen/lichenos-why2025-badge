@@ -105,6 +105,9 @@ when one breaks:
 2. The IDENT hooks (`START_LORA_IDENT`: `c6link_set_ident`, `c6link_set_ident_ready`) are set before `START_C6LINK`.
 3. `START_C6LINK` (`c6link_start`) comes before `START_BACKLIGHT`, `START_KEYBOARD` and `START_LORA`; `START_C6_HOOKS`
    (`c6_wire_hooks`) only after those three. The boot step enum in `lichen_boot/boot_steps.h` is a display order only.
+4. `START_SD_UPDATE` (#595, the P4 image in the card's update folder) comes right after `START_C6LINK` (the C6 first,
+   then the P4), after `START_SD` and `START_NOTICES`, and before `START_APPS`, `START_SD_APPS` and `START_OTA`. It is
+   not gated on IDENT, so a contract change can't strand the P4 on the old image.
 
 The OS rules in the same test include `START_WATCH` (the thermal watchdog and the notices, #281) after `START_NOTICES`
 and `START_SHELL`: its own step, so `start_shell` returning early without a display cannot skip it.
@@ -272,6 +275,32 @@ tiles appear when the loader has scanned `/sd/lichen/apps`. A degraded boot (saf
   asked again (`c6_sup.c:331`) once LoRa is back. `fw c6` shows the result.
 - **Flasher** (`c6link/c6_flasher.c`): UART1 on GPIO15/16, reset GPIO12 (EN), boot strap GPIO13; it releases the C6 into its
   application before ESP-Hosted may talk to it.
+
+### SD card update folder (#595)
+The card holds the firmware and stays the source: at boot the badge compares it with what it runs and installs what
+differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` lays it out from a build on a PC.
+- **Layout** `/sd/lichen/update/` (files are never renamed): `badge_fw.bin` + `badge_fw.bin.sha256` (sha256sum's
+  format), and `c6/` with the six files of `/storage/c6` (`C6_CARD_DIR`, `c6link/c6_paths.h`).
+- **C6** (`c6link/c6_card.c`, rules in `c6_boot_policy.c` `c6_card_*`): inside `c6link_start`, before the plan. From
+  stat and the `.md5` texts only, the card bundle is *same* as `/storage/c6` (nothing to do: an up-to-date card costs
+  no hashing), *incomplete* (notice, ignored), *failed before* or *new*. A new one whose three `.bin` match their
+  `.md5` is this boot's source (`c6_image_dir`): the bundle key, the flasher and the boot IDENT expectation read it,
+  under the card's batch lock, released before `esp_hosted_init`. After IDENT MATCH the bundle is copied into
+  `/storage/c6`, the no-card rescue: pair by pair, the `.bin` and `.md5` into temps, the `.bin` read back against the
+  `.md5`, then both renamed (room for the largest file once, as `ota-c6`). Held by the C6 (written this boot, or found
+  there by the flasher's check) and not proven: NVS `c6_card_bad` records its key plus the running P4's ELF sha, and the boots after go back to `/storage/c6` until the card bundle
+  or the P4 image changes. The copy needs no `#420` hold: what lands on `/storage/c6` is what the C6 just proved.
+- **P4** (`ota/ota_sd_update.c`, rules in `ota/sd_update_policy.c`, D1): the cheap look reads the image header and the
+  `esp_app_desc_t` at offset 32 (208 bytes) and compares its ELF sha256 with the running app's. Installed only when it
+  differs, was not tried before (settings blob `sdu_tried`, bound by main: ota opens no NVS) and the running image is
+  not definitely on trial. Then: the whole file's SHA-256 against `.sha256`, the card -> inactive slot in 4 KB pieces
+  through a short-lived internal buffer, `esp_ota_end`, the slot read back with `esp_partition_read` and hashed
+  (`esp_partition_get_sha256` returns the image's appended hash, never the file's), the attempt recorded, then
+  `esp_ota_set_boot_partition` and `system_restart_asked`. The arrival is marked as a slot switch
+  (`ota_image_note_slot_switch`): a card is physical access, so the trial needs no Wi-Fi (#411); a bad image still
+  rolls back and the record keeps it from installing again (one notice). A card pulled or a bad file before
+  `set_boot` leaves the boot slot alone, with a notice.
+- **#420:** installs from the card stay allowed with the on-air list on (D3: physical access, the security posture).
 
 ### 4. Hardware couplings
 - **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard

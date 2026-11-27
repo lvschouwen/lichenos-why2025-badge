@@ -271,6 +271,99 @@ static void test_bundle_pending(void) {
     CHECK(c6_bundle_pending(false, false, false, false));
 }
 
+
+// #595: the card bundle, every row
+static void test_card_classify(void) {
+    char const *k1 = M1 "," M2 "," M3 ",10,20,30";
+    char const *k2 = M2 "," M2 "," M3 ",10,20,30";
+    CHECK(c6_card_classify(0, "", k1, false) == C6_CARD_NONE);
+    CHECK(c6_card_classify(0, "", "", true) == C6_CARD_NONE);         // a stale record means nothing without files
+    for (unsigned f = 1; f < 6; f++) {
+        CHECK(c6_card_classify(f, k2, k1, false) == C6_CARD_HALF);   // a half bundle is never used
+    }
+    CHECK(c6_card_classify(6, "", k1, false) == C6_CARD_HALF);       // all there, a .md5 malformed
+    CHECK(c6_card_classify(6, NULL, k1, false) == C6_CARD_HALF);
+    CHECK(c6_card_classify(6, k1, k1, false) == C6_CARD_SAME);       // copied after the last card install
+    CHECK(c6_card_classify(6, k1, k1, true) == C6_CARD_SAME);        // same as /storage beats a stale record
+    CHECK(c6_card_classify(6, k2, k1, true) == C6_CARD_FAILED);
+    CHECK(c6_card_classify(6, k2, k1, false) == C6_CARD_NEW);
+    CHECK(c6_card_classify(6, k2, "", false) == C6_CARD_NEW);        // no bundle on /storage at all
+    CHECK(c6_card_classify(6, k2, NULL, false) == C6_CARD_NEW);
+    for (int c = C6_CARD_NONE; c <= C6_CARD_NEW; c++) {
+        CHECK(c6_card_use((c6_card_t)c, true) == (c == C6_CARD_NEW));
+        CHECK(!c6_card_use((c6_card_t)c, false));                    // a bad md5 is never the source
+        CHECK(c6_card_name((c6_card_t)c)[0] != '?');
+    }
+}
+
+static void test_card_record(void) {
+    uint8_t sha[C6_IDENT_SHA_LEN], other[C6_IDENT_SHA_LEN];
+    for (int i = 0; i < C6_IDENT_SHA_LEN; i++) {
+        sha[i]   = (uint8_t)(i * 7);
+        other[i] = (uint8_t)(i * 7);
+    }
+    other[31] ^= 1;
+    char a[C6_CARD_RECORD_MAX], b[C6_CARD_RECORD_MAX];
+    char const *k1 = M1 "," M2 "," M3 ",10,20,30";
+    CHECK(c6_card_record(k1, sha, a, sizeof(a)));
+    CHECK(strncmp(a, k1, strlen(k1)) == 0 && a[strlen(k1)] == '|' && strlen(a) == strlen(k1) + 1 + 64);
+    CHECK(strcmp(a + strlen(k1) + 1 + 60, "d2d9") == 0); // bytes 30 and 31 (210, 217), lowercase hex
+    CHECK(c6_card_record(k1, other, b, sizeof(b)) && strcmp(a, b) != 0); // another P4 image: another record
+    CHECK(!c6_card_record("", sha, b, sizeof(b)) && b[0] == '\0');
+    CHECK(!c6_card_record(k1, NULL, b, sizeof(b)) && b[0] == '\0');
+    CHECK(!c6_card_record(k1, sha, b, strlen(k1) + 1 + 64) && b[0] == '\0'); // no room for the NUL
+    CHECK(c6_card_record(k1, sha, b, strlen(k1) + 1 + 64 + 1));
+    CHECK(!c6_card_record(k1, sha, NULL, 10));
+}
+
+static void test_card_after(void) {
+    for (int w = 0; w < 2; w++) {
+        for (int i = 0; i < 2; i++) {
+            CHECK(c6_card_after(false, w, i) == C6_CARD_KEEP); // /storage/c6 was the source: the card is not touched
+        }
+    }
+    CHECK(c6_card_after(true, true, true) == C6_CARD_COPY);
+    CHECK(c6_card_after(true, false, true) == C6_CARD_COPY);           // the C6 already ran it: still the rescue copy
+    // The retry under a new P4 image (the record is per P4): the C6 already holds the card bundle, so the flasher
+    // writes nothing, and IDENT failing again must still record it, or every boot would retry it for ever
+    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_after(true, false, false) == C6_CARD_KEEP);          // the flasher never reached the C6
+}
+
+// The contract-change case (#595 option A): a card with a new C6 and a new P4. The old P4 records the card bundle
+// failed (the new C6 cannot answer its IDENT); the new P4 then retries it once, since the record names the old P4, and
+// records it under its own SHA only if IDENT fails again.
+static bool failed_under(char const *stored, char const *card_key, uint8_t const *p4) {
+    char rec[C6_CARD_RECORD_MAX];
+    return c6_card_record(card_key, p4, rec, sizeof(rec)) && strcmp(stored, rec) == 0;
+}
+
+static void test_card_contract_change(void) {
+    char const *storage = M1 "," M2 "," M3 ",10,20,30";
+    char const *card    = M3 "," M2 "," M1 ",10,20,30";
+    uint8_t     old_p4[C6_IDENT_SHA_LEN], new_p4[C6_IDENT_SHA_LEN];
+    memset(old_p4, 0x11, sizeof(old_p4));
+    memset(new_p4, 0x22, sizeof(new_p4));
+    char stored[C6_CARD_RECORD_MAX] = "";
+
+    // Boot 1, old P4: the card bundle is new, flashed, IDENT fails -> recorded under the old P4
+    CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, old_p4)) == C6_CARD_NEW);
+    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_record(card, old_p4, stored, sizeof(stored)));
+    // The old P4 again (say the P4 install failed): the bundle stays ignored
+    CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, old_p4)) == C6_CARD_FAILED);
+
+    // Boot 2, the new P4 from the card: the record is not its own, so the card bundle is the source again
+    c6_card_t c = c6_card_classify(6, card, storage, failed_under(stored, card, new_p4));
+    CHECK(c == C6_CARD_NEW && c6_card_use(c, true));
+    // ... the C6 already holds it (no write), and the new P4 gets IDENT: copied, the rescue copy is updated
+    CHECK(c6_card_after(true, true, true) == C6_CARD_COPY);
+    // ... or IDENT fails under the new P4 too: recorded under the new P4, so boot 3 goes back to /storage/c6
+    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_record(card, new_p4, stored, sizeof(stored)));
+    CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, new_p4)) == C6_CARD_FAILED);
+}
+
 int main(void) {
     test_key();
     test_bundle_pending();
@@ -282,6 +375,10 @@ int main(void) {
     test_after_attach();
     test_ident();
     test_no_loop_glue();
+    test_card_classify();
+    test_card_record();
+    test_card_after();
+    test_card_contract_change();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

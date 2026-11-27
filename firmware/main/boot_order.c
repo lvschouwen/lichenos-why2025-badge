@@ -18,6 +18,7 @@ boot_start_t const boot_order[] = {
     START_RADIO_SWITCHES, // before Wi-Fi and LoRa start
     START_LORA_IDENT,     // before c6link_start asks the C6 app who it is
     START_C6LINK,
+    START_SD_UPDATE,      // #595: the C6 first, then the P4; not gated on IDENT, so a contract change can't strand it
     START_BACKLIGHT,      // the C6 drives the backlights
     START_KEYBOARD,       // the TCA8418 resets with the C6 (#234)
     START_SENSORS,        // the keyboard's bus
@@ -46,7 +47,7 @@ char const *boot_start_name(boot_start_t step) {
         [START_EARLY] = "early",         [START_BOOT_SCREEN] = "boot screen", [START_CONSOLE] = "console",
         [START_STORAGE] = "storage",     [START_NOTICES] = "notices",   [START_FONTS] = "fonts",
         [START_SHELL] = "shell",         [START_WATCH] = "watch",         [START_SD] = "sd",             [START_RADIO_SWITCHES] = "radio switches",
-        [START_LORA_IDENT] = "lora ident", [START_C6LINK] = "c6link",   [START_BACKLIGHT] = "backlight",
+        [START_LORA_IDENT] = "lora ident", [START_C6LINK] = "c6link",   [START_SD_UPDATE] = "sd update", [START_BACKLIGHT] = "backlight",
         [START_KEYBOARD] = "keyboard",   [START_SENSORS] = "sensors",   [START_BATTERY] = "battery",
         [START_LORA] = "lora",
         [START_C6_HOOKS] = "c6 hooks",   [START_APPS] = "apps",         [START_SD_APPS] = "sd apps",   [START_OTA] = "ota",

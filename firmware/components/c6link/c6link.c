@@ -2,6 +2,7 @@
 #include "board_sdmmc.h"
 
 #include "c6_boot_policy.h"
+#include "c6_card.h"
 #include "c6_hooks_priv.h"
 #include "c6_rules.h"
 #include "c6link_priv.h"
@@ -179,41 +180,9 @@ void c6link_set_ident(bool (*ident)(uint8_t out[C6LINK_IDENT_LEN], uint32_t time
     ident_fn = ident;
 }
 
-// md5 text and size of one bundle file, the same files the flasher compares (no hashing of the 1 MB app)
-static bool read_bundle_file(char const *name, char md5[40], unsigned long *size) {
-    char path[64], md5_name[40];
-    snprintf(md5_name, sizeof(md5_name), "%s.md5", name);
-    if (!c6_image_path(name, path, sizeof(path))) {
-        return false;
-    }
-    struct stat st;
-    if (stat(path, &st) != 0 || st.st_size <= 0) {
-        return false;
-    }
-    *size = (unsigned long)st.st_size;
-    if (!c6_image_path(md5_name, path, sizeof(path))) {
-        return false;
-    }
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        return false;
-    }
-    size_t n = fread(md5, 1, 39, f);
-    fclose(f);
-    md5[n] = '\0';
-    return n >= 32;
-}
-
+// The bundle key of the directory the flasher reads this boot: the .md5 texts and sizes, no hashing of the 1 MB app
 static bool current_bundle_key(char *out, size_t cap) {
-    char          m[3][40];
-    unsigned long sz[3];
-    static char const *const names[3] = {"bootloader.bin", "partitions.bin", "firmware.bin"};
-    for (int i = 0; i < 3; i++) {
-        if (!read_bundle_file(names[i], m[i], &sz[i])) {
-            return false;
-        }
-    }
-    return c6_bundle_key(m[0], m[1], m[2], sz[0], sz[1], sz[2], out, cap);
+    return c6_bundle_key_in(c6_image_dir(), out, cap, NULL);
 }
 
 // The bundled app's ELF sha256, from the first bytes of its .bin (no hashing of the 1 MB app)
@@ -232,10 +201,12 @@ static bool bundle_app_sha(uint8_t out[C6_APP_SHA_LEN]) {
     return c6_app_elf_sha256(head, n, out);
 }
 
-// After the attach: does the running C6 app match the bundle? Any doubt is "not proven" (#36).
-static c6_ident_t check_ident(uint32_t *ms_out) {
-    uint8_t expected[C6_APP_SHA_LEN], running[C6_IDENT_SHA_LEN];
-    bool    have_expected = bundle_app_sha(expected);
+// After the attach: does the running C6 app match the bundle? Any doubt is "not proven" (#36). expected: the bundle's
+// app sha (NULL: unreadable), read by the caller from the bundle's directory (at boot before the attach: the card is
+// not read after it, #595)
+static c6_ident_t check_ident(uint32_t *ms_out, uint8_t const *expected) {
+    uint8_t running[C6_IDENT_SHA_LEN];
+    bool    have_expected = expected != NULL;
     int64_t t0            = esp_timer_get_time();
     bool    answered      = ident_fn && ident_fn(running, C6_IDENT_WAIT_MS);
     *ms_out               = (uint32_t)((esp_timer_get_time() - t0) / 1000);
@@ -331,7 +302,8 @@ void c6link_check_ident_runtime(void) {
         rt_ident = C6_IDENT_NOT_ASKED; // no LoRa task (radio off): nobody can ask, which proves nothing either way
         return;
     }
-    rt_ident = check_ident(&rt_ident_ms);
+    uint8_t expected[C6_APP_SHA_LEN];
+    rt_ident = check_ident(&rt_ident_ms, bundle_app_sha(expected) ? expected : NULL);
     if (rt_ident != C6_IDENT_MATCH) {
         ESP_LOGW(TAG, "C6 app not proven after the re-attach: full check on the next boot");
         c6link_set_verify_flag();
@@ -457,13 +429,15 @@ bool c6link_start(void) {
     c6_hooks_step_begin();
     int64_t   t0    = esp_timer_get_time();
     bool      force = take_force_flag();
+    c6_card_begin(); // #595: the card's bundle is this boot's source when it is new and valid
     char      key[C6_BUNDLE_KEY_MAX];
-    bool      full = plan_full_check(force, key, sizeof(key));
-    esp_err_t err  = ESP_OK;
+    bool      full  = plan_full_check(force, key, sizeof(key));
+    esp_err_t err   = ESP_OK;
+    bool      wrote = false;
     if (full) {
         ESP_LOGI(TAG, "C6 flasher check runs (%s)", boot_info.why);
         atomic_store(&s_flashing, true);
-        err = flash_c6_if_needed(force);
+        err = flash_c6_if_needed(force, &wrote);
         atomic_store(&s_flashing, false);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
@@ -471,6 +445,9 @@ bool c6link_start(void) {
     } else {
         ESP_LOGI(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
+    uint8_t expected[C6_APP_SHA_LEN];
+    bool    have_expected = bundle_app_sha(expected); // from the source, while the card is still ours (#595)
+    c6_card_end_reading();
     // Only after the flash check (#250): c6log borrows UART1 shared, and must never overlap the flasher's exclusive lend
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
@@ -485,8 +462,10 @@ bool c6link_start(void) {
     }
     // IDENT on both paths: a full boot stores the key only when the running C6 proved the bundled app, so a later skip
     // rests on a C6 that answered IDENT, never on an older image that cannot
-    boot_info.ident = attached ? check_ident(&boot_info.ident_ms) : C6_IDENT_NOT_ASKED;
+    boot_info.ident = attached ? check_ident(&boot_info.ident_ms, have_expected ? expected : NULL) : C6_IDENT_NOT_ASKED;
     bool ident_ok   = boot_info.ident == C6_IDENT_MATCH;
+    // A proven card bundle becomes the /storage/c6 rescue, one the C6 holds but did not prove is recorded as failed
+    c6_card_finish(wrote || (full && err == ESP_OK), ident_ok);
     // A failed flash leaves the C6 unproven: still pending (#420)
     atomic_store(&s_boot_c6, BOOT_CHECKED | (key[0] ? BOOT_STAGED : 0) | (ident_ok ? BOOT_PROVEN : 0));
     // The key is stored only after a successful attach and IDENT; a failed skip sets the verify flag (full check next

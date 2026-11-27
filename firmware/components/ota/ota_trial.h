@@ -36,8 +36,9 @@ bool ota_rolled_back(void);
 ota_arrival_t ota_image_arrival(void);
 // The developer-mode test arm was set before this boot: its trial counts Wi-Fi as not rejoined. Any task.
 bool ota_image_arrival_test_no_wifi(void);
-// `fw slot other` made slot the boot slot (only then; fw_console calls it through console_bind_slot_switch): the next
-// boot, if it boots that slot, keeps the trial rule as before. Not from an interrupt.
+// `fw slot other` made slot the boot slot (fw_console calls it through console_bind_slot_switch), or the boot-time SD card
+// install did (#595: physical access, as the console): the next boot, if it boots that slot, keeps the trial rule as
+// before (no Wi-Fi needed). Never for an image that came over the air. Not from an interrupt.
 void ota_image_note_slot_switch(esp_partition_t const *slot);
 // Registers the developer-mode `trial` command (compiled out of release builds). Once, at start.
 void ota_trial_register_cmds(void);

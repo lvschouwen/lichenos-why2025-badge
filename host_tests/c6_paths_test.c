@@ -56,6 +56,19 @@ int main(void) {
     // Never a truncated path
     CHECK(!c6_image_path("firmware.bin", out, 4));
 
+    // #595: the card bundle for one boot, then back; the #420 hold stays on /storage/c6 whatever the source
+    CHECK(strcmp(c6_image_dir(), C6_IMAGE_DIR) == 0);
+    c6_image_dir_use(C6_CARD_DIR);
+    CHECK(c6_image_path("firmware.bin", out, sizeof(out)) && strcmp(out, "/sd/lichen/update/c6/firmware.bin") == 0);
+    CHECK(!c6_image_path("../x", out, sizeof(out)));
+    CHECK(!c6_path_in_image_dir(C6_CARD_DIR "/firmware.bin"));
+    c6_image_dir_use(NULL);
+    CHECK(strcmp(c6_image_dir(), C6_IMAGE_DIR) == 0);
+    CHECK(c6_image_path_in(C6_CARD_DIR, "partitions.bin.md5", out, sizeof(out)) &&
+          strcmp(out, C6_CARD_DIR "/partitions.bin.md5") == 0);
+    CHECK(!c6_image_path_in(NULL, "firmware.bin", out, sizeof(out)));
+    CHECK(!c6_image_path_in(C6_CARD_DIR, "a/b", out, sizeof(out)));
+
     // The .md5 file next to an image must describe that image: MD5("abc") = 900150983cd24fb0d6963f7d28e17f72
     uint8_t const abc[16] = {0x90, 0x01, 0x50, 0x98, 0x3c, 0xd2, 0x4f, 0xb0,
                              0xd6, 0x96, 0x3f, 0x7d, 0x28, 0xe1, 0x7f, 0x72};

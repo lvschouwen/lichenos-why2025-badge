@@ -93,6 +93,10 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
                                       can show private messages, so keep it out of the repo)
 
 Host only (touches no badge, no ssh):
+  sd-prep <mountpoint> [c6dir]
+                            copy firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) with a .sha256 and the C6
+                            bundle (default firmware/storage_staging/c6) into <mountpoint>/lichen/update/ on a mounted
+                            SD card; the badge installs what differs from what it runs at its next boot, C6 first (#595)
   new-app <id> "<Name>"     scaffold a new app: firmware/components/lichen_<id>/ (model, screens, CMake), its host test
                             and the register, layer and test lines; refuses an id in use or a name with quotes (#385,
                             docs/app-api.md "An app in 10 minutes")
@@ -944,6 +948,36 @@ cmd_sdapp_push() {
     cmd_ota_file "$host" "$dir/manifest" "SD0:[lichen.apps.$id]manifest"
 }
 
+# #595: the SD card's update folder, from this build, on a card mounted on this machine. The badge installs a new P4
+# image and C6 bundle from it at boot by itself (C6 first). Each file goes in under a temp name and is moved into
+# place, so a card pulled half way leaves the old file or none, never a short one.
+sd_prep_put() {
+    local src=$1 dst=$2
+    cp -- "$src" "$dst.tmp" && mv -f -- "$dst.tmp" "$dst"
+}
+
+cmd_sd_prep() {
+    local mnt=$1 c6dir=${2:-$REPO/firmware/storage_staging/c6} bin=${BADGE_FIRMWARE_BIN:-$REPO/firmware/build/badge_fw.bin}
+    local dest name f
+    [ -d "$mnt" ] || { echo "sd-prep: $mnt is not a directory (mount the card first)" >&2; exit 1; }
+    [ -f "$bin" ] || { echo "sd-prep: no $bin (build first)" >&2; exit 1; }
+    c6_check_local "$c6dir" || exit 1
+    dest=$mnt/lichen/update
+    mkdir -p "$dest/c6"
+    sd_prep_put "$bin" "$dest/badge_fw.bin"
+    (cd "$dest" && sha256sum badge_fw.bin > badge_fw.bin.sha256.tmp && mv -f badge_fw.bin.sha256.tmp badge_fw.bin.sha256)
+    for name in "${C6_BUNDLE_FILES[@]}"; do
+        for f in "$name.bin" "$name.bin.md5"; do
+            sd_prep_put "$c6dir/$f" "$dest/c6/$f"
+        done
+    done
+    (cd "$dest" && sha256sum -c badge_fw.bin.sha256 >/dev/null) ||
+        { echo "sd-prep: badge_fw.bin on the card does not match its .sha256" >&2; exit 1; }
+    c6_check_local "$dest/c6" || exit 1
+    sync
+    echo "$dest holds $(basename "$bin") and the C6 bundle; unmount the card and put it in the badge, then restart it"
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -977,5 +1011,6 @@ case "${1:-}" in
         if [ "${2:-}" = --sd ]; then [ $# -eq 4 ] || usage; exec python3 -I "$REPO/tools/new_app.py" --sd "$3" "$4"; fi
         [ $# -eq 3 ] || usage; exec python3 -I "$REPO/tools/new_app.py" "$2" "$3" ;;
     screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
+    sd-prep)      [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_sd_prep "$2" "${3:-}" ;;
     *)        usage ;;
 esac

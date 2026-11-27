@@ -62,6 +62,7 @@
 #include "nvs_flash.h"
 #include "ota_server.h"
 #include "ota_os.h"
+#include "ota_sd_update.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
@@ -766,12 +767,19 @@ static void wifi_free_bulk(void *p) {
     lichen_free(lichen_sys_ctx_os(), p);
 }
 
+// The SD card's update folder (#595): what was ignored or failed is a notice. Raised at most once per boot by c6link;
+// no LN_ONCE_BOOT: its key is (source, target), shared by every OS notice without a target
+static void c6_card_notice(char const *title, char const *body) {
+    lichen_sys_notify(LN_WARN, title, body, 0);
+}
+
 static void start_c6link(boot_ctx_t *ctx) {
     (void)ctx;
     c6link_boot_hooks_t const boot = {.begin          = c6_step_begin,
                                       .progress       = c6_step_progress,
                                       .end            = c6_step_end,
-                                      .image_on_trial = ota_image_trial_maybe}; // an unread state: on trial
+                                      .image_on_trial = ota_image_trial_maybe, // an unread state: on trial
+                                      .notice         = c6_card_notice};
     c6link_set_boot_hooks(&boot);
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
     wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);
@@ -781,6 +789,30 @@ static void start_c6link(boot_ctx_t *ctx) {
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }
+}
+
+static void sd_update_notice(bool warn, char const *title, char const *body) {
+    lichen_sys_notify(warn ? LN_WARN : LN_INFO, title, body, 0); // once per boot by itself; see c6_card_notice
+}
+
+// The card install's attempt record (ota may not open NVS, #235): one blob in the settings' namespace
+static char const SD_UPDATE_RECORD[] = "sdu_tried";
+
+static bool sd_update_record_get(ota_sd_record_t *out) {
+    return settings_get_blob(SD_UPDATE_RECORD, out, sizeof(*out));
+}
+
+static bool sd_update_record_set(ota_sd_record_t const *rec) {
+    return settings_set_blob(SD_UPDATE_RECORD, rec, sizeof(*rec));
+}
+
+// #595: after the C6 step (its card bundle went first), before the apps and the update server: a new P4 image on the
+// card is installed and restarted into; this returns when there was nothing to install
+static void start_sd_update(boot_ctx_t *ctx) {
+    (void)ctx;
+    ota_sd_update_hooks_t const hooks = {
+        .notice = sd_update_notice, .record_get = sd_update_record_get, .record_set = sd_update_record_set};
+    ota_sd_update_boot(&hooks);
 }
 
 static void start_backlight(boot_ctx_t *ctx) {
@@ -927,6 +959,7 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
     [START_RADIO_SWITCHES] = start_radio_switches,
     [START_LORA_IDENT]     = start_lora_ident,
     [START_C6LINK]         = start_c6link,
+    [START_SD_UPDATE]      = start_sd_update,
     [START_BACKLIGHT]      = start_backlight,
     [START_KEYBOARD]       = start_keyboard,
     [START_SENSORS]        = start_sensors,
