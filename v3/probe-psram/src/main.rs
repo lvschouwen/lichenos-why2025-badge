@@ -86,20 +86,25 @@ extern "C" fn pmain() -> ! {
     let mut stage = STAGE;
     let mut cpu_mhz = 40;
     if let Some(rest) = STAGE.strip_prefix("cpu") {
+        // "cpu400-..." asks for 400 MHz (owner decision, #645); "cpu-..." stays at 360
+        let (target, rest) = match rest.strip_prefix("400") {
+            Some(r) => (400, r),
+            None => (360, rest),
+        };
         stage = rest.strip_prefix('-').unwrap_or("");
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, boot hart, RAM-only image (see clock::cpu_to_360).
-        match unsafe { clock::cpu_to_360(&mut log) } {
+        match unsafe { clock::cpu_to_mhz(&mut log, target) } {
             Ok((_, Some(a))) => {
                 cpu_mhz = a;
                 pl!("PERF cpu.clock mhz={cpu_mhz}");
                 pl!(
-                    "CHECK 645.cpu360 {} measured {cpu_mhz} MHz (360 expected)",
-                    if (350..=370).contains(&cpu_mhz) { "PASS" } else { "FAIL" }
+                    "CHECK 645.cpu{target} {} measured {cpu_mhz} MHz ({target} expected)",
+                    if cpu_mhz * 100 >= target * 97 && cpu_mhz * 100 <= target * 103 { "PASS" } else { "FAIL" }
                 );
             }
             Ok(_) => pl!("psram: clock set, timer did not count: no measurement"),
-            Err(e) => pl!("CHECK 645.cpu360 FAIL {e:?}"),
+            Err(e) => pl!("CHECK 645.cpu{target} FAIL {e:?}"),
         }
     }
     let upto = match stage {

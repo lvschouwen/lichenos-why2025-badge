@@ -183,6 +183,19 @@ pub fn state(log: Log) {
 /// Changes the core supply (HP/LP regulator bias, DCDC) and the CPU clock tree; RAM-only bring-up on the boot hart with
 /// nothing else running. Stop and report on a hang or brownout; do not retry blindly.
 pub unsafe fn cpu_to_360(log: Log) -> Result<(Option<u32>, Option<u32>), Error> {
+    cpu_to_mhz(log, 360)
+}
+
+/// `cpu_to_360` or the 400 MHz variant (#645, owner decision: try it). 400 is what IDF's non-REV_LESS_V3 build (rev 3.x) uses:
+/// CPLL div reg 10 instead of 9 (`clk_ll_cpll_set_config`, rev >= 1 branch), CPU div 1, MEM div 2, APB div 2
+/// (`rtc_clk_cpu_freq_to_cpll_mhz`), the same dbias and DCDC values. IDF does not offer 400 on rev < 3 (v2 is REV_LESS_V3), so
+/// this has no IDF precedent on rev 1.0.
+///
+/// # Safety
+/// As `cpu_to_360`.
+pub unsafe fn cpu_to_mhz(log: Log, mhz: u32) -> Result<(Option<u32>, Option<u32>), Error> {
+    assert!(mhz == 360 || mhz == 400);
+    let cpll_div: u8 = if mhz == 400 { 10 } else { 9 };
     state(log);
     let before = measure_mhz();
     log(format_args!("clk: before: measured {before:?} MHz"));
@@ -239,10 +252,10 @@ pub unsafe fn cpu_to_360(log: Log) -> Result<(Option<u32>, Option<u32>), Error> 
     put(log, "apb div 1", ROOT2, 0x00FF_0000, 0);
     bus_update();
     put(log, "cpll calibration start", ANA_PLL_CTRL0, 1 << 3, 0);
-    log(format_args!("clk: regi2c CPLL ref_div reg2 = 0x50, div reg3 = 0x9 (360 MHz), dcur reg6 = 0x73 (IDF clk_ll_cpll_set_config, rev >= 1)"));
+    log(format_args!("clk: regi2c CPLL ref_div reg2 = 0x50, div reg3 = {cpll_div:#x} ({mhz} MHz), dcur reg6 = 0x73 (IDF clk_ll_cpll_set_config, rev >= 1)"));
     uart::drain();
     i2c_write(BLK_CPLL, 2, 0x50);
-    i2c_write(BLK_CPLL, 3, 0x09);
+    i2c_write(BLK_CPLL, 3, cpll_div);
     i2c_write(BLK_CPLL, 6, 0x73);
     let mut n = 0u32;
     while read32(ANA_PLL_CTRL0) & (1 << 2) == 0 {
