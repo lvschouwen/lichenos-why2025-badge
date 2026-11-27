@@ -17,7 +17,9 @@ SECTIONS {
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > LOAD
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _load_end = .; } > LOAD
   .bss (NOLOAD) : ALIGN(4) { _noload_start = .; _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD
-  .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 4K; _trap_stack_top = .; . += 2K; _fault_stack_top = .; _noload_end = .; } > NOLOAD
+  .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 4K; _trap_stack_top = .; . += 2K; _fault_stack_top = .; } > NOLOAD
+  /* Core 1 (#612 checkpoint 3): its own kernel, trap and fault stacks; _start1 and nested_trap pick them by mhartid. */
+  .stack1 (NOLOAD) : ALIGN(16) { . += 8K; _stack1_top = .; . += 4K; _trap_stack1_top = .; . += 2K; _fault_stack1_top = .; _noload_end = .; } > NOLOAD
   /* U data page for the stubs (#612): the first data slot of the plan (0x4FF70000), 4 KB of it. */
   .udata 0x4FF70000 (NOLOAD) : { _udata = .; . += 4K; _eudata = .; } > NOLOAD
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }

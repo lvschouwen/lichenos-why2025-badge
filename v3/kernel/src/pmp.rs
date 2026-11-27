@@ -65,22 +65,33 @@ pub fn read_entries() -> [Entry; ENTRIES] {
     core::array::from_fn(|i| Entry { cfg: cfg_byte(i), addr: read_addr(i) })
 }
 
-/// What the kernel believes is loaded, so a reload writes only what differs. Single hart, MIE clear (see `Global`).
-static SHADOW: Global<[Entry; ENTRIES]> = Global::new([Entry::OFF; ENTRIES]);
-static GRAN: AtomicU32 = AtomicU32::new(0);
-static FREE: AtomicU32 = AtomicU32::new(0);
-static LOCKED: AtomicU32 = AtomicU32::new(0);
+/// What the kernel believes is loaded, so a reload writes only what differs. Per hart, MIE clear (see `Global`).
+/// PMP CSRs are per hart, so the shadow and the discovery results are too (#612 checkpoint 3: core 1 runs its own
+/// discovery and U view). Each hart touches only its own index.
+const HARTS: usize = 2;
+static SHADOW: [Global<[Entry; ENTRIES]>; HARTS] = [const { Global::new([Entry::OFF; ENTRIES]) }; HARTS];
+static GRAN: [AtomicU32; HARTS] = [const { AtomicU32::new(0) }; HARTS];
+static FREE: [AtomicU32; HARTS] = [const { AtomicU32::new(0) }; HARTS];
+static LOCKED: [AtomicU32; HARTS] = [const { AtomicU32::new(0) }; HARTS];
+
+/// This hart's index into the per-hart tables (the qemu-virt harness is single-hart).
+fn hart() -> usize {
+    #[cfg(feature = "esp32p4")]
+    return crate::smp::hartid() & 1;
+    #[cfg(not(feature = "esp32p4"))]
+    0
+}
 
 pub fn gran() -> u32 {
-    GRAN.load(Ordering::Relaxed)
+    GRAN[hart()].load(Ordering::Relaxed)
 }
 
 /// What `report()` found in the ROM state (all zero before it has run).
 #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn discovery() -> pmp::Discovery {
     pmp::Discovery {
-        free_mask: FREE.load(Ordering::Relaxed) as u16,
-        locked_mask: LOCKED.load(Ordering::Relaxed) as u16,
+        free_mask: FREE[hart()].load(Ordering::Relaxed) as u16,
+        locked_mask: LOCKED[hart()].load(Ordering::Relaxed) as u16,
         gran: Some(gran()).filter(|g| *g != 0),
     }
 }
@@ -135,11 +146,12 @@ pub fn report() -> pmp::Discovery {
         kprintln!("pmp: granularity {gran} is coarser than an app slot: refusing to run apps");
         crate::platform::exit(4);
     }
-    GRAN.store(gran, Ordering::Relaxed);
-    FREE.store(d.free_mask as u32, Ordering::Relaxed);
-    LOCKED.store(d.locked_mask as u32, Ordering::Relaxed);
-    // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
-    *unsafe { SHADOW.get() } = read_entries();
+    let h = hart();
+    GRAN[h].store(gran, Ordering::Relaxed);
+    FREE[h].store(d.free_mask as u32, Ordering::Relaxed);
+    LOCKED[h].store(d.locked_mask as u32, Ordering::Relaxed);
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
+    *unsafe { SHADOW[h].get() } = read_entries();
     d
 }
 
@@ -156,8 +168,8 @@ pub fn load(want: &pmp::Plan) -> usize {
 /// Is the view the hardware holds (per the shadow) a safe one? `run_u` asserts it before every U entry.
 #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn view_loaded() -> bool {
-    // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
-    pmp::view_ok(unsafe { SHADOW.get() })
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
+    pmp::view_ok(unsafe { SHADOW[hart()].get() })
 }
 
 /// `load` without the view check. Only the #646 hang reproducer uses it (probe builds).
@@ -167,8 +179,8 @@ pub fn load_unchecked(want: &pmp::Plan) -> usize {
 }
 
 fn write_plan(want: &pmp::Plan) -> usize {
-    // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
-    let sh = unsafe { SHADOW.get() };
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
+    let sh = unsafe { SHADOW[hart()].get() };
     let mut writes = 0;
     let mut words = [0u32; 4];
     for (i, w) in want.entries().iter().enumerate() {

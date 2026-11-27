@@ -1,0 +1,241 @@
+//! The second HP core (#612 checkpoint 3): its start, the two mailbox queues, and the loop core 1 runs.
+//!
+//! Core 1 runs the same trap vector as core 0 with per-hart state (boot_esp32p4.S indexes k_ctx and the fault stack
+//! by mhartid, `_start1` gives it its own kernel and trap stacks, mtrap keeps one State per hart). Its tick is its own
+//! CLINT compare and CLIC line 7, both programmed through core 1's own view of those blocks.
+//!
+//! Console rule (the console ring is a single-context `Global`): core 1 prints only in `kmain1` before it posts
+//! `UP`, while core 0 waits silently for that message; it flushes first, and the Release of the post hands the ring
+//! back. After that core 1 only answers messages, and core 0 prints the results. Fatal paths switch to the raw UART
+//! (`enter_fatal`) before printing, on either hart.
+//!
+//! The message set is the bench's. #619 (syscall forwarding) adds its own ops on the same queues; `Msg` already has
+//! room for a syscall number and six arguments.
+use crate::kprintln;
+use crate::mtrap;
+use crate::platform::{self, hw};
+use lichen_kcore::mailbox::{Consumer, Producer, Spsc};
+
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct Msg {
+    pub op: u32,
+    pub seq: u32,
+    pub a: [u32; 6],
+}
+
+/// Core 1 -> core 0, once: a = [mhartid, mtvec, pmpcfg0, pmpcfg1, pmpcfg2, pmpcfg3].
+pub const OP_UP: u32 = 1;
+/// Echo: the reply carries `!a[i]`, so it proves core 1 read the request.
+pub const OP_PING: u32 = 2;
+/// Store a[0] to `COHERE_WORD` through the cached alias, then reply.
+pub const OP_COHERE: u32 = 3;
+/// Run a[1] ticks of a[0] us on core 1's own timer. Reply a = [count, gap_min, gap_max, lat_max, missed, stray].
+pub const OP_TICK: u32 = 4;
+/// Spin a[0] iterations in U under core 1's PMP with a 100 us tick, then the illegal word.
+/// Reply a = [preempts, fault code (0xFFF none), fault epc, ticks, exit a0 or 0, 1 if it exited].
+pub const OP_USPIN: u32 = 5;
+/// Reply, then park in wfi for good.
+pub const OP_PARK: u32 = 6;
+/// U load (a[1] = 0) or store (a[1] = 1) of a[0] on core 1 under its U view. Reply a = [fault code (0xFFF none),
+/// mtval, epc, exit a0, 1 if it exited, 0].
+pub const OP_UACCESS: u32 = 7;
+/// Set on every reply.
+pub const REPLY: u32 = 0x8000_0000;
+
+const QLEN: usize = 16;
+/// Core 0 produces, core 1 consumes.
+static TO_C1: Spsc<Msg, QLEN> = Spsc::new();
+/// Core 1 produces, core 0 consumes.
+static TO_C0: Spsc<Msg, QLEN> = Spsc::new();
+/// The word OP_COHERE stores to (bench evidence for the shared L1 DCache).
+pub static COHERE_WORD: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+extern "C" {
+    fn _start1();
+    fn u_spin_illegal();
+    fn u_load();
+    fn u_store();
+    static _utext: u8;
+}
+
+const UPAGE: usize = 4096;
+const U_TICK_US: u64 = 100;
+
+pub fn hartid() -> usize {
+    let v: usize;
+    // SAFETY: mhartid is a read-only CSR with no side effects.
+    unsafe { core::arch::asm!("csrr {0}, mhartid", out(reg) v, options(nomem, nostack)) };
+    v
+}
+
+/// mcycle, low word (wraps every ~10 s at 400 MHz; callers time far shorter spans with wrapping_sub). Not `nomem`:
+/// a timing read must stay where it is relative to the mailbox accesses it brackets.
+pub fn cycles() -> u32 {
+    let v: u32;
+    // SAFETY: reading mcycle has no side effects.
+    unsafe { core::arch::asm!("csrr {0}, mcycle", out(reg) v, options(nostack)) };
+    v
+}
+
+/// mcountinhibit (CSR 0x320); bit 0 set means mcycle is stopped.
+pub fn mcountinhibit() -> u32 {
+    let v: u32;
+    // SAFETY: reading mcountinhibit has no side effects.
+    unsafe { core::arch::asm!("csrr {0}, 0x320", out(reg) v, options(nomem, nostack)) };
+    v
+}
+
+/// Let mcycle count on this hart.
+pub fn uninhibit_mcycle() {
+    // SAFETY: clearing mcountinhibit.CY only starts this hart's cycle counter.
+    unsafe { core::arch::asm!("csrci 0x320, 1", options(nomem, nostack)) };
+}
+
+/// Core 0's ends of the two queues.
+pub struct Link {
+    tx: Producer<'static, Msg, QLEN>,
+    rx: Consumer<'static, Msg, QLEN>,
+}
+
+/// Start core 1 at `_start1`. Core 0 must print nothing until `Link::recv` returns UP (see the console rule).
+/// Returns the link and the stall polls, or None if core 1 stayed stalled.
+pub fn start() -> Option<(Link, u32)> {
+    // Everything core 0 wrote so far (bss, the console ring) is ordered before core 1 can run.
+    core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+    // SAFETY: _start1 sets up its own stacks and mtvec (boot_esp32p4.S); this is the only call (bringup runs once).
+    let polls = unsafe { hw::core1::start(_start1 as *const () as usize, 1_000_000) }?;
+    // SAFETY: core 0 is the only producer of TO_C1 and the only consumer of TO_C0; Link is created once.
+    Some((Link { tx: unsafe { TO_C1.producer() }, rx: unsafe { TO_C0.consumer() } }, polls))
+}
+
+impl Link {
+    /// Queue a request; waits (bounded by `deadline`, an mtime value) while the queue is full.
+    pub fn send(&mut self, m: Msg, deadline: u64) -> bool {
+        let mut m = m;
+        loop {
+            match self.tx.push(m) {
+                Ok(()) => return true,
+                Err(back) if hw::clint::mtime() < deadline => m = back,
+                Err(_) => return false,
+            }
+        }
+    }
+    /// The next message from core 1, or None at `deadline`.
+    pub fn recv(&mut self, deadline: u64) -> Option<Msg> {
+        loop {
+            if let Some(m) = self.rx.pop() {
+                return Some(m);
+            }
+            if hw::clint::mtime() >= deadline {
+                return None;
+            }
+        }
+    }
+    /// Non-blocking.
+    pub fn try_recv(&mut self) -> Option<Msg> {
+        self.rx.pop()
+    }
+}
+
+/// Hart 1's Rust entry, from `_start1` (own stack, mtvec = trap_entry, mscratch = its trap stack top).
+#[no_mangle]
+extern "C" fn kmain1() -> ! {
+    let mtvec = hw::trap::mtvec();
+    kprintln!("core1: up, mhartid={} mtvec={mtvec:#010x}; its own PMP follows", hartid());
+    crate::pmp::report();
+    let cfg = core::array::from_fn::<u32, 4, _>(|w| {
+        (0..4).fold(0u32, |acc, b| acc | (crate::pmp::cfg_byte(w * 4 + b) as u32) << (8 * b))
+    });
+    platform::flush();
+    // SAFETY: hart 1 is the only consumer of TO_C1 and the only producer of TO_C0; kmain1 runs once.
+    let (mut rx, mut tx) = unsafe { (TO_C1.consumer(), TO_C0.producer()) };
+    let up = Msg { op: OP_UP, seq: 0, a: [hartid() as u32, mtvec, cfg[0], cfg[1], cfg[2], cfg[3]] };
+    reply(&mut tx, up);
+    loop {
+        let Some(m) = rx.pop() else {
+            core::hint::spin_loop();
+            continue;
+        };
+        let a = match m.op {
+            OP_PING => m.a.map(|x| !x),
+            OP_COHERE => {
+                COHERE_WORD.store(m.a[0], core::sync::atomic::Ordering::Relaxed);
+                m.a
+            }
+            OP_TICK => tick_run(m.a[0] as u64, m.a[1]),
+            OP_USPIN => u_spin(m.a[0] as usize),
+            OP_UACCESS => u_access_at(m.a[0] as usize, m.a[1] != 0),
+            OP_PARK => {
+                reply(&mut tx, Msg { op: m.op | REPLY, seq: m.seq, a: [0; 6] });
+                park()
+            }
+            _ => [u32::MAX; 6],
+        };
+        reply(&mut tx, Msg { op: m.op | REPLY, seq: m.seq, a });
+    }
+}
+
+/// Core 0 never has more requests outstanding than the reply queue holds, so a full queue only means core 0 is
+/// slow or gone: retry.
+fn reply(tx: &mut Producer<'static, Msg, QLEN>, m: Msg) {
+    while tx.push(m).is_err() {
+        core::hint::spin_loop();
+    }
+}
+
+fn park() -> ! {
+    loop {
+        hw::trap::wfi();
+    }
+}
+
+/// `count` ticks of `period_us` on this hart's CLINT + CLIC, taken in mtrap's wait window as on core 0.
+fn tick_run(period_us: u64, count: u32) -> [u32; 6] {
+    let period = lichen_kcore::trap::us_to_ticks(period_us);
+    let stray0 = mtrap::stray_irqs();
+    mtrap::tick_start(period, count);
+    let deadline = hw::clint::mtime() + period * (count as u64 + 1000);
+    while mtrap::tick_count() < count && hw::clint::mtime() < deadline {
+        mtrap::wait_irq();
+    }
+    let Some(t) = mtrap::tick_stop() else { return [0; 6] };
+    let s = t.stats;
+    let stray = mtrap::stray_irqs() - stray0;
+    [s.count, s.gap_min as u32, s.gap_max as u32, s.lat_max as u32, s.missed as u32, stray]
+}
+
+/// #609 row 3 on core 1: a U spin under core 1's own PMP view is preempted by core 1's tick, and the illegal
+/// instruction at its end still arrives.
+fn u_spin(spin: usize) -> [u32; 6] {
+    let udata = u_view();
+    mtrap::tick_start(lichen_kcore::trap::us_to_ticks(U_TICK_US), u32::MAX);
+    let u = mtrap::run_u(u_spin_illegal as *const () as usize, udata + UPAGE, spin, 0);
+    let ticks = mtrap::tick_stop().map_or(0, |k| k.stats.count);
+    let (code, epc) = u.fault.map_or((0xFFF, 0), |f| (lichen_kcore::trap::decode(f.cause).code as u32, f.epc));
+    [u.preempts, code, epc, ticks, u.exit.unwrap_or(0) as u32, u.exit.is_some() as u32]
+}
+
+/// Load core 1's U view into its own PMP through the planner and `pmp::load` (so `view_ok` holds): the stub text
+/// (R+X), its data page (R+W), and the fixed entries every U view carries, the R-only CPU-subsystem window (entry 14,
+/// #646: a PMP-denied U load there hangs the core, an allowed one is refused by the hardware check) and deny-all.
+/// Core 1's data and stack page is the first page of app slot 1's data region (kcore slots), so core 0's U runs
+/// (slot 0) and core 1's never share a page. Returns the data page.
+fn u_view() -> usize {
+    // SAFETY: a linker symbol; only its address is used.
+    let utext = unsafe { &_utext as *const u8 as usize };
+    let udata = platform::slot(1).data;
+    crate::pmp::apply(utext, udata, UPAGE);
+    udata
+}
+
+/// One U load (or store, when `store`) on core 1 for the core-local deny rows: a load must be refused by the hardware
+/// privilege check, a store by the PMP.
+fn u_access_at(addr: usize, store: bool) -> [u32; 6] {
+    let udata = u_view();
+    let f = if store { u_store as *const () as usize } else { u_load as *const () as usize };
+    let u = mtrap::run_u(f, udata + UPAGE, addr, 0);
+    let (code, tval, epc) =
+        u.fault.map_or((0xFFF, 0, 0), |f| (lichen_kcore::trap::decode(f.cause).code as u32, f.tval, f.epc));
+    [code, tval, epc, u.exit.unwrap_or(0) as u32, u.exit.is_some() as u32, 0]
+}

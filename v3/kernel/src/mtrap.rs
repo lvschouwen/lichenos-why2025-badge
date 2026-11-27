@@ -60,13 +60,26 @@ struct State {
     stray: u32,
 }
 
-/// Touched by the handler and by kernel code with MIE clear only (see the module invariant).
-static STATE: Global<State> = Global::new(State { tick: None, user: None, expect_pc: None, caught: None, stray: 0 });
+/// One per hart (#612 checkpoint 3), each touched only by its own hart: by its handler and by its kernel code with
+/// MIE clear (see the module invariant). The tick, U run and fault state are per core like the CLINT compare, the
+/// CLIC and mscratch they go with.
+static STATE: [Global<State>; 2] =
+    [const { Global::new(State { tick: None, user: None, expect_pc: None, caught: None, stray: 0 }) }; 2];
+
+/// This hart's State.
+///
+/// # Safety
+/// As `Global::get`, for this hart's instance: no other live reference to it.
+unsafe fn state() -> &'static mut State {
+    // mhartid is 0 or 1 on the P4 (_start and _start1 park anything else before Rust runs).
+    STATE[crate::smp::hartid() & 1].get()
+}
 
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     hw::trap::irq_disable();
-    // SAFETY: MIE is clear here and the handler is not running (it never calls `with`), so this is the only &mut.
-    f(unsafe { STATE.get() })
+    // SAFETY: MIE is clear here and this hart's handler is not running (it never calls `with`), so this is the only
+    // &mut to this hart's State; the other hart only uses its own.
+    f(unsafe { state() })
 }
 
 /// Configure CLINT + CLIC line 7 for a periodic tick and arm the first deadline. Returns the threshold read back.
@@ -234,7 +247,7 @@ extern "C" fn m_trap(frame: *mut Frame) -> usize {
     let c = trap::decode(mcause);
     // SAFETY: trap entry; the kernel holds no &mut into STATE while MIE can be set (module invariant), and a nested
     // trap never reaches here (it takes the nested_fault path).
-    let s = unsafe { STATE.get() };
+    let s = unsafe { state() };
     if c.interrupt {
         if c.code == trap::IRQ_MTIMER {
             on_timer(s);

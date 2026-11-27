@@ -17,6 +17,8 @@ mod platform;
 #[cfg(feature = "esp32p4")]
 mod bringup;
 #[cfg(feature = "esp32p4")]
+mod bringup_core1;
+#[cfg(feature = "esp32p4")]
 mod bringup_pmp;
 #[cfg(feature = "esp32p4")]
 mod bringup_shapes;
@@ -24,6 +26,8 @@ mod bringup_shapes;
 mod bringup_u;
 #[cfg(feature = "esp32p4")]
 mod mtrap;
+#[cfg(feature = "esp32p4")]
+mod smp;
 
 #[cfg(feature = "qemu-virt")]
 use lichen_kcore::handles;
@@ -76,6 +80,9 @@ extern "C" fn kmain(hart: usize, boot_info: *const u8) -> ! {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    // The panicking code may hold the console ring, or run on core 1 while core 0 prints: go raw first.
+    #[cfg(feature = "esp32p4")]
+    platform::enter_fatal();
     kprintln!("KERNEL PANIC: {info}");
     platform::exit(2)
 }

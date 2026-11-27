@@ -66,6 +66,22 @@ impl<T: Copy, const N: usize> Spsc<T, N> {
         (Producer { q: self }, Consumer { q: self })
     }
 
+    /// The producer handle alone, for a queue in a static whose two sides start on different harts.
+    ///
+    /// # Safety
+    /// As `split`: at most one live `Producer` for this queue at any time.
+    pub unsafe fn producer(&self) -> Producer<'_, T, N> {
+        Producer { q: self }
+    }
+
+    /// The consumer handle alone.
+    ///
+    /// # Safety
+    /// As `split`: at most one live `Consumer` for this queue at any time.
+    pub unsafe fn consumer(&self) -> Consumer<'_, T, N> {
+        Consumer { q: self }
+    }
+
     /// Messages waiting, as seen from anywhere (a snapshot; it may be stale by the time it is used).
     pub fn len(&self) -> usize {
         let h = self.head.load(Ordering::Acquire);

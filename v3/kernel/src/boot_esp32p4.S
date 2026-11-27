@@ -35,6 +35,29 @@ park:
     wfi
     j park
 
+# Core 1 entry (#612 checkpoint 3): core 0 hands this address to the ROM (ets_set_appcpu_boot_addr) once core 1 is
+# clocked and out of reset. The same trap vector as core 0, but its own kernel and trap stacks; bss belongs to core 0
+# and is already zeroed. Any hart other than 1 that lands here parks.
+.global _start1
+.balign 4
+_start1:
+    csrci mstatus, 8
+    li t0, 0x6000               # mstatus.FS = off, as _start: no FPU state for U to see or leave behind
+    csrc mstatus, t0
+    li t0, 0x200000             # mstatus.TW = 1, as _start: wfi in a lower mode traps
+    csrs mstatus, t0
+    la t0, trap_entry
+    ori t0, t0, 3
+    csrw mtvec, t0
+    csrr t0, mhartid
+    li t1, 1
+    bne t0, t1, park
+    la sp, _stack1_top
+    la t0, _trap_stack1_top
+    csrw mscratch, t0
+    call kmain1
+    j park
+
 .section .text.trap, "ax"
 # M-mode trap vector (#612). CLIC mode: exceptions and non-vectored interrupts land at the mtvec base (64-byte aligned
 # at least). Invariant: outside a trap, mscratch holds this hart's trap stack top; inside one, it is 0. So a trap taken
@@ -98,6 +121,9 @@ to_kernel:
     addi t0, sp, 80
     csrw mscratch, t0
     la t0, k_ctx
+    csrr t1, mhartid            # this hart's 64-byte k_ctx slot
+    slli t1, t1, 6
+    add t0, t0, t1
     lw ra, 0(t0)
     lw sp, 4(t0)
     lw s0, 8(t0)
@@ -116,10 +142,15 @@ to_kernel:
     lw tp, 60(t0)
     ret
 
+# Each hart has its own fault stack, so a nested trap on one core cannot run over the other's dump.
 nested_trap:
     csrw mscratch, zero
+    csrr sp, mhartid
+    bnez sp, 1f
     la sp, _fault_stack_top
-    call nested_fault
+    j 2f
+1:  la sp, _fault_stack1_top
+2:  call nested_fault
     j park
 
 # planted_fault(): one illegal instruction (the all-zero word is defined illegal), then return. The bring-up arms
@@ -138,6 +169,9 @@ planted_fault:
 .global run_user
 run_user:
     la t0, k_ctx
+    csrr t1, mhartid            # this hart's 64-byte k_ctx slot (see to_kernel)
+    slli t1, t1, 6
+    add t0, t0, t1
     sw ra, 0(t0)
     sw sp, 4(t0)
     sw s0, 8(t0)
@@ -195,7 +229,8 @@ run_user:
 
 .section .bss
 .balign 4
-k_ctx: .space 64
+# One 64-byte callee-saved context per hart (0 and 1), indexed by mhartid.
+k_ctx: .space 128
 
 # U-mode stubs, on their own 4 KB page (.utext, granted R+X to U). a7 = 0: echo (the kernel returns a0 + 1);
 # a7 = 1: exit with a0.
