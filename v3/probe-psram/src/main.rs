@@ -116,7 +116,7 @@ extern "C" fn pmain() -> ! {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" | "eye" | "diag" | "perf" | "regs" | "variants" => Some(psram::Upto::Tuned),
+        "tune" | "all" | "eye" | "diag" | "perf" | "regs" | "variants" | "isolate" => Some(psram::Upto::Tuned),
         _ => None,
     };
     if let Some(upto) = upto {
@@ -125,6 +125,9 @@ extern "C" fn pmain() -> ! {
         match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
+                if stage == "isolate" {
+                    variants::isolate();
+                }
                 if stage == "variants" {
                     if let Some(t) = i.tuned {
                         variants::run_group(GROUP, t);

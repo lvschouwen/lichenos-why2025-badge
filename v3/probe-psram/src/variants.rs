@@ -175,3 +175,125 @@ pub fn run_group(group: u32, base: tune::Tuned) {
         }
     }
 }
+
+// ---- isolate: does the flip follow the data, the neighbours, the address or the write rate? -----------------------------
+const I_OFF: usize = 0x54_0000;
+const I_LEN: usize = 0x8_0000; // 0x540000..0x5C0000 covers 0x55xxxx-0x5axxxx
+
+#[derive(Clone, Copy)]
+enum Store {
+    Word,
+    Half,
+    Byte,
+}
+
+fn cycles() -> u32 {
+    let v: u32;
+    // SAFETY: mcycle CSR read.
+    unsafe { core::arch::asm!("csrr {}, mcycle", out(reg) v) };
+    v
+}
+
+fn iso_case(name: &str, f: &dyn Fn(usize) -> u32, how: Store, gap_cycles: u32) {
+    // SAFETY: ROM cache maintenance on the mapped window.
+    unsafe { map::cache_invalidate(CACHED_BASE, 32 << 20) };
+    let mut a = I_OFF;
+    while a < I_OFF + I_LEN {
+        let v = f(a);
+        let p = UNC + a;
+        // SAFETY: inside the mapped window, naturally aligned.
+        unsafe {
+            match how {
+                Store::Word => write_volatile(p as *mut u32, v),
+                Store::Half => {
+                    write_volatile(p as *mut u16, v as u16);
+                    write_volatile((p + 2) as *mut u16, (v >> 16) as u16);
+                }
+                Store::Byte => {
+                    for i in 0..4 {
+                        write_volatile((p + i) as *mut u8, (v >> (8 * i)) as u8);
+                    }
+                }
+            }
+            core::arch::asm!("fence");
+        }
+        if gap_cycles != 0 {
+            let t0 = cycles();
+            while cycles().wrapping_sub(t0) < gap_cycles {}
+        }
+        a += 4;
+    }
+    let (mut bad, mut bit8, mut other, mut in_class, mut first) = (0u32, 0u32, 0u32, 0u32, [0u32; 4]);
+    let mut a = I_OFF;
+    while a < I_OFF + I_LEN {
+        // SAFETY: as above.
+        let g = unsafe { read_volatile((UNC + a) as *const u32) };
+        let e = f(a);
+        if g != e {
+            if (bad as usize) < first.len() {
+                first[bad as usize] = a as u32;
+            }
+            bad += 1;
+            if g ^ e == 0x100 {
+                bit8 += 1;
+            } else {
+                other += 1;
+            }
+            if a & 0x7FF == 0x400 {
+                in_class += 1;
+            }
+        }
+        a += 4;
+    }
+    pl!(
+        "ISOLATE {name}: {bad} bad of {} words (bit 8 only {bit8}, other {other}, at offset 0x400 mod 0x800: {in_class}); first {:#x} {:#x} {:#x} {:#x}",
+        I_LEN / 4,
+        first[0],
+        first[1],
+        first[2],
+        first[3]
+    );
+    lichen_platform_esp32p4::uart::drain();
+}
+
+pub fn isolate() {
+    // SAFETY: ROM cache maintenance; mapped window.
+    unsafe {
+        map::cache_invalidate_all_l2();
+        map::map_identity((32 << 20) / PAGE_BYTES);
+    }
+    let addr = |a: usize| a as u32;
+    iso_case("address, sw, back to back", &addr, Store::Word, 0);
+    iso_case("const 0x00000400", &|_| 0x400, Store::Word, 0);
+    iso_case("const 0x00000000", &|_| 0, Store::Word, 0);
+    iso_case("const 0x00000600", &|_| 0x600, Store::Word, 0);
+    iso_case("const 0x00000200 (bit 9)", &|_| 0x200, Store::Word, 0);
+    iso_case("const 0xFFFFFFFF (control)", &|_| 0xFFFF_FFFF, Store::Word, 0);
+    // neighbours: only the words at page offset 0x400 differ from their surroundings
+    iso_case(
+        "0x400 at offset 0x400 mod 0x800, 0x3FC elsewhere",
+        &|a| if a & 0x7FF == 0x400 { 0x400 } else { 0x3FC },
+        Store::Word,
+        0,
+    );
+    iso_case(
+        "0x400 at offset 0x400 mod 0x800, 0 elsewhere",
+        &|a| if a & 0x7FF == 0x400 { 0x400 } else { 0 },
+        Store::Word,
+        0,
+    );
+    iso_case(
+        "0 at offset 0x400 mod 0x800, 0x400 elsewhere",
+        &|a| if a & 0x7FF == 0x400 { 0 } else { 0x400 },
+        Store::Word,
+        0,
+    );
+    // write rate: 1 us (360 cycles) between stores, and 10 us
+    iso_case("address, sw, 1 us gap", &addr, Store::Word, 360);
+    iso_case("address, sw, 10 us gap", &addr, Store::Word, 3600);
+    iso_case("const 0x400, sw, 1 us gap", &|_| 0x400, Store::Word, 360);
+    // store width
+    iso_case("address, sh x2", &addr, Store::Half, 0);
+    iso_case("address, sb x4", &addr, Store::Byte, 0);
+    iso_case("address, sb x4, 1 us gap", &addr, Store::Byte, 360);
+}
