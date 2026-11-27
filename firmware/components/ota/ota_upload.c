@@ -5,6 +5,7 @@
 
 #include "assets.h"
 #include "assets_fmt.h"
+#include "esp_cache.h"
 #include "esp_log.h"
 #include "flash_chunk.h"
 #include "ota_hold.h"
@@ -12,6 +13,7 @@
 #include "ota_pieces.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
+#include "sha256.h"
 #include "sdcard.h"
 #include "storage.h"
 
@@ -88,6 +90,54 @@ static int file_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
     return fseek(f, (long)off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n ? 0 : -1;
 }
 
+#define DIFF_LOG_MAX 8
+#define CACHE_LINE   128 // the L2 line the PSRAM is cached in
+
+// A plain read of one byte of the staging buffer, not folded away
+static uint8_t peek(uint8_t const *p) {
+    return *(volatile uint8_t const *)p;
+}
+
+// What the staging buffer holds now for one byte the file got wrong (#593, the #569 signature: one bit, 0 -> 1): the
+// plain read, and the read after the cache line is invalidated. Tells a read-path transient during the copy (staging
+// right now) from a stored change (wrong even after the invalidate).
+static void log_flip(size_t off, uint8_t in_file, uint8_t const *data) {
+    uint8_t const *at   = data + off;
+    uint8_t        now  = peek(at);
+    uintptr_t      line = (uintptr_t)at & ~(uintptr_t)(CACHE_LINE - 1);
+    esp_err_t      err  = esp_cache_msync((void *)line, CACHE_LINE, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+    uint8_t        inv  = peek(at);
+    ESP_LOGW(TAG, "flip at file offset 0x%zx, psram %p: file 0x%02x, staging now 0x%02x, after invalidate 0x%02x (%s)", off,
+             (void const *)at, in_file, now, inv, err == ESP_OK ? "msync ok" : esp_err_to_name(err));
+}
+
+// The differing bytes of the temp file against the staging buffer (up to DIFF_LOG_MAX), and whether the staging buffer
+// still hashes to the whole file's SHA-256: all of it only runs after a mismatch.
+__attribute__((noinline)) static void log_flips(FILE *f, uint8_t const *data, size_t len, uint8_t *bounce, size_t cap, char const *sha_hex) {
+    size_t logged = 0;
+    for (size_t at = 0; at < len && logged < DIFF_LOG_MAX; at += cap) {
+        size_t n = len - at < cap ? len - at : cap;
+        if (file_read(f, at, bounce, n) != 0) {
+            break;
+        }
+        for (size_t i = 0; i < n && logged < DIFF_LOG_MAX; i++) {
+            if (bounce[i] != data[at + i]) {
+                log_flip(at + i, bounce[i], data);
+                logged++;
+            }
+        }
+    }
+    uint8_t digest[SHA256_DIGEST_LEN];
+    char    hex[OTA_SHA256_HEX + 1];
+    sha256_ctx_t sha;
+    sha256_init(&sha);
+    sha256_update(&sha, data, len);
+    sha256_final(&sha, digest);
+    ota_hex(digest, sizeof(digest), hex);
+    ESP_LOGW(TAG, "staging buffer %p now hashes %s the whole file's SHA-256 (%zu differing bytes logged)", (void const *)data,
+             strcmp(hex, sha_hex) == 0 ? "to" : "NOT to", logged);
+}
+
 // Read the temp file back and compare its SHA-256 with the whole file's (#593): a bit that flipped between the check
 // in PSRAM and the flash is caught here, before the swap, instead of at the next boot. The bounce buffer is internal.
 __attribute__((noinline)) static bool written_ok(char const *temp, uint8_t const *data, size_t len, char const *sha_hex) {
@@ -101,6 +151,7 @@ __attribute__((noinline)) static bool written_ok(char const *temp, uint8_t const
         size_t bad = ota_first_diff_block(file_read, f, data, len, bounce, sizeof(bounce), 4096);
         ESP_LOGW(TAG, "read-back of %s %s, first differing 4 KB block at %zu", temp,
                  res < 0 ? "failed" : "differs", bad == (size_t)-1 ? (size_t)0 : bad);
+        log_flips(f, data, len, bounce, sizeof(bounce), sha_hex);
     }
     fclose(f);
     return res == 0;
@@ -212,6 +263,7 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         ota_respond(fd, 400, "bad path");
         return false;
     }
+    ESP_LOGI(TAG, "file push to %s: staging buffer %p, %zu bytes", vms, (void const *)data, len);
     if (!ota_drive_ready(fd, vms) || !ota_storage_room(fd, vms, len, 0, 0) || !ota_file_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
     }
