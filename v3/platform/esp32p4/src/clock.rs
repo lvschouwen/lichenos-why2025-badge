@@ -11,9 +11,11 @@
 //! The register words were recorded by running IDF's own `clk_ll_*` and `pmu_ll_*` on a host (see psram/regs.rs).
 //! Left out on purpose: the RC_FAST / RC_SLOW / RC32K calibration writes of rtc_clk_init (they tune the slow clocks, not the
 //! CPU) and the flash MSPI clock (bootloader_init_mspi_clock): v3 does not touch flash.
-//! eFuse: two read registers, `rd_mac_sys_2` (block version) and `rd_mac_sys_4` (active HP/LP dbias); no write, no trigger.
+//! eFuse: three read registers, `rd_mac_sys_2` (block version), `rd_mac_sys_4` (active HP/LP dbias) and `rd_mac_sys_5` (PVT dbias gap); no write, no trigger.
 use crate::mmio::{modify32, read32, write32};
 use crate::psram::clockmath::{dbias, dbias_calibrated};
+use crate::psram::pmutab::{self, Op};
+use crate::psram::systimer;
 use crate::uart;
 use core::fmt::Arguments;
 
@@ -21,6 +23,7 @@ pub type Log<'a> = &'a mut dyn FnMut(Arguments);
 
 const EFUSE_RD_MAC_SYS_2: usize = 0x5012_D000 + 0x4C;
 const EFUSE_RD_MAC_SYS_4: usize = 0x5012_D000 + 0x54;
+const EFUSE_RD_MAC_SYS_5: usize = 0x5012_D000 + 0x58;
 
 const PMU: usize = 0x5011_5000;
 const PMU_HP_ACTIVE_REG0: usize = PMU + 0x28; // regulator0: xpd bit 18, dbias_sel bit 14, hp_dbias_vol [13:9], dbias [31:27]
@@ -53,6 +56,8 @@ const DCM_VSET_DEFAULT: u32 = 27; // HP_CALI_ACTIVE_DCM_VSET_DEFAULT
 pub enum Error {
     /// The CPLL calibration did not finish.
     CpllCalibration,
+    /// The eFuse PVT gap field is outside the range IDF accepts.
+    PvtGap,
 }
 
 fn delay_us(us: u32) {
@@ -105,43 +110,27 @@ unsafe fn put(log: Log, what: &str, addr: usize, mask: u32, val: u32) {
     modify32(addr, mask, val);
 }
 
-/// CPU MHz measured with mcycle against the SYSTIMER (16 MHz, XTAL-derived) over about 1 ms; `None` if it does not count.
+/// CPU MHz measured with mcycle against the SYSTIMER (16 MHz, XTAL-derived) over about 1 ms; `None` if the timer does not answer
+/// or does not advance within a bounded number of polls.
 pub fn measure_mhz() -> Option<u32> {
-    const SYSTIMER: usize = 0x500E_2000;
-    const CONF: usize = SYSTIMER;
-    const OP: usize = SYSTIMER + 0x04;
-    const LO: usize = SYSTIMER + 0x44;
-    // SAFETY: SYSTIMER unit 0: clock gate on (it is the one write), update-and-read of its counter; mcycle CSR read.
+    // SAFETY: mcycle CSR read (the SYSTIMER access is in `systimer`).
     unsafe {
-        modify32(CONF, 0, 1 << 31);
-        let rd = || {
-            modify32(OP, 0, 1 << 30);
-            let mut n = 0u32;
-            while read32(OP) & (1 << 29) == 0 && n < 1000 {
-                n += 1;
-            }
-            read32(LO)
-        };
-        let (c0, t0) = (read_mcycle(), rd());
-        let mut t;
-        let mut c;
-        loop {
+        let (c0, t0) = (read_mcycle(), systimer::now_ticks()?);
+        let (mut c, mut t) = (c0, t0);
+        for _ in 0..20_000_000u32 {
             c = read_mcycle();
-            t = rd();
-            if t.wrapping_sub(t0) >= 16_000 {
+            t = systimer::now_ticks()?;
+            if systimer::elapsed(t0, t) >= 16_000 {
                 break;
             }
         }
-        let (dc, dt) = (c.wrapping_sub(c0), t.wrapping_sub(t0));
-        if dt == 0 {
+        let (dc, dt) = (c.wrapping_sub(c0), systimer::elapsed(t0, t));
+        if dt < 16_000 {
             None
         } else {
-            Some(psram_mhz(dc, dt))
+            Some(crate::psram::clockmath::mhz_from_systimer(dc, dt as u32))
         }
     }
-}
-fn psram_mhz(c: u32, t: u32) -> u32 {
-    crate::psram::clockmath::mhz_from_systimer(c, t)
 }
 #[cfg(target_arch = "riscv32")]
 #[inline(always)]
@@ -154,6 +143,18 @@ unsafe fn read_mcycle() -> u32 {
 #[cfg(not(target_arch = "riscv32"))]
 unsafe fn read_mcycle() -> u32 {
     0
+}
+
+unsafe fn run_op(log: Log, op: &Op) {
+    match *op {
+        Op::Bits(a, m, v) => put(log, "pvt", a, m, v),
+        Op::Set(a, m) => put(log, "pvt set", a, m, m),
+        Op::Clear(a, m) => put(log, "pvt clear", a, m, 0),
+        Op::DelayUs(us) => {
+            log(format_args!("clk: delay {us} us"));
+            delay_us(us);
+        }
+    }
 }
 
 /// Print the state a hang or brownout would leave: dividers, source, regulators, DCDC.
@@ -241,6 +242,30 @@ pub unsafe fn cpu_to_mhz(log: Log, mhz: u32) -> Result<(Option<u32>, Option<u32>
     put(log, "hp active regulator xpd off", PMU_HP_ACTIVE_REG0, 1 << 18, 0);
     state(log);
 
+    // pmu_init(): HP-active and LP-active analog, regulator, clock and power fields, then the PVT automatic dbias (v2: CONFIG_ESP_ENABLE_PVT)
+    for &(addr, mask, val) in pmutab::PMU_HP_ACTIVE.iter() {
+        put(log, "pmu_init HP active", addr, mask, val);
+    }
+    for &(addr, mask, val) in pmutab::PMU_LP_ACTIVE.iter() {
+        put(log, "pmu_init LP active", addr, mask, val);
+    }
+    if dbias_calibrated(blk) {
+        let gap_field = (read32(EFUSE_RD_MAC_SYS_5) >> 5) & 0x1F; // rd_mac_sys_5.lp_dcdc_dbias_vol_gap [9:5]
+        let Some(gap) = pmutab::pvt_gap_value(gap_field) else {
+            log(format_args!(
+                "clk: eFuse lp_dcdc_dbias_vol_gap {gap_field} out of IDF's range; PVT not enabled, CPU stays on XTAL"
+            ));
+            return Err(Error::PvtGap);
+        };
+        log(format_args!("clk: eFuse lp_dcdc_dbias_vol_gap field {gap_field} -> PVT offset byte {gap:#x}"));
+        for op in pmutab::PVT_INIT.iter().chain(pmutab::pvt_offset_ops(gap).iter()).chain(pmutab::PVT_ENABLE.iter()) {
+            run_op(log, op);
+        }
+        state(log);
+    } else {
+        log(format_args!("clk: eFuse block version {blk} < 2: no PVT, as IDF"));
+    }
+
     // CPU: CPLL on, CPU to XTAL with all dividers 1, calibrate CPLL to 360, dividers, then the source
     put(log, "cpll power (xpd cpll + i2c)", PMU_IMM_HP_CK_POWER, 0x0880_0000, 0x0880_0000);
     put(log, "cpll clock gate open", PMU_IMM_HP_CK_POWER, 0x0002_0000, 0x0002_0000);
@@ -260,6 +285,8 @@ pub unsafe fn cpu_to_mhz(log: Log, mhz: u32) -> Result<(Option<u32>, Option<u32>
     while read32(ANA_PLL_CTRL0) & (1 << 2) == 0 {
         n += 1;
         if n > 5_000_000 {
+            modify32(ANA_PLL_CTRL0, 1 << 3, 1 << 3); // calibration stop, as on success
+            log(format_args!("clk: CPLL calibration did not finish; stopped, CPU left on XTAL"));
             return Err(Error::CpllCalibration);
         }
     }

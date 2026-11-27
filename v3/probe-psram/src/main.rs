@@ -91,6 +91,7 @@ extern "C" fn pmain() -> ! {
     // "cpu" = clock only; "cpu-<stage>" = clock first, then <stage>
     let mut stage = STAGE;
     let mut cpu_mhz = 40;
+    let mut clock_failed = false;
     if let Some(rest) = STAGE.strip_prefix("cpu") {
         // "cpu400-..." asks for 400 MHz (explicit experiment, #645); "cpu-..." stays at 360
         let (target, rest) = match rest.strip_prefix("400") {
@@ -110,7 +111,10 @@ extern "C" fn pmain() -> ! {
                 );
             }
             Ok(_) => pl!("psram: clock set, timer did not count: no measurement"),
-            Err(e) => pl!("CHECK 645.cpu{target} FAIL {e:?}"),
+            Err(e) => {
+                pl!("CHECK 645.cpu{target} FAIL {e:?}: PSRAM init skipped");
+                clock_failed = true;
+            }
         }
     }
     let upto = match stage {
@@ -122,7 +126,7 @@ extern "C" fn pmain() -> ! {
         }
         _ => None,
     };
-    if let Some(upto) = upto {
+    if let Some(upto) = upto.filter(|_| !clock_failed) {
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, on the boot hart, in a RAM-only image that owns the machine (load-ram).
         let res =

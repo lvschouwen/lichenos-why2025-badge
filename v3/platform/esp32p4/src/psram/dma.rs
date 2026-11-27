@@ -1,7 +1,10 @@
 //! AXI-DMA memory-to-memory copy into PSRAM (#620 workaround test): channel 0, TX reads the source, RX writes the destination.
 //! Register words recorded from ESP-IDF v6.1 `axi_dma_ll_*` / `gdma_ll_*` (`esp_hal_dma/esp32p4/include/hal/`) the way psram/regs.rs
 //! was. The destination is a cached-alias PSRAM address (the AXI-DMA external range is 0x4000_0000-0x4C00_0000); the caller owns
-//! cache maintenance (write back the source, invalidate the destination before and after).
+//! cache maintenance, and the contract is: BEFORE the DMA write back and invalidate both buffers (so no dirty line of either can be
+//! written later over the DMA's data, and the destination holds nothing stale); AFTER the DMA invalidate the destination only
+//! (never write it back: that would store stale cache lines over what the DMA wrote). Descriptors live in internal RAM (the AXI-DMA
+//! reads and writes them there), 8-byte aligned; buffers are aligned to the cache line (`BUF_ALIGN`).
 use crate::mmio::{modify32, read32, write32};
 
 const AXI_DMA: usize = 0x5008_A000;
@@ -28,6 +31,17 @@ const TX_PERI_SEL: usize = AXI_DMA + 0x17C;
 /// First free M2M "peripheral" id (AXI_DMA_LL_M2M_FREE_PERIPH_ID_MASK = 0xFFC0).
 const M2M_ID: u32 = 6;
 pub const SEG_BYTES: usize = 2048;
+/// Buffer alignment the contract needs: the larger cache line the controller can be configured with.
+pub const BUF_ALIGN: usize = 128;
+const INTERNAL_START: u32 = 0x4FF0_0000;
+const INTERNAL_END: u32 = 0x4FFC_0000;
+const RX_STOP_BIT: u32 = 1 << 1; // inlink_stop
+const TX_STOP_BIT: u32 = 1 << 0; // outlink_stop
+
+/// Is `addr` in internal RAM (L2MEM) and 8-byte aligned, as the descriptors must be?
+pub const fn is_desc_addr(addr: u32) -> bool {
+    addr >= INTERNAL_START && addr + 16 <= INTERNAL_END && addr & 7 == 0
+}
 
 /// One AXI-DMA descriptor (`dma_descriptor_align8_t`, 16 bytes, 8-byte aligned).
 #[repr(C, align(8))]
@@ -54,6 +68,11 @@ pub const fn dw0(size: u32, length: u32, eof: bool) -> u32 {
 pub fn build_chain(descs: &mut [Desc], buf: u32, len: usize, tx: bool) -> usize {
     let n = len.div_ceil(SEG_BYTES);
     assert!(n <= descs.len());
+    assert!(buf as usize & (BUF_ALIGN - 1) == 0 && len & (BUF_ALIGN - 1) == 0, "DMA buffers are cache-line aligned");
+    assert!(
+        is_desc_addr(descs.as_ptr() as u32) || cfg!(not(target_arch = "riscv32")),
+        "descriptors in internal RAM, 8-byte aligned"
+    );
     for i in 0..n {
         let seg = (len - i * SEG_BYTES).min(SEG_BYTES) as u32;
         let last = i + 1 == n;
@@ -68,7 +87,7 @@ pub fn build_chain(descs: &mut [Desc], buf: u32, len: usize, tx: bool) -> usize 
 pub enum DmaError {
     /// No end of frame in time: the RX and TX raw interrupt words at that point.
     Timeout(u32, u32),
-    /// RX interrupt raw word with an error bit (descriptor error, error EOF).
+    /// An error bit was raised: the RX raw word, with the TX descriptor-error flag (OUT_DSCR_ERR) added as bit 10.
     Fault(u32),
 }
 
@@ -99,29 +118,51 @@ pub unsafe fn init() {
     modify32(TX_CONF0, 0xC, 0);
 }
 
-/// Run one prepared pair of chains (`tx` reads, `rx` writes) and wait for the RX end of frame.
+/// Stop both channels, reset them (in and out) and clear the interrupt flags: the state after an error or a timeout, so no link
+/// keeps running behind the caller.
 ///
 /// # Safety
-/// Descriptor and buffer memory must stay valid and cache-clean for the DMA; call after `init`.
-pub unsafe fn run(tx: &Desc, rx: &Desc, spins: u32) -> Result<(), DmaError> {
+/// AXI-DMA registers; after `init`.
+pub unsafe fn quiesce() {
+    modify32(RX_LINK, RX_STOP_BIT, RX_STOP_BIT);
+    modify32(TX_LINK, TX_STOP_BIT, TX_STOP_BIT);
+    modify32(RX_CONF0, 1, 1);
+    modify32(RX_CONF0, 1, 0);
+    modify32(TX_CONF0, 1, 1);
+    modify32(TX_CONF0, 1, 0);
     write32(RX_INT_CLR, 0xFFFF_FFFF);
     write32(TX_INT_CLR, 0xFFFF_FFFF);
-    write32(RX_DESC, rx as *const Desc as u32);
-    write32(TX_DESC, tx as *const Desc as u32);
+}
+
+/// Run one prepared pair of chains (`tx` reads, `rx` writes) and wait for the RX end of frame. On an error (RX or TX descriptor
+/// error, RX error EOF, descriptor empty) or a timeout both channels are quiesced before returning.
+///
+/// # Safety
+/// `tx` and `rx` point to the first descriptor of chains built by `build_chain` in internal RAM; the hardware writes the
+/// descriptors back, so they must not be read through other references meanwhile. Buffers and caches follow the contract at the
+/// top of this file. Call after `init`.
+pub unsafe fn run(tx: *mut Desc, rx: *mut Desc, spins: u32) -> Result<(), DmaError> {
+    assert!(is_desc_addr(tx as u32) && is_desc_addr(rx as u32), "descriptors must be in internal RAM, 8-byte aligned");
+    write32(RX_INT_CLR, 0xFFFF_FFFF);
+    write32(TX_INT_CLR, 0xFFFF_FFFF);
+    write32(RX_DESC, rx as u32);
+    write32(TX_DESC, tx as u32);
     modify32(RX_LINK, 0x4, 0x4);
     modify32(TX_LINK, 0x2, 0x2);
     let mut n = 0;
     loop {
-        let raw = read32(RX_INT_RAW);
+        let (raw, traw) = (read32(RX_INT_RAW), read32(TX_INT_RAW));
+        if raw & 0x1C != 0 || traw & 0x4 != 0 {
+            quiesce();
+            return Err(DmaError::Fault(raw | (traw & 0x4) << 8)); // RX: error EOF, descriptor error, descriptor empty; TX bit 2 -> bit 10
+        }
         if raw & 0x2 != 0 {
             return Ok(()); // IN_SUC_EOF
         }
-        if raw & 0xC != 0 {
-            return Err(DmaError::Fault(raw)); // IN_ERR_EOF, IN_DSCR_ERR
-        }
         n += 1;
         if n > spins {
-            return Err(DmaError::Timeout(raw, read32(TX_INT_RAW)));
+            quiesce();
+            return Err(DmaError::Timeout(raw, traw));
         }
     }
 }
@@ -138,6 +179,15 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_addresses() {
+        assert!(is_desc_addr(0x4FF4_0000));
+        assert!(!is_desc_addr(0x4FF4_0004)); // not 8-aligned
+        assert!(!is_desc_addr(0x4800_0000)); // PSRAM
+        assert!(!is_desc_addr(0x4FFB_FFF8)); // runs past L2MEM
+        assert!(!is_desc_addr(0));
+    }
+
+    #[test]
     fn chain_covers_the_length_in_segments() {
         let mut d = [Desc::zero(); 40];
         let n = build_chain(&mut d, 0x4800_0000, 64 * 1024, true);
@@ -147,9 +197,9 @@ mod tests {
         assert_eq!(d[31].next, 0);
         assert!(d[31].dw0 >> 30 & 1 == 1 && d[30].dw0 >> 30 & 1 == 0);
         assert_eq!((d[0].dw0 >> 12) & 0xFFF, 2048);
-        let n = build_chain(&mut d, 0x4800_0000, 3000, false);
+        let n = build_chain(&mut d, 0x4800_0000, 4096, false);
         assert_eq!(n, 2);
-        assert_eq!(d[1].dw0 & 0xFFF, 952);
+        assert_eq!(d[1].dw0 & 0xFFF, 2048);
         assert_eq!((d[1].dw0 >> 12) & 0xFFF, 0); // RX: length filled by the DMA
     }
 }

@@ -77,6 +77,19 @@ pub fn delay_us(us: u32) {
 /// # Safety
 /// The PSRAM controller must be clocked and configured (`init` order); calls ROM code.
 pub unsafe fn xact(cmd: u32, addr: u32, dummy_bits: u32, tx: Option<(&[u32], u32)>, rx: Option<(&mut [u32], u32)>) {
+    if let Some((b, n)) = &tx {
+        assert!(
+            *n as usize <= FIFO_MAX_BYTES * 8 && *n as usize <= b.len() * 32,
+            "tx bits exceed the FIFO or the buffer"
+        );
+    }
+    if let Some((b, n)) = &rx {
+        assert!(
+            *n as usize <= FIFO_MAX_BYTES * 8 && *n as usize <= b.len() * 32,
+            "rx bits exceed the FIFO or the buffer"
+        );
+    }
+    assert!(dummy_bits <= 255);
     let (txp, txb) = tx.map_or((core::ptr::null(), 0), |(b, n)| (b.as_ptr(), n));
     let (rxp, rxb) = match rx {
         Some((b, n)) => (b.as_mut_ptr(), n),

@@ -5,7 +5,10 @@
 //! back, and reads the truth through the uncached alias. Failures print the first few addresses and a per-bit count of
 //! flipped bits (the #86 / #569 history: bits 8 and 9, 0 -> 1).
 use core::ptr::{read_volatile, write_volatile};
-use lichen_platform_esp32p4::psram::map::{self, CACHED_BASE, PAGE_BYTES, UNCACHED_OFFSET};
+use lichen_platform_esp32p4::psram::map::{self, CACHED_BASE, PAGE_BYTES};
+
+/// The uncached alias offset: the platform keeps it private, the diagnostics here (single-word uncached stores, #620) need it.
+pub const UNCACHED_OFFSET: usize = 0x4000_0000;
 use lichen_platform_esp32p4::psram::{mspi::delay_us, patterns};
 
 pub const PSRAM_BYTES: usize = 32 << 20;
@@ -254,7 +257,7 @@ pub fn eye() {
     // SAFETY: ROM cache maintenance; L2 holds external memory only; the 32 MB are mapped for the stress region.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+        map::map_identity_with_hole(PSRAM_BYTES / PAGE_BYTES);
     }
     let (off, len) = (0x50_0000, 0x20_0000);
     pl!("psram: eye: stress bad-word counts over {len:#x} bytes at {off:#x}; rows = DQS phase 0..3, columns = delay line id 0..30");
@@ -442,7 +445,7 @@ pub fn diag() {
     // SAFETY: as `eye`.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+        map::map_identity_with_hole(PSRAM_BYTES / PAGE_BYTES);
         regs::apply(&[regs::VAR_DUMMY_FIFO_OFF]); // FIFO-path reads were tuned with the variable dummy off
     }
     pl!("psram: diag: region {D_OFF:#x}..{:#x}", D_OFF + D_LEN);
@@ -478,7 +481,7 @@ pub fn perf(cpu_mhz: u32) {
     // SAFETY: ROM cache maintenance; mapped window.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+        map::map_identity_with_hole(PSRAM_BYTES / PAGE_BYTES);
         map::cache_invalidate(CACHED_BASE, PSRAM_BYTES);
     }
     pl!("PERF psram.clock mhz={}", lichen_platform_esp32p4::psram::current_mhz());
@@ -512,7 +515,7 @@ pub fn run(cpu_mhz: u32) -> u32 {
     let rc_l2 = unsafe { map::cache_invalidate_all_l2() };
     pl!("psram: L2 invalidate all returned {rc_l2}");
     // SAFETY: `init` reached Tuned; 512 pages cover the 32 MB the chip reports.
-    unsafe { map::map_identity(PSRAM_BYTES / PAGE_BYTES) };
+    unsafe { map::map_identity_with_hole(PSRAM_BYTES / PAGE_BYTES) };
     // SAFETY: ROM cache maintenance over the freshly mapped window.
     let rc = unsafe { map::cache_invalidate(CACHED_BASE, PSRAM_BYTES) };
     pl!(

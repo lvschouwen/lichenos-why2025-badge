@@ -8,8 +8,8 @@
 //! 3. chip: mode registers over the FIFO path (latency codes, refresh 4x from the first access, burst), connection check.
 //! 4. `regs::CONFIG_FOR_PSRAM` (the cache/AXI path) and `tune`: reference data at 20 MHz, DQS phase and delay-line sweep at 120 MHz.
 //!
-//! Floor: 120 MHz (memory: PSRAM stays >= 120 MHz; DMA bit flips #121/#569). There is no lower speed here on purpose:
-//! `PSRAM_MHZ` is the only speed, faults are fixed at that clock (refresh, timing), never by slowing down.
+//! Floor: 120 MHz (memory: PSRAM stays >= 120 MHz; DMA bit flips #121/#569). `SPEED_120` is the default and there is no lower
+//! speed on purpose; `SPEED_160` is an explicit experiment. Faults are fixed at the clock (refresh, timing), never by slowing down.
 //!
 //! The CPU/AXI clock must be at least the PSRAM clock (IDF `clk_utils.c` BELOW_FREQ_THRESHOLD on the P4: the MSPI write
 //! FIFO can overflow otherwise). This module does not touch the CPU clock; `init` only reports it (`cpu_clock_ok`).
@@ -20,7 +20,9 @@ pub mod map;
 pub mod mspi;
 pub mod patterns;
 pub mod pll;
+pub mod pmutab;
 pub mod regs;
+pub mod systimer;
 pub mod tune;
 
 use crate::mmio::{modify32, read32, write32};
@@ -88,6 +90,9 @@ pub enum Error {
     MpllCalibration,
     /// The write/read at address 0 did not come back (IDF: "PSRAM chip is not connected").
     NotConnected,
+    /// Timing tuning found no passing DQS phase or delay line: the chip answers but is not reliable at this speed. The details are
+    /// in the `tune:` log line; `Info` is not returned.
+    TuningFallback,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -263,5 +268,8 @@ pub unsafe fn init_with(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> 
     set_psram_clock(sp.mpll, sp.mhz);
     regs::apply(&regs::VAR_DUMMY_ON);
     info.tuned = Some(t);
+    if !t.phase_ok || !t.delayline_ok {
+        return Err(Error::TuningFallback);
+    }
     Ok(info)
 }

@@ -1,9 +1,10 @@
 //! #620 init variants, one knob at a time against the uncached address-in-address test (the only one that fails):
 //! `variants` stage, groups 1 to 3 (`LICHEN_PSRAM_GROUP`). Each variant applies one change on top of the tuned init, runs the
 //! test, and puts the knob back. Output: `VARIANT <name>: <register change> -> <bad words> ...` lines.
+use crate::tests::UNCACHED_OFFSET;
 use core::ptr::{read_volatile, write_volatile};
 use lichen_platform_esp32p4::mmio::{modify32, read32, write32};
-use lichen_platform_esp32p4::psram::map::{self, CACHED_BASE, PAGE_BYTES, UNCACHED_OFFSET};
+use lichen_platform_esp32p4::psram::map::{self, CACHED_BASE, PAGE_BYTES};
 use lichen_platform_esp32p4::psram::{mspi, patterns, regs, tune};
 
 const UNC: usize = CACHED_BASE + UNCACHED_OFFSET;
@@ -103,7 +104,7 @@ pub fn run_group(group: u32, base: tune::Tuned) {
     // SAFETY: ROM cache maintenance; mapped window.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity((32 << 20) / PAGE_BYTES);
+        map::map_identity_with_hole((32 << 20) / PAGE_BYTES);
     }
     let (bp, bd, bq) = (tune::PHASES[base.phase_id], base.data_dl, base.dqs_dl);
     pl!("VARIANT base point: phase {bp} data {bd} dqs {bq} (delay line id {})", base.delayline_id);
@@ -260,7 +261,7 @@ pub fn isolate() {
     // SAFETY: ROM cache maintenance; mapped window.
     unsafe {
         map::cache_invalidate_all_l2();
-        map::map_identity((32 << 20) / PAGE_BYTES);
+        map::map_identity_with_hole((32 << 20) / PAGE_BYTES);
     }
     let addr = |a: usize| a as u32;
     iso_case("address, sw, back to back", &addr, Store::Word, 0);
