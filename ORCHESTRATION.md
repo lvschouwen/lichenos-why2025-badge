@@ -58,5 +58,5 @@ when the run ends. The old wave logs are in git history (before #483).
 - #648 perf lab: decisions on the issue (M0 skipped by the owner; 200 MHz and the 1900 step approved, 1950 = today). Main runs every 160/200 and LDO run.
 - Bench lock: one load-ram at a time, runs of 120 s or less; roadmap first. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
 - #615 next steps are owner flash writes.
-- #648 bench next (main): C1-C4 load-ram runs (120/160/200, L2 lines 64/128), 1900 step only if 200 fails or is marginal; plan in the merge comment on #648. wt-5 released.
+- #648: Phase 1 merged; bench C1-C4 done and posted on #648 (200 MHz fails at the calibrated rail, 1900 step skipped by the owner, 128 B L2 lines = +62 % read). Open on #648: CPU 400, 512 KB L2, DMA bursts, `all` suite. #650 still needs a forced-failure retry run.
 - #652 GUI overhaul: research committed (3e8899ca, docs/v3-gui-research/); mockups on a private design canvas; owner leans to Poster wall.
