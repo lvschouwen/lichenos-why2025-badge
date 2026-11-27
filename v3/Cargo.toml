@@ -16,3 +16,7 @@ codegen-units = 1
 
 [profile.dev]
 panic = "abort"
+
+# The probe must fit the 32 KB load window below its U-mode page (probe-p4/link.ld).
+[profile.release.package.lichen-probe-p4]
+opt-level = "z"

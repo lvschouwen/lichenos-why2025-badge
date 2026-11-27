@@ -57,6 +57,17 @@ const TEST_ID: usize = 16 + TEST_CPU_LINE; // CLIC_EXT_INTR_NUM_OFFSET
 const fn clic_byte(core_off: usize, id: usize, byte: usize) -> usize {
     CLIC_CTRL + core_off + 4 * id + byte // 0 ip, 1 ie, 2 attr, 3 ctl
 }
+// CLINT, own core (TRM v1.0 sec. 2.9.3.5; documented for v3.x, unconfirmed on v1.0 until this probe reads it).
+const CLINT: usize = 0x2000_0000;
+const MSIP: usize = CLINT;
+const MTIMECMP_LO: usize = CLINT + 0x4000;
+const MTIMECMP_HI: usize = CLINT + 0x4004;
+const MTIMELOAD_LO: usize = CLINT + 0x4008;
+const MTIMECTL: usize = CLINT + 0x4010;
+const MTIME_LO: usize = CLINT + 0xBFF8;
+const MTIME_HI: usize = CLINT + 0xBFFC;
+const MTIP_ID: usize = 7;
+const CLIC_USER: usize = 0x20B0_0000; // "CLIC user" window (TRM Table 2.8-1)
 // Interrupt matrix fallback for B3: the from-CPU-0 software source routed to TEST_CPU_LINE.
 const FROM_CPU_0: usize = 0x500E_5010; // HP_SYSTEM_CPU_INT_FROM_CPU_0_REG
 const MAP_FROM_CPU_0: usize = 0x500D_613C; // INTERRUPT_CORE0_CPU_INT_FROM_CPU_0_MAP_REG
@@ -121,6 +132,7 @@ extern "C" fn pmain() -> ! {
     b1_user_mode();
     a5_dedicated_gpio();
     b3_interrupt_in_u();
+    b3_timer();
     b6_apm();
     b4_clic_from_u();
     b2_locks();
@@ -214,6 +226,63 @@ fn a5_dedicated_gpio() {
 fn quiesce_test_line() {
     let _ = m_sb(clic_byte(0, TEST_ID, 0), 0);
     let _ = m_sw(FROM_CPU_0, 0);
+}
+fn quiesce_timer() {
+    let _ = m_sb(clic_byte(0, MTIP_ID, 1), 0);
+    let _ = m_sw(MTIMECMP_HI, 0xFFFF_FFFF);
+    let _ = m_sw(MTIMECMP_LO, 0xFFFF_FFFF);
+}
+fn mtime() -> Result<u64, Trap> {
+    loop {
+        let hi = m_lw(MTIME_HI)?;
+        let lo = m_lw(MTIME_LO)?;
+        if m_lw(MTIME_HI)? == hi {
+            return Ok(((hi as u64) << 32) | lo as u64);
+        }
+    }
+}
+fn b3_timer() {
+    begin("B3t");
+    pl!("B3t CLINT msip={} cmp lo/hi={} {} load lo={} ctl={}", show(m_lw(MSIP)), show(m_lw(MTIMECMP_LO)), show(m_lw(MTIMECMP_HI)), show(m_lw(MTIMELOAD_LO)), show(m_lw(MTIMECTL)));
+    let (Ok(t0), _) = (mtime(), ()) else {
+        check("B3t", Some(false), format_args!("mtime not readable from M: timer case skipped"));
+        return;
+    };
+    hw::spin(100_000);
+    let Ok(t1) = mtime() else { return };
+    let per = t1.wrapping_sub(t0);
+    check("B3t.ticks", Some(per > 0), format_args!("mtime {t0:#x} -> {t1:#x}: {per} ticks per 100k spin loops"));
+    if per == 0 {
+        return;
+    }
+    let saved: [Result<u8, Trap>; 4] = core::array::from_fn(|b| m_lbu(clic_byte(0, MTIP_ID, b)));
+    pl!("B3t id 7 before: ip/ie/attr/ctl {} {} {} {}", ShowB(saved[0]), ShowB(saved[1]), ShowB(saved[2]), ShowB(saved[3]));
+    // SAFETY: single hart; read by the handler only on an interrupt.
+    unsafe { write_volatile(addr_of_mut!(hw::IRQ_QUIESCE), quiesce_timer) };
+    let _ = m_sb(clic_byte(0, MTIP_ID, 2), 0xC0); // mode M, level-triggered (the CLINT line is level-type)
+    let _ = m_sb(clic_byte(0, MTIP_ID, 3), 0xFF);
+    let _ = m_sw(CLIC_THRESH, 0);
+    let _ = m_lw(CLIC_THRESH);
+    let Ok(now) = mtime() else { return };
+    let cmp = now + per * 5; // fires about 500k loops in; U spins 2M
+    let _ = m_sw(MTIMECMP_HI, 0xFFFF_FFFF);
+    let _ = m_sw(MTIMECMP_LO, cmp as u32);
+    let _ = m_sw(MTIMECMP_HI, (cmp >> 32) as u32);
+    let _ = m_sb(clic_byte(0, MTIP_ID, 1), 1);
+    set_irq_count(0);
+    let t = user(uaddr(u_spin), 2_000_000, 0, false);
+    let n = irq_count();
+    // SAFETY: written by the handler before its mret.
+    let last = unsafe { read_volatile(addr_of!(hw::IRQ_LAST)) };
+    let in_u = (last.mstatus >> 11) & 3 == 0 && (last.epc & !0xFFF) == UTEXT;
+    check("B3t.preempt", Some(n == 1 && in_u && t.is_ecall_u() && t.a0 == 0),
+        format_args!("CLINT timer while U spins: {n} interrupt(s), last {last}, MPP {}; U ended {t}", (last.mstatus >> 11) & 3));
+    quiesce_timer();
+    for b in [2, 3] {
+        if let Ok(v) = saved[b] {
+            let _ = m_sb(clic_byte(0, MTIP_ID, b), v);
+        }
+    }
 }
 fn b3_interrupt_in_u() {
     begin("B3");
@@ -387,16 +456,19 @@ fn b4_clic_from_u() {
     u_write_probe("B4.ie", "CLIC ie line 41", clic_byte(0, TEST_ID, 1), 1, true);
     u_write_probe("B4.attr", "CLIC attr line 41", clic_byte(0, TEST_ID, 2), 0x02, true);
     u_write_probe("B4.ctl", "CLIC ctl line 41", clic_byte(0, TEST_ID, 3), 0xFF, true);
-    for (name, off) in hw_clint::CANDIDATES {
-        u_write_probe("B4.clint", name, 0x2000_0000 + off, 0x0, false);
-    }
+    u_write_probe("B4.ie7", "CLIC ie id 7 (MTIP)", clic_byte(0, MTIP_ID, 1), 1, true);
+    u_write_probe("B4.msip", "CLINT msip", MSIP, 1, false);
+    u_write_probe("B4.mtimecmp", "CLINT mtimecmp lo", MTIMECMP_LO, 0, false);
+    u_write_probe("B4.mtimeload", "CLINT mtimeload lo", MTIMELOAD_LO, 0x1234, false);
+    u_write_probe("B4.mtimectl", "CLINT mtimectl (MTIME_EN)", MTIMECTL, 0, false);
+    let t = user(uaddr(u_load), MTIME_LO, 0, false);
+    check("B4.mtime-u", None, format_args!("U read of mtime lo: {t} a0={:#x}", t.a0));
+    begin("B4.clic-user");
+    pl!("B4 CLIC user window M reads: +0 {} +4 {} +8 {}", show(m_lw(CLIC_USER)), show(m_lw(CLIC_USER + 4)), show(m_lw(CLIC_USER + 8)));
+    u_write_probe("B4.clic-user", "CLIC user window +8", CLIC_USER + 8, 0xFF00_0000, false);
     // The other core's windows (CLIC_THRESH + OTHER_CORE, ...) are not probed: with core 1 held off in ROM state
     // an M read of them stalled the bus until reset (#608 run 1, probe ed277b62).
     pmp_off(E_T1);
-}
-mod hw_clint {
-    /// CLINT words to probe (offset from 0x2000_0000): filled from the TRM table once known; empty = not probed.
-    pub const CANDIDATES: &[(&str, usize)] = &[];
 }
 
 // B2 (last) -------------------------------------------------------------------------------------------------------------
