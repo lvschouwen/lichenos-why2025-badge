@@ -11,9 +11,12 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # mbedTLS stays at -Os (#588): upstream 69f55d8852 makes it follow the -O2 above, +13 KB P4 crypto for no measured need
 CONFIG_MBEDTLS_COMPILER_OPTIMIZATION_SIZE=y
-CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+# Brownout at 2.42 V (level 5; the IDF default 7 is 2.6 V): the badge's 3.3 V rail dips under Wi-Fi and LoRa bursts, a higher level resets on those
 CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
+# 8 KB main task (IDF default 3.5 KB): app_main runs the whole boot sequence on it
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# The version is fw-<sha> and the UI shows only ->version: no build date, so one SHA builds one image (#600)
+CONFIG_APP_COMPILE_TIME_DATE=n
 CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=5
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # Quiet second-stage bootloader (#39): faster boots and a smaller bootloader.bin (only 0x4e0 B were free in the 0x6000
@@ -22,6 +25,7 @@ CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 
 # PSRAM is ordinary malloc memory: big buffers, lwIP and the UI live there, internal RAM stays for DMA
 CONFIG_SPIRAM=y
+# 80 MHz is only the compile-time boot clock; SPIRAM_SPEED_RUNTIME_SELECT below switches to 120 MHz at runtime (default since #353).
 # 80 MHz (Lucas, 2026-11-01, #89). At 200 MHz this badge flips bit 8/9 of PSRAM words, 0->1, anywhere a pattern tickles
 # the lane (the "weak cells" of #86 grew from 1.3 to 2.6 MB in a day; four LVGL crashes from flipped object metadata;
 # a heap canary flipped 1 s after it was written). At 80 MHz the same memory is clean with no quarantine. Cost: PSRAM
@@ -38,14 +42,16 @@ CONFIG_SPIRAM=y
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
 CONFIG_SPIRAM_SPEED_80M=y
-# 80 or 120 MHz chosen at boot (#121): needs tools/idf-patches/0001 + 0003 in the IDF; build.sh refuses an IDF without 0003
-# (#588), as Kconfig would drop the unknown symbol and build a plain 80 MHz image. Default stays 80 MHz.
+# 80 or 120 MHz chosen at runtime (#121): needs tools/idf-patches/0001 + 0003 in the IDF; build.sh refuses an IDF without 0003
+# (#588), as Kconfig would drop the unknown symbol and build a plain 80 MHz image. The runtime default is 120 MHz since #353.
 CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 # Always 4x refresh (#569): the AP HEX chip boots letting its die temperature pick the refresh rate and picks slow on a
 # cool die; at 120 MHz one weak cell then lost bit 9 (0 -> 1) in data left unread for 3.5-5 s (9 of 20 bench sessions,
 # none when the data was re-read every 200 ms). Needs tools/idf-patches/0004; build.sh refuses an IDF without it.
 CONFIG_SPIRAM_HEX_REFRESH_4X=y
 CONFIG_SPIRAM_USE_MALLOC=y
+# NVS page cache and key hash list in PSRAM (#600): they are read only by NVS code, never from an ISR or with the flash cache off
+CONFIG_NVS_ALLOCATE_CACHE_IN_SPIRAM=y
 # A plain malloc of up to 4 KB is internal first, a bigger one PSRAM first (IDF default 16 KB, #261): internal RAM is
 # nearly all DMA-capable, and every ordinary 4-16 KB block took it from esp_hosted's Wi-Fi frames. Safe because nothing
 # that DMAs, runs in an ISR or runs with the cache off uses a plain malloc (#261 audit): those ask for caps
@@ -55,6 +61,7 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Big statics that need no DMA or cache-off access live in PSRAM via EXT_RAM_BSS_ATTR (#107)
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# 256 KB L2 cache (the P4 maximum): every PSRAM read (UI, lwIP, heap) goes through it, a bigger cache means fewer slow PSRAM fetches
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
@@ -96,6 +103,8 @@ CONFIG_LITTLEFS_MALLOC_STRATEGY_INTERNAL=y
 # CONFIG_LITTLEFS_ASSERTS is not set
 
 # FatFs: the SD card only since #300 (/storage is LittleFS)
+# Names are UTF-8 at the API (#600): the UI and files_model.c are UTF-8, a PC-written cafe-with-accent name must round-trip
+CONFIG_FATFS_API_ENCODING_UTF_8=y
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_USE_DYN_BUFFERS=y
 # FatFs's heap buffers (window, file and LFN buffers, vfs context, mkdir's cluster clear) in PSRAM, cache-line aligned
@@ -105,15 +114,15 @@ CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
 CONFIG_FATFS_ALLOC_PREFER_ALIGNED_WORK_BUFFERS=y
 # FatFs's file lock (#274): a delete, rename or write-open of a file another task has open fails with EACCES
 # (FR_LOCKED) instead of corrupting the volume. One table for all volumes (ff.c: static FILESEM Files[FF_FS_LOCK],
-# 16 B an entry, internal .bss), counting open files and open directories: 12 files (SD max_files 4, plus the 8 of the
-# FAT /storage before #300) and 8 directories (a listing, MeshCore's openNextFile, the shim's recursive remove). Past it an open fails with ENFILE.
+# 16 B an entry, internal .bss), counting open files and open directories: 4 files (SD max_files 4) and 8 directories
+# (a listing, MeshCore's openNextFile, the shim's recursive remove). Past it an open fails with ENFILE.
 # Concurrency (R0.16, ff.c): open, opendir, unlink and rename take the system mutex (mount_volume -> lock_volume(fs, 1))
 # around chk_share/inc_share, so those are serialised across volumes; close's dec_share runs under the volume mutex
 # only (the note at dec_share). A close on one volume racing an open on the other can at worst drop the new entry's
 # lock (the protection we had before), never corrupt the FAT. No spurious FR_INT_ERR on open: inc_share runs right
 # after chk_share under the same system mutex, so the free entry it found is still free. An EIO stays a card fault;
 # ENFILE/EMFILE (table full) and EACCES (locked) do not count against the card (files_job, #274).
-CONFIG_FATFS_FS_LOCK=20
+CONFIG_FATFS_FS_LOCK=12
 # "fw sd format" names the card LICHEN (f_setlabel, #60)
 CONFIG_FATFS_USE_LABEL=y
 
@@ -184,6 +193,7 @@ CONFIG_ESP_HOSTED_HOST_SDIO_RX_Q_SIZE=24
 # CONFIG_ESP_HOSTED_HOST_SDIO_RX_STAGING_PREALLOC=y, with CONFIG_ESP_HOSTED_HOST_SDIO_RX_STAGING_SLOTS=1 for 21504 B.
 # Either way a read above the INIT aggregate, or one with no memory after 1.5 s, fails the link (#371).
 CONFIG_ESP_HOSTED_HOST_SDIO_RX_STAGING_ON_DEMAND=y
+# Static TX buffers: the dynamic choice is not offered while SPIRAM_TRY_ALLOCATE_WIFI_LWIP is on
 CONFIG_WIFI_RMT_STATIC_TX_BUFFER=y
 # CONFIG_WIFI_RMT_SOFTAP_SUPPORT is not set
 # The Wi-Fi side runs on the C6, which has no PSRAM: don't ask it for TX cache buffers
@@ -239,7 +249,7 @@ CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 CONFIG_RINGBUF_PLACE_ISR_FUNCTIONS_INTO_FLASH=y
 # CONFIG_I2C_MASTER_ISR_HANDLER_IN_IRAM is not set
 # CONFIG_LVGL_PORT_ENABLE_PPA is not set
-# #95 (measured at 120 MHz PSRAM, PSRAM is at 80 MHz again since #120): the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
+# #95 (measured at 120 MHz PSRAM, the runtime default since #353): the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
 
 # Keep every crash (#74): the core dump goes to the coredump partition. ELF format and a SHA256 check are the only
 # ones left in ESP-IDF 6.1 (no CRC32 choice). The dump holds every task's stack, so it must fit in 128 KB.
