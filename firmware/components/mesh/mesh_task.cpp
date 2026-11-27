@@ -228,7 +228,7 @@ static void store_warn(char const *what) {
 }
 
 // Messages for the screens, from MyMesh (called inside loop(), under the lock)
-class ScreenFeed : public MyMesh::Listener {
+class ScreenFeed : public MeshEventListener {
 public:
     void onMessageRecv(mesh::Packet *pkt, ContactInfo const &from, uint8_t txt_type, uint32_t sender_timestamp,
                        char const *text) override {

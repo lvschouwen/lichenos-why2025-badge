@@ -1,7 +1,7 @@
 [submodule "meshcore"]
 	path = meshcore
 	url = https://github.com/lvschouwen/meshcore-why2025-badge.git
-	branch = why2025-badge
+	branch = why2025-badge-dev
 [submodule "esp-hosted-mcu"]
 	path = esp_hosted
 	url = https://github.com/lvschouwen/esp-hosted-mcu-why2025-badge.git

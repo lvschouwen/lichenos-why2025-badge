@@ -12,7 +12,7 @@ set(THIRD_PARTY_SRCS
     ${MC}/src/Dispatcher.cpp ${MC}/src/Mesh.cpp ${MC}/src/Packet.cpp ${MC}/src/Identity.cpp ${MC}/src/Utils.cpp
     ${MC}/src/helpers/BaseChatMesh.cpp ${MC}/src/helpers/AdvertDataHelpers.cpp ${MC}/src/helpers/TxtDataHelpers.cpp
     ${MC}/src/helpers/StaticPoolPacketManager.cpp ${MC}/src/helpers/ConfigSerializer.cpp
-    ${MC}/src/helpers/DynamicConfigSerializer.cpp ${MC}/src/helpers/CommonRadioPrefs.cpp
+    ${MC}/src/helpers/DynamicConfigSerializer.cpp ${MC}/src/helpers/CommonRadioPrefs.cpp ${MC}/src/helpers/CommonGpsPrefs.cpp
     ${CR}/AES128.cpp ${CR}/AESCommon.cpp ${CR}/SHA256.cpp ${CR}/SHA512.cpp ${CR}/Ed25519.cpp ${CR}/Curve25519.cpp
     ${CR}/BigNumberUtil.cpp ${CR}/Crypto.cpp ${CR}/Hash.cpp ${CR}/BlockCipher.cpp
     ${ED25519_SRCS})
@@ -31,7 +31,7 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_api_view.cpp" "mesh_api_settin
                             "mesh_hist.c" "mesh_hist_boot.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_journal_gen.c" "mesh_journal_scan.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "mesh_health.c" "meshcore_health.c" "mesh_airlog.c" "meshcore_airlog.c" "mesh_discover.c" "meshcore_discover.c" "mesh_radar.c" "meshcore_radar.c" "mesh_signal.c" "meshcore_signal.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "mesh_order.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_card.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "mesh_chat_cmd.c" "mesh_chat_target.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "mesh_radio_line.c" "mesh_applied.c" "meshcore_applied.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "channel_key.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"
-                            "../../../shared/arduino_shim/fs_shim.cpp" ${THIRD_PARTY_SRCS} ${COMPANION_SRCS}
+                            "../../../shared/arduino_shim/fs_shim.cpp" "../../../shared/arduino_shim/location_shim.cpp" ${THIRD_PARTY_SRCS} ${COMPANION_SRCS}
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "companion" ${MC}/src ${MC}/examples/companion_radio ${MC}/lib/ed25519 ${CR}
                                          "../../../shared/arduino_shim" "../../../third_party/base64/src"

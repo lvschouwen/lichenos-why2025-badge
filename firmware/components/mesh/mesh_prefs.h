@@ -3,7 +3,7 @@
 // MeshCore's settings changed the way the badge changes them (#67): the badge's setters (mesh_task.cpp) and the host
 // test (host_tests/companion_test.cpp) both go through these, so what the test saves and reloads is what the badge
 // does. The caller holds the mesh lock and calls MyMesh::savePrefs() afterwards.
-#include "NodePrefs.h"
+#include <helpers/CompanionNodePrefs.h>
 #include "mesh_advert_cfg.h"
 #include "mesh_format.h"
 #include "mesh_scope.h"

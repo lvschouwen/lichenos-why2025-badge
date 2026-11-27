@@ -268,7 +268,7 @@ static void clock_uses_real_time(void) {
 
 
 // Messages seen by the Listener, as the badge's screens get them
-struct CountingListener : MyMesh::Listener {
+struct CountingListener : MeshEventListener {
     int         channel_msgs = 0, dm_msgs = 0, queue_len = -1;
     std::string last_dm;
     uint8_t     last_type = 0xFF;

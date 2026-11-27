@@ -1250,6 +1250,7 @@ add_library(meshcore_companion_host STATIC
     ${MESHCORE_DIR}/src/helpers/ConfigSerializer.cpp
     ${MESHCORE_DIR}/src/helpers/DynamicConfigSerializer.cpp
     ${MESHCORE_DIR}/src/helpers/CommonRadioPrefs.cpp
+    ${MESHCORE_DIR}/src/helpers/CommonGpsPrefs.cpp
     ${MESHCORE_DIR}/src/helpers/TransportKeyStore.cpp
     ${MESHCORE_DIR}/src/helpers/RegionMap.cpp
     ${MESHCORE_DIR}/examples/companion_radio/MyMesh.cpp
@@ -1267,6 +1268,7 @@ add_library(meshcore_companion_host STATIC
     ${CRYPTO_DIR}/BlockCipher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/arduino_shim/arduino_shim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/arduino_shim/fs_shim.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/arduino_shim/location_shim.cpp
 )
 # stubs first: shared/arduino_shim/nvs_flash.h only declares nvs_flash_erase (the firmware renames and defines it), so
 # it must not win over the host stub's inline definition; which header won depended on the generator
