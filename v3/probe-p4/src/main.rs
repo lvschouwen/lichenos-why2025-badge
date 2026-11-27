@@ -36,10 +36,10 @@ extern "C" {
 }
 
 const PROBE_ID: &str = env!("LICHEN_PROBE_ID");
-/// LICHEN_PROBE_RUN picks the suite: "b6" (default, run 9), "core1" (run 8) or "core0" (runs 1-7).
+/// LICHEN_PROBE_RUN picks the suite: "b5" (default, run 10), "b6" (run 9), "core1" (run 8) or "core0" (runs 1-7).
 const RUN: &str = match option_env!("LICHEN_PROBE_RUN") {
     Some(r) => r,
-    None => "b6",
+    None => "b5",
 };
 const fn run_is(name: &str) -> bool {
     let (a, b) = (RUN.as_bytes(), name.as_bytes());
@@ -142,10 +142,20 @@ fn unlocked(i: usize) -> bool {
 extern "C" fn pmain() -> ! {
     hw::spin(2_000_000); // let esptool finish reading the MEM_END reply
     pl!("");
-    if run_is("core1") {
+    if const { run_is("core1") } {
         core1::launch(PROBE_ID);
     }
-    if run_is("b6") {
+    if const { run_is("b5") } {
+        pl!("lichen-probe-p4 {PROBE_ID} (#608 run 10), core 0, ROM download-mode state: B5 with PMP entries 16-63");
+        b5_dump();
+        pl!("END ok");
+        hw::drain();
+        loop {
+            // SAFETY: park; the host hard-resets the badge after END.
+            unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+        }
+    }
+    if const { run_is("b6") } {
         pl!("lichen-probe-p4 {PROBE_ID} (#608 run 9), core 0, ROM download-mode state: B6 mtime clock and violation record");
         setup_pmp();
         b6x::timers();
@@ -219,6 +229,42 @@ pub(crate) fn b5_dump() {
          15: "0xbcf" "0xbdf");
     let locked = (0..16).filter(|&i| !unlocked(i)).count();
     check("B5.rom", None, format_args!("core {} after the ROM: {locked} of 16 PMP entries locked (dump above)", csr_read!("mhartid")));
+    b5_upper();
+}
+/// PMP entries 16-63 (pmpcfg4-15, pmpaddr16-63), guarded: which exist, and what the ROM left in them.
+fn b5_upper() {
+    begin("B5.upper");
+    extern "C" {
+        fn csr_upper_tab();
+    }
+    let read = |k: usize| {
+        let f: extern "C" fn() -> usize =
+            // SAFETY: stub k of csr_upper_tab (8 bytes each, csrr a0 then ret).
+            unsafe { core::mem::transmute(csr_upper_tab as *const () as usize + 8 * k) };
+        hw::guarded(|| f())
+    };
+    let mut cfgs = 0;
+    for j in 4..16 {
+        match read(j - 4) {
+            Ok(v) => {
+                cfgs += 1;
+                if v != 0 {
+                    pl!("B5 pmpcfg{j}={v:#010x}");
+                }
+            }
+            Err(_) => pl!("B5 pmpcfg{j} traps"),
+        }
+    }
+    let mut addrs = 0;
+    for i in 16..64 {
+        if let Ok(v) = read(12 + i - 16) {
+            addrs += 1;
+            if v != 0 {
+                pl!("B5 pmpaddr{i}={v:#010x}");
+            }
+        }
+    }
+    check("B5.pmp-count", None, format_args!("pmpcfg4-15: {cfgs} of 12 readable; pmpaddr16-63: {addrs} of 48 readable, so {} PMP entries (nonzero ones printed above)", 16 + addrs));
 }
 struct ShowU(Result<usize, Trap>);
 impl core::fmt::Display for ShowU {

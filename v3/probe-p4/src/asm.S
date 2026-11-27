@@ -39,6 +39,133 @@ _start1:
     call p1main
     j park
 
+# B5.upper: one 8-byte stub per CSR (csrr a0; ret), pmpcfg4-15 then pmpaddr16-63. Called guarded: a trap on the
+# csrr is skipped (mepc += 4) and the ret returns a0 as the caller set it.
+.section .text
+.balign 4
+.global csr_upper_tab
+csr_upper_tab:
+    csrr a0, 0x3a4
+    ret
+    csrr a0, 0x3a5
+    ret
+    csrr a0, 0x3a6
+    ret
+    csrr a0, 0x3a7
+    ret
+    csrr a0, 0x3a8
+    ret
+    csrr a0, 0x3a9
+    ret
+    csrr a0, 0x3aa
+    ret
+    csrr a0, 0x3ab
+    ret
+    csrr a0, 0x3ac
+    ret
+    csrr a0, 0x3ad
+    ret
+    csrr a0, 0x3ae
+    ret
+    csrr a0, 0x3af
+    ret
+    csrr a0, 0x3c0
+    ret
+    csrr a0, 0x3c1
+    ret
+    csrr a0, 0x3c2
+    ret
+    csrr a0, 0x3c3
+    ret
+    csrr a0, 0x3c4
+    ret
+    csrr a0, 0x3c5
+    ret
+    csrr a0, 0x3c6
+    ret
+    csrr a0, 0x3c7
+    ret
+    csrr a0, 0x3c8
+    ret
+    csrr a0, 0x3c9
+    ret
+    csrr a0, 0x3ca
+    ret
+    csrr a0, 0x3cb
+    ret
+    csrr a0, 0x3cc
+    ret
+    csrr a0, 0x3cd
+    ret
+    csrr a0, 0x3ce
+    ret
+    csrr a0, 0x3cf
+    ret
+    csrr a0, 0x3d0
+    ret
+    csrr a0, 0x3d1
+    ret
+    csrr a0, 0x3d2
+    ret
+    csrr a0, 0x3d3
+    ret
+    csrr a0, 0x3d4
+    ret
+    csrr a0, 0x3d5
+    ret
+    csrr a0, 0x3d6
+    ret
+    csrr a0, 0x3d7
+    ret
+    csrr a0, 0x3d8
+    ret
+    csrr a0, 0x3d9
+    ret
+    csrr a0, 0x3da
+    ret
+    csrr a0, 0x3db
+    ret
+    csrr a0, 0x3dc
+    ret
+    csrr a0, 0x3dd
+    ret
+    csrr a0, 0x3de
+    ret
+    csrr a0, 0x3df
+    ret
+    csrr a0, 0x3e0
+    ret
+    csrr a0, 0x3e1
+    ret
+    csrr a0, 0x3e2
+    ret
+    csrr a0, 0x3e3
+    ret
+    csrr a0, 0x3e4
+    ret
+    csrr a0, 0x3e5
+    ret
+    csrr a0, 0x3e6
+    ret
+    csrr a0, 0x3e7
+    ret
+    csrr a0, 0x3e8
+    ret
+    csrr a0, 0x3e9
+    ret
+    csrr a0, 0x3ea
+    ret
+    csrr a0, 0x3eb
+    ret
+    csrr a0, 0x3ec
+    ret
+    csrr a0, 0x3ed
+    ret
+    csrr a0, 0x3ee
+    ret
+    csrr a0, 0x3ef
+    ret
+
 # Exceptions and non-vectored interrupts land here (mtvec base, 64-byte aligned at least).
 # trap_rust returns 0 to resume the trapped context with mret, 1 to end a U run and return to the harness.
 .section .text.trap, "ax"
