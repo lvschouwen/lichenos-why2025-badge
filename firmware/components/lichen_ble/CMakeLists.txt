@@ -1,6 +1,6 @@
 # lichen_ble (#598): L2 driver for the NimBLE host over esp_hosted's HCI link. The source is empty until B1 of #73.
 idf_component_register(SRCS "lichen_ble.c"
-                       PRIV_REQUIRES bt esp_hosted)
+                       PRIV_REQUIRES bt esp_hosted esp_hid)
 
 # Nothing calls NimBLE yet, so --gc-sections would drop all but what nimble_port_init reaches and the size gate would
 # be baselined on a fraction of the stack (B1/B2 would trip it again). These roots keep linked what plan v3 uses: the
@@ -22,7 +22,12 @@ set(lichen_ble_roots
     ble_gatts_add_dynamic_svcs ble_gatts_delete_svc ble_gatts_notify_custom ble_gatts_indicate_custom
     # GATT client (C1)
     ble_gattc_exchange_mtu ble_gattc_disc_all_svcs ble_gattc_disc_all_chrs ble_gattc_disc_all_dscs
-    ble_gattc_read ble_gattc_write_flat ble_gattc_write_no_rsp_flat)
+    ble_gattc_read ble_gattc_write_flat ble_gattc_write_no_rsp_flat
+    # L2CAP connection-oriented channels (phone link bulk transfer)
+    ble_l2cap_create_server ble_l2cap_connect ble_l2cap_send ble_l2cap_recv_ready ble_l2cap_disconnect
+    # esp_hid: HID device (the badge as a keyboard) and HID host (a BLE keyboard on the badge), D3
+    esp_hidd_dev_init esp_hidd_dev_deinit esp_hidd_dev_input_set esp_hidd_dev_battery_set
+    esp_hidh_init esp_hidh_deinit esp_hidh_dev_open esp_hidh_dev_close)
 foreach(sym ${lichen_ble_roots})
     target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--undefined=${sym}")
 endforeach()
