@@ -41,18 +41,18 @@ class WrapperTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         tools = os.path.join(self.tmp, "tools")
         os.mkdir(tools)
+        subprocess.run(["git", "init", "-q", self.tmp], check=True)  # the wrapper finds its checkout through git
         for f in ("v3-load-ram.sh", "v3_load_ram_check.py"):
             shutil.copy(os.path.join(TOOLS, f), tools)
         self.record = os.path.join(self.tmp, "badge-args")
-        self.write_exec(os.path.join(tools, "badge.sh"), f'#!/bin/sh\necho "$@" > "{self.record}"\n')
+        self.write_exec(os.path.join(tools, "badge.sh"), f'#!/bin/sh\necho "$@" > "{self.record}"\ncp "$3" "{self.tmp}/seen"\n')
         self.good_bin = os.path.join(self.tmp, "good.bin")
         self.put(self.good_bin, image([(RAM, 64)]))
         # stand-in for the elf-to-image converter: always yields the good image, and says it ran
-        stub = os.path.join(self.tmp, "stubbin")
-        os.mkdir(stub)
+        stub = os.path.join(self.tmp, ".local", "bin")  # the wrapper's fixed PATH ends in $HOME/.local/bin
+        os.makedirs(stub)
         self.write_exec(os.path.join(stub, "esptool"), f'#!/bin/sh\ncp "{self.good_bin}" "$5"\ntouch "{self.tmp}/converted"\n')
-        self.env = dict(os.environ, HOME=self.tmp, BADGE_PORT="/dev/ttyTEST", PATH=stub + ":" + os.environ["PATH"],
-                        XDG_CONFIG_HOME=self.tmp)
+        self.env = dict(os.environ, HOME=self.tmp, BADGE_PORT="/dev/ttyACM7", XDG_CONFIG_HOME=self.tmp)
 
     def write_exec(self, path, text):
         with open(path, "w") as f:
@@ -110,7 +110,9 @@ class WrapperTest(unittest.TestCase):
         rc, err = self.run_wrapper(self.good_bin)
         self.assertEqual(rc, 0, err)
         with open(self.record) as f:
-            self.assertEqual(f.read().split(), ["load-ram", "/dev/ttyTEST", self.good_bin, "--baud", "460800", "--timeout", "20"])
+            args = f.read().split()
+        self.assertEqual(args[:2], ["load-ram", "/dev/ttyACM7"])
+        self.assertEqual(args[3:], ["--baud", "460800", "--timeout", "20"])
 
     def test_ram_elf_converted_and_accepted(self):
         rc, err = self.run_wrapper(self.put(f"{self.tmp}/a.elf", elf([(RAM, 64, 64)])), "--follow", "--timeout", "5")
@@ -119,6 +121,31 @@ class WrapperTest(unittest.TestCase):
         with open(self.record) as f:
             args = f.read().split()
         self.assertEqual(args[-3:], ["--timeout", "5", "--follow"])
+
+    def test_copy_is_what_gets_checked_and_passed_on(self):
+        rc, err = self.run_wrapper(self.good_bin)
+        self.assertEqual(rc, 0, err)
+        with open(self.record) as f:
+            sent = f.read().split()[2]
+        self.assertNotEqual(sent, self.good_bin)  # a private copy, not the caller's file
+        self.assertIn("v3-load-ram.", sent)
+        with open(f"{self.tmp}/seen", "rb") as f, open(self.good_bin, "rb") as g:
+            self.assertEqual(f.read(), g.read())
+        self.assertFalse(os.path.exists(sent))  # and it is gone afterwards
+
+    def test_bad_ports_refused(self):
+        for port in ["x; touch /tmp/pwned", "/dev/ttyACM0 --x", "/dev/ttyACM", "/dev/../etc/x", "$(id)", "ttyACM0",
+                     "/dev/serial/by-id/a b", "/dev/serial/by-id/a;b", "/dev/ttyACM0\n"]:
+            self.env["BADGE_PORT"] = port
+            rc, err = self.run_wrapper(self.good_bin)
+            self.assertEqual(rc, 1, port)
+            self.assertIn("is not /dev/", err)
+            self.assertFalse(self.called())
+
+    def test_good_ports_accepted(self):
+        for port in ["/dev/ttyACM0", "/dev/ttyUSB12", "/dev/serial/by-id/usb-Espressif_USB_JTAG:serial_debug_unit_AB-if00"]:
+            self.env["BADGE_PORT"] = port
+            self.assertEqual(self.run_wrapper(self.good_bin)[0], 0, port)
 
     def test_bench_lock_refuses(self):
         os.makedirs(f"{self.tmp}/badge-logs", exist_ok=True)

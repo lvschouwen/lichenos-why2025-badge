@@ -157,7 +157,7 @@ require_espressif_port() {
     for allowed in ${BADGE_EXTRA_PORTS:-}; do
         [ "$port" = "$allowed" ] && return 0
     done
-    remote "udevadm info -q property -n '$port' | grep -qx 'ID_VENDOR_ID=303a'" ||
+    remote "udevadm info -q property -n $(printf %q "$port") | grep -qx 'ID_VENDOR_ID=303a'" ||
         { echo "refusing: $port is not an Espressif (303a) USB device (add it to BADGE_EXTRA_PORTS if it really is the badge)" >&2; exit 1; }
 }
 
@@ -415,7 +415,8 @@ cmd_load_ram() {
     remote "mkdir -p $REMOTE_DIR/images"
     scp -q "$REPO/tools/load_ram_run.py" "$HOST:$REMOTE_DIR/load_ram_run.py"
     scp -q "$image" "$HOST:$REMOTE_DIR/images/load-ram.bin"
-    port_remote "$VENV/bin/python $REMOTE_DIR/load_ram_run.py '$port' $REMOTE_DIR/images/load-ram.bin $secs $baud $follow"
+    # %q: the port is data for the remote shell, never code (#614)
+    port_remote "$VENV/bin/python $REMOTE_DIR/load_ram_run.py $(printf %q "$port") $REMOTE_DIR/images/load-ram.bin $secs $baud $follow"
 }
 
 # The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in ~/badge-logs/badge-serial.log).
