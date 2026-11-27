@@ -26,7 +26,8 @@ int main(void)
 	assert(eh_sdio_rx_step(21505, 21504, 0, false, 0) == EH_SDIO_RX_FAIL);
 	/* a corrupt PKT_LEN (masked to 20 bits) never allocates */
 	assert(eh_sdio_rx_step(0xFFFFF, 21504, 0, false, 0) == EH_SDIO_RX_FAIL);
-	/* zero length is never a read */
+	/* zero length is never a read (the driver drops it before asking, with a
+	 * warning; this guards future callers) */
 	assert(eh_sdio_rx_step(0, 21504, 0, true, 0) == EH_SDIO_RX_FAIL);
 
 	/* block-only reads: the rounded length counts */
@@ -34,6 +35,13 @@ int main(void)
 	assert(eh_sdio_rx_step(21505, 21504 + 512, 512, true, 0) == EH_SDIO_RX_READ);
 	assert(eh_sdio_rx_step(21505, 21504, 512, true, 0) == EH_SDIO_RX_FAIL);
 	assert(eh_sdio_rx_round(1, 512) == 512 && eh_sdio_rx_round(512, 512) == 512);
+	/* near UINT32_MAX: saturates, never wraps under the cap */
+	assert(eh_sdio_rx_round(0xFFFFFFFFu, 512) == 0xFFFFFFFFu);
+	assert(eh_sdio_rx_round(0xFFFFFE01u, 512) == 0xFFFFFFFFu);
+	assert(eh_sdio_rx_round(0xFFFFFC00u, 512) == 0xFFFFFC00u);
+	assert(eh_sdio_rx_step(0xFFFFFFFFu, 21504, 512, true, 0) == EH_SDIO_RX_FAIL);
+	/* the shared CP depth sets the default cap */
+	assert(EH_SDIO_RX_STREAM_MAX_FRAMES == 14u);
 
 	/* under the cap without memory: wait until the bound, then fail */
 	assert(eh_sdio_rx_step(3072, 21504, 0, false, 0) == EH_SDIO_RX_WAIT);

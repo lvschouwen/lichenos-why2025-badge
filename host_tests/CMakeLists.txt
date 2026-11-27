@@ -3048,7 +3048,8 @@ add_test(NAME sdio_rx_idle_test COMMAND sdio_rx_idle_test)
 add_executable(sdio_rx_bound_test ${CMAKE_CURRENT_SOURCE_DIR}/sdio_rx_bound_test.c)
 target_compile_options(sdio_rx_bound_test PRIVATE -Wall -Wextra -Werror)
 target_include_directories(sdio_rx_bound_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/common/eh_common/include)
 add_test(NAME sdio_rx_bound_test COMMAND sdio_rx_bound_test)
 
 # The OS video surface (#559, #527): scale steps, centred rect and bars in both frames; owner state machine and flip rule

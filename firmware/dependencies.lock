@@ -75,14 +75,35 @@ dependencies:
     dependencies:
     - name: idf
       version: '>=5.5'
+    - name: espressif/esp_tinyusb
+      rules:
+      - if: target in [esp32s2, esp32s3, esp32s31]
+      - if: $CONFIG{ESP_HOSTED_CP_TINYUSB_MANIFEST} == 1
+      version: '>=2.2.0'
+    - name: espressif/usb_host_cdc_acm
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST} == 1
+      version: '*'
+    - name: espressif/iot_usbh_rndis
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_RNDIS_MANIFEST} == 1
+      version: ^0.5.2
+    - name: cherry-embedded/cherryusb
+      rules:
+      - if: target in [esp32p4]
+      - if: $CONFIG{ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST} == 1
+      version: '>=1.6.0'
     source:
       path: ../esp_hosted
       type: local
     targets:
     - esp32
-    - esp32c2
     - esp32s2
     - esp32s3
+    - esp32s31
+    - esp32c2
     - esp32c3
     - esp32c5
     - esp32c6
@@ -91,7 +112,7 @@ dependencies:
     - esp32h4
     - esp32h21
     - esp32p4
-    version: 3.0.10
+    version: 3.1.0
   espressif/esp_lvgl_port:
     component_hash: d6e8ea2e84d1042dcec295222b9d3c33ee939f5093e4881c0ab5d7873471d1b5
     dependencies:
@@ -297,6 +318,6 @@ direct_dependencies:
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: 9bf7d76a0dc52d8fb57621242774f4f4f73be2b75b7278493c5ea93bdea02a32
+manifest_hash: b3c90d41ab9894714545d01410612e3abef47035ba4923f80c856def85e8c30a
 target: esp32p4
 version: 3.0.0
