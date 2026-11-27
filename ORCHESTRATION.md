@@ -53,4 +53,5 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-27)
-- #591: all merged, bench blocked by #593. #593: wt-1 holds c0530141 + eec68b03 (unreviewed, unmerged). Next: #595. State: the latest comment on each.
+- #593: wt-1 under review (agent rev-593). Then merge, flash, one ota-c6 reproducer push.
+- #595 part A: wt-4 `feat/595-sd-update`, agent impl-595. Part B starts after the #593 reproducer (see #595 decisions).
