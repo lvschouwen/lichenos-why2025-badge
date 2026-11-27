@@ -7,3 +7,4 @@ pub mod handles;
 pub mod image;
 pub mod l2;
 pub mod ring;
+pub mod trap;

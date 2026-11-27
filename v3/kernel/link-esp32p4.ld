@@ -16,7 +16,7 @@ SECTIONS {
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > LOAD
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _load_end = .; } > LOAD
   .bss (NOLOAD) : ALIGN(4) { _noload_start = .; _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > NOLOAD
-  .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 2K; _trap_stack_top = .; _noload_end = .; } > NOLOAD
+  .stack (NOLOAD) : ALIGN(16) { . += 16K; _stack_top = .; . += 4K; _trap_stack_top = .; . += 2K; _fault_stack_top = .; _noload_end = .; } > NOLOAD
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
   ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
   ASSERT(_noload_end <= 0x4FF80000, "NOLOAD memory runs into the L2 cache carve")

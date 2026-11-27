@@ -1,6 +1,7 @@
 //! ESP32-P4 rev v1.0 hardware layer, hand-written from the v1.0 register headers (hw_ver1), no esp-hal. Each module
 //! owns one block. Everything that touches an address goes through `mmio`, so the unsafe surface stays in one file.
-//! The M1-B modules (trap, clic, clint, pmp, pma, core1, mailbox) are empty stubs: #612 fills them and nothing else
+//! The M1-B modules (trap, clic, clint, pmp, pma, core1, mailbox) belong to #612 (trap, clic, clint filled; the rest are
+//! stubs) and nothing else
 //! edits this list.
 #![no_std]
 

@@ -79,8 +79,9 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         kprintln!("trap: context does not belong to the current task");
         platform::exit(5);
     }
-    let irq = mcause & (1 << 31) != 0;
-    let code = mcause & 0x7FFF_FFFF;
+    // CLIC layout on the P4 (code = bits 11:0); a plain mcause decodes the same for every standard code.
+    let cause = lichen_kcore::trap::decode(mcause as u32);
+    let (irq, code) = (cause.interrupt, cause.code as usize);
     let mut switch = false;
     if irq {
         if platform::is_timer_irq(code) {

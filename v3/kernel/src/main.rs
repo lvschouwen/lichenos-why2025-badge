@@ -2,7 +2,8 @@
 //! - `qemu-virt`: the #607 feasibility harness (single hart, M-mode kernel, apps in U-mode behind PMP), 21 isolation
 //!   cases on an emulator. Proves kernel logic only.
 //! - `esp32p4`: the RAM-only bring-up image for the real chip (#611): banner, bench CHECK lines, END. Loaded by the
-//!   ROM download mode, never written to flash. Traps, PMP and core 1 arrive with #612.
+//!   ROM download mode, never written to flash. M-mode traps and the core 0 tick are #612
+//!   checkpoint 1; PMP and core 1 follow.
 #![no_std]
 #![no_main]
 
@@ -15,6 +16,8 @@ mod platform;
 
 #[cfg(feature = "esp32p4")]
 mod bringup;
+#[cfg(feature = "esp32p4")]
+mod mtrap;
 
 #[cfg(feature = "qemu-virt")]
 use lichen_kcore::handles;
