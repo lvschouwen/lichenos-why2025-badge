@@ -130,6 +130,14 @@ if grep -q '^CONFIG_SPIRAM_SPEED_120M=y' "$here/sdkconfig.defaults" &&
     exit 1
 fi
 
+# The 4x PSRAM refresh (#569) is also an IDF patch: without it Kconfig drops the symbol and the chip stays on slow refresh.
+if grep -q '^CONFIG_SPIRAM_HEX_REFRESH_4X=y' "$here/sdkconfig.defaults" &&
+   ! grep -q 'SPIRAM_HEX_REFRESH_4X' "$IDF_DIR/components/esp_psram/esp32p4/Kconfig.spiram"; then
+    echo "sdkconfig.defaults asks for 4x PSRAM refresh but $IDF_DIR is not patched for it:" >&2
+    echo "  git -C $IDF_DIR apply $repo/tools/idf-patches/0004-esp32p4-psram-hex-refresh-4x.patch" >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1091
 . "$IDF_DIR/export.sh" >/dev/null
 

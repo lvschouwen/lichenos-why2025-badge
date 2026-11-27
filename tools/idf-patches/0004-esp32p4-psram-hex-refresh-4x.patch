@@ -1,0 +1,43 @@
+Lichen #569: AP HEX PSRAM always 4x refresh (MR4 RF = 0), behind CONFIG_SPIRAM_HEX_REFRESH_4X.
+Apply after 0001 and 0003: git -C <idf> apply tools/idf-patches/0004-esp32p4-psram-hex-refresh-4x.patch
+
+diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+--- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
++++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+@@ -196,6 +196,9 @@
+     mode_reg.mr0.read_latency = mode_reg_config->mr0.read_latency;
+     mode_reg.mr0.drive_str = mode_reg_config->mr0.drive_str;
+     mode_reg.mr4.wr_latency = mode_reg_config->mr4.wr_latency;
++#if CONFIG_SPIRAM_HEX_REFRESH_4X
++    mode_reg.mr4.rf = mode_reg_config->mr4.rf; // Lichen #569: the power-on default lets the chip pick a slow refresh
++#endif
+ 
+     //write
+     addr = 0x0;
+@@ -466,6 +469,9 @@
+     mode_reg.mr0.read_latency = AP_HEX_PSRAM_RD_LATENCY;
+     mode_reg.mr0.drive_str = 0;
+     mode_reg.mr4.wr_latency = AP_HEX_PSRAM_WR_LATENCY;
++#if CONFIG_SPIRAM_HEX_REFRESH_4X
++    mode_reg.mr4.rf = 0; // always 4x refresh (0: 4x, 1: 1x when the temperature allows, 3: 0.5x)
++#endif
+     mode_reg.mr8.bl = 3;
+     mode_reg.mr8.bt = 0;
+     mode_reg.mr8.rbx = 1;
+diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/esp32p4/Kconfig.spiram
+--- a/components/esp_psram/esp32p4/Kconfig.spiram
++++ b/components/esp_psram/esp32p4/Kconfig.spiram
+@@ -57,6 +57,13 @@
+         depends on SPIRAM_SPEED_80M
+         default n
+ 
++    # Added by Lichen (lichenos-why2025-badge #569, tools/idf-patches/0004). The AP HEX part boots with MR4 RF at "1x when
++    # the temperature allows" and picks slow refresh on a cool die; a weak cell on the badge then loses bit 9 in data that
++    # is not read for a few seconds. This sets MR4 RF to "always 4x" at PSRAM init.
++    config SPIRAM_HEX_REFRESH_4X
++        bool "Lichen: always 4x refresh (AP HEX PSRAM MR4 RF = 0)"
++        default n
++
+     config SPIRAM_SPEED
+         int
+         default 20 if SPIRAM_SPEED_20M

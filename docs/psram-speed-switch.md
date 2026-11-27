@@ -120,6 +120,12 @@ The badge's IDF carries `tools/idf-patches/0001` and `0003` (`git -C ~/esp/esp-i
 (`BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`) is the switchable image. An IDF without 0003 still builds:
 the symbol is unknown to Kconfig, the app reports 80 MHz and "not supported", and the Settings row is hidden.
 
+`tools/idf-patches/0004` (after 0003) sets the chip's MR4 refresh field to "always 4x" at PSRAM init, behind
+`CONFIG_SPIRAM_HEX_REFRESH_4X` (on in `firmware/sdkconfig.defaults`, #569). Without it the AP HEX chip lets its die
+temperature choose and boots in slow refresh (boot log `hex_psram: SRF : 0x02 (Slow Refresh)`); with it the line reads
+`0x01 (Fast Refresh)`. build.sh refuses to build when the defaults ask for it and the IDF lacks the patch. The register
+is written once, at PSRAM init, at either clock.
+
 ## Bench plan
 
 1. OTA the image. If the badge was at 80 by an old record (v3), the first boot reads the default and restarts once into

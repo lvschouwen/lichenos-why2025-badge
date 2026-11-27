@@ -39,6 +39,10 @@ CONFIG_SPIRAM_SPEED_80M=y
 # 80 or 120 MHz chosen at boot (#121): needs tools/idf-patches/0001 + 0003 in the IDF; without 0003 this symbol is unknown to
 # Kconfig and the build is a plain 80 MHz one (Settings > PSRAM speed is then hidden). Default stays 80 MHz.
 CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
+# Always 4x refresh (#569): the AP HEX chip boots letting its die temperature pick the refresh rate and picks slow on a
+# cool die; at 120 MHz one weak cell then lost bit 9 (0 -> 1) in data left unread for 3.5-5 s (9 of 20 bench sessions,
+# none when the data was re-read every 200 ms). Needs tools/idf-patches/0004; build.sh refuses an IDF without it.
+CONFIG_SPIRAM_HEX_REFRESH_4X=y
 CONFIG_SPIRAM_USE_MALLOC=y
 # A plain malloc of up to 4 KB is internal first, a bigger one PSRAM first (IDF default 16 KB, #261): internal RAM is
 # nearly all DMA-capable, and every ordinary 4-16 KB block took it from esp_hosted's Wi-Fi frames. Safe because nothing
