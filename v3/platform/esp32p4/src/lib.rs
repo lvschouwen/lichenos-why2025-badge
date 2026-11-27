@@ -7,6 +7,7 @@
 
 pub mod c6;
 pub mod cache;
+pub mod clock;
 pub mod gpio;
 pub mod mem;
 pub mod mmio;

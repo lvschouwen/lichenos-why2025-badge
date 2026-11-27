@@ -1,6 +1,5 @@
-//! CPU clock to 360 MHz on the ESP32-P4 rev 1.0 exactly as ESP-IDF v6.1 does it (#645; a separate step from #620 so main
-//! can move this file into the platform crate: it has no probe state, only the platform crate's `mmio`, the ROM-free
-//! register accesses below and a logger callback).
+//! CPU clock to 360 MHz on the ESP32-P4 rev 1.0 exactly as ESP-IDF v6.1 does it (#645). No kernel state: `mmio`, the
+//! register accesses below, a few ROM calls and a logger callback.
 //!
 //! Sources (ESP-IDF v6.1, `~/esp/esp-idf-v6.1-head/components`, REV_LESS_V3 build as v2):
 //! - `bootloader_support/src/esp32p4/bootloader_esp32p4.c: bootloader_hardware_init()` (analog I2C clock, 1.1 V bias)
@@ -13,10 +12,10 @@
 //! Left out on purpose: the RC_FAST / RC_SLOW / RC32K calibration writes of rtc_clk_init (they tune the slow clocks, not the
 //! CPU) and the flash MSPI clock (bootloader_init_mspi_clock): v3 does not touch flash.
 //! eFuse: two read registers, `rd_mac_sys_2` (block version) and `rd_mac_sys_4` (active HP/LP dbias); no write, no trigger.
+use crate::mmio::{modify32, read32, write32};
+use crate::psram::clockmath::{dbias, dbias_calibrated};
+use crate::uart;
 use core::fmt::Arguments;
-use lichen_platform_esp32p4::mmio::{modify32, read32, write32};
-use lichen_platform_esp32p4::psram::clockmath::{dbias, dbias_calibrated};
-use lichen_platform_esp32p4::uart;
 
 pub type Log<'a> = &'a mut dyn FnMut(Arguments);
 
@@ -142,13 +141,19 @@ pub fn measure_mhz() -> Option<u32> {
     }
 }
 fn psram_mhz(c: u32, t: u32) -> u32 {
-    lichen_platform_esp32p4::psram::clockmath::mhz_from_systimer(c, t)
+    crate::psram::clockmath::mhz_from_systimer(c, t)
 }
+#[cfg(target_arch = "riscv32")]
 #[inline(always)]
 unsafe fn read_mcycle() -> u32 {
     let v: u32;
     core::arch::asm!("csrr {}, mcycle", out(reg) v);
     v
+}
+/// Host builds (the platform crate's unit tests) have no mcycle.
+#[cfg(not(target_arch = "riscv32"))]
+unsafe fn read_mcycle() -> u32 {
+    0
 }
 
 /// Print the state a hang or brownout would leave: dividers, source, regulators, DCDC.

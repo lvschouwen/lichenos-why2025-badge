@@ -8,7 +8,7 @@
 
 use core::arch::global_asm;
 use core::fmt::Write;
-use lichen_platform_esp32p4::{mmio::read32, psram, uart};
+use lichen_platform_esp32p4::{clock, mmio::read32, psram, uart};
 
 global_asm!(include_str!("boot.S"));
 
@@ -32,7 +32,6 @@ macro_rules! pl {
     ($($a:tt)*) => {{ let _ = { use core::fmt::Write as _; writeln!($crate::Con, $($a)*) }; }};
 }
 
-mod clock;
 mod tests;
 
 const STAGE: &str = env!("LICHEN_PSRAM_STAGE");
@@ -107,7 +106,7 @@ extern "C" fn pmain() -> ! {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" | "eye" | "diag" | "perf" => Some(psram::Upto::Tuned),
+        "tune" | "all" | "eye" | "diag" | "perf" | "regs" => Some(psram::Upto::Tuned),
         _ => None,
     };
     if let Some(upto) = upto {
@@ -116,6 +115,9 @@ extern "C" fn pmain() -> ! {
         match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
+                if stage == "regs" {
+                    regs_dump();
+                }
                 if stage == "perf" {
                     tests::perf(cpu_mhz);
                 }
@@ -141,6 +143,24 @@ extern "C" fn pmain() -> ! {
     }
     pl!("END ok");
     park()
+}
+
+/// Every non-zero register word of the PSRAM controller (cache side SPIMEM2, FIFO side SPIMEM3) and the MSPI pin block,
+/// to compare with the same addresses read on v2 (`mem_int_raw` at SPIMEM2 + 0xC8 holds TX underflow / RX overflow flags).
+fn regs_dump() {
+    for (name, base, len) in
+        [("spimem2", 0x5008_E000usize, 0x400usize), ("spimem3", 0x5008_F000, 0x200), ("mspi_iomux", 0x500E_1200, 0x70)]
+    {
+        let mut a = 0;
+        while a < len {
+            let v = rd(base + a);
+            if v != 0 {
+                pl!("REGS {name}+{a:#05x} = {v:#010x}");
+            }
+            a += 4;
+        }
+    }
+    pl!("REGS mspi2 int_raw {:#010x} (bit 26 rx overflow, bit 27 tx underflow)", rd(0x5008_E000 + 0xC8));
 }
 
 /// The clocks the pattern tests ran at, read back right before them.
