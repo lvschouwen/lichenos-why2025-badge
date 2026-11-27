@@ -217,8 +217,8 @@ static void open_pair(badge_t *a, badge_t *b, uint32_t t) {
     pump(a, b, t);
     CHECK(a->s->state == PEER_PAIRING && (peer_session_take_events(a->s) & PEER_EV_PAIR));
     CHECK(b->s->state == PEER_PAIRING);
-    peer_session_secured(a->s, t, true);
-    peer_session_secured(b->s, t, true);
+    peer_session_secured(a->s, t, a->link, true);
+    peer_session_secured(b->s, t, b->link, true);
     CHECK(a->s->state == PEER_OPEN && b->s->state == PEER_OPEN);
     CHECK(peer_session_take_events(a->s) & PEER_EV_OPEN);
     CHECK(peer_session_take_events(b->s) & PEER_EV_OPEN);
@@ -307,24 +307,40 @@ static void visible_and_rate(void) {
     CHECK(peer_session_on_frame(b.s, 2003, 12, 12, f, n) == PEER_RX_REFUSE); // closed, not reset yet
     peer_session_reset(b.s);
     CHECK(b.s->state == PEER_IDLE && peer_session_visible(b.s, 2004));
-    // per peer: the same inviter again within 10 s is refused, then shown; another peer is shown at once
-    CHECK(peer_session_on_frame(b.s, 2000 + PEER_INVITE_GAP_MS - 1, 12, 11, f, n) == PEER_RX_REFUSE);
-    CHECK(peer_session_on_frame(b.s, 2000 + PEER_INVITE_GAP_MS, 12, 11, f, n) == PEER_RX_OK);
-    uint32_t t = 2000 + PEER_INVITE_GAP_MS;
-    peer_session_answer(b.s, t, false);
+    // L6: the decline cools every invite down for 10 s, whoever sends it
+    CHECK(peer_session_on_frame(b.s, 2002 + PEER_INVITE_COOLDOWN_MS - 1, 12, 13, f, n) == PEER_RX_REFUSE);
+    CHECK(peer_session_on_frame(b.s, 2002 + PEER_INVITE_COOLDOWN_MS, 12, 13, f, n) == PEER_RX_OK);
+    // so does an invite nobody answered
+    peer_session_tick(b.s, 2002 + PEER_INVITE_COOLDOWN_MS + PEER_ANSWER_MS);
+    CHECK(b.s->end == PEER_END_NO_ANSWER);
     peer_session_reset(b.s);
-    CHECK(peer_session_on_frame(b.s, t, 13, 13, f, n) == PEER_RX_OK);
+    uint32_t t = 2002 + PEER_INVITE_COOLDOWN_MS + PEER_ANSWER_MS;
+    CHECK(peer_session_on_frame(b.s, t + PEER_INVITE_COOLDOWN_MS - 1, 14, 14, f, n) == PEER_RX_REFUSE);
+    CHECK(peer_session_on_frame(b.s, t + PEER_INVITE_COOLDOWN_MS, 14, 14, f, n) == PEER_RX_OK);
+    free(b.s);
+    // per peer, with links that went down (no cooldown): the same inviter within 10 s is refused, another is shown
+    b.s = new_session();
+    peer_session_set_visible(b.s, 0, true);
+    CHECK(peer_session_on_frame(b.s, 0, 1, 11, f, n) == PEER_RX_OK);
+    peer_session_link_down(b.s, 1, 1);
+    peer_session_reset(b.s);
+    CHECK(peer_session_on_frame(b.s, PEER_INVITE_GAP_MS - 1, 2, 11, f, n) == PEER_RX_REFUSE);
+    CHECK(peer_session_on_frame(b.s, PEER_INVITE_GAP_MS - 1, 2, 13, f, n) == PEER_RX_OK);
+    peer_session_link_down(b.s, PEER_INVITE_GAP_MS, 2);
+    peer_session_reset(b.s);
+    CHECK(peer_session_on_frame(b.s, PEER_INVITE_GAP_MS, 3, 11, f, n) == PEER_RX_OK);
+    free(b.s);
     // the table remembers PEER_RATE_SLOTS peers: with all of them shown in the last 10 s, a new one waits
-    for (uint32_t k = 100; k < 100 + PEER_RATE_SLOTS - 2; k++) { // 11 and 13 hold two slots already
-        peer_session_answer(b.s, t, false);
+    b.s = new_session();
+    peer_session_set_visible(b.s, 0, true);
+    for (uint32_t k = 100; k < 100 + PEER_RATE_SLOTS; k++) {
+        CHECK(peer_session_on_frame(b.s, 1, 4, k, f, n) == PEER_RX_OK);
+        peer_session_link_down(b.s, 1, 4);
         peer_session_reset(b.s);
-        CHECK(peer_session_on_frame(b.s, t + 1, 14, k, f, n) == PEER_RX_OK);
     }
-    peer_session_answer(b.s, t, false);
-    peer_session_reset(b.s);
-    CHECK(peer_session_on_frame(b.s, t + 1, 14, 999, f, n) == PEER_RX_REFUSE); // table full of recent peers
-    CHECK(peer_session_on_frame(b.s, 2000 + 2 * PEER_INVITE_GAP_MS, 14, 999, f, n) == PEER_RX_OK); // 11's slot aged
-    CHECK(!peer_session_answer(a.s, 0, true));                                                     // not invited
+    CHECK(peer_session_on_frame(b.s, 1, 4, 999, f, n) == PEER_RX_REFUSE);                  // full of recent peers
+    CHECK(peer_session_on_frame(b.s, 1 + PEER_INVITE_GAP_MS, 4, 999, f, n) == PEER_RX_OK); // the slots aged
+    CHECK(!peer_session_answer(a.s, 0, true));                                             // not invited
     peer_session_set_visible(b.s, 0, false);
     CHECK(!peer_session_visible(b.s, 1));
     // Visible running out is latched by the tick: the same counter value after a wrap is not Visible again
@@ -373,9 +389,9 @@ static void decline_and_timeouts(void) {
     CHECK(a.s->state == PEER_PAIRING);
     peer_session_tick(a.s, t + PEER_PAIR_MS);
     CHECK(a.s->state == PEER_CLOSED && a.s->end == PEER_END_PAIR_FAILED);
-    peer_session_secured(b.s, t + 1, false);
+    peer_session_secured(b.s, t + 1, 11, false);
     CHECK(b.s->state == PEER_CLOSED && b.s->end == PEER_END_PAIR_FAILED);
-    peer_session_secured(b.s, t + 2, true); // not pairing any more: nothing
+    peer_session_secured(b.s, t + 2, 11, true); // not pairing any more: nothing
     CHECK(b.s->state == PEER_CLOSED);
     // the link goes down while invited
     peer_session_reset(a.s);
@@ -569,8 +585,8 @@ static void glare_finish(peer_session_t *w, uint16_t wlink, uint32_t wkey, peer_
     uint8_t f[PEER_FRAME_MAX];
     size_t  n = peer_session_next_frame(l, 5, f, sizeof(f));
     CHECK(peer_session_on_frame(w, 5, wlink, wkey, f, n) == PEER_RX_OK && w->state == PEER_PAIRING);
-    peer_session_secured(w, 6, true);
-    peer_session_secured(l, 6, true);
+    peer_session_secured(w, 6, wlink, true);
+    peer_session_secured(l, 6, llink, true);
     CHECK(w->state == PEER_OPEN && l->state == PEER_OPEN);
     CHECK(w->role == LICHEN_BT_ROLE_CENTRAL && l->role == LICHEN_BT_ROLE_PERIPHERAL);
     CHECK(peer_session_send(w, "hit", 4) == LICHEN_BT_OK);
@@ -627,6 +643,52 @@ static void glare_decline_first(void) {
     free(g.B);
 }
 
+// M1: a lost glare by DECLINE waits for the winner's invite PEER_ANSWER_MS at most, so a lying DECLINE + GLARE cannot
+// park the session; the awaited invite needs no Visible
+static void glare_wait_ends(void) {
+    glare_t g;
+    uint8_t d[PEER_HDR + 1];
+    glare_start(&g, 9, 5);
+    CHECK(peer_session_on_frame(g.A, 2, 2, KEY_B, g.fb, g.nb) == PEER_RX_REFUSE);
+    size_t da = peer_session_refusal(g.A, d, sizeof(d));
+    CHECK(peer_session_on_frame(g.B, 3, 21, KEY_A, d, da) == PEER_RX_YIELD);
+    peer_session_take_events(g.B);
+    peer_session_tick(g.B, 3 + PEER_ANSWER_MS - 1);
+    CHECK(g.B->state == PEER_IDLE && g.B->await_glare);
+    peer_session_tick(g.B, 3 + PEER_ANSWER_MS);
+    CHECK(g.B->state == PEER_CLOSED && g.B->end == PEER_END_NO_ANSWER && !g.B->await_glare);
+    CHECK(peer_session_take_events(g.B) & PEER_EV_CLOSED);
+    free(g.A);
+    free(g.B);
+    glare_start(&g, 9, 5);
+    peer_session_on_frame(g.A, 2, 2, KEY_B, g.fb, g.nb);
+    da = peer_session_refusal(g.A, d, sizeof(d));
+    peer_session_on_frame(g.B, 3, 21, KEY_A, d, da);
+    peer_session_set_visible(g.B, 4, false);
+    CHECK(peer_session_on_frame(g.B, 5, 22, KEY_A, g.fa, g.na) == PEER_RX_OK && g.B->state == PEER_INVITED);
+    free(g.A);
+    free(g.B);
+}
+
+// L4: only the session's own link opens it
+static void secured_link(void) {
+    badge_t a = {.s = new_session(), .link = 1}, b = {.s = new_session(), .link = 11};
+    peer_session_set_visible(b.s, 0, true);
+    peer_invite_t inv = invite_of(1, "battleship", "A");
+    CHECK(peer_session_invite(a.s, 0, 1, KEY_B, &inv) == LICHEN_BT_OK);
+    pump(&a, &b, 0);
+    peer_session_answer(b.s, 1, true);
+    pump(&a, &b, 1);
+    peer_session_secured(a.s, 2, 7, true); // another link's pairing
+    CHECK(a.s->state == PEER_PAIRING);
+    peer_session_secured(a.s, 2, 7, false);
+    CHECK(a.s->state == PEER_PAIRING);
+    peer_session_secured(a.s, 2, 1, true);
+    CHECK(a.s->state == PEER_OPEN);
+    free(a.s);
+    free(b.s);
+}
+
 static void glare_cap(void) {
     ble_conns_t c = {0};
     CHECK(ble_conn_add(&c, LICHEN_BT_ROLE_CENTRAL) && ble_conn_add(&c, LICHEN_BT_ROLE_PERIPHERAL)); // a glare's two
@@ -651,11 +713,11 @@ static void pairing_edges(void) {
     CHECK(b.s->rxq_n == 0 && b.s->rx_next == 0);
     CHECK(peer_session_send(a.s, "x", 1) == LICHEN_BT_NOT_CONNECTED);
     // the central opens first and sends; the peripheral is secured a moment later and takes the resend
-    peer_session_secured(a.s, 3, true);
+    peer_session_secured(a.s, 3, 1, true);
     CHECK(peer_session_send(a.s, "x", 1) == LICHEN_BT_OK);
     pump(&a, &b, 3);
     CHECK(b.s->rxq_n == 0);
-    peer_session_secured(b.s, 4, true);
+    peer_session_secured(b.s, 4, 11, true);
     peer_session_tick(a.s, 3 + PEER_RTO_MS);
     pump(&a, &b, 3 + PEER_RTO_MS);
     uint8_t got[2];
@@ -673,7 +735,7 @@ static void pairing_edges(void) {
     peer_session_end(b.s, 2);
     pump(&a, &b, 2);
     CHECK(a.s->state == PEER_CLOSED && a.s->end == PEER_END_REMOTE);
-    peer_session_secured(a.s, 3, true); // too late: nothing
+    peer_session_secured(a.s, 3, 1, true); // too late: nothing
     CHECK(a.s->state == PEER_CLOSED);
     peer_session_reset(a.s);
     peer_session_reset(b.s);
@@ -688,40 +750,107 @@ static void pairing_edges(void) {
     free(b.s);
 }
 
-// Random DATA and ACK frames against an open session: its queues and counters stay in bounds
-static void fuzz_open(void) {
-    badge_t a = {.s = new_session(), .link = 1}, b = {.s = new_session(), .link = 11};
-    open_pair(&a, &b, 0);
-    mut_rng_t r;
-    mut_seed(&r, 12345);
-    uint8_t f[PEER_FRAME_MAX], got[PEER_MSG_MAX], payload[PEER_MSG_MAX];
-    memset(payload, 0x33, sizeof(payload));
-    for (uint32_t i = 0; i < 20000; i++) {
-        uint32_t     t    = 1 + i;
-        peer_ftype_t type = mut_next(&r) % 2 ? PEER_F_DATA : PEER_F_ACK;
-        size_t       len  = type == PEER_F_DATA ? 1 + mut_below(&r, PEER_MSG_MAX) : 0;
-        uint16_t     seq  = (uint16_t)(mut_next(&r) % 3 ? b.s->rx_next + mut_below(&r, 3) - 1 : mut_next(&r));
-        uint16_t     ack  = (uint16_t)(mut_next(&r) % 2 ? b.s->tx_base + mut_below(&r, 6) : mut_next(&r));
-        size_t       n    = peer_frame_build(type, seq, ack, payload, len, f, sizeof(f));
-        uint8_t     *x    = mut_exact(f, n);
-        if (!x) {
-            abort();
-        }
-        peer_session_on_frame(b.s, t, 11, KEY_A, x, n);
-        free(x);
-        if (mut_next(&r) % 4 == 0) {
-            peer_session_send(b.s, payload, 1 + mut_below(&r, 8));
-        }
-        if (mut_next(&r) % 3 == 0) {
-            peer_session_recv(b.s, got, sizeof(got));
-        }
-        peer_session_next_frame(b.s, t, f, sizeof(f));
-        CHECK(b.s->state == PEER_OPEN);
-        CHECK(b.s->rxq_n <= PEER_RXQ && b.s->txq_n <= PEER_TXQ);
-        CHECK(b.s->tx_sent <= b.s->txq_n && b.s->tx_ever <= b.s->txq_n);
+// One random frame: any of the six types or a reserved one (7), lengths in and out of the rules, seq and ack near
+// the session's counters or anywhere, then sometimes mutated
+static size_t random_frame(mut_rng_t *r, peer_session_t const *s, uint8_t *f, size_t cap) {
+    uint8_t  pl[PEER_MSG_MAX], tmp[PEER_FRAME_MAX];
+    unsigned type = 1 + (unsigned)mut_below(r, 7);
+    size_t   len  = 0;
+    if (type == PEER_F_INVITE) {
+        peer_invite_t inv = invite_of(mut_next(r), "battleship", "R");
+        len               = peer_invite_encode(&inv, pl, sizeof(pl));
+    } else if (type == PEER_F_DATA) {
+        len = 1 + mut_below(r, 64);
+        memset(pl, (int)mut_below(r, 256), len);
+    } else if (type == PEER_F_DECLINE || type == PEER_F_END) {
+        len   = mut_below(r, 2);
+        pl[0] = (uint8_t)mut_below(r, 3);
     }
-    free(a.s);
-    free(b.s);
+    uint16_t seq = (uint16_t)(mut_next(r) % 3 ? s->rx_next + mut_below(r, 3) - 1 : mut_next(r));
+    uint16_t ack = (uint16_t)(mut_next(r) % 2 ? s->tx_base + mut_below(r, 6) : mut_next(r));
+    size_t   n   = type == 7 ? 0 : peer_frame_build((peer_ftype_t)type, seq, ack, pl, len, tmp, sizeof(tmp));
+    if (type == 7) { // reserved: built by hand, the builder refuses it
+        uint8_t h[PEER_HDR] = {PEER_VERSION, 7, 0, 0, 0, 0, 0, 0};
+        memcpy(tmp, h, sizeof(h));
+        n = sizeof(h);
+    }
+    return mut_next(r) % 3 ? mut_truncate(tmp, n, n, f, cap) : mut_random(r, tmp, n, f, cap);
+}
+
+static void check_bounds(peer_session_t const *s) {
+    CHECK(s->state <= PEER_CLOSED && s->end <= PEER_END_REMOTE_EXIT);
+    CHECK(s->rxq_n <= PEER_RXQ && s->txq_n <= PEER_TXQ && s->rxq_head < PEER_RXQ);
+    CHECK(s->tx_sent <= s->txq_n && s->tx_ever <= s->txq_n);
+}
+
+// Drives b (the invitee) or a (the inviter) into st; the session under test
+static peer_session_t *drive(badge_t *a, badge_t *b, peer_state_t st) {
+    peer_session_set_visible(b->s, 0, true);
+    peer_invite_t inv = invite_of(1, "battleship", "A");
+    CHECK(peer_session_invite(a->s, 0, a->link, KEY_B, &inv) == LICHEN_BT_OK);
+    if (st == PEER_INVITING) {
+        return a->s;
+    }
+    pump(a, b, 0);
+    if (st == PEER_INVITED) {
+        return b->s;
+    }
+    peer_session_answer(b->s, 1, true);
+    pump(a, b, 1);
+    if (st == PEER_PAIRING) {
+        return b->s;
+    }
+    peer_session_secured(a->s, 2, a->link, true);
+    peer_session_secured(b->s, 2, b->link, true);
+    if (st == PEER_CLOSED) {
+        peer_session_end(b->s, 3);
+    }
+    return b->s;
+}
+
+// L5: random frames, on the session's link and others, from the invited badge and strangers, against a session in
+// each state; with sends, reads and ticks in between. Nothing leaves its bounds (ASan and UBSan watch the rest).
+static void fuzz_states(void) {
+    peer_state_t const states[] = {PEER_INVITING, PEER_INVITED, PEER_PAIRING, PEER_OPEN, PEER_CLOSED};
+    uint32_t const     keys[]   = {KEY_A, KEY_B, 0x5555u};
+    for (size_t k = 0; k < sizeof(states) / sizeof(states[0]); k++) {
+        badge_t         a = {.s = new_session(), .link = 1}, b = {.s = new_session(), .link = 11};
+        peer_session_t *s    = drive(&a, &b, states[k]);
+        peer_session_t *snap = new_session();
+        *snap                = *s;
+        CHECK(s->state == states[k]);
+        mut_rng_t r;
+        mut_seed(&r, 777u + (uint32_t)k);
+        uint8_t f[PEER_FRAME_MAX + 16], got[PEER_MSG_MAX];
+        for (uint32_t i = 0; i < 4000; i++) {
+            if (i % 8 == 0) {
+                *s = *snap; // back to the state under test every few frames
+            }
+            uint32_t t    = 10 + i;
+            size_t   n    = random_frame(&r, s, f, sizeof(f));
+            uint8_t *x    = mut_exact(f, n);
+            uint16_t link = mut_next(&r) % 2 ? s->link : (uint16_t)(s->link + 1);
+            if (!x) {
+                abort();
+            }
+            peer_session_on_frame(s, t, link, keys[mut_below(&r, 3)], x, n);
+            free(x);
+            switch (mut_next(&r) % 6) {
+                case 0: peer_session_send(s, got, 1 + mut_below(&r, 8)); break;
+                case 1: peer_session_recv(s, got, sizeof(got)); break;
+                case 2: peer_session_tick(s, t + (uint32_t)mut_below(&r, 40000)); break;
+                case 3: peer_session_answer(s, t, mut_next(&r) % 2); break;
+                default: break;
+            }
+            while (peer_session_next_frame(s, t, f, sizeof(f))) {
+            }
+            peer_session_refusal(s, f, sizeof(f));
+            check_bounds(s);
+        }
+        free(snap);
+        free(a.s);
+        free(b.s);
+    }
 }
 
 int main(void) {
@@ -743,8 +872,10 @@ int main(void) {
     glare_crossing(7, 7);
     glare_decline_first();
     glare_cap();
+    glare_wait_ends();
+    secured_link();
     pairing_edges();
-    fuzz_open();
+    fuzz_states();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

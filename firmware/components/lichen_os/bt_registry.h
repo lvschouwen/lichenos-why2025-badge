@@ -20,20 +20,22 @@
 // confirmed (bt_reg_service_gone, bt_reg_scan_done, bt_reg_conn_gone) and each queued event dropped
 // (bt_reg_event_done). Only when bt_reg_owner_idle is true may bt_reg_owner_release run and the memory be freed.
 
-#define BT_REG_OWNERS       8u
+#define BT_REG_OWNERS             8u
 // The OS's own services (Battery, Device Information, the peer service ...) have their budget, the apps theirs: an app
 // can never take the slots the OS needs. OS services added before the host starts are its static GATT table
 // (bt_reg_static_services), registered once at start and never removed; everything after is dynamic.
-#define BT_REG_OS_SERVICES  4u
-#define BT_REG_OS_CHRS      16u
-#define BT_REG_APP_SERVICES 8u
-#define BT_REG_APP_CHRS     32u
-#define BT_REG_SERVICES     (BT_REG_OS_SERVICES + BT_REG_APP_SERVICES)
-#define BT_REG_CHRS         (BT_REG_OS_CHRS + BT_REG_APP_CHRS)
-#define BT_REG_CONNS        3u // the connection cap (ble_policy.h BLE_CONN_MAX)
-#define BT_REG_CHANS        4u // L2CAP channels open at once
-#define BT_REG_LISTENS      4u // PSMs listened on
-#define BT_REG_UNDO_MAX     (BT_REG_SERVICES + BT_REG_CONNS + BT_REG_CHANS + BT_REG_LISTENS + 2u)
+#define BT_REG_OS_SERVICES        4u
+#define BT_REG_OS_CHRS            16u
+#define BT_REG_APP_SERVICES       8u
+#define BT_REG_APP_CHRS           32u
+#define BT_REG_APP_OWNER_SERVICES 4u // one app's share of the apps' budget
+#define BT_REG_APP_OWNER_CHRS     16u
+#define BT_REG_SERVICES           (BT_REG_OS_SERVICES + BT_REG_APP_SERVICES)
+#define BT_REG_CHRS               (BT_REG_OS_CHRS + BT_REG_APP_CHRS)
+#define BT_REG_CONNS              3u // the connection cap (ble_policy.h BLE_CONN_MAX)
+#define BT_REG_CHANS              4u // L2CAP channels open at once
+#define BT_REG_LISTENS            4u // PSMs listened on
+#define BT_REG_UNDO_MAX           (BT_REG_SERVICES + BT_REG_CONNS + BT_REG_CHANS + BT_REG_LISTENS + 2u)
 
 // What an owner holds that is not a stack object: its wish to advertise, its wish to be Visible, the peer session
 #define BT_CLAIM_ADVERTISE 0x01u
@@ -147,7 +149,9 @@ bt_owner_t bt_reg_owner_add(bt_reg_t *r, bt_owner_kind_t kind);
 // The handle names a live owner that was not revoked
 bool       bt_reg_owner_valid(bt_reg_t const *r, bt_owner_t owner);
 // Refuses the owner's handles from now on and lists what the service must undo (at most BT_REG_UNDO_MAX): the number
-// written. Again on a revoked owner: the undos still unconfirmed, so a retry after a lost confirmation works.
+// written. Again on a revoked owner: the undos still waiting for a confirmation (services, the scan, connections,
+// channels), so a retry after a lost confirmation works; UNLISTEN and RELEASE are done in the books at once and are
+// listed only the first time.
 size_t     bt_reg_revoke(bt_reg_t *r, bt_owner_t owner, bt_undo_t *undo, size_t cap);
 // Nothing of the owner is live any more: no service (removing or not), scan, connection, channel, listened PSM, claim
 // or queued event
@@ -158,7 +162,8 @@ bool       bt_reg_owner_release(bt_reg_t *r, bt_owner_t owner);
 // ---- GATT services ----
 // Checks and copies def: chrs_out gets chr_count handles. INVALID for a bad UUID, length, property, or a UUID that is
 // reserved (GAP 0x1800, GATT 0x1801 and the Lichen peer service, which only the OS may add); EXISTS for a UUID already
-// there; FULL when the owner's budget (OS or apps) ran out; NOT_FOUND for an owner that is not valid.
+// there; FULL when the budget (the OS's, the apps', or this app's own share) ran out; NOT_FOUND for an owner that is
+// not valid.
 lichen_bt_err_t bt_reg_service_add(
     bt_reg_t *r, bt_owner_t owner, lichen_bt_svc_def_t const *def, lichen_bt_svc_t *svc, lichen_bt_chr_t *chrs_out
 );

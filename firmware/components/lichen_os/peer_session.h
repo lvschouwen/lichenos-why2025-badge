@@ -29,31 +29,33 @@
 // - the loser gets the winner's INVITE first: it drops its own invite and link and takes the winner's (PEER_RX_YIELD);
 // - the winner refuses the loser's INVITE with DECLINE + PEER_WHY_GLARE (peer_session_refusal); a loser that gets
 //   that first goes back to IDLE (PEER_RX_YIELD, drop yielded_link) and takes the winner's INVITE when it comes,
-//   without the rate limit. The surviving session is the winner's: the winner is its central.
+//   without the Visible, rate or cooldown checks; if none comes within PEER_ANSWER_MS, it ends NO_ANSWER. The
+//   surviving session is the winner's: the winner is its central.
 // Equal nonces: both refuse plainly, both invites end DECLINED. Any other badge's invite while we invite is refused.
 // A peer can send DECLINE + PEER_WHY_GLARE without having won: our invite still ends, only quietly (PEER_EV_YIELD).
 //
 // The wire format is the contract in lichen_bt.h (LICHEN_BT_PEER_*); the constants below are taken from it.
 
-#define PEER_VERSION       LICHEN_BT_PEER_WIRE_VERSION
-#define PEER_HDR           LICHEN_BT_PEER_HDR
-#define PEER_MSG_MAX       LICHEN_BT_PEER_MSG_MAX
-#define PEER_FRAME_MAX     (PEER_HDR + PEER_MSG_MAX)
-#define PEER_INVITE_MAX    LICHEN_BT_PEER_INVITE_MAX
-#define PEER_APP_MAX       13u // an app id (app_ns rules: a-z 0-9 _)
-#define PEER_NAME_MAX      LICHEN_BT_NAME_MAX
-#define PEER_PARAM_MAX     LICHEN_BT_PEER_PARAM_MAX
-#define PEER_VISIBLE_MS    600000u
-#define PEER_INVITE_GAP_MS 10000u // incoming invites: one shown per peer every 10 s
-#define PEER_RATE_SLOTS    8u     // peers the rate limit remembers
-#define PEER_ANSWER_MS     30000u // the person answers an invite
-#define PEER_PAIR_MS       30000u // numeric comparison on both screens
-#define PEER_KEEPALIVE_MS  LICHEN_BT_PEER_KEEPALIVE_MS
-#define PEER_SILENCE_MS    LICHEN_BT_PEER_SILENCE_MS
-#define PEER_RTO_MS        LICHEN_BT_PEER_RTO_MS
-#define PEER_RETRIES       LICHEN_BT_PEER_RETRIES
-#define PEER_TXQ           LICHEN_BT_PEER_WINDOW
-#define PEER_RXQ           4u
+#define PEER_VERSION            LICHEN_BT_PEER_WIRE_VERSION
+#define PEER_HDR                LICHEN_BT_PEER_HDR
+#define PEER_MSG_MAX            LICHEN_BT_PEER_MSG_MAX
+#define PEER_FRAME_MAX          (PEER_HDR + PEER_MSG_MAX)
+#define PEER_INVITE_MAX         LICHEN_BT_PEER_INVITE_MAX
+#define PEER_APP_MAX            13u // an app id (app_ns rules: a-z 0-9 _)
+#define PEER_NAME_MAX           LICHEN_BT_NAME_MAX
+#define PEER_PARAM_MAX          LICHEN_BT_PEER_PARAM_MAX
+#define PEER_VISIBLE_MS         600000u
+#define PEER_INVITE_GAP_MS      10000u // incoming invites: one shown per peer every 10 s
+#define PEER_RATE_SLOTS         8u     // peers the rate limit remembers
+#define PEER_INVITE_COOLDOWN_MS 10000u // after a declined or unanswered invite: none from anyone
+#define PEER_ANSWER_MS          30000u // the person answers an invite
+#define PEER_PAIR_MS            30000u // numeric comparison on both screens
+#define PEER_KEEPALIVE_MS       LICHEN_BT_PEER_KEEPALIVE_MS
+#define PEER_SILENCE_MS         LICHEN_BT_PEER_SILENCE_MS
+#define PEER_RTO_MS             LICHEN_BT_PEER_RTO_MS
+#define PEER_RETRIES            LICHEN_BT_PEER_RETRIES
+#define PEER_TXQ                LICHEN_BT_PEER_WINDOW
+#define PEER_RXQ                4u
 
 typedef enum {
     PEER_F_INVITE  = LICHEN_BT_PEER_F_INVITE,
@@ -151,6 +153,8 @@ typedef struct {
     uint32_t         invited_key; // INVITING: the service's key of the badge we invite
     bool             await_glare; // we lost a glare by DECLINE: the winner's invite is expected
     uint8_t          refuse_why;  // the reason byte of the last refusal (PEER_WHY_GLARE), 0 none
+    bool             cooldown;    // since cooldown_ms, after a declined or unanswered invite
+    uint32_t         cooldown_ms;
     uint32_t         state_ms;
     uint32_t         last_rx_ms;
     uint32_t         last_tx_ms;
@@ -194,8 +198,8 @@ peer_rx_t peer_session_on_frame(
 );
 // The person answered the invite (INVITED only; false otherwise)
 bool            peer_session_answer(peer_session_t *s, uint32_t now_ms, bool accept);
-// Pairing ended on the session's link: ok opens the session
-void            peer_session_secured(peer_session_t *s, uint32_t now_ms, bool ok);
+// Pairing ended on link: ok opens the session (only the session's own link counts)
+void            peer_session_secured(peer_session_t *s, uint32_t now_ms, uint16_t link, bool ok);
 void            peer_session_link_down(peer_session_t *s, uint32_t now_ms, uint16_t link);
 // Ends a session under way (END goes out); nothing when IDLE or CLOSED
 void            peer_session_end(peer_session_t *s, uint32_t now_ms);

@@ -24,7 +24,19 @@ void ble_pair_open(ble_pair_t *p, uint32_t now_ms) {
     p->opened_ms = now_ms;
 }
 
+// One more failure; the third locks pairing out
+static void pair_fail(ble_pair_t *p, uint32_t now_ms) {
+    p->busy = false;
+    if (++p->fails >= BLE_PAIR_FAILS_MAX) {
+        p->locked    = true;
+        p->locked_ms = now_ms;
+    }
+}
+
 void ble_pair_tick(ble_pair_t *p, uint32_t now_ms) {
+    if (p->busy && since(now_ms, p->busy_ms) >= BLE_PAIR_SMP_MS) {
+        pair_fail(p, now_ms); // the pairing never ended (a lost callback, a peer that stalls): a failure
+    }
     pair_unlock_due(p, now_ms);
     if (p->open && since(now_ms, p->opened_ms) >= BLE_PAIR_WINDOW_MS) {
         p->open = false;
@@ -64,26 +76,24 @@ ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds
     if (bonds >= BLE_BONDS_MAX) {
         return BLE_PAIR_BONDS_FULL;
     }
-    p->busy = true;
+    p->busy    = true;
+    p->busy_ms = now_ms;
     return BLE_PAIR_GO;
 }
 
 bool ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool bonded, bool authenticated) {
     bool ok = bonded && authenticated; // a Just Works bond has no MITM protection: a failure like any other
     if (!p->busy) {
-        return !ok; // no pairing began (a stale callback): nothing counted, a failed link still goes
+        return true; // no pairing began here (stale, or timed out): nothing counted, and the link goes, bond or not
     }
-    p->busy = false;
-    if (ok) {
-        p->fails = 0;
-        p->open  = false; // one pairing per window
-        return false;
+    if (!ok) {
+        pair_fail(p, now_ms);
+        return true;
     }
-    if (++p->fails >= BLE_PAIR_FAILS_MAX) {
-        p->locked    = true;
-        p->locked_ms = now_ms;
-    }
-    return true;
+    p->busy  = false;
+    p->fails = 0;
+    p->open  = false; // one pairing per window
+    return false;
 }
 
 ble_access_t ble_access(lichen_bt_level_t need, ble_link_sec_t sec) {

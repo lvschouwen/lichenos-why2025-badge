@@ -14,9 +14,8 @@
 // - Access: a characteristic's level against the link's security, answered as the ATT error that makes a phone pair.
 // - The connection cap: BLE_CONN_MAX links, at most BLE_CONN_PERIPHERAL_MAX that peers made to us and
 //   BLE_CONN_CENTRAL_MAX that we made.
-// - A stranger's link: one a peer made to us that is not bonded with authenticated keys is dropped BLE_UNBONDED_DROP_MS
-// after it came up, or
-//   BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's GATT client) and the peer session's links
+// - A stranger's link: one a peer made to us that is not bonded with authenticated keys is dropped
+//   BLE_UNBONDED_DROP_MS after it came up, or BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's GATT client) and the peer session's links
 //   (never bonded, the session has its own timeouts) are not strangers.
 // - The passkey: 6 digits drawn without bias, shown "123 456".
 // - The peer session's links pair by numeric comparison outside all of this: no window, no lockout, no bond store
@@ -38,11 +37,12 @@
 
 typedef struct {
     bool     open;
-    bool     busy;  // a pairing is under way
+    bool     busy;  // a pairing is under way (since busy_ms; it fails after BLE_PAIR_SMP_MS)
     uint8_t  fails; // since the last success or lockout
     bool     locked;
     uint32_t opened_ms;
     uint32_t locked_ms;
+    uint32_t busy_ms;
 } ble_pair_t;
 
 typedef enum {
@@ -57,7 +57,7 @@ void               ble_pair_init(ble_pair_t *p);
 // Settings opened (or re-opened) the window: BLE_PAIR_WINDOW_MS from now. A lockout stays.
 void               ble_pair_open(ble_pair_t *p, uint32_t now_ms);
 void               ble_pair_close(ble_pair_t *p);
-// Latches what ran out (the window closes, a lockout ends): call it on the service's timer, at least daily, so a
+// Latches what ran out (the window closes, a lockout ends, a pairing under way past BLE_PAIR_SMP_MS fails): call it on the service's timer, at least daily, so a
 // window or lockout never reads as current again after the ms counter wraps (49.7 days). ble_pair_begin does it too.
 void               ble_pair_tick(ble_pair_t *p, uint32_t now_ms);
 bool               ble_pair_is_open(ble_pair_t const *p, uint32_t now_ms);
@@ -69,7 +69,8 @@ uint32_t           ble_pair_locked_ms(ble_pair_t const *p, uint32_t now_ms);
 ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds);
 // The pairing that began ended: bonded, and with MITM-protected keys (authenticated). Anything less is a failure: it
 // counts towards the lockout, the window stays open, and true says disconnect the link and delete any bond the stack
-// stored for it (a Just Works bond is never kept). True also for a stale end without a begin that failed.
+// stored for it (a Just Works bond is never kept). True too for an end without a begin (stale, or the pairing timed
+// out in ble_pair_tick): whatever it bonded is not trusted.
 bool               ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool bonded, bool authenticated);
 
 // ---- Access levels ----

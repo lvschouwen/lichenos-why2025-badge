@@ -217,24 +217,6 @@ static bool chr_def_ok(lichen_bt_chr_def_t const *c) {
            c->max_len <= LICHEN_BT_VALUE_MAX && c->level <= LICHEN_BT_BONDED;
 }
 
-static lichen_bt_err_t svc_def_check(bt_reg_t const *r, bt_owner_kind_t kind, lichen_bt_svc_def_t const *def) {
-    if (!def || !uuid_ok(&def->uuid) || uuid_reserved(&def->uuid, kind) || !def->chrs || def->chr_count == 0 ||
-        def->chr_count > LICHEN_BT_SVC_CHRS_MAX) {
-        return LICHEN_BT_INVALID;
-    }
-    for (unsigned i = 0; i < def->chr_count; i++) {
-        if (!chr_def_ok(&def->chrs[i])) {
-            return LICHEN_BT_INVALID;
-        }
-    }
-    for (unsigned i = 0; i < BT_REG_SERVICES; i++) {
-        if (r->svcs[i].used && uuid_eq(&r->svcs[i].uuid, &def->uuid)) {
-            return LICHEN_BT_EXISTS; // a removing one too: the stack may still serve it
-        }
-    }
-    return LICHEN_BT_OK;
-}
-
 static int free_svc_slot(bt_reg_t const *r) {
     for (unsigned i = 0; i < BT_REG_SERVICES; i++) {
         if (!r->svcs[i].used) {
@@ -244,17 +226,57 @@ static int free_svc_slot(bt_reg_t const *r) {
     return -1;
 }
 
-// Room in the OS's or the apps' budget for one more service of n characteristics
-static bool budget_ok(bt_reg_t const *r, bool os, unsigned n) {
-    unsigned svcs = 0, chrs = 0;
+// Room for one more service of n characteristics: in the OS's or the apps' budget, and for an app also in its own
+// share, so one app cannot starve the others
+static bool budget_ok(bt_reg_t const *r, bool os, bt_owner_t owner, unsigned n) {
+    unsigned svcs = 0, chrs = 0, mine = 0, mine_chrs = 0;
     for (unsigned i = 0; i < BT_REG_SERVICES; i++) {
-        if (r->svcs[i].used && r->svcs[i].os == os) {
+        bt_reg_svc_t const *v = &r->svcs[i];
+        if (v->used && v->os == os) {
             svcs++;
-            chrs += r->svcs[i].chr_count;
+            chrs += v->chr_count;
         }
+        if (v->used && v->owner == owner) {
+            mine++;
+            mine_chrs += v->chr_count;
+        }
+    }
+    if (!os && (mine >= BT_REG_APP_OWNER_SERVICES || mine_chrs + n > BT_REG_APP_OWNER_CHRS)) {
+        return false;
     }
     return svcs < (os ? BT_REG_OS_SERVICES : BT_REG_APP_SERVICES) &&
            chrs + n <= (os ? BT_REG_OS_CHRS : BT_REG_APP_CHRS);
+}
+
+// Copies def into n and chrs with every UUID normalised, and checks it in the same pass: INVALID for a bad count,
+// UUID (a 32-bit SIG one too), property, length or level, or a reserved UUID; EXISTS for one already there.
+static lichen_bt_err_t def_take(
+    bt_reg_t const            *r,
+    bt_owner_kind_t            kind,
+    lichen_bt_svc_def_t const *def,
+    lichen_bt_svc_def_t       *n,
+    lichen_bt_chr_def_t       *chrs
+) {
+    if (!def || !def->chrs || def->chr_count == 0 || def->chr_count > LICHEN_BT_SVC_CHRS_MAX) {
+        return LICHEN_BT_INVALID;
+    }
+    *n      = *def;
+    n->chrs = chrs;
+    for (unsigned i = 0; i < def->chr_count; i++) {
+        chrs[i] = def->chrs[i];
+        if (!uuid_norm(&chrs[i].uuid) || !chr_def_ok(&chrs[i])) {
+            return LICHEN_BT_INVALID;
+        }
+    }
+    if (!uuid_norm(&n->uuid) || !uuid_ok(&n->uuid) || uuid_reserved(&n->uuid, kind)) {
+        return LICHEN_BT_INVALID;
+    }
+    for (unsigned i = 0; i < BT_REG_SERVICES; i++) {
+        if (r->svcs[i].used && uuid_eq(&r->svcs[i].uuid, &n->uuid)) {
+            return LICHEN_BT_EXISTS; // a removing one too: the stack may still serve it
+        }
+    }
+    return LICHEN_BT_OK;
 }
 
 static lichen_bt_chr_t chr_take(bt_reg_t *r, unsigned svc, lichen_bt_chr_def_t const *d) {
@@ -274,22 +296,6 @@ static lichen_bt_chr_t chr_take(bt_reg_t *r, unsigned svc, lichen_bt_chr_def_t c
     return 0; // not reached: the caller counted the free slots
 }
 
-// A copy of def with its UUIDs normalised (chrs holds the characteristics); false for what cannot be copied or a
-// 32-bit SIG UUID. The rest is svc_def_check's.
-static bool norm_def(lichen_bt_svc_def_t const *def, lichen_bt_svc_def_t *n, lichen_bt_chr_def_t *chrs) {
-    if (!def || !def->chrs || def->chr_count == 0 || def->chr_count > LICHEN_BT_SVC_CHRS_MAX) {
-        return false;
-    }
-    *n = *def;
-    memcpy(chrs, def->chrs, def->chr_count * sizeof(chrs[0]));
-    n->chrs = chrs;
-    bool ok = uuid_norm(&n->uuid);
-    for (unsigned i = 0; i < def->chr_count; i++) {
-        ok = uuid_norm(&chrs[i].uuid) && ok;
-    }
-    return ok;
-}
-
 lichen_bt_err_t bt_reg_service_add(
     bt_reg_t *r, bt_owner_t owner, lichen_bt_svc_def_t const *def, lichen_bt_svc_t *svc, lichen_bt_chr_t *chrs_out
 ) {
@@ -299,17 +305,14 @@ lichen_bt_err_t bt_reg_service_add(
     }
     lichen_bt_chr_def_t chrs[LICHEN_BT_SVC_CHRS_MAX];
     lichen_bt_svc_def_t n;
-    if (!norm_def(def, &n, chrs)) {
-        return LICHEN_BT_INVALID;
-    }
-    def               = &n; // every check and the books see the normalised UUIDs only
-    lichen_bt_err_t e = svc_def_check(r, o->kind, def);
+    lichen_bt_err_t     e = def_take(r, o->kind, def, &n, chrs);
     if (e != LICHEN_BT_OK) {
         return e;
     }
+    def       = &n; // the books see the normalised UUIDs only
     bool os   = o->kind == BT_OWNER_OS;
     int  slot = free_svc_slot(r);
-    if (slot < 0 || !budget_ok(r, os, def->chr_count)) {
+    if (slot < 0 || !budget_ok(r, os, owner, def->chr_count)) {
         return LICHEN_BT_FULL; // the budgets add up to the tables, so a free slot is always there within one
     }
     bt_reg_svc_t *s = &r->svcs[slot];

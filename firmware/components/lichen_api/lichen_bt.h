@@ -34,7 +34,7 @@ typedef struct {
 
 // What a characteristic needs from the link before a peer may read, write or subscribe (ble_policy.c enforces it):
 // OPEN anyone connected; ENCRYPTED an encrypted link (the peer session's numeric-comparison links); BONDED an
-// authenticated (MITM, passkey) and bonded link (a paired phone).
+// authenticated (MITM: passkey or numeric comparison) and bonded link (a paired phone).
 typedef enum { LICHEN_BT_OPEN, LICHEN_BT_ENCRYPTED, LICHEN_BT_BONDED } lichen_bt_level_t;
 
 // Our side of a connection: CENTRAL when we connected out, PERIPHERAL when the peer connected to us

@@ -266,6 +266,17 @@ static peer_rx_t on_glare(peer_session_t *s, uint32_t now_ms, uint16_t link, pee
     return PEER_RX_YIELD;
 }
 
+// After a declined or unanswered invite, no invite from anyone for PEER_INVITE_COOLDOWN_MS: many badges cannot take
+// turns at the person's screen
+static bool cooling(peer_session_t const *s, uint32_t now_ms) {
+    return s->cooldown && since(now_ms, s->cooldown_ms) < PEER_INVITE_COOLDOWN_MS;
+}
+
+static void cool_down(peer_session_t *s, uint32_t now_ms) {
+    s->cooldown    = true;
+    s->cooldown_ms = now_ms;
+}
+
 static peer_rx_t on_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, uint32_t key, peer_frame_t const *f) {
     peer_invite_t inv;
     s->refuse_why = 0;
@@ -275,20 +286,20 @@ static peer_rx_t on_invite(peer_session_t *s, uint32_t now_ms, uint16_t link, ui
     if (active(s) && link == s->link) {
         return PEER_RX_IGNORED; // an invite on the session's own link: never drop the session for it
     }
+    if (s->state == PEER_IDLE && s->await_glare && key == s->invited_key) {
+        s->await_glare = false; // the glare's winner, after its DECLINE came first: no Visible, rate or cooldown
+        take_invite(s, now_ms, link, &inv);
+        return PEER_RX_OK;
+    }
     if (!peer_session_visible(s, now_ms)) {
         return PEER_RX_REFUSE;
     }
     if (s->state == PEER_INVITING && key == s->invited_key) {
         return on_glare(s, now_ms, link, &inv);
     }
-    if (s->state != PEER_IDLE) {
-        return PEER_RX_REFUSE; // busy, or CLOSED and not reset yet
+    if (s->state != PEER_IDLE || cooling(s, now_ms) || !rate_take(s, now_ms, key)) {
+        return PEER_RX_REFUSE; // busy (or CLOSED and not reset yet), the cooldown, or this peer's rate limit
     }
-    bool awaited = s->await_glare && key == s->invited_key; // the glare's winner, after its DECLINE came first
-    if (!awaited && !rate_take(s, now_ms, key)) {
-        return PEER_RX_REFUSE;
-    }
-    s->await_glare = false;
     take_invite(s, now_ms, link, &inv);
     return PEER_RX_OK;
 }
@@ -395,6 +406,7 @@ bool peer_session_answer(peer_session_t *s, uint32_t now_ms, bool accept) {
     }
     if (!accept) {
         close_as(s, now_ms, PEER_END_DECLINED, PEER_F_DECLINE);
+        cool_down(s, now_ms);
         return true;
     }
     s->ctl = PEER_F_ACCEPT;
@@ -402,8 +414,8 @@ bool peer_session_answer(peer_session_t *s, uint32_t now_ms, bool accept) {
     return true;
 }
 
-void peer_session_secured(peer_session_t *s, uint32_t now_ms, bool ok) {
-    if (s->state != PEER_PAIRING) {
+void peer_session_secured(peer_session_t *s, uint32_t now_ms, uint16_t link, bool ok) {
+    if (s->state != PEER_PAIRING || link != s->link) {
         return;
     }
     if (!ok) {
@@ -458,18 +470,38 @@ static void tick_open(peer_session_t *s, uint32_t now_ms) {
     s->tx_sent = 0; // go back to the oldest unacked message
 }
 
-void peer_session_tick(peer_session_t *s, uint32_t now_ms) {
-    if (s->visible && !peer_session_visible(s, now_ms)) {
-        s->visible = false; // latched: a counter wrap never makes the badge Visible again
+// No answer to an invite in time; the invitee's side cools down (an unanswered invite is a declined one)
+static void tick_invite(peer_session_t *s, uint32_t now_ms, uint32_t in_state) {
+    if (in_state < PEER_ANSWER_MS) {
+        return;
     }
+    bool invited = s->state == PEER_INVITED;
+    close_as(s, now_ms, PEER_END_NO_ANSWER, PEER_F_END);
+    if (invited) {
+        cool_down(s, now_ms);
+    }
+}
+
+// What runs out by itself: Visible, the cooldown, the wait for a glare's winner (latched, so a wrap never revives them)
+static void tick_latches(peer_session_t *s, uint32_t now_ms) {
+    if (s->visible && !peer_session_visible(s, now_ms)) {
+        s->visible = false;
+    }
+    if (s->cooldown && !cooling(s, now_ms)) {
+        s->cooldown = false;
+    }
+    if (s->state == PEER_IDLE && s->await_glare && since(now_ms, s->state_ms) >= PEER_ANSWER_MS) {
+        s->await_glare = false; // the glare's winner never invited (or a DECLINE + GLARE was a lie)
+        close_as(s, now_ms, PEER_END_NO_ANSWER, 0);
+    }
+}
+
+void peer_session_tick(peer_session_t *s, uint32_t now_ms) {
+    tick_latches(s, now_ms);
     uint32_t in_state = since(now_ms, s->state_ms);
     switch (s->state) {
         case PEER_INVITING:
-        case PEER_INVITED:
-            if (in_state >= PEER_ANSWER_MS) {
-                close_as(s, now_ms, PEER_END_NO_ANSWER, PEER_F_END);
-            }
-            break;
+        case PEER_INVITED: tick_invite(s, now_ms, in_state); break;
         case PEER_PAIRING:
             if (in_state >= PEER_PAIR_MS) {
                 close_as(s, now_ms, PEER_END_PAIR_FAILED, PEER_F_END);
@@ -565,12 +597,14 @@ void peer_session_reset(peer_session_t *s) {
     if (s->state != PEER_CLOSED) {
         return;
     }
-    bool        visible = s->visible;
-    uint32_t    vis_ms  = s->visible_ms;
+    bool        visible = s->visible, cooldown = s->cooldown;
+    uint32_t    vis_ms = s->visible_ms, cool_ms = s->cooldown_ms;
     peer_rate_t rate[PEER_RATE_SLOTS];
     memcpy(rate, s->rate, sizeof(rate));
     peer_session_init(s);
-    s->visible    = visible;
-    s->visible_ms = vis_ms;
+    s->visible     = visible;
+    s->visible_ms  = vis_ms;
+    s->cooldown    = cooldown;
+    s->cooldown_ms = cool_ms;
     memcpy(s->rate, rate, sizeof(rate));
 }

@@ -64,6 +64,7 @@ static void pair_attempts(void) {
     CHECK(p.fails == 1 && !p.locked);
     // a stale end without a begin counts nothing
     CHECK(ble_pair_end(&p, 70000, false, false)); // still dropped
+    CHECK(ble_pair_end(&p, 70000, true, true)); // a stale success is not trusted either (fails closed)
     CHECK(p.fails == 1);
     // success: failures forgotten and the window closes (one pairing per window)
     CHECK(ble_pair_begin(&p, 70001, 0) == BLE_PAIR_GO);
@@ -83,6 +84,22 @@ static void pair_unauthenticated(void) {
     CHECK(ble_pair_begin(&p, 3, 0) == BLE_PAIR_GO);
     CHECK(!ble_pair_end(&p, 4, true, true));
     CHECK(p.fails == 0 && !ble_pair_is_open(&p, 5));
+}
+
+// A pairing that never ends is a failure after the SMP timeout, so BUSY cannot block the window for good
+static void pair_stalls(void) {
+    ble_pair_t p;
+    ble_pair_init(&p);
+    ble_pair_open(&p, 0);
+    CHECK(ble_pair_begin(&p, 10, 0) == BLE_PAIR_GO);
+    CHECK(ble_pair_begin(&p, 10 + BLE_PAIR_SMP_MS - 1, 0) == BLE_PAIR_BUSY);
+    ble_pair_tick(&p, 10 + BLE_PAIR_SMP_MS);
+    CHECK(!p.busy && p.fails == 1);
+    CHECK(ble_pair_end(&p, 10 + BLE_PAIR_SMP_MS + 1, true, true)); // its late end: dropped, not counted again
+    CHECK(p.fails == 1 && ble_pair_is_open(&p, 10 + BLE_PAIR_SMP_MS + 1));
+    CHECK(ble_pair_begin(&p, 40000, 0) == BLE_PAIR_GO); // begin ticks too
+    CHECK(ble_pair_begin(&p, 40000 + BLE_PAIR_SMP_MS, 0) == BLE_PAIR_GO);
+    CHECK(p.fails == 2);
 }
 
 static void pair_bonds(void) {
@@ -183,6 +200,7 @@ int main(void) {
     pair_window();
     pair_attempts();
     pair_unauthenticated();
+    pair_stalls();
     pair_bonds();
     access_levels();
     conn_cap();

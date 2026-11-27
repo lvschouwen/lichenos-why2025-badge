@@ -165,29 +165,61 @@ static void base_uuid(void) {
 static void slots_full(void) {
     bt_reg_t r;
     bt_reg_init(&r);
-    bt_owner_t          app = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    bt_owner_t          apps[3];
     lichen_bt_svc_t     svc;
     lichen_bt_chr_t     chr[LICHEN_BT_SVC_CHRS_MAX];
-    lichen_bt_chr_def_t eight[LICHEN_BT_SVC_CHRS_MAX];
+    lichen_bt_chr_def_t eight[LICHEN_BT_SVC_CHRS_MAX] = {{.props = 0}};
     for (unsigned i = 0; i < LICHEN_BT_SVC_CHRS_MAX; i++) {
         eight[i] = CHR_RW;
     }
-    // the apps' 32 characteristics: four services of eight use them all
+    for (unsigned i = 0; i < 3; i++) {
+        apps[i] = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    }
+    // the apps' 32 characteristics: four services of eight (two apps, 16 each) use them all; a third app gets none
     for (unsigned i = 0; i < BT_REG_APP_CHRS / LICHEN_BT_SVC_CHRS_MAX; i++) {
         lichen_bt_svc_def_t d = svc_def(u16((uint16_t)(0x3000 + i)), eight, LICHEN_BT_SVC_CHRS_MAX);
-        CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_OK);
+        CHECK(bt_reg_service_add(&r, apps[i / 2], &d, &svc, chr) == LICHEN_BT_OK);
     }
     lichen_bt_svc_def_t d = svc_def(u16(0x3100), &CHR_RW, 1);
-    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_FULL);
-    // the apps' 8 services
+    CHECK(bt_reg_service_add(&r, apps[2], &d, &svc, chr) == LICHEN_BT_FULL);
+    // the apps' 8 services (two apps, 4 each)
     bt_reg_init(&r);
-    app = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    for (unsigned i = 0; i < 3; i++) {
+        apps[i] = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    }
     for (unsigned i = 0; i < BT_REG_APP_SERVICES; i++) {
         d = svc_def(u16((uint16_t)(0x3200 + i)), &CHR_RW, 1);
-        CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_OK);
+        CHECK(bt_reg_service_add(&r, apps[i / 4], &d, &svc, chr) == LICHEN_BT_OK);
     }
     d = svc_def(u16(0x3300), &CHR_RW, 1);
-    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_FULL);
+    CHECK(bt_reg_service_add(&r, apps[2], &d, &svc, chr) == LICHEN_BT_FULL);
+}
+
+// One app's share: 4 services and 16 characteristics, so it cannot take the whole apps' budget from the others
+static void owner_share(void) {
+    bt_reg_t r;
+    bt_reg_init(&r);
+    bt_owner_t          a = bt_reg_owner_add(&r, BT_OWNER_SD), b = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    lichen_bt_svc_t     svc;
+    lichen_bt_chr_t     chr[LICHEN_BT_SVC_CHRS_MAX];
+    lichen_bt_svc_def_t d;
+    for (unsigned i = 0; i < BT_REG_APP_OWNER_SERVICES; i++) {
+        d = svc_def(u16((uint16_t)(0x3600 + i)), &CHR_RW, 1);
+        CHECK(bt_reg_service_add(&r, a, &d, &svc, chr) == LICHEN_BT_OK);
+    }
+    d = svc_def(u16(0x3610), &CHR_RW, 1);
+    CHECK(bt_reg_service_add(&r, a, &d, &svc, chr) == LICHEN_BT_FULL); // its fifth
+    CHECK(bt_reg_service_add(&r, b, &d, &svc, chr) == LICHEN_BT_OK);   // another app still has room
+    lichen_bt_chr_def_t eight[LICHEN_BT_SVC_CHRS_MAX] = {{.props = 0}};
+    for (unsigned i = 0; i < LICHEN_BT_SVC_CHRS_MAX; i++) {
+        eight[i] = CHR_RW;
+    }
+    d = svc_def(u16(0x3620), eight, 8); // b: 1 + 8 = 9
+    CHECK(bt_reg_service_add(&r, b, &d, &svc, chr) == LICHEN_BT_OK);
+    d = svc_def(u16(0x3621), eight, 7); // 16: its whole share
+    CHECK(bt_reg_service_add(&r, b, &d, &svc, chr) == LICHEN_BT_OK);
+    d = svc_def(u16(0x3622), &CHR_RW, 1); // the 17th
+    CHECK(bt_reg_service_add(&r, b, &d, &svc, chr) == LICHEN_BT_FULL);
 }
 
 // The OS's budget is its own, and what it adds before the host starts is the static table
@@ -220,10 +252,11 @@ static void os_budget_and_static(void) {
     CHECK(bt_reg_service_add(&r, os, &d, &s, chr) == LICHEN_BT_OK);
     d = svc_def(u16(0x1821), &CHR_RW, 1);
     CHECK(bt_reg_service_add(&r, os, &d, &s, chr) == LICHEN_BT_FULL); // the OS's 4 services
-    // the apps keep all of theirs
+    // the apps keep all of theirs (two apps, each its full share)
+    bt_owner_t app2 = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
     for (unsigned i = 0; i < BT_REG_APP_SERVICES; i++) {
         d = svc_def(u16((uint16_t)(0x3400 + i)), four, 4);
-        CHECK(bt_reg_service_add(&r, app, &d, &s, chr) == LICHEN_BT_OK);
+        CHECK(bt_reg_service_add(&r, i < 4 ? app : app2, &d, &s, chr) == LICHEN_BT_OK);
     }
     d = svc_def(u16(0x3500), &CHR_RW, 1);
     CHECK(bt_reg_service_add(&r, app, &d, &s, chr) == LICHEN_BT_FULL);
@@ -583,6 +616,7 @@ int main(void) {
     services();
     base_uuid();
     slots_full();
+    owner_share();
     os_budget_and_static();
     handles();
     revoke_before_free();
