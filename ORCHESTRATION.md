@@ -53,8 +53,10 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-27 21:30, v3 sprint)
-- v3 tip 4401d881 (pushed): #612, #646, #620, #645 merged and closed. v3 merges: rebase, ff-only, ./v3/check.sh, push.
+- v3 tip e1833cd0 (pushed): #612, #646, #620, #645 merged and closed; #650 merged, open until a 200 MHz fallback run (see #650). v3 merges: rebase, ff-only, ./v3/check.sh, push.
 - v3 slots: `agent-wt done` refuses branches merged into v3 (not main). Recipe: `git -C <slot> checkout --detach origin/v3 && agent-wt release <slot>`; the branch stays (wt-5/6/8 branches kept).
-- #648 perf lab: Phase 0 posted; owner decisions on the issue. Phase 0b (BadgeVMS PSRAM 200 + LDO) running in perflab-research (read-only), writes the scratchpad file 648-phase0b.md; main posts it. Phases 1-2 can start now; fix #650 before the 160/200 runs.
+- #648 perf lab: decisions on the issue (M0 skipped by the owner; 200 MHz and the 1900 step approved, 1950 = today). Main runs every 160/200 and LDO run.
 - Bench lock: one load-ram at a time, runs of 120 s or less; roadmap first. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
 - #615 next steps are owner flash writes.
+- #648 Phase 1: perf-643 in wt-5 (exp/648-perflab), first commit 02761299 green; log check-wt-5-648.log. Main wires ./probe-perf/check.sh into v3/check.sh at merge.
+- #652 GUI overhaul: research in docs/v3-gui-research/ (uncommitted, devices report still being web-checked by gui-research-devices); mockups on a private design canvas; owner leans to Poster wall.
