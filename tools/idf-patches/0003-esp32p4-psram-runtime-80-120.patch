@@ -10,12 +10,17 @@ g_mspi_psram_carrier_found (esp_private/mspi_timing_tuning.h). The 2nd stage boo
 mspi_timing_tuning.c nor init PSRAM, so it is unaffected. The latency codes and the DQS tuning tables are the same for
 80 and 120 MHz (0001), so only the MPLL frequency and the clock divider are runtime.
 
+Rebased onto release/v6.1 c112a7898c (#588). Upstream's BELOW_FREQ_THRESHOLD in clk_utils.c now takes the PSRAM speed
+as an argument, so the P4 callers pass MSPI_TIMING_PSRAM_SPEED_MHZ (CLK_UTILS_PSRAM_SPEED_MHZ) instead of a P4 macro
+that read it; the other targets keep CONFIG_SPIRAM_SPEED.
+
     git -C <idf> apply "$PWD/tools/idf-patches/0003-esp32p4-psram-runtime-80-120.patch"
 
 diff --git a/components/esp_driver_spi/src/gpspi/spi_master.c b/components/esp_driver_spi/src/gpspi/spi_master.c
+index dc8fe12b6d..658ae2d40b 100644
 --- a/components/esp_driver_spi/src/gpspi/spi_master.c
 +++ b/components/esp_driver_spi/src/gpspi/spi_master.c
-@@ -116,6 +116,7 @@
+@@ -116,6 +116,7 @@ We have two bits to control the interrupt:
  #include "esp_private/spi_common_internal.h"
  #include "esp_private/spi_master_internal.h"
  #include "esp_private/esp_clk_tree_common.h"
@@ -23,7 +28,7 @@ diff --git a/components/esp_driver_spi/src/gpspi/spi_master.c b/components/esp_d
  #include "esp_private/cache_utils.h"
  #include "driver/spi_master.h"
  #include "esp_clk_tree.h"
-@@ -169,7 +170,11 @@
+@@ -169,7 +170,11 @@ We have two bits to control the interrupt:
   */
  #define K_EDMA_SETUP_RATIO      1 / 50000
  #define B_EDMA_SETUP_TIME_US    1
@@ -36,18 +41,44 @@ diff --git a/components/esp_driver_spi/src/gpspi/spi_master.c b/components/esp_d
  ESP_LOG_ATTR_TAG_DRAM(SPI_TAG, "spi_master");
  #define SPI_CHECK(a, str, ret_val, ...)  ESP_RETURN_ON_FALSE_ISR(a, ret_val, SPI_TAG, str, ##__VA_ARGS__)
 diff --git a/components/esp_hw_support/clk_utils.c b/components/esp_hw_support/clk_utils.c
+index 8badcbf292..516c66ed74 100644
 --- a/components/esp_hw_support/clk_utils.c
 +++ b/components/esp_hw_support/clk_utils.c
-@@ -20,7 +20,7 @@
- // Not directly divide to avoid truncation issue
- // DIG-498
- #if CONFIG_IDF_TARGET_ESP32P4
--#define BELOW_FREQ_THRESHOLD(freq) ((freq) < CONFIG_SPIRAM_SPEED)
-+#define BELOW_FREQ_THRESHOLD(freq) ((freq) < MSPI_TIMING_PSRAM_SPEED_MHZ)
- #elif CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C61 || CONFIG_IDF_TARGET_ESP32H4
- #define BELOW_FREQ_THRESHOLD(freq) ((freq) * 8 < CONFIG_SPIRAM_SPEED)
- #elif CONFIG_IDF_TARGET_ESP32S31
+@@ -46,6 +46,14 @@ static inline bool BELOW_FREQ_THRESHOLD(uint32_t cpu_freq, uint32_t psram_freq)
+ }
+ #endif
+ 
++// Modified by Lichen (lichenos-why2025-badge #121, tools/idf-patches/0003): on the P4 the PSRAM speed can be chosen at
++// PSRAM init (80 or 120 MHz), so the AXI threshold compares against the running speed, not the Kconfig one.
++#if CONFIG_IDF_TARGET_ESP32P4
++#define CLK_UTILS_PSRAM_SPEED_MHZ MSPI_TIMING_PSRAM_SPEED_MHZ
++#else
++#define CLK_UTILS_PSRAM_SPEED_MHZ CONFIG_SPIRAM_SPEED
++#endif
++
+ #if !CONFIG_APP_BUILD_TYPE_PURE_RAM_APP
+ void esp_clk_utils_mspi_speed_mode_sync_before_cpu_freq_switching(uint32_t target_cpu_src_freq, uint32_t target_cpu_freq)
+ {
+@@ -60,7 +68,7 @@ void esp_clk_utils_mspi_speed_mode_sync_before_cpu_freq_switching(uint32_t targe
+     /* On chips with AXI bus, currently there is a restriction that AXI frequency (usually equals to a portion of CPU
+      * frequency) needs to be greater than or equal to MSPI PSRAM frequency to avoid writing MSPI FIFO overflow.
+      */
+-    if (BELOW_FREQ_THRESHOLD(target_cpu_freq, CONFIG_SPIRAM_SPEED)) {
++    if (BELOW_FREQ_THRESHOLD(target_cpu_freq, CLK_UTILS_PSRAM_SPEED_MHZ)) {
+         // Before switching to low speed mode, verify AXI still meets the constraint at PSRAM low speed
+         assert(!BELOW_FREQ_THRESHOLD(target_cpu_freq, mspi_timing_get_psram_low_speed_freq_mhz()));
+         mspi_timing_change_speed_mode_cache_safe(true);
+@@ -82,7 +90,7 @@ void esp_clk_utils_mspi_speed_mode_sync_after_cpu_freq_switching(uint32_t target
+     /* On chips with AXI bus, currently there is a restriction that AXI frequency (usually equals to a portion of CPU
+      * frequency) needs to be greater than or equal to MSPI PSRAM frequency to avoid writing MSPI FIFO overflow.
+      */
+-    if (!BELOW_FREQ_THRESHOLD(target_cpu_freq, CONFIG_SPIRAM_SPEED)) {
++    if (!BELOW_FREQ_THRESHOLD(target_cpu_freq, CLK_UTILS_PSRAM_SPEED_MHZ)) {
+         mspi_timing_change_speed_mode_cache_safe(false);
+     }
+ #else
 diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h b/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
+index 55c00908dd..6bf4db5af6 100644
 --- a/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
 +++ b/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
 @@ -14,10 +14,28 @@
@@ -80,9 +111,10 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_priva
   * @brief Make MSPI work under 20Mhz, remove the timing tuning required delays.
   * @param control_spi1  Select whether to control SPI1. For tuning, we need to use SPI1. After tuning (during startup stage), let the flash driver to control SPI1
 diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c b/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
+index 84e44e3e1b..0f42d4fd5c 100644
 --- a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
 +++ b/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
-@@ -39,6 +39,28 @@
+@@ -40,6 +40,28 @@
  #include "esp_ipc_isr.h"
  #endif
  
@@ -111,7 +143,7 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tunin
  #if CONFIG_ESPTOOLPY_FLASHFREQ_120M
  #define FLASH_FREQUENCY_MHZ 120
  #elif CONFIG_ESPTOOLPY_FLASHFREQ_80M
-@@ -335,7 +357,7 @@
+@@ -336,7 +358,7 @@ static void s_do_tuning(uint8_t *reference_data, mspi_timing_config_t *config, b
  #endif
  #if MSPI_TIMING_PSRAM_NEEDS_TUNING
      if (!is_flash) {
@@ -120,7 +152,7 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tunin
      }
  #endif
  
-@@ -550,7 +572,7 @@
+@@ -551,7 +573,7 @@ void mspi_timing_enter_high_speed_mode(bool control_spi1)
       */
      mspi_timing_config_set_flash_clock(FLASH_FREQUENCY_MHZ, MSPI_TIMING_SPEED_MODE_NORMAL_PERF, control_spi1);
  #if CONFIG_SPIRAM
@@ -130,6 +162,7 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tunin
  #endif  //#if SOC_SPI_MEM_SUPPORT_TIMING_TUNING
  
 diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
+index ae0c57789a..d5f2a43f1f 100644
 --- a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
 +++ b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
 @@ -14,6 +14,7 @@
@@ -140,7 +173,7 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi
  #include "hal/psram_ctrlr_ll.h"
  #include "hal/mspi_ll.h"
  #include "soc/hp_sys_clkrst_struct.h"
-@@ -23,7 +24,12 @@
+@@ -23,7 +24,12 @@ ESP_LOG_ATTR_TAG(TAG, "MSPI Timing");
  //-------------------------------------MSPI Clock Setting-------------------------------------//
  void mspi_timing_config_set_psram_clock(uint32_t psram_freq_mhz, mspi_timing_speed_mode_t speed_mode, bool control_both_mspi)
  {
@@ -155,6 +188,7 @@ diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi
      ESP_DRAM_LOGD(TAG, "psram_freq_mhz: %" PRIu32 " mhz, bus clock div: %" PRIu32, psram_freq_mhz, freqdiv);
      PERIPH_RCC_ATOMIC() {
 diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+index 6d90ba6e10..67f110061e 100644
 --- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
 +++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
 @@ -67,6 +67,12 @@
@@ -170,7 +204,7 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
  #define AP_HEX_PSRAM_REF_DATA              0x5a6b7c8d
  
  #define AP_HEX_PSRAM_ULP_MODE_HALFSLEEP    0xF0
-@@ -422,6 +428,9 @@
+@@ -428,6 +434,9 @@ static void s_configure_psram_ecc(void)
  
  esp_err_t esp_psram_impl_enable(void)
  {
@@ -180,9 +214,9 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
  #if SOC_CLK_MPLL_SUPPORTED
      // We need to use the acquire and freq_set functions directly instead of general clk_tree API for IRAM safe function
      esp_clk_tree_mpll_acquire();
-@@ -447,8 +456,8 @@
+@@ -451,8 +460,8 @@ esp_err_t esp_psram_impl_enable(void)
+     psram_ctrlr_ll_set_page_size(PSRAM_CTRLR_LL_MSPI_ID_2, 2048);
      s_configure_psram_ecc();
- #endif
      //enter MSPI slow mode to init PSRAM device registers
 -    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_2, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / CONFIG_SPIRAM_SPEED);
 -    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_3, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / CONFIG_SPIRAM_SPEED);
@@ -192,9 +226,10 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
      psram_ctrlr_ll_enable_dll(PSRAM_CTRLR_LL_MSPI_ID_3, true);
  
 diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/esp32p4/Kconfig.spiram
+index f3150bf586..26fcee439c 100644
 --- a/components/esp_psram/esp32p4/Kconfig.spiram
 +++ b/components/esp_psram/esp32p4/Kconfig.spiram
-@@ -49,6 +49,14 @@
+@@ -49,6 +49,14 @@ menu "PSRAM config"
              bool "20MHz clock speed"
      endchoice
  
@@ -210,6 +245,7 @@ diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/
          int
          default 20 if SPIRAM_SPEED_20M
 diff --git a/components/esp_psram/system_layer/esp_psram.c b/components/esp_psram/system_layer/esp_psram.c
+index e7fd0ad0db..2af35f959b 100644
 --- a/components/esp_psram/system_layer/esp_psram.c
 +++ b/components/esp_psram/system_layer/esp_psram.c
 @@ -31,6 +31,7 @@
@@ -220,7 +256,7 @@ diff --git a/components/esp_psram/system_layer/esp_psram.c b/components/esp_psra
  #include "esp_private/startup_internal.h"
  #if SOC_SPIRAM_XIP_SUPPORTED
  #include "esp_private/mmu_psram_flash.h"
-@@ -231,7 +232,7 @@
+@@ -231,7 +232,7 @@ static esp_err_t s_psram_chip_init(void)
      assert(ret == ESP_OK);
  
      PSRAM_EARLY_LOGI(TAG, "Found %" PRIu32 "MB PSRAM device", psram_physical_size / (1024 * 1024));

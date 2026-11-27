@@ -27,7 +27,7 @@ index 4d599c6274..c516ae9adb 100644
  #define MSPI_TIMING_PSRAM_NEEDS_TUNING      1
  #define MSPI_TIMING_MPLL_FREQ_MHZ           320
 diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
-index 8219f1c528..e3a6c73093 100644
+index 15c69ff51b..fb5053488c 100644
 --- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
 +++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
 @@ -40,6 +40,8 @@

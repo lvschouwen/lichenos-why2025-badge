@@ -9,6 +9,8 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# mbedTLS stays at -Os (#588): upstream 69f55d8852 makes it follow the -O2 above, +13 KB P4 crypto for no measured need
+CONFIG_MBEDTLS_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
@@ -75,9 +77,11 @@ CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 # malloc and free), and every prog went out in 32-byte flash operations. Cost: ~1.4 KB while mounted (read and prog
 # cache 512 each, lookahead 128, lfs_t, the mount) plus ~0.7 KB per open file or ~0.3 KB per open folder. Worst case
 # about 6 files and 4 folders at once, ~7 KB peak (MeshCore folder + file or journal in + out, a shell copy in + out,
-# OTA, the C6 image, the fw storage walk up to 4 folders deep, short writers). Explicit-internal allocations may draw
-# on CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL; near out-of-memory they can land in SPM or LP RAM, where reads bounce
-# again. Reads of 512 B or more straight into a caller's PSRAM buffer still bounce (once per block read, up to 4 KB).
+# OTA, the C6 image, the fw storage walk up to 4 folders deep, short writers). Since IDF 137a536826 (#588) the DMA reserve
+# (CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL) is the last resort: plain malloc takes it only after PSRAM runs out, and
+# explicit-internal allocations such as these only after the other internal heaps; near out-of-memory they can land
+# in SPM or LP RAM, where reads bounce again. Reads of 512 B or more straight into a caller's PSRAM buffer still
+# bounce (once per block read, up to 4 KB).
 # tools/pack_storage.py check-config requires this strategy.
 CONFIG_LITTLEFS_READ_SIZE=128
 CONFIG_LITTLEFS_WRITE_SIZE=128

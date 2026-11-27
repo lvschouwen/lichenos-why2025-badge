@@ -107,7 +107,7 @@ EOF
 
 ELFS=${BADGE_ELFS:-$BACKUPS/elf}
 ELF_KEEP=${BADGE_ELF_KEEP:-20}
-IDF=${BADGE_IDF_PATH:-$HOME/esp/esp-idf-v6.1}
+IDF=${BADGE_IDF_PATH:-$HOME/esp/esp-idf-v6.1-head}
 
 remote() {
     [ -n "$HOST" ] || { echo "no badge host: put its SSH name in ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/host (or BADGE_HOST)" >&2; exit 1; }

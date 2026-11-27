@@ -138,8 +138,26 @@ if grep -q '^CONFIG_SPIRAM_HEX_REFRESH_4X=y' "$here/sdkconfig.defaults" &&
     exit 1
 fi
 
+# The boot-time 80/120 MHz PSRAM choice (#121) is the third IDF patch; without it the app silently stays at 80 MHz.
+if grep -q '^CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y' "$here/sdkconfig.defaults" &&
+   ! grep -q 'SPIRAM_SPEED_RUNTIME_SELECT' "$IDF_DIR/components/esp_psram/esp32p4/Kconfig.spiram"; then
+    echo "sdkconfig.defaults asks for the runtime PSRAM speed but $IDF_DIR is not patched for it:" >&2
+    echo "  git -C $IDF_DIR apply $repo/tools/idf-patches/0003-esp32p4-psram-runtime-80-120.patch" >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1091
 . "$IDF_DIR/export.sh" >/dev/null
+
+# esptool writes the image headers, so its version is part of the build (#498). IDF's constraint is only a range
+# (>=5.3,<6): the exact pin lives here, in the IDF python env that export.sh just activated.
+REQUIRED_ESPTOOL=5.7.0
+esptool_ver=$(python -c 'import importlib.metadata as m; print(m.version("esptool"))' 2>/dev/null || echo none)
+if [ "$esptool_ver" != "$REQUIRED_ESPTOOL" ]; then
+    echo "the IDF python env has esptool $esptool_ver but the build needs exactly $REQUIRED_ESPTOOL (#498):" >&2
+    echo "  . $IDF_DIR/export.sh && python -m pip install esptool==$REQUIRED_ESPTOOL" >&2
+    exit 1
+fi
 
 # ccache (#196): shared by every worktree slot, so paths are hashed relative to the checkout it builds
 if command -v ccache >/dev/null; then

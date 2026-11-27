@@ -2,9 +2,10 @@ Lichen #569: AP HEX PSRAM always 4x refresh (MR4 RF = 0), behind CONFIG_SPIRAM_H
 Apply after 0001 and 0003: git -C <idf> apply tools/idf-patches/0004-esp32p4-psram-hex-refresh-4x.patch
 
 diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+index 67f110061e..08ab9a677f 100644
 --- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
 +++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
-@@ -196,6 +196,9 @@
+@@ -196,6 +196,9 @@ static void s_init_psram_mode_reg(int spi_num, hex_psram_mode_reg_t *mode_reg_co
      mode_reg.mr0.read_latency = mode_reg_config->mr0.read_latency;
      mode_reg.mr0.drive_str = mode_reg_config->mr0.drive_str;
      mode_reg.mr4.wr_latency = mode_reg_config->mr4.wr_latency;
@@ -14,7 +15,7 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
  
      //write
      addr = 0x0;
-@@ -332,6 +335,9 @@
+@@ -332,6 +335,9 @@ static void s_print_psram_info(hex_psram_mode_reg_t *reg_val)
                     reg_val->mr2.density == 0x7 ? 256 : 0);
      ESP_EARLY_LOGI(TAG, "good-die     : 0x%02x (%s)", reg_val->mr2.kgd, reg_val->mr2.kgd == 6 ? "Pass" : "Fail");
      ESP_EARLY_LOGI(TAG, "SRF          : 0x%02x (%s Refresh)", reg_val->mr3.srf, reg_val->mr3.srf == 0x1 ? "Fast" : "Slow");
@@ -24,7 +25,7 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
      ESP_EARLY_LOGI(TAG, "BurstType    : 0x%02x (%s Wrap)", reg_val->mr8.bt, reg_val->mr8.bt == 1 && reg_val->mr8.bl != 3 ? "Hybrid" : "");
      ESP_EARLY_LOGI(TAG, "BurstLen     : 0x%02x (%d Byte)", reg_val->mr8.bl, reg_val->mr8.bl == 0x00 ? 16 :
                     reg_val->mr8.bl == 0x01 ? 32 :
-@@ -466,6 +472,9 @@
+@@ -470,6 +476,9 @@ esp_err_t esp_psram_impl_enable(void)
      mode_reg.mr0.read_latency = AP_HEX_PSRAM_RD_LATENCY;
      mode_reg.mr0.drive_str = 0;
      mode_reg.mr4.wr_latency = AP_HEX_PSRAM_WR_LATENCY;
@@ -35,9 +36,10 @@ diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/es
      mode_reg.mr8.bt = 0;
      mode_reg.mr8.rbx = 1;
 diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/esp32p4/Kconfig.spiram
+index 26fcee439c..69385c3d57 100644
 --- a/components/esp_psram/esp32p4/Kconfig.spiram
 +++ b/components/esp_psram/esp32p4/Kconfig.spiram
-@@ -57,6 +57,13 @@
+@@ -57,6 +57,13 @@ menu "PSRAM config"
          depends on SPIRAM_SPEED_80M
          default n
  

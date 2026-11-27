@@ -40,18 +40,25 @@ completely. A few files still come from BadgeVMS, see [Acknowledgements](#acknow
 
 ## Build
 
-Lichen needs exactly ESP-IDF 6.1. Keep a 6.1 checkout next to your usual one and point `BADGE_IDF_PATH` at it:
+Lichen needs ESP-IDF 6.1, pinned to the `release/v6.1` branch at `c112a7898c` (v6.1.1-673, #588: SDMMC and PSRAM fixes
+after the v6.1.1 tag), with Lichen's PSRAM patches applied. Keep that checkout next to your usual one and point
+`BADGE_IDF_PATH` at it:
 
 ```
 git clone --recurse-submodules https://github.com/lvschouwen/lichenos-why2025-badge.git
-git -C ~/esp/esp-idf worktree add --detach ~/esp/esp-idf-v6.1 v6.1
-(cd ~/esp/esp-idf-v6.1 && git submodule update --init --recursive && ./install.sh esp32p4,esp32c6)
-git -C ~/esp/esp-idf-v6.1 apply "$PWD/tools/idf-patches/0001-esp32p4-psram-120mhz.patch"
-BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build
+git -C ~/esp/esp-idf fetch origin release/v6.1
+git -C ~/esp/esp-idf worktree add --detach ~/esp/esp-idf-v6.1-head c112a7898c
+(cd ~/esp/esp-idf-v6.1-head && git submodule update --init --recursive && ./install.sh esp32p4,esp32c6)
+for p in 0001-esp32p4-psram-120mhz 0003-esp32p4-psram-runtime-80-120 0004-esp32p4-psram-hex-refresh-4x; do
+    git -C ~/esp/esp-idf-v6.1-head apply "$PWD/tools/idf-patches/$p.patch"
+done
+BADGE_IDF_PATH=~/esp/esp-idf-v6.1-head ./firmware/build.sh build
 ```
 
-The patch adds a 120 MHz PSRAM clock to the IDF (its own choices are 80 and 200; see `tools/idf-patches/` for why and
-the license note). `build.sh` refuses to build without it while `sdkconfig.defaults` asks for 120 MHz.
+The patches add a 120 MHz PSRAM clock (the IDF's own choices are 80 and 200), the boot-time choice between 80 and 120
+MHz, and the 4x PSRAM refresh; see `tools/idf-patches/` for why and the license note. Apply them in that order (0002
+is an unused alternative to 0001). `build.sh` refuses to build without 0001 and 0004 while `sdkconfig.defaults` asks
+for them.
 
 `firmware/build.sh build` runs the host tests (`host_tests/`), builds the C6 image (`c6/`), puts it on Lichen's
 storage drive together with `firmware/lora.toml`, and builds the P4 image into `firmware/build/`. Any other arguments go
@@ -232,7 +239,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 ## Flashing through a remote USB host
 
 `tools/badge.sh` works on a badge plugged into another machine reachable over SSH (set its SSH name in
-`~/.config/why2025-badge/host` or `BADGE_HOST`). That host needs `esptool` 5.x and `pyserial` in `~/badge-venv`. The script only touches Espressif
+`~/.config/why2025-badge/host` or `BADGE_HOST`). That host needs `esptool` 5.7.0 (exactly, the version the build pins, #498) and `pyserial` in `~/badge-venv`. The script only touches Espressif
 USB devices (vendor ID `303a`); a badge behind a generic USB-serial bridge such as a CH340 must be named explicitly with
 `BADGE_EXTRA_PORTS=/dev/ttyUSB1`. Over a CH340, keep the baud rate at the default 460800 (`BADGE_BAUD`): 921600
 corrupts reads. A full 16 MB backup takes about 7 minutes. Run `tools/badge.sh` without arguments for all commands.

@@ -9,7 +9,7 @@ connected" at boot). The latency codes the IDF programs for 80 MHz (LC5 / WLC5) 
 The three files are Espressif's, Apache-2.0 (see their SPDX headers); each hunk carries a "Modified by Lichen" note
 as the license asks. Apply to the IDF checkout that BADGE_IDF_PATH points at:
 
-    git -C ~/esp/esp-idf-v6.1 apply "$PWD/tools/idf-patches/0001-esp32p4-psram-120mhz.patch"
+    git -C ~/esp/esp-idf-v6.1-head apply "$PWD/tools/idf-patches/0001-esp32p4-psram-120mhz.patch"
 
 firmware/build.sh refuses to build a CONFIG_SPIRAM_SPEED_120M=y configuration against an unpatched IDF (Kconfig would
 drop the unknown symbol and silently fall back to 200 MHz). To go back to a stock IDF: git -C <idf> checkout -- <files>.
@@ -30,7 +30,7 @@ index 4d599c6274..870ea23014 100644
  #define MSPI_TIMING_PSRAM_NEEDS_TUNING      1
  #define MSPI_TIMING_MPLL_FREQ_MHZ           320
 diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
-index 8219f1c528..dbd0eda5c9 100644
+index 15c69ff51b..6d90ba6e10 100644
 --- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
 +++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
 @@ -40,6 +40,8 @@
