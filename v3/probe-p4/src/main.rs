@@ -414,18 +414,10 @@ fn b2_locks() {
     pmp_set(E_COVER_PERI, napot(0x5000_0000, 0x10_0000), NAPOT | R | W | L);
     pl!("B2 covers locked: entry {E_COVER_RAM} L2MEM 512 KB RWX, entry {E_COVER_PERI} HP peripherals 1 MB RW");
     hw::drain();
-    // a) a locked R-only NAPOT entry binds M and grants U.
+    // a) a locked R-only NAPOT entry: M read, U read and U write.
     pmp_set(E_LOCK_NAPOT, napot(LOCK_A, 0x100), NAPOT | R | L);
-    pl!("B2 step entry {E_LOCK_NAPOT} locked: cfg {:#04x} addr {:#x}", pmp_cfg_byte(E_LOCK_NAPOT), hw::pmpaddr_r(E_LOCK_NAPOT));
-    hw::drain();
     let m_r = m_lw(LOCK_A);
-    pl!("B2 step M read {}", show(m_r));
-    hw::drain();
-    let m_w = m_sw(LOCK_A, 0xdead_beef);
-    pl!("B2 step M write {:?}", m_w.err());
-    hw::drain();
-    check("B2.lock-binds-m", Some(m_r == Ok(0x1111_1111) && matches!(m_w, Err(t) if t.code() == 7)),
-        format_args!("locked R entry: M read {}, M write {:?}", show(m_r), m_w.err().map(|t| t.code())));
+    check("B2.lock-m-read", Some(m_r == Ok(0x1111_1111)), format_args!("locked R entry {E_LOCK_NAPOT} (cfg {:#04x}): M read {}", pmp_cfg_byte(E_LOCK_NAPOT), show(m_r)));
     let u_r = user(uaddr(u_load), LOCK_A, 0, false);
     let u_w = user(uaddr(u_store), LOCK_A, 0x3333_3333, false);
     check("B2.lock-grants-u", Some(u_r.is_ecall_u() && u_w.code() == 7),
@@ -441,16 +433,23 @@ fn b2_locks() {
     // c) a locked TOR entry i and the pmpaddr[i-1] it uses as its base.
     hw::pmpaddr_w(E_TOR_LO, LOCK_B >> 2);
     pmp_set(E_TOR_HI, (LOCK_B + 0x100) >> 2, TOR | R | L);
-    let m_w = m_sw(LOCK_B, 0xdead_beef);
     let lo0 = hw::pmpaddr_r(E_TOR_LO);
     hw::pmpaddr_w(E_TOR_LO, (LOCK_B + 0x80) >> 2);
     let lo1 = hw::pmpaddr_r(E_TOR_LO);
-    check("B2.tor", None, format_args!("locked TOR entry {E_TOR_HI}: M write {:?} (expect 7); pmpaddr{E_TOR_LO} {lo0:#x} -> {lo1:#x} after a write ({})",
-        m_w.err().map(|t| t.code()), if lo1 == lo0 { "locked with i" } else { "still writable" }));
+    check("B2.tor", None, format_args!("locked TOR entry {E_TOR_HI}: pmpaddr{E_TOR_LO} {lo0:#x} -> {lo1:#x} after a write ({})",
+        if lo1 == lo0 { "locked with i" } else { "still writable" }));
+    let u_tor = user(uaddr(u_store), LOCK_B + 0x10, 0x4444_4444, false);
+    check("B2.tor-u", Some(u_tor.code() == 7), format_args!("U write inside the locked R TOR range: {u_tor}"));
     // d) with locked entries present, is an address no entry matches still open to M? (uncached L2MEM alias)
     begin("B2.unmatched");
     let m_un = m_lw(SCRATCH_UNCACHED);
     check("B2.unmatched-m", None, format_args!("M read of unmatched {SCRATCH_UNCACHED:#x} with locked entries present: {}", show(m_un)));
+    // e) last: an M write the locked R entry forbids. Runs 4 and 5 stopped here with no trap delivered.
+    begin("B2.m-write");
+    pl!("CHECK B2.m-write INFO an M store to the locked R entry follows; no CHECK line after this means the core hung (no trap)");
+    hw::drain();
+    let m_w = m_sw(LOCK_A, 0xdead_beef);
+    check("B2.m-write", Some(matches!(m_w, Err(t) if t.code() == 7)), format_args!("M store to the locked R entry: {:?}", m_w.err()));
 }
 
 #[panic_handler]
