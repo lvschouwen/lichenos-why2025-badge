@@ -2,7 +2,7 @@
 //! Lichen's card installer to take it.
 //! - esp_app_desc_t (esp_app_desc.h, 256 bytes) at the start of segment 0, in a flash-mapped (DROM/IROM) segment like
 //!   an IDF app's: the bootloader reads its efuse block revision range and MMU page size there, and maps the segment,
-//!   so it never maps a zero-length region. Lichen's installer wants the magic and a non-zero ELF SHA-256, which
+//!   so it never maps a zero-length region. The P4 bootloader wants exactly two flash segments; the second is APP_ROM2. Lichen's installer wants the magic and a non-zero ELF SHA-256, which
 //!   esptool writes at image offset 0xb0 (build.sh, --elf-sha256-offset).
 //! - Field values as in Lichen's own image (efuse 0-199, MMU page 2^16, flash mode 3).
 //!   Built only for LICHEN_PROBE_RUN=app (cfg probe_app), linked by link-app.ld; the load-ram suites keep RAM-only images.
@@ -40,6 +40,12 @@ const fn desc() -> [u8; 256] {
 #[used]
 #[link_section = ".app_desc"]
 static APP_DESC: AppDesc = AppDesc(desc());
+
+/// The second flash segment the bootloader wants (link-app.ld); never read.
+#[cfg(probe_app)]
+#[used]
+#[link_section = ".app_rom2"]
+static APP_ROM2: [u8; 16] = *b"lichen-probe-p4\0";
 
 /// The ROM's software_reset (esp32p4.rom.ld: 0x4fc00094): a system reset, so the bootloader runs again. The
 /// bootloader's 9 s RTC watchdog, which the probe never feeds, is the backstop should it return.
