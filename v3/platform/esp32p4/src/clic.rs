@@ -11,12 +11,19 @@ pub const ATTR_M_LEVEL: u8 = 0xC0;
 /// The highest level.
 pub const CTL_MAX: u8 = 0xFF;
 
+/// Interrupt lines the P4 CPU has (IDF SOC_CPU_INTR_NUM). An id past it is ignored: the id can come from an mcause code
+/// (up to 0xFFF), and a write 4 * id bytes past the window start would hit unrelated registers.
+pub const LINES: usize = 32;
+
 const fn byte(id: usize, b: usize) -> usize {
     CTRL + 4 * id + b
 }
 
 /// Configure a line (masked while it is set up).
 pub fn configure(id: usize, attr: u8, ctl: u8) {
+    if id >= LINES {
+        return;
+    }
     // SAFETY: this core's CLIC line bytes; ie goes off first so a half-configured line cannot fire.
     unsafe {
         write8(byte(id, 1), 0);
@@ -26,12 +33,18 @@ pub fn configure(id: usize, attr: u8, ctl: u8) {
 }
 
 pub fn set_enabled(id: usize, on: bool) {
+    if id >= LINES {
+        return;
+    }
     // SAFETY: this core's CLIC ie byte for the line.
     unsafe { write8(byte(id, 1), on as u8) };
 }
 
 /// ip, ie, attr, ctl of a line.
 pub fn line(id: usize) -> [u8; 4] {
+    if id >= LINES {
+        return [0; 4];
+    }
     // SAFETY: reads of this core's CLIC line bytes.
     core::array::from_fn(|b| unsafe { read8(byte(id, b)) })
 }

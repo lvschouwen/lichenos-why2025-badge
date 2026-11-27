@@ -144,10 +144,10 @@ fn tor_rows(t: &mut Tally, utext: usize, udata: usize) {
     record(
         t,
         "pmp.plan",
-        Some(plan.used == 3 && plan.entries[1].cfg == 0 && plan.entries[2].cfg == (kp::TOR | kp::R | kp::W)),
+        Some(plan.used() == 3 && plan.entries()[1].cfg == 0 && plan.entries()[2].cfg == (kp::TOR | kp::R | kp::W)),
         format_args!(
             "{} entries (NAPOT text, TOR base+top data), {writes} register write(s), read back verified",
-            plan.used
+            plan.used()
         ),
     );
     let sp = udata + UPAGE;

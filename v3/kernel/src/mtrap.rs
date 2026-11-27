@@ -169,12 +169,30 @@ extern "C" {
     fn run_user(entry: usize, sp: usize, a0: usize, a1: usize);
 }
 
+/// Watchdog tick period for U runs that have no tick of their own.
+const WATCHDOG_US: u64 = 10_000;
+
 /// Run U code at `entry` (on the U stub page, under the PMP view the caller applied) until it exits or faults.
 pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
+    // U never runs without the fixed window entry (a U window load would hang, #646) ...
+    if !crate::pmp::view_loaded() {
+        platform::enter_fatal();
+        kprintln!("KERNEL: run_u without a safe PMP view (#646): halting");
+        platform::exit(4);
+    }
+    // ... nor without a tick: TW is hardwired 0, so a U wfi would park the hart. A run with no tick of its own gets a
+    // watchdog tick that only preempts (nothing counts it).
+    let watchdog = with(|s| s.tick.is_none());
+    if watchdog {
+        tick_start(trap::us_to_ticks(WATCHDOG_US), u32::MAX);
+    }
     with(|s| s.user = Some(URun::default()));
     // SAFETY: run_user saves the kernel's callee-saved registers and returns here through to_kernel when m_trap ends
     // the run; no &mut into STATE is live across it (the `with` borrow above has ended).
     unsafe { run_user(entry, sp, a0, a1) };
+    if watchdog {
+        tick_stop();
+    }
     with(|s| s.user.take().unwrap_or_default())
 }
 

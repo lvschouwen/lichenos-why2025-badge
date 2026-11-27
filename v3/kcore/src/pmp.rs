@@ -78,9 +78,24 @@ pub enum PlanError {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Plan {
-    pub entries: [Entry; ENTRIES],
+    entries: [Entry; ENTRIES],
     /// Entries used in the dynamic window.
-    pub used: usize,
+    used: usize,
+}
+impl Plan {
+    /// Only `plan()` builds a Plan, so every Plan has passed the region checks and carries the fixed entries.
+    pub fn entries(&self) -> &[Entry; ENTRIES] {
+        &self.entries
+    }
+    pub fn used(&self) -> usize {
+        self.used
+    }
+    /// The #646 hang reproducer: the same plan without the window entry. Probe builds only.
+    #[cfg(feature = "probe-646")]
+    pub fn without_window(mut self) -> Plan {
+        self.entries[WINDOW_INDEX] = Entry::OFF;
+        self
+    }
 }
 
 fn check_region(r: &Region, gran: u32) -> Result<(), PlanError> {
@@ -184,9 +199,31 @@ pub fn plan(regions: &[Region], gran: u32) -> Result<Plan, PlanError> {
     Ok(Plan { entries, used })
 }
 
-/// Does this U view carry the fixed entries (#646)? The kernel refuses to load one that does not.
+/// Is this a safe U view (#646)? It carries the fixed entries and no earlier entry touches the window. The kernel
+/// refuses to load any other view.
 pub fn view_ok(entries: &[Entry; ENTRIES]) -> bool {
-    entries[WINDOW_INDEX] == Entry::WINDOW && entries[DENY_ALL_INDEX] == Entry::DENY_ALL
+    if entries[WINDOW_INDEX] != Entry::WINDOW || entries[DENY_ALL_INDEX] != Entry::DENY_ALL {
+        return false;
+    }
+    // No entry in front of the window entry may touch the window: a perm-0 or W/X entry there would win over it and
+    // bring back the hang (a PMP-denied U load) or open the window to U.
+    (0..WINDOW_INDEX).all(|i| entry_range(entries, i).is_none_or(|(lo, hi)| hi <= WINDOW_BASE || lo >= WINDOW_END))
+}
+
+/// The byte range entry `i` matches (TOR takes its base from entry i-1; an empty TOR matches nothing).
+fn entry_range(entries: &[Entry; ENTRIES], i: usize) -> Option<(u64, u64)> {
+    let e = entries[i];
+    let (lo, hi) = match e.mode() {
+        TOR => ((if i == 0 { 0 } else { (entries[i - 1].addr as u64) << 2 }), (e.addr as u64) << 2),
+        NAPOT => {
+            let ones = (!e.addr).trailing_zeros().min(31);
+            let size = 1u64 << (ones + 3);
+            let base = (((e.addr as u64) >> (ones + 1)) << (ones + 1)) << 2;
+            (base, base + size)
+        }
+        _ => return None,
+    };
+    (lo < hi).then_some((lo, hi))
 }
 
 /// What U-mode may do at byte `a` under `entries` (spec semantics: the lowest matching entry decides, no match = deny).
@@ -194,18 +231,10 @@ pub fn view_ok(entries: &[Entry; ENTRIES]) -> bool {
 pub fn u_perms(entries: &[Entry; ENTRIES], a: u32) -> u8 {
     let a = a as u64;
     for (i, e) in entries.iter().enumerate() {
-        let (lo, hi) = match e.mode() {
-            TOR => ((if i == 0 { 0 } else { (entries[i - 1].addr as u64) << 2 }), (e.addr as u64) << 2),
-            NAPOT => {
-                let ones = (!e.addr).trailing_zeros().min(31);
-                let size = 1u64 << (ones + 3);
-                let base = (((e.addr as u64) >> (ones + 1)) << (ones + 1)) << 2;
-                (base, base + size)
+        if let Some((lo, hi)) = entry_range(entries, i) {
+            if a >= lo && a < hi {
+                return e.cfg & PERM_MASK;
             }
-            _ => continue,
-        };
-        if a >= lo && a < hi {
-            return e.cfg & PERM_MASK;
         }
     }
     0
@@ -381,6 +410,27 @@ mod tests {
     }
 
     #[test]
+    fn view_ok_refuses_an_earlier_entry_that_touches_the_window() {
+        let base = *plan(&[rg(0x1000, 0x2000, R)], G).unwrap().entries();
+        assert!(view_ok(&base));
+        // A perm-0 NAPOT over the window in front of the fixed entry brings back the hang.
+        let mut e = base;
+        e[3] = Entry { cfg: NAPOT, addr: 0x09FF_FFFF };
+        assert!(!view_ok(&e));
+        // A writable TOR pair that straddles the lower edge.
+        let mut e = base;
+        e[3] = Entry { cfg: 0, addr: 0x1FFF_F000 >> 2 };
+        e[4] = Entry { cfg: TOR | R | W, addr: 0x2000_1000 >> 2 };
+        assert!(!view_ok(&e));
+        // An empty TOR, or entries elsewhere, are fine.
+        let mut e = base;
+        e[3] = Entry { cfg: 0, addr: 0x5000_0000 >> 2 };
+        e[4] = Entry { cfg: TOR | R, addr: 0x4000_0000 >> 2 };
+        e[5] = Entry { cfg: NAPOT | R, addr: (0x4800_0000u32 | 0x7FF) >> 2 };
+        assert!(view_ok(&e));
+    }
+
+    #[test]
     fn regions_touching_the_window_are_refused() {
         assert_eq!(plan(&[rg(0x2000_0000, 0x2000_1000, R)], G), Err(PlanError::CoreLocal));
         assert_eq!(plan(&[rg(0x1FFF_F000, 0x2000_0080, R)], G), Err(PlanError::CoreLocal));
@@ -519,7 +569,23 @@ mod tests {
     }
 
     fn probe_addrs(rs: &[Region], extra: &[u32]) -> Vec<u32> {
-        let mut v: Vec<u32> = vec![0, 1, 0x7F, 0x80, 0xFFFF_FFFF, 0xFFFF_FF80, 0xFFFF_FF7F];
+        let mut v: Vec<u32> = vec![
+            0,
+            1,
+            0x7F,
+            0x80,
+            0xFFFF_FFFF,
+            0xFFFF_FF80,
+            0xFFFF_FF7F, // fixed edges: the window and its neighbours
+            0x1FFF_FFFF,
+            0x1FFF_FF80,
+            0x2000_0000,
+            0x2000_007F,
+            0x2FFF_FFFF,
+            0x2FFF_FF80,
+            0x3000_0000,
+            0x3000_007F,
+        ];
         for r in rs {
             for d in [
                 r.base.wrapping_sub(1),
@@ -536,6 +602,47 @@ mod tests {
         }
         v.extend_from_slice(extra);
         v
+    }
+
+    /// Independent model of the planner's rules: Ok(entries used) or the error class.
+    fn model(rs: &[Region]) -> Result<usize, PlanError> {
+        if rs.len() > DYN_BUDGET {
+            return Err(PlanError::Budget);
+        }
+        if rs.iter().any(|r| (r.base as u64) < WINDOW_END && r.end > WINDOW_BASE) {
+            return Err(PlanError::CoreLocal);
+        }
+        let mut v = rs.to_vec();
+        v.sort_by_key(|r| r.base);
+        if v.windows(2).any(|w| (w[1].base as u64) < w[0].end) {
+            return Err(PlanError::Overlap);
+        }
+        let mut merged: Vec<Region> = Vec::new();
+        for r in v {
+            match merged.last_mut() {
+                Some(l) if l.end == r.base as u64 && l.perm == r.perm => l.end = r.end,
+                _ => merged.push(r),
+            }
+        }
+        let (mut used, mut tor_base) = (0usize, None::<u64>);
+        for r in merged {
+            let len = r.end - r.base as u64;
+            if len.is_power_of_two() && len >= G as u64 && (r.base as u64).is_multiple_of(len) {
+                used += 1;
+                tor_base = None;
+            } else {
+                if r.end > 0xFFFF_FF80 {
+                    return Err(PlanError::TopOfSpace);
+                }
+                let shared = tor_base == Some(r.base as u64) || (used == 0 && r.base == 0);
+                used += 1 + usize::from(!shared);
+                tor_base = Some(r.end);
+            }
+            if used > DYN_BUDGET {
+                return Err(PlanError::Budget);
+            }
+        }
+        Ok(used)
     }
 
     fn oracle(rs: &[Region], a: u32) -> u8 {
@@ -555,6 +662,7 @@ mod tests {
         ) {
             match plan(&rs, G) {
                 Ok(p) => {
+                    prop_assert_eq!(model(&rs), Ok(p.used));
                     prop_assert!(p.used <= DYN_BUDGET);
                     for e in p.entries {
                         prop_assert_eq!(e.cfg & LOCK, 0);
@@ -570,8 +678,8 @@ mod tests {
                     }
                 }
                 Err(e) => {
-                    // The only legitimate failures for valid, 128-aligned inputs: overlap, budget, top of space.
-                    prop_assert!(matches!(e, PlanError::Overlap | PlanError::Budget | PlanError::TopOfSpace | PlanError::CoreLocal), "{:?}", e);
+                    // The exact error class, from an independent model of the rules.
+                    prop_assert_eq!(model(&rs), Err(e));
                 }
             }
         }

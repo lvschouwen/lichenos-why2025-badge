@@ -10,13 +10,17 @@ _start:
     csrci mstatus, 8
     li t0, 0x6000               # mstatus.FS = off: no FPU state for U to see or leave behind
     csrc mstatus, t0
-    li t0, 0x200000             # mstatus.TW = 1: wfi in a lower mode traps instead of stalling the hart
-    csrs mstatus, t0
+    li t0, 0x200000             # mstatus.TW = 1 requested; the bench shows it reads back 0 (WARL), so U can run wfi
+    csrs mstatus, t0            # and only a running tick wakes it (run_u always has one)
     la t0, trap_entry
     ori t0, t0, 3
     csrw mtvec, t0
     csrr t0, mhartid
     bnez t0, park
+    # U-visible state starts at zero: HWLP and PIE state OFF, no U access to the cycle counters.
+    csrw 0x7f1, zero
+    csrw 0x7f2, zero
+    csrw 0x306, zero
     la sp, _stack_top
     la t0, _trap_stack_top
     csrw mscratch, t0

@@ -13,6 +13,9 @@ bench = false
 default = ["qemu-virt"]
 qemu-virt = []
 esp32p4 = ["dep:lichen-platform-esp32p4"]
+# Probe builds only (never default, never release): the #646 hang reproducer, and the full-window soak stage.
+probe-646 = ["lichen-kcore/probe-646"]
+soak-646 = []
 
 [dependencies]
 lichen-abi = { path = "../abi" }

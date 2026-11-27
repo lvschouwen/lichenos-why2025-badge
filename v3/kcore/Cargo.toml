@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Lichen v3 kernel pure logic: no hardware, no asm, host-tested."
 
+[features]
+# Hang reproducer for #646 (a view without the window entry). Never in a release or default build.
+probe-646 = []
+
 [dependencies]
 lichen-abi = { path = "../abi" }
 

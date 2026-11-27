@@ -19,6 +19,8 @@ mod bringup;
 #[cfg(feature = "esp32p4")]
 mod bringup_pmp;
 #[cfg(feature = "esp32p4")]
+mod bringup_shapes;
+#[cfg(feature = "esp32p4")]
 mod bringup_u;
 #[cfg(feature = "esp32p4")]
 mod mtrap;

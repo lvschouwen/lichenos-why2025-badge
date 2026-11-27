@@ -23,14 +23,7 @@ csr_read!(mintstatus, "0x346");
 csr_read!(hwlp_state, "0x7f1");
 csr_read!(pie_state, "0x7f2");
 
-/// Turn the hardware-loop and PIE state off, so U neither inherits nor leaves behind coprocessor state.
-pub fn clear_hwlp_pie() {
-    // SAFETY: writes the state CSRs of units the kernel does not use; zero is the OFF state.
-    unsafe {
-        core::arch::asm!("csrw 0x7f1, zero", options(nomem, nostack));
-        core::arch::asm!("csrw 0x7f2, zero", options(nomem, nostack));
-    }
-}
+csr_read!(mcounteren, "0x306");
 
 /// Set mstatus.MIE: M-level interrupts are taken in M-mode from here on. A compiler memory barrier (no `nomem`):
 /// the handler writes kernel state, so loads after this call must not be cached from before it.

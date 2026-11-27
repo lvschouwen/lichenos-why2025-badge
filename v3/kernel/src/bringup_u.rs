@@ -139,15 +139,13 @@ fn boot_state(t: &mut Tally, udata: usize) {
         udata == lichen_kcore::slots::SLOT_DATA && platform::slot(0).data == udata,
         format_args!("_udata {udata:#x}, slot 0 data {:#x}", platform::slot(0).data),
     );
-    let (h, p) = (hw::trap::hwlp_state(), hw::trap::pie_state());
-    // Turn both off, then read again: the state U would otherwise inherit or leave behind.
-    hw::trap::clear_hwlp_pie();
-    let (h2, p2) = (hw::trap::hwlp_state(), hw::trap::pie_state());
+    // Read straight after boot: `_start` zeroes these, nothing in C does (a regression shows up here).
+    let (h, p, c) = (hw::trap::hwlp_state(), hw::trap::pie_state(), hw::trap::mcounteren());
     record(
         t,
         "boot.coproc",
-        h2 & 3 == 0 && p2 & 3 == 0,
-        format_args!("HWLP state {h:#x} -> {h2:#x}, PIE state {p:#x} -> {p2:#x} (low 2 bits 0 = off)"),
+        h == 0 && p == 0 && c == 0,
+        format_args!("HWLP state {h:#x}, PIE state {p:#x}, mcounteren {c:#x} (want 0, 0, 0: zeroed by _start)"),
     );
 }
 
@@ -219,10 +217,6 @@ fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
     run_cases(t, sp, &cases);
 }
 
-/// 0 = production. 1 = hang reproducer for #646, probe builds only: the view WITHOUT the fixed core-local window
-/// entry, then one PMP-denied U load at the CLINT, which hangs the P4 with no trap.
-const MODE: u8 = 0;
-
 /// Core-local rows: LAST in the bench order, because a hang here must not hide the rows before them. Every U view
 /// carries the fixed R-only window entry (kcore pmp, #646): loads reach the hardware privilege check and fault, stores
 /// and fetches are denied by the PMP.
@@ -230,27 +224,37 @@ pub fn core_local_rows(t: &mut Tally) {
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, udata) = unsafe { (&_utext as *const u8 as usize, &_udata as *const u8 as usize) };
     let sp = udata + UPAGE;
-    if MODE == 1 {
-        let mut plan =
-            lichen_kcore::pmp::plan(&view_base(utext, udata), crate::pmp::gran()).unwrap_or_else(|_| platform::exit(4));
-        plan.entries[lichen_kcore::pmp::WINDOW_INDEX] = lichen_kcore::pmp::Entry::OFF;
+    // The #646 hang reproducer (probe builds only): the view WITHOUT the window entry, then one PMP-denied U load at
+    // the CLINT, which hangs the P4 with no trap.
+    #[cfg(feature = "probe-646")]
+    {
+        let plan = lichen_kcore::pmp::plan(&view_base(utext, udata), crate::pmp::gran())
+            .unwrap_or_else(|_| platform::exit(4))
+            .without_window();
         crate::pmp::load_unchecked(&plan);
         kprintln!("DIAG PMP-denied U load at the CLINT without the window entry: expected to hang");
         run_cases(t, sp, &CORE_LOCAL[..1]);
         return;
     }
-    crate::pmp::apply(utext, udata, UPAGE);
-    run_cases(t, sp, &CORE_LOCAL);
-    window_probe(t, sp);
-    sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
-    sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
-    sweep(t, sp, "u.sweep.userclic", USER_CLIC_BASE, CLIC_LEN);
-    stride_loads(t, sp);
+    #[cfg(not(feature = "probe-646"))]
+    {
+        crate::pmp::apply(utext, udata, UPAGE);
+        run_cases(t, sp, &CORE_LOCAL);
+        window_probe(t, sp);
+        sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
+        sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
+        sweep(t, sp, "u.sweep.userclic", USER_CLIC_BASE, CLIC_LEN);
+        stride_loads(t, sp);
+        // The access-shape rows go last of all: they are the likeliest to find a new hang.
+        crate::bringup_shapes::run(t, sp);
+        #[cfg(feature = "soak-646")]
+        soak(t, sp);
+    }
 }
 
 const USER_CLIC_BASE: usize = 0x20B0_0000;
 
-/// One U load per 64 KB over the whole window outside the CLINT, CLIC and core 1's CLIC pages (swept or probed
+/// One U load per 1 KB over the whole window outside the CLINT, CLIC and core 1's CLIC pages (swept or probed
 /// elsewhere): every one must fault with code 5, none may return data. A BEGIN line per MB names a hang.
 fn stride_loads(t: &mut Tally, sp: usize) {
     let (mut n, mut bad) = (0u32, 0u32);
@@ -258,8 +262,8 @@ fn stride_loads(t: &mut Tally, sp: usize) {
         let base = 0x2000_0000 + mb * 0x10_0000;
         kprintln!("BEGIN u.stride {base:#010x}");
         platform::flush();
-        for k in 0..16usize {
-            let a = base + k * 0x1_0000 + 0x40;
+        for k in 0..1024usize {
+            let a = base + k * 0x400 + 0x40;
             if a < 0x2001_0000 || (CLIC_BASE..CLIC_BASE + 0x2_0000).contains(&a) {
                 continue;
             }
@@ -277,7 +281,7 @@ fn stride_loads(t: &mut Tally, sp: usize) {
         t,
         "u.stride",
         bad == 0,
-        format_args!("{n} U loads, one per 64 KB over 0x20000000..0x30000000, {bad} did not fault code 5"),
+        format_args!("{n} U loads, one per 1 KB over 0x20000000..0x30000000, {bad} did not fault code 5"),
     );
 }
 
@@ -301,6 +305,36 @@ fn window_probe(t: &mut Tally, sp: usize) {
     }
 }
 
+/// Opt-in (feature soak-646, never in the default run): a U load at EVERY word of the window, 64M of them. Each costs
+/// one U round trip with a fault; the first 4096 are timed and the estimate for the whole soak is printed first, so
+/// the run can be sized (and cut with the bench timeout) before it commits.
+#[cfg(feature = "soak-646")]
+fn soak(t: &mut Tally, sp: usize) {
+    let (mut n, mut bad) = (0u64, 0u64);
+    let t0 = hw::clint::mtime();
+    for a in (0x2000_0000usize..0x3000_0000).step_by(4) {
+        if n % 0x40_0000 == 0 {
+            kprintln!("BEGIN u.soak {a:#010x}");
+            platform::flush();
+        }
+        let (fault, exit) = run(u_load, sp, a, 0);
+        n += 1;
+        if !fault.is_some_and(|(code, tval, _)| code == 5 && tval == a) || exit.is_some() {
+            bad += 1;
+            if bad <= 16 {
+                kprintln!("FINDING u.soak: U load at {a:#010x} did not fault: {fault:x?} exit {exit:x?}");
+            }
+        }
+        if n == 4096 {
+            let us = (hw::clint::mtime() - t0) / 40;
+            kprintln!("perf: u.soak: 4096 loads in {us} us, estimate for 64M loads: {} s", us * 16384 / 1_000_000);
+            platform::flush();
+        }
+    }
+    record(t, "u.soak", bad == 0, format_args!("{n} U loads over the whole window, {bad} did not fault code 5"));
+}
+
+#[cfg(feature = "probe-646")]
 fn view_base(utext: usize, udata: usize) -> [lichen_kcore::pmp::Region; 2] {
     use lichen_kcore::pmp::{Region, R, W, X};
     [

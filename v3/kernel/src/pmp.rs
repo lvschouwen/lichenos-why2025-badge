@@ -1,7 +1,8 @@
 //! PMP hardware glue. The layout and all decisions live in `lichen_kcore::pmp` (host-tested): this file only reads and
-//! writes CSRs. Entries 0..8 hold the running app's regions, entry 15 is the static deny-all, both unlocked, so they
-//! bind U-mode only and M-mode (the kernel) keeps full access. A locked entry among the ones we need voids the
-//! isolation claim, so `report()` refuses to continue then.
+//! writes CSRs. Entries 0..8 hold the running app's regions, entry 14 is the fixed R-only CPU-subsystem window (#646:
+//! a PMP-denied U load there hangs the P4) and entry 15 the static deny-all, all unlocked, so they bind U-mode only and
+//! M-mode (the kernel) keeps full access. A locked entry among the ones we need voids the isolation claim, so
+//! `report()` refuses to continue then.
 use crate::global::Global;
 use crate::kprintln;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -43,8 +44,8 @@ fn read_cfg(word: usize) -> u32 {
     v as u32
 }
 fn write_cfg(word: usize, v: u32) {
-    // SAFETY: the caller verified (report) that the entries of this word the kernel writes are unlocked, and writes
-    // the other bytes back unchanged.
+    // SAFETY: `report()` verified that entries 0..8, 14 and 15 are unlocked (and `load` rewrites all 16 bytes of the
+    // four words from a checked plan), so none of these writes touches a locked entry.
     unsafe {
         match word {
             0 => core::arch::asm!("csrw pmpcfg0, {0}", in(reg) v as usize),
@@ -97,14 +98,18 @@ pub fn report() -> pmp::Discovery {
         }
     }
     let saved: [u32; ENTRIES] = core::array::from_fn(read_addr);
-    // Granularity from entry 0 (with it OFF): all ones in, then G = trailing zero bits of what reads back.
-    let off0 = read_cfg(0) & !0xFF;
+    // Granularity from entry 0 (with it OFF): all ones in, then G = trailing zero bits of what reads back. Entry 0's
+    // cfg byte is put back afterwards.
+    let cfg0 = read_cfg(0);
     if cfg[0] & pmp::LOCK == 0 {
-        write_cfg(0, off0);
+        write_cfg(0, cfg0 & !0xFF);
     }
     write_addr(0, u32::MAX);
     let ones = read_addr(0);
     write_addr(0, saved[0]);
+    if cfg[0] & pmp::LOCK == 0 {
+        write_cfg(0, cfg0);
+    }
     let mut d = pmp::discover(&cfg, ones);
     // A free entry must also take an address: write all ones to each, read back, restore.
     let mut writable = 0u16;
@@ -123,7 +128,7 @@ pub fn report() -> pmp::Discovery {
     kprintln!("pmp: pmpaddr0 readback {ones:#010x} -> granularity {gran} bytes");
     kprintln!("pmp: discovery: {} of {ENTRIES} entries free, locked mask {:#06x}", d.free(), d.locked_mask);
     if !d.layout_ok() {
-        kprintln!("pmp: entries 0..8 and 15 are not all free: isolation is NOT possible this way");
+        kprintln!("pmp: entries 0..8, 14 and 15 are not all free: isolation is NOT possible this way");
         crate::platform::exit(4);
     }
     if gran > crate::platform::slot(0).len as u32 {
@@ -141,21 +146,33 @@ pub fn report() -> pmp::Discovery {
 /// Program `want`, writing only the registers that differ from the shadow, then verify by reading back. Returns the
 /// number of registers written. Fails closed: a mismatch means U must not run with this view.
 pub fn load(want: &pmp::Plan) -> usize {
-    if !pmp::view_ok(&want.entries) {
-        kprintln!("pmp: view without the fixed window and deny-all entries (#646): halting");
+    if !pmp::view_ok(want.entries()) {
+        kprintln!("pmp: unsafe view (fixed window/deny-all missing, or an entry touches the window; #646): halting");
         crate::platform::exit(4);
     }
-    load_unchecked(want)
+    write_plan(want)
 }
 
-/// `load` without the fixed-entry check. Only the #646 hang reproducer uses it (probe builds).
+/// Is the view the hardware holds (per the shadow) a safe one? `run_u` asserts it before every U entry.
+#[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+pub fn view_loaded() -> bool {
+    // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
+    pmp::view_ok(unsafe { SHADOW.get() })
+}
+
+/// `load` without the view check. Only the #646 hang reproducer uses it (probe builds).
+#[cfg(feature = "probe-646")]
 pub fn load_unchecked(want: &pmp::Plan) -> usize {
+    write_plan(want)
+}
+
+fn write_plan(want: &pmp::Plan) -> usize {
     // SAFETY: single hart, MIE clear, no other reference to SHADOW exists.
     let sh = unsafe { SHADOW.get() };
     let mut writes = 0;
     let mut words = [0u32; 4];
-    for (i, w) in want.entries.iter().enumerate() {
-        let (cfg, addr) = pmp::needs_write(&sh[i], &want.entries, i);
+    for (i, w) in want.entries().iter().enumerate() {
+        let (cfg, addr) = pmp::needs_write(&sh[i], want.entries(), i);
         if addr {
             write_addr(i, w.addr);
             sh[i].addr = w.addr;
@@ -178,7 +195,7 @@ pub fn load_unchecked(want: &pmp::Plan) -> usize {
 
 fn verify(want: &pmp::Plan) {
     let g = gran();
-    let rb: [Entry; ENTRIES] = core::array::from_fn(|i| pmp::readback(want.entries[i], g));
+    let rb: [Entry; ENTRIES] = core::array::from_fn(|i| pmp::readback(want.entries()[i], g));
     let cur = read_entries();
     for (i, c) in cur.iter().enumerate() {
         if pmp::needs_write(c, &rb, i) != (false, false) {
