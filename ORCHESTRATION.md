@@ -56,4 +56,5 @@ when the run ends. The old wave logs are in git history (before #483).
 - #593: merged, reproduced; open until #595 B proves ota-c6 via SD. Badge fw-4fcdd719, mixed C6 bundle on /storage: no `fw c6 reflash`.
 - #595 A: wt-4 `feat/595-sd-update` (impl-595). B after A, same branch.
 - #73 BLE wave A: wt-5 #598 probe (impl-598), wt-6 #599 pure logic (impl-599), wt-7 #513 (impl-513). #597 (C6 bt_set) waits for #585 (wt-3, uncommitted work in c6/main/app_main.c, no live agent).
-- Settings review (sdkconfig): cfg-p4 running; cfg-c6 done (verdict to the owner once both are in).
+- Settings: #600 cleanup (P4 part) in wt-1 (impl-600); #601 bench round, at the next wave bench. #585 resumes after #595, then #597.
+- #595 A review: rev-595a; B building in wt-4 (impl-595).
