@@ -67,7 +67,7 @@ cp -- "$image" "$tmp/input"
 image=$tmp/input
 check=$root/tools/v3_load_ram_check.py
 python3 -I "$check" "$image" || exit 1
-if [ "$(head -c4 "$image")" = $'\x7fELF' ]; then
+if [ "$(head -c4 "$image" | tr -d '\0')" = $'\x7fELF' ]; then
     # IDF 6.1's esptool first (a pip --user esptool may be broken), then whatever the fixed PATH has
     esptool_bin=''
     for c in "$HOME"/.espressif/python_env/idf6.1_*/bin/esptool; do [ -x "$c" ] && { esptool_bin=$c; break; }; done
