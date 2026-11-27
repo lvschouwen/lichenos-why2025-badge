@@ -47,7 +47,13 @@ LICHEN_APP_HEARTBEAT=$PWD/target/lichen/qemu-virt/heartbeat.bin LICHEN_APP_ATTAC
 "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 -- -D warnings
 
 step "bench-experiments stays out of the kernel"
-if cargo tree --locked -p lichen-kernel --no-default-features --features esp32p4 -e features | grep -q bench-experiments; then
+tree=$(cargo tree --locked -p lichen-kernel --no-default-features --features esp32p4 -e features)
+probe_tree=$(cargo tree --locked -p lichen-probe-psram -e features)
+if ! grep -q 'feature "bench-experiments"' <<<"$probe_tree"; then
+  echo "guard self-test failed: the probe's tree does not show bench-experiments" >&2
+  exit 1
+fi
+if grep -q 'feature "bench-experiments"' <<<"$tree"; then
   echo "bench-experiments is enabled in the kernel's dependency tree" >&2
   exit 1
 fi
