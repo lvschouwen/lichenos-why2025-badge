@@ -138,6 +138,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     timer(&mut t);
     fault(&mut t);
     user(&mut t);
+    crate::bringup_pmp::run(&mut t);
 
     let dropped = platform::take_dropped();
     record(&mut t, "log.ring", Some(dropped == 0), format_args!("dropped={dropped}"));
