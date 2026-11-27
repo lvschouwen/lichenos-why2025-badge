@@ -334,22 +334,28 @@ unsafe fn cpu_to(log: Log, target: CpuClock) -> Result<(Option<u32>, Option<u32>
     put(log, "cpu source CPLL", LP_CLKRST_HP_CLK_CTRL, 3, 1);
     // SAFETY (transmute): ROM ets_update_cpu_frequency(mhz) so the ROM delay loops keep their scale
     let upd: extern "C" fn(u32) = core::mem::transmute(ROM_UPDATE_CPU_FREQ);
-    upd(rom_cpu_mhz(target));
+    upd(mhz);
     uart::spin(100_000);
     state(log);
     let after = measure_mhz();
     log(format_args!("clk: after: measured {after:?} MHz"));
+    // #653: the ROM delay loops are only as right as the MHz they were told; check it against the SYSTIMER measurement.
+    let agrees = after.is_some_and(|m| within_pct(m, mhz, ROM_SCALE_TOL_PCT));
+    log(format_args!(
+        "clk: ROM delay scale {mhz} MHz (ets_update_cpu_frequency), measured {after:?} MHz against SYSTIMER: {}",
+        if agrees { "agree" } else { "WARN: differ by more than 5%, ROM delays are off by as much" }
+    ));
     Ok((before, after))
 }
 
-/// The MHz `ets_update_cpu_frequency` gets after the switch: the target's own clock, or the ROM delay loops run short
-/// (#653: a fixed 360 made them about 10% short at 400 MHz).
-const fn rom_cpu_mhz(target: CpuClock) -> u32 {
-    target.mhz()
+/// How far the measured clock may be from the MHz the ROM was given before `cpu_to` warns.
+const ROM_SCALE_TOL_PCT: u32 = 5;
+
+/// `a` within `pct` percent of a nonzero `b`.
+const fn within_pct(a: u32, b: u32, pct: u32) -> bool {
+    let diff = a.abs_diff(b) as u64;
+    b != 0 && diff * 100 <= b as u64 * pct as u64
 }
-// The gate's host tests run without `bench-experiments`; its feature-on clippy and probe-psram builds evaluate this.
-#[cfg(feature = "bench-experiments")]
-const _: () = assert!(rom_cpu_mhz(CpuClock::Mhz400) == 400);
 
 unsafe fn bus_update() {
     modify32(ROOT0, 0, 1 << 4);
@@ -361,9 +367,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rom_delay_scale_follows_the_target() {
-        assert_eq!(rom_cpu_mhz(CpuClock::Mhz360), 360);
-        #[cfg(feature = "bench-experiments")]
-        assert_eq!(rom_cpu_mhz(CpuClock::Mhz400), 400);
+    fn rom_delay_scale_is_never_a_literal() {
+        // #653: a fixed 360 for every target made the ROM delays 10% short at 400 MHz. The call must take the target's
+        // `mhz`; a number there fails this test. The needle is built so this test's own text does not match.
+        let src = include_str!("clock.rs");
+        let needle = concat!("up", "d(");
+        let mut calls = 0;
+        for (i, _) in src.match_indices(needle) {
+            let rest = &src[i + needle.len()..];
+            assert!(!rest.starts_with(|c: char| c.is_ascii_digit()), "literal MHz passed to the ROM: {}", &rest[..8]);
+            calls += 1;
+        }
+        assert!(calls > 0, "the ets_update_cpu_frequency call was not found");
+    }
+
+    #[test]
+    fn measured_clock_tolerance() {
+        assert!(within_pct(360, 360, 5));
+        assert!(within_pct(378, 360, 5));
+        assert!(!within_pct(379, 360, 5));
+        assert!(!within_pct(360, 400, 5)); // the #653 case: the ROM told 360 at a 400 MHz clock
+        assert!(!within_pct(400, 360, 5));
+        assert!(!within_pct(0, 0, 5));
     }
 }

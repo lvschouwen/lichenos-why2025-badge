@@ -41,8 +41,9 @@ pub const fn rate_hz(ticks: u64, ref_ticks: u64, ref_hz: u64) -> Option<u64> {
     if ref_ticks == 0 {
         return None;
     }
-    match ticks.checked_mul(ref_hz) {
-        Some(p) => Some((p + ref_ticks / 2) / ref_ticks),
+    let Some(p) = ticks.checked_mul(ref_hz) else { return None };
+    match p.checked_add(ref_ticks / 2) {
+        Some(r) => Some(r / ref_ticks),
         None => None,
     }
 }
@@ -50,6 +51,39 @@ pub const fn rate_hz(ticks: u64, ref_ticks: u64, ref_hz: u64) -> Option<u64> {
 /// The mtime rate from an mtime and a SYSTIMER delta over the same window, if it is plausible.
 pub fn mtime_hz_from_systimer(mtime_ticks: u64, systimer_ticks: u64) -> Option<u64> {
     rate_hz(mtime_ticks, systimer_ticks, SYSTIMER_HZ).filter(|hz| PLAUSIBLE_HZ.contains(hz))
+}
+
+/// The P4's XTAL, which mtime counts while the CPU runs from it (#608 run 9).
+pub const XTAL_HZ: u64 = 40_000_000;
+/// How close a measured mtime rate must be to a candidate clock to count as that clock.
+pub const SOURCE_TOL_PCT: u64 = 3;
+
+/// Which clock a measured mtime rate matches (#654: does mtime follow the CPU clock or stay on XTAL?).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MtimeSource {
+    /// About XTAL, and the CPU is not (mtime stays on XTAL).
+    Xtal,
+    /// About the CPU clock, and that is not XTAL (mtime follows the CPU).
+    Cpu,
+    /// The CPU runs at about XTAL itself (the ROM clock), so the run cannot tell the two apart.
+    XtalOrCpu,
+}
+
+const fn near(a: u64, b: u64, pct: u64) -> bool {
+    b != 0 && a.abs_diff(b) * 100 <= b * pct
+}
+
+/// Match `mtime_hz` against XTAL and against `cpu_hz` (measured independently, mcycle against SYSTIMER; 0 if
+/// unknown). None when it matches neither: the rate is then not believed.
+pub const fn mtime_source(mtime_hz: u64, cpu_hz: u64) -> Option<MtimeSource> {
+    let xtal = near(mtime_hz, XTAL_HZ, SOURCE_TOL_PCT);
+    let cpu = near(mtime_hz, cpu_hz, SOURCE_TOL_PCT);
+    match (xtal, cpu) {
+        (true, true) => Some(MtimeSource::XtalOrCpu),
+        (true, false) => Some(MtimeSource::Xtal),
+        (false, true) => Some(MtimeSource::Cpu),
+        (false, false) => None,
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +149,30 @@ mod tests {
         assert_eq!(mtime_hz_from_systimer(0, 32_000), None); // a stopped mtime
         assert_eq!(mtime_hz_from_systimer(u64::MAX, 32_000), None); // overflow
         assert_eq!(mtime_hz_from_systimer(4_000_000, 32_000), None); // 2 GHz: not believed
+    }
+
+    #[test]
+    fn mtime_source_names_the_clock() {
+        // This bench (ROM clock): mtime 39 998 503 Hz, mcycle 39 MHz (measure_mhz floors).
+        assert_eq!(mtime_source(39_998_503, 39_000_000), Some(MtimeSource::XtalOrCpu));
+        // #648: mtime 360 MHz with the CPU at 360.
+        assert_eq!(mtime_source(360_000_000, 360_000_000), Some(MtimeSource::Cpu));
+        // The other outcome #654 allows: mtime on XTAL while the CPU runs at 360.
+        assert_eq!(mtime_source(40_000_000, 360_000_000), Some(MtimeSource::Xtal));
+        // mcycle not counting (0): XTAL can still be recognised.
+        assert_eq!(mtime_source(40_000_000, 0), Some(MtimeSource::Xtal));
+        // Plausible but neither: not believed.
+        assert_eq!(mtime_source(100_000_000, 360_000_000), None);
+        assert_eq!(mtime_source(380_000_000, 360_000_000), None); // 5.6% off
+        assert_eq!(mtime_source(370_000_000, 360_000_000), Some(MtimeSource::Cpu)); // 2.8%
+        assert_eq!(mtime_source(0, 0), None);
+    }
+
+    #[test]
+    fn rate_rounding_cannot_overflow() {
+        // ticks * ref_hz fits, the rounding add would not.
+        assert_eq!(rate_hz(u64::MAX, 2, 1), None);
+        assert_eq!(rate_hz(u64::MAX - 1, 4, 1), None);
     }
 
     proptest! {

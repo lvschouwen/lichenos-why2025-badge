@@ -1,5 +1,6 @@
-//! The measured CLINT mtime rate (#654). mtime follows the CPU clock on the P4, so the rate is measured against
-//! SYSTIMER at boot and every tick conversion in the kernel goes through here. An `AtomicU32` (riscv32imac has no
+//! The measured CLINT mtime rate (#654). The hypothesis of #654 is that mtime follows the CPU clock on the P4 (40 MHz
+//! on the ROM's XTAL in #608 run 9, 360 MHz at CPU 360 in #648); the `timebase.mtime` row tests it. Either way the rate
+//! is measured against SYSTIMER at boot rather than assumed, and every tick conversion in the kernel goes through here. An `AtomicU32` (riscv32imac has no
 //! 64-bit atomics) because core 1 converts too; it is written before core 1 starts.
 use crate::platform::hw;
 use core::sync::atomic::{AtomicU32, Ordering};

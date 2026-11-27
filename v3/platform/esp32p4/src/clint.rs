@@ -48,7 +48,9 @@ pub fn ctl() -> u32 {
     unsafe { read32(MTIMECTL) }
 }
 
-/// SYSTIMER ticks of one rate measurement: 2 ms at 16 MHz, a resolution of about 31 ppm.
+/// SYSTIMER ticks of one rate measurement: 2 ms at 16 MHz. SYSTIMER quantisation alone is about 31 ppm (one tick in
+/// 32 000); the jitter of the two bracketing reads (the SYSTIMER latch handshake) adds more, about 50-250 ppm at a
+/// 360 MHz mtime.
 pub const MEASURE_SYSTIMER_TICKS: u64 = 32_000;
 
 /// mtime and SYSTIMER deltas over one window of at least `MEASURE_SYSTIMER_TICKS`, for

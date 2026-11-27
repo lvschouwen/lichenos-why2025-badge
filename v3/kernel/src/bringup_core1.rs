@@ -223,7 +223,8 @@ fn cpu_hz() -> (u64, u32) {
         smp::uninhibit_mcycle();
     }
     let (c0, m0) = (smp::cycles(), hw::clint::mtime());
-    while hw::clint::mtime() < m0 + us_to_ticks(2000) {}
+    let end = m0 + us_to_ticks(2000);
+    while hw::clint::mtime() < end {}
     let (c1, m1) = (smp::cycles(), hw::clint::mtime());
     (c1.wrapping_sub(c0) as u64 * timebase::hz() / (m1 - m0).max(1), inhibit)
 }

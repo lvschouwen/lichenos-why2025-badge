@@ -152,14 +152,28 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     platform::park()
 }
 
-/// The mtime rate against SYSTIMER (#654), before anything converts microseconds to ticks. `perf.clock` later puts
-/// the CPU clock next to it (mcycle may still be inhibited here).
+/// The mtime rate against SYSTIMER (#654), before anything converts microseconds to ticks. PASS only if it matches
+/// XTAL or the CPU clock, the latter measured independently (mcycle against SYSTIMER), so the row also answers #654's
+/// hypothesis: `source=Cpu` means mtime follows the CPU clock. At the ROM clock the CPU is on XTAL and the row can
+/// only say `XtalOrCpu`.
 fn mtime_rate(t: &mut Tally) {
     begin("timebase");
     let m = crate::timebase::remeasure();
-    let detail = format_args!("{} mtime ticks over {} SYSTIMER ticks (16 MHz)", m.mtime_ticks, m.systimer_ticks);
+    let cpu_mhz = hw::clock::measure_mhz();
+    let src_sel = hw::psram::systimer::src_sel();
+    let detail = format_args!(
+        "{} mtime ticks over {} SYSTIMER ticks (16 MHz, src_sel {src_sel} = {}); CPU {cpu_mhz:?} MHz by mcycle vs SYSTIMER",
+        m.mtime_ticks,
+        m.systimer_ticks,
+        if src_sel == 0 { "XTAL" } else { "RC_FAST, not 16 MHz" }
+    );
     match m.hz {
-        Some(hz) => record(t, "timebase.mtime", Some(true), format_args!("mtime_hz={hz}: {detail}")),
+        Some(hz) => {
+            let cpu_hz = cpu_mhz.unwrap_or(0) as u64 * 1_000_000;
+            let source = lichen_kcore::timebase::mtime_source(hz, cpu_hz);
+            let ok = source.is_some() && src_sel == 0;
+            record(t, "timebase.mtime", Some(ok), format_args!("mtime_hz={hz} source={source:?}: {detail}"));
+        }
         None => record(
             t,
             "timebase.mtime",

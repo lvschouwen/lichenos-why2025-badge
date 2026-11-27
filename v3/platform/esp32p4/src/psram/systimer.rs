@@ -7,6 +7,8 @@ const OP: usize = SYSTIMER + 0x04; // update bit 30, value_valid bit 29
 const HI: usize = SYSTIMER + 0x40; // [19:0]
 const LO: usize = SYSTIMER + 0x44;
 pub const TICKS_PER_US: u64 = 16;
+/// HP_SYS_CLKRST PERI_CLK_CTRL21: systimer_clk_src_sel bit 29 (0 = XTAL, 1 = RC_FAST; IDF systimer_ll.h).
+const CLKRST_PERI_CLK_CTRL21: usize = 0x500E_6098;
 
 /// Ticks to microseconds.
 pub const fn ticks_to_us(ticks: u64) -> u64 {
@@ -39,6 +41,12 @@ pub fn now_ticks() -> Option<u64> {
         }
         Some(counter(read32(HI), read32(LO)))
     }
+}
+
+/// The SYSTIMER clock source select: 0 = XTAL (the 16 MHz this module assumes), 1 = RC_FAST. Read only.
+pub fn src_sel() -> u32 {
+    // SAFETY: a clock-control register, read only.
+    unsafe { (read32(CLKRST_PERI_CLK_CTRL21) >> 29) & 1 }
 }
 
 /// Microseconds since the counter started (`None` if the counter did not answer).

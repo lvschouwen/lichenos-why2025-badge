@@ -253,6 +253,8 @@ fn now() -> u32 {
     match src() {
         // SAFETY: `calibrate` proved the stub works before the source was selected.
         Src::Mcycle => unsafe { bp_read_mcycle() },
+        // The low word only: it wraps every 2^32 / rate, 107 s at 40 MHz but 11.9 s at 360 MHz; the samples timed
+        // with it are microseconds long and use wrapping_sub.
         Src::Mtime => hw::clint::mtime() as u32,
     }
 }
