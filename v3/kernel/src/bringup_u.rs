@@ -87,11 +87,32 @@ fn run(f: unsafe extern "C" fn(), sp: usize, a0: usize, a1: usize) -> (Option<(u
     (u.fault.map(|c| (decode(c.cause).code, c.tval as usize, c.epc as usize)), u.exit)
 }
 
+/// The PMP view U runs under must grant nothing at the core-local windows; print what the table says.
+fn view(t: &mut Tally) {
+    begin("pmp.view");
+    let e = crate::pmp::read_entries();
+    let probes = [0x2080_0000u32, 0x2080_101C, 0x2000_4000, 0x3010_0000];
+    let perms: [u8; 4] = core::array::from_fn(|i| lichen_kcore::pmp::u_perms(&e, probes[i]));
+    record(
+        t,
+        "pmp.view",
+        perms == [0; 4],
+        format_args!(
+            "table says U perms at CLIC {:#x}, CLIC line 7 {:#x}, CLINT {:#x}, TCM {:#x} (want all 0)",
+            perms[0], perms[1], perms[2], perms[3]
+        ),
+    );
+    for (i, x) in e.iter().enumerate().filter(|(_, x)| x.cfg != 0 || x.addr != 0) {
+        kprintln!("pmp.view: entry {i:2} cfg={:#04x} addr={:#010x}", x.cfg, x.addr);
+    }
+}
+
 pub fn run_rows(t: &mut Tally) {
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, udata) = unsafe { (&_utext as *const u8 as usize, &_udata as *const u8 as usize) };
     let sp = udata + UPAGE;
     boot_state(t, udata);
+    view(t);
     regs(t, sp);
     deny(t, utext, udata, sp);
     ecall(t, sp);
@@ -100,11 +121,17 @@ pub fn run_rows(t: &mut Tally) {
 fn boot_state(t: &mut Tally, udata: usize) {
     begin("boot.state");
     let ms = hw::trap::mstatus();
-    record(
-        t,
-        "boot.mstatus",
-        ms & 0x6000 == 0 && ms & 0x20_0000 != 0,
-        format_args!("mstatus={ms:#010x}: FS {} (want 0), TW {} (want 1)", (ms >> 13) & 3, (ms >> 21) & 1),
+    record(t, "boot.mstatus", ms & 0x6000 == 0, format_args!("mstatus={ms:#010x}: FS {} (want 0)", (ms >> 13) & 3));
+    // TW is probably hardwired 0 on this core (WARL): set it and read it back. If so U can run wfi, which only waits
+    // for the next interrupt, and the tick still preempts it.
+    // SAFETY: setting mstatus.TW only makes wfi in lower modes trap.
+    unsafe { core::arch::asm!("csrs mstatus, {0}", in(reg) 0x20_0000usize, options(nomem, nostack)) };
+    let tw = (hw::trap::mstatus() >> 21) & 1;
+    kcheck!(
+        "boot.tw",
+        Verdict::Info,
+        "mstatus.TW after set = {tw} ({})",
+        if tw == 1 { "implemented" } else { "hardwired 0 (WARL): U can run wfi, the tick still preempts it" }
     );
     record(
         t,
@@ -135,28 +162,11 @@ fn regs(t: &mut Tally, sp: usize) {
     );
 }
 
-fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
-    // (id, function, address, want cause code)
-    let cases: [(&str, unsafe extern "C" fn(), usize, u16); 17] = [
-        ("u.deny.text-store", u_store, utext + 0x800, 7),
-        ("u.deny.jump-data", bu_jump, udata, 1),
-        ("u.deny.jump-ktext", bu_jump, 0x4FF1_0000, 1),
-        ("u.deny.load-ktext", u_load, 0x4FF1_0000, 5),
-        ("u.deny.clic-load", u_load, 0x2080_0000, 5),
-        ("u.deny.clic-store", u_store, 0x2080_0000, 7),
-        ("u.deny.clic-ie-load", u_load, 0x2080_1000 + 7 * 4, 5),
-        ("u.deny.clic-ie-store", u_store, 0x2080_1000 + 7 * 4, 7),
-        ("u.deny.clint-load", u_load, 0x2000_4000, 5),
-        ("u.deny.clint-store", u_store, 0x2000_4000, 7),
-        ("u.deny.tcm-load", u_load, 0x3010_0000, 5),
-        ("u.deny.tcm-store", u_store, 0x3010_0000, 7),
-        ("u.deny.jump-clic", bu_jump, 0x2080_0000, 1),
-        ("u.deny.jump-peri", bu_jump, 0x500C_A000, 1),
-        ("u.deny.jump-uncached", bu_jump, udata + 0x4000_0000, 1),
-        ("u.deny.jump-lpram", bu_jump, 0x5010_8000, 1),
-        ("u.deny.jump-zero", bu_jump, 0, 1),
-    ];
-    for (id, f, a, want) in cases {
+type Case = (&'static str, unsafe extern "C" fn(), usize, u16);
+
+/// Run each case in U and check it ends in the wanted fault at the wanted address.
+fn run_cases(t: &mut Tally, sp: usize, cases: &[Case]) {
+    for &(id, f, a, want) in cases {
         begin(id);
         // A store writes 0; a jump or load passes the address in a0.
         let (fault, exit) = run(f, sp, a, 0);
@@ -178,6 +188,50 @@ fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
             kprintln!("FINDING {id}: U access at {a:#010x} was NOT denied");
         }
     }
+}
+
+/// A U access to the CPU-subsystem window 0x2000_0000-0x2FFF_FFFF (CLINT, CLIC) HANGS the badge with no trap when the
+/// PMP denies it (5223aad5 bench), while a PMP-granted access is refused by the hardware privilege check (#608 B4).
+/// So these rows run under a view that grants U R+W on the window and rely on that hardware check. Last, each with a
+/// BEGIN line, so a hang names itself.
+const CORE_LOCAL: [Case; 9] = [
+    ("u.deny.clint-load", u_load, 0x2000_4000, 5),
+    ("u.deny.clint-store", u_store, 0x2000_4000, 7),
+    ("u.deny.clic-ie-load", u_load, 0x2080_1000 + 7 * 4, 5),
+    ("u.deny.clic-ie-store", u_store, 0x2080_1000 + 7 * 4, 7),
+    ("u.deny.clic-load", u_load, 0x2080_0000, 5),
+    ("u.deny.clic-store", u_store, 0x2080_0000, 7),
+    ("u.deny.jump-clic", bu_jump, 0x2080_0000, 1),
+    ("u.deny.jump-clint", bu_jump, 0x2000_4000, 1),
+    ("u.deny.jump-cpusub", bu_jump, 0x2FFF_FFF0, 1),
+];
+
+fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
+    let cases: [Case; 10] = [
+        ("u.deny.text-store", u_store, utext + 0x800, 7),
+        ("u.deny.jump-data", bu_jump, udata, 1),
+        ("u.deny.jump-ktext", bu_jump, 0x4FF1_0000, 1),
+        ("u.deny.load-ktext", u_load, 0x4FF1_0000, 5),
+        ("u.deny.jump-peri", bu_jump, 0x500C_A000, 1),
+        ("u.deny.jump-uncached", bu_jump, udata + 0x4000_0000, 1),
+        ("u.deny.jump-lpram", bu_jump, 0x5010_8000, 1),
+        ("u.deny.jump-zero", bu_jump, 0, 1),
+        ("u.deny.tcm-load", u_load, 0x3010_0000, 5),
+        ("u.deny.tcm-store", u_store, 0x3010_0000, 7),
+    ];
+    run_cases(t, sp, &cases);
+    use lichen_kcore::pmp::{self as kp, Region};
+    let r = |base: usize, end: u64, perm| Region { base: base as u32, end, perm };
+    let view = [
+        r(utext, (utext + UPAGE) as u64, kp::R | kp::X),
+        r(udata, (udata + UPAGE) as u64, kp::R | kp::W),
+        r(0x2000_0000, 0x3000_0000, kp::R | kp::W),
+    ];
+    match crate::pmp::load_regions(&view) {
+        Ok(_) => run_cases(t, sp, &CORE_LOCAL),
+        Err(e) => record(t, "u.deny.core-local", false, format_args!("cannot plan the core-local view: {e:?}")),
+    }
+    crate::pmp::apply(utext, udata, UPAGE);
 }
 
 fn ecall(t: &mut Tally, sp: usize) {
