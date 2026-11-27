@@ -1,7 +1,10 @@
 //! The probe's own hardware access: time, the PSRAM rail step, the die temperature, cache and DMA registers. Everything the platform
 //! keeps private and #648 needs is re-declared here (the platform's psram files belong to #650 meanwhile); the words and fields come
 //! from `lichen-perflab`, which tests them.
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::Relaxed};
+use core::sync::atomic::{
+    AtomicBool, AtomicU32, AtomicUsize,
+    Ordering::{Acquire, Relaxed, Release},
+};
 use lichen_perflab::dma::{Burst, RX_MASK, TX_MASK};
 use lichen_perflab::ldo::{self, Step};
 use lichen_perflab::temp;
@@ -51,20 +54,20 @@ pub fn ldo_state() -> ldo::State {
 /// Put the calibrated pair back: ONE masked write, nothing printed first. Safe to call on any path, any number of times. The caller
 /// verifies with `ldo_restore_verify` once it may print.
 pub fn ldo_restore_raw() {
-    if STEPPED.load(Relaxed) {
+    if STEPPED.load(Acquire) {
         // SAFETY: the same register and masked write as the step, with the fields read before it.
-        unsafe { modify32(ldo::ANA_REG, ldo::MASK, BASELINE.load(Relaxed)) };
+        unsafe { modify32(ldo::ANA_REG, ldo::MASK, ldo::restore_bits(BASELINE.load(Relaxed))) };
     }
 }
 
 /// After `ldo_restore_raw`: settle, read back, report. Returns whether the rail is on the calibrated pair (or was never moved).
 pub fn ldo_restore_verify() -> bool {
-    if !STEPPED.load(Relaxed) {
+    if !STEPPED.load(Acquire) {
         return true;
     }
     wait_us(ldo::SETTLE_US);
     let st = ldo_state();
-    let base = BASELINE.load(Relaxed);
+    let base = ldo::restore_bits(BASELINE.load(Relaxed));
     let ok = st.xpd == 1 && st.tieh == 0 && st.dref == base >> 28 && st.mul == (base >> 23) & 7;
     crate::con::pass_if(
         ok,
@@ -99,7 +102,7 @@ pub fn ldo_step(to: Step) -> bool {
     }
     // SAFETY: a read of the rail's word.
     BASELINE.store(ldo::baseline_bits(unsafe { read32(ldo::ANA_REG) }), Relaxed);
-    STEPPED.store(true, Relaxed);
+    STEPPED.store(true, Release);
     // SAFETY: one masked 32-bit write of dref and mul together (read, merge, one write); XPD and TIEH are in the other register and
     // untouched. The restore path undoes it.
     unsafe { modify32(ldo::ANA_REG, ldo::MASK, to.bits()) };
@@ -196,11 +199,13 @@ pub fn temp_init() -> bool {
         modify32(PMU_RF_PWC, 0, 1 << 27);
         modify32(PMU_RF_PWC, 0, 1 << 26);
     }
+    I2C_FAULT.store(false, Relaxed);
     set_range(temp::FIRST_RANGE);
+    let range_fault = I2C_FAULT.load(Relaxed);
     // SAFETY: as above; power_up (22) and sample_en (9).
     unsafe { modify32(TSENS_CTRL, 0, 1 << 22 | 1 << 9) };
     wait_us(300);
-    let ok = temp_celsius_x100().is_some();
+    let ok = !range_fault && temp_celsius_x100().is_some();
     TEMP_OK.store(ok, Relaxed);
     ok
 }

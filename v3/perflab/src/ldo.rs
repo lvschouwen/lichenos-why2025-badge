@@ -72,6 +72,17 @@ pub const fn baseline_bits(ana: u32) -> u32 {
     ana & MASK
 }
 
+/// The fields a restore writes: the baseline read before the step, unless it is zero or above the ceiling (a restore that ran before
+/// the baseline was stored would otherwise write dref 0 / mul 0): then the calibrated pair.
+pub const fn restore_bits(baseline: u32) -> u32 {
+    let (dref, mul) = (baseline >> 28, baseline >> 23 & 7);
+    if baseline == 0 || baseline & !MASK != 0 || !within_ceiling(dref, mul) {
+        Step::Calibrated.bits()
+    } else {
+        baseline
+    }
+}
+
 /// What the two words say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct State {
@@ -160,6 +171,16 @@ mod tests {
         assert_eq!(baseline_bits(ana), 0x7280_0000);
         // restoring it into the stepped word gives back the original fields and keeps the other bits
         assert_eq!(ana_after(0xC100_0000 | 1 << 27, Step::Mv1900) & !MASK, 1 << 27);
+    }
+
+    #[test]
+    fn a_missing_or_bad_baseline_restores_the_calibrated_pair() {
+        assert_eq!(restore_bits(Step::Mv1900.bits()), Step::Mv1900.bits());
+        assert_eq!(restore_bits(Step::Calibrated.bits()), Step::Calibrated.bits());
+        assert_eq!(restore_bits(0), Step::Calibrated.bits()); // dref 0 / mul 0 would be a brownout
+        assert_eq!(restore_bits(10 << 28 | 4 << 23), Step::Calibrated.bits()); // 2100 mV: above the ceiling
+        assert_eq!(restore_bits(Step::Mv1900.bits() | 1 << 27), Step::Calibrated.bits());
+        // bits outside the fields
     }
 
     #[test]
