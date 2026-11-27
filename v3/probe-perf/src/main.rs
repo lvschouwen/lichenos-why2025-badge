@@ -1,5 +1,5 @@
 //! #648 perf lab probe (RAM-only, load-ram). One image does one configuration of the matrix, fixed at build time (`build.sh`,
-//! `LICHEN_PERF_*`): CPU 360 or 400 MHz, PSRAM 120 or 160 MHz (200 waits for #650), L2 size and line, DMA burst, and the one LDO step.
+//! `LICHEN_PERF_*`): CPU 360 or 400 MHz, PSRAM 120, 160 or 200 MHz, L2 size and line, DMA burst, and the one LDO step.
 //! Output is the bench-log protocol (CHECK, PERF, END) read by `tools/v3_bench_report.py` and `tools/perf_report.py`.
 //!
 //! Safety, in this order: the PSRAM rail is put back on the calibrated pair by a single raw masked write before anything else on every
@@ -10,7 +10,7 @@
 
 use core::arch::global_asm;
 use lichen_kcore::check::{write_end, Verdict};
-use lichen_perflab::cfg::{parse_ldo, parse_u32, Cfg, Refuse};
+use lichen_perflab::cfg::{parse_ldo, parse_u32, Cfg};
 use lichen_perflab::dma::Burst;
 use lichen_perflab::l2::L2Cfg;
 use lichen_perflab::ldo::Step;
@@ -54,7 +54,6 @@ const CFG: Cfg = Cfg {
 };
 const _: () = match CFG.check() {
     Ok(()) => {}
-    Err(Refuse::Psram200Pending) => panic!("PSRAM 200 MHz waits for #650 (the platform's psram speed table)"),
     Err(_) => panic!("impossible LICHEN_PERF_* combination (see perflab/src/cfg.rs)"),
 };
 const _: () = assert!(CFG.l2.fits_below(0x4FF3_A000), "link.ld NOLOAD window must stay below the cache carve");
@@ -176,23 +175,47 @@ fn l2_step() -> bool {
     ok
 }
 
+/// # Safety
+/// As `psram::init`: boot hart, nothing else using PSRAM.
+unsafe fn psram_init(mhz: u32, log: &mut dyn FnMut(core::fmt::Arguments)) -> Result<psram::Info, psram::Error> {
+    let speed = match mhz {
+        160 => psram::SPEED_160,
+        200 => psram::SPEED_200,
+        _ => return psram::init(psram::Upto::Tuned, psram::TuneOverride::default(), log),
+    };
+    psram::init_with(psram::Upto::Tuned, psram::TuneOverride::default(), speed, log)
+}
+
+fn calibrated(r: &Result<psram::Info, psram::Error>) -> bool {
+    matches!(r, Ok(i) if i.tuned.is_some_and(|t| t.phase_ok && t.delayline_ok) && i.size_bytes == mem::CHIP as u32)
+}
+
 fn psram_step() -> bool {
     let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
     // SAFETY: the one init call of this image (boot hart, RAM-only).
-    let r = unsafe {
-        if CFG.psram_mhz == 160 {
-            psram::init_with(psram::Upto::Tuned, psram::TuneOverride::default(), psram::SPEED_160, &mut log)
-        } else {
-            psram::init(psram::Upto::Tuned, psram::TuneOverride::default(), &mut log)
-        }
-    };
-    // a speed that did not calibrate is a failed point, never a silent fall back to another clock
-    let ok = matches!(&r, Ok(i) if i.tuned.is_some_and(|t| t.phase_ok && t.delayline_ok) && i.size_bytes == mem::CHIP as u32);
+    let r = unsafe { psram_init(CFG.psram_mhz, &mut log) };
+    let ok = calibrated(&r);
     con::pass_if(
         ok,
         "648.psram",
         format_args!("{} MHz requested, calibrated: {ok} ({:?})", CFG.psram_mhz, r.as_ref().err()),
     );
+    if !ok && CFG.psram_mhz != 120 {
+        // the 120 MHz retry is the #650 evidence that a failed speed can be recovered from; the point itself stays failed
+        pl!("psram: {} MHz failed, retrying 120 MHz", CFG.psram_mhz);
+        // SAFETY: a second init on the same boot hart, as #650's recovery path expects.
+        let r120 = unsafe { psram_init(120, &mut log) };
+        con::check(
+            "648.psram.retry120",
+            if calibrated(&r120) { Verdict::Info } else { Verdict::Fail },
+            format_args!(
+                "120 MHz after the failed {} MHz: calibrated {} ({:?})",
+                CFG.psram_mhz,
+                calibrated(&r120),
+                r120.as_ref().err()
+            ),
+        );
+    }
     ok
 }
 

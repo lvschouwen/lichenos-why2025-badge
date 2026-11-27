@@ -30,9 +30,9 @@ pub mod systimer;
 pub mod tune;
 
 use crate::mmio::{modify32, read32, write32};
-#[cfg(feature = "bench-experiments")]
-pub use speed::SPEED_160;
 use speed::{Speed, SPEED_120};
+#[cfg(feature = "bench-experiments")]
+pub use speed::{SPEED_160, SPEED_200};
 
 pub const PSRAM_MHZ: u32 = 120;
 pub const MPLL_MHZ: u32 = 480;

@@ -35,6 +35,18 @@ pub const SPEED_160: Speed = Speed {
     rd_reg_dummy: 2 * (6 - 1),
     wr_dummy: 2 * (6 - 1),
 };
+/// Experiment (#648): 200 MHz = MPLL 400 / 2 (IDF's own setting for rev < 3), LC7 / WLC7 (14 and 7 cycles). v2 saw bit 8/9 flips here on the
+/// uncached path; the lab runs it through the cached and DMA paths only.
+#[cfg(feature = "bench-experiments")]
+pub const SPEED_200: Speed = Speed {
+    mhz: 200,
+    mpll: 400,
+    rd_lat: 4,
+    wr_lat: 1,
+    rd_dummy: 2 * (14 - 1),
+    rd_reg_dummy: 2 * (7 - 1),
+    wr_dummy: 2 * (7 - 1),
+};
 
 /// `SPIMEM2 + 0x40` fields the AXI side needs for a speed: read dummy [11:6] = bits - 1 (enable bit 4 stays set from
 /// `regs::CONFIG_FOR_PSRAM`), write dummy [27:22] = bits - 1.
@@ -48,6 +60,8 @@ pub const KNOWN_REG_DUMMIES: &[(u32, u8)] = &[
     (SPEED_120.rd_reg_dummy, SPEED_120.rd_lat),
     #[cfg(feature = "bench-experiments")]
     (SPEED_160.rd_reg_dummy, SPEED_160.rd_lat),
+    #[cfg(feature = "bench-experiments")]
+    (SPEED_200.rd_reg_dummy, SPEED_200.rd_lat),
 ];
 
 #[cfg(test)]
@@ -58,6 +72,16 @@ mod tests {
     #[test]
     fn the_default_build_knows_one_speed_so_nothing_is_probed() {
         assert_eq!(KNOWN_REG_DUMMIES.len(), 1);
+    }
+
+    #[cfg(feature = "bench-experiments")]
+    #[test]
+    fn the_200_setting_is_idfs_and_every_speed_has_its_own_reg_dummy() {
+        assert_eq!((SPEED_200.mpll / SPEED_200.mhz, SPEED_200.mpll % SPEED_200.mhz), (2, 0)); // even divider
+        assert_eq!((SPEED_200.rd_dummy, SPEED_200.wr_dummy, SPEED_200.rd_reg_dummy), (26, 12, 12));
+        for (i, a) in KNOWN_REG_DUMMIES.iter().enumerate() {
+            assert!(KNOWN_REG_DUMMIES[i + 1..].iter().all(|b| b.0 != a.0 && b.1 != a.1));
+        }
     }
 
     #[test]

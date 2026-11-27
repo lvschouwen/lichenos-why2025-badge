@@ -17,22 +17,20 @@ pub struct Cfg {
 pub enum Refuse {
     Cpu,
     Psram,
-    /// 200 MHz needs the #650 speed in the platform's psram code.
-    Psram200Pending,
     L2(l2::Refuse),
 }
 
 impl Cfg {
     pub const DEFAULT: Cfg =
         Cfg { cpu_mhz: 360, psram_mhz: 120, l2: L2Cfg { kb: 256, line: 64 }, burst: Burst::B32, ldo: Step::Calibrated };
-    /// CPU 360 or 400, PSRAM 120 or 160 (200 only after #650), L2 as `L2Cfg::check`.
+    /// CPU 360 or 400, PSRAM 120, 160 or 200, L2 as `L2Cfg::check`.
     pub const fn check(&self) -> Result<(), Refuse> {
         if !(self.cpu_mhz == 360 || self.cpu_mhz == 400) {
             return Err(Refuse::Cpu);
         }
         match self.psram_mhz {
             120 | 160 => {}
-            200 => return Err(Refuse::Psram200Pending),
+            200 => {}
             _ => return Err(Refuse::Psram),
         }
         match self.l2.check() {
@@ -110,7 +108,7 @@ mod tests {
         assert_eq!(Cfg { cpu_mhz: 440, ..d }.check(), Err(Refuse::Cpu)); // the owner said no above 400
         assert_eq!(Cfg { cpu_mhz: 400, ..d }.check(), Ok(()));
         assert_eq!(Cfg { psram_mhz: 160, ..d }.check(), Ok(()));
-        assert_eq!(Cfg { psram_mhz: 200, ..d }.check(), Err(Refuse::Psram200Pending));
+        assert_eq!(Cfg { psram_mhz: 200, ..d }.check(), Ok(()));
         assert_eq!(Cfg { psram_mhz: 80, ..d }.check(), Err(Refuse::Psram)); // PSRAM stays >= 120
         assert_eq!(Cfg { l2: L2Cfg { kb: 512, line: 64 }, ..d }.check(), Err(Refuse::L2(l2::Refuse::Line512)));
         assert_eq!(Cfg { l2: L2Cfg { kb: 512, line: 128 }, ..d }.check(), Ok(()));

@@ -7,12 +7,12 @@ A RAM-only image for `tools/v3-load-ram.sh` that measures one point of the matri
 
 ## Build one point
 
-    v3/probe-perf/build.sh [--cpu 360|400] [--psram 120|160] [--l2kb 128|256|512] [--l2line 64|128] [--dma 32|64|128]
+    v3/probe-perf/build.sh [--cpu 360|400] [--psram 120|160|200] [--l2kb 128|256|512] [--l2line 64|128] [--dma 32|64|128]
                            [--ldo cal|1900] [--suite smoke|all|config|mem|cpu|irq|dma|integrity|park|dual] [--secs N]
 
 The image is `v3/target/lichen/probe-perf/probe-perf-<tag>-<suite>.bin`, `<tag>` = `cpu360-ps120-l2k256l64-dma32-ldocal`. The tag is
 also in the banner (`lichen-v3 <sha>-<tag> platform esp32p4 perflab ...`), so a stale file cannot pass for another point. Defaults are
-the production point. Impossible points do not build: PSRAM 200 MHz (waits for #650), 512 KB L2 with 64 B lines, CPU above 400 MHz,
+the production point. Impossible points do not build: 512 KB L2 with 64 B lines, CPU above 400 MHz,
 any LDO value but `cal` and `1900`, a DMA burst other than 32, 64 or 128 B. `v3/probe-perf/check.sh` is the gate (fmt, host tests,
 clippy, every switch value, the refusals).
 
@@ -59,3 +59,7 @@ from the build options; `648.config` fails when they differ. Metrics: `lab.mem.s
   `watch` (0x400 mod 0x800 inside 0x54_0000-0x64_0000, the v2 fingerprint).
 - Temperature is the uncalibrated LP_TSENS reading (no eFuse delta): good for trends and the stop at 85 C, not an absolute figure. Power is
   not measurable on this badge (#11 gauge not fitted).
+
+## Open
+
+Syscall and context-switch latency need a kernel and wait for #617; Phase 1 covers timer accuracy and CLINT interrupt latency and jitter only.

@@ -29,6 +29,8 @@ variants=(
   "--cpu 400"
   "--psram 160"
   "--cpu 400 --psram 160"
+  "--psram 200"
+  "--cpu 400 --psram 200"
   "--l2kb 128 --l2line 64"
   "--l2kb 128 --l2line 128"
   "--l2kb 256 --l2line 128"
@@ -48,7 +50,7 @@ done
 
 step "images: impossible combinations are refused at build time"
 refused=(
-  "--psram 200:200 MHz waits for #650"
+  "--psram 100:impossible"
   "--psram 80:impossible"
   "--cpu 440:impossible"
   "--l2kb 512 --l2line 64:impossible"
