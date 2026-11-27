@@ -20,6 +20,7 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "driver/gpio.h"
+#include "driver/sdmmc_host.h"
 #include "hal/rtc_io_ll.h"
 #include "c6_reg.h"
 #include "reg.h"
@@ -394,6 +395,35 @@ static bool plan_full_check(bool force, char *key, size_t key_cap) {
     return plan == C6_PLAN_FULL_CHECK;
 }
 
+#if !CONFIG_ESP_HOSTED_SDIO_SLOT_1
+#error "c6link_raise_sdio_clock assumes the C6 link on SDMMC slot 1"
+#endif
+
+// IDF's SDIO card init applies at most SDMMC_FREQ_HIGHSPEED (40 MHz, sdmmc_io_enable_hs_mode) whatever esp_hosted asks
+// for, so after each attach slot 1 is set to the configured clock (#583). The card is already in SDIO High Speed mode,
+// which the C6 runs up to 50 MHz. This only stores the slot's clock (under IDF's spinlock); the next transfer on slot 1
+// programs it under the controller mutex, so it needs no lock of ours. Until then the link runs at 40, or at 50 when
+// the SD card's slot last programmed the same 200 MHz source / 4: both inside High Speed.
+void c6link_raise_sdio_clock(void) {
+    int applied = 0;
+    if (sdmmc_host_get_real_freq(SDMMC_HOST_SLOT_1, &applied) != ESP_OK) {
+        ESP_LOGW(TAG, "SDIO clock not readable: left as the card init set it");
+        return;
+    }
+    uint32_t  khz = c6_sdio_raise_khz(CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ, applied);
+    esp_err_t err = khz ? sdmmc_host_set_card_clk(SDMMC_HOST_SLOT_1, khz) : ESP_OK;
+    int       now = applied;
+    if (khz && err == ESP_OK) {
+        sdmmc_host_get_real_freq(SDMMC_HOST_SLOT_1, &now);
+    }
+    // The bench's proof of the link clock (#583); the SD card's is in its mount line and "fw sd"
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "SDIO link clock %d kHz (card init %d kHz)", now, applied);
+    } else {
+        ESP_LOGW(TAG, "SDIO link clock %d kHz: raise to %u failed: %s", now, (unsigned)khz, esp_err_to_name(err));
+    }
+}
+
 // P4 GPIO13 is the C6 GPIO9 strap: low at a reset means download mode. esp_hosted now resets the C6 through EN (GPIO12), so
 // the strap has to be high first, on every path (the flasher may have bailed out early, #2). The level is set before the
 // pin becomes an output so it never glitches. Low only for "fw c6 reset rom" (#14).
@@ -444,6 +474,9 @@ bool c6link_start(void) {
     bool inited = esp_hosted_init() == 0;
     board_sdmmc_unlock();
     bool attached = inited && esp_hosted_connect_to_slave() == 0;
+    if (attached) {
+        c6link_raise_sdio_clock();
+    }
     // IDENT on both paths: a full boot stores the key only when the running C6 proved the bundled app, so a later skip
     // rests on a C6 that answered IDENT, never on an older image that cannot
     boot_info.ident = attached ? check_ident(&boot_info.ident_ms) : C6_IDENT_NOT_ASKED;

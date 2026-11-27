@@ -18,6 +18,10 @@ sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome) {
     }
 }
 
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz) {
+    return tried_khz > SD_CLOCK_DEFAULT_KHZ && negotiated_khz != 0 ? SD_CLOCK_DEFAULT_KHZ : 0;
+}
+
 sd_io_t sd_io_from_errno(int err) {
     if (err == 0) {
         return SD_IO_OK;

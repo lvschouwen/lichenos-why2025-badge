@@ -12,6 +12,9 @@ void c6link_set_link(bool up);
 void hold_c6_boot(int level);
 // The next boot checks the C6 fully (NVS c6_verify), the stored bundle key stays
 bool c6link_set_verify_flag(void);
+// After every successful attach (boot and re-attach): slot 1 up to CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ, past IDF's
+// 40 MHz SDIO cap (#583), and one log line with the clock
+void c6link_raise_sdio_clock(void);
 // IDENT after a runtime re-attach, with LoRa back (#36); a result but a match sets the verify flag
 void c6link_check_ident_runtime(void);
 

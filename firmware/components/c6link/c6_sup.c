@@ -341,6 +341,9 @@ static unsigned do_reattach(void) {
     ESP_LOGI(TAG, "re-attach: connect to slave (init %d, %u ms)", i, (unsigned)(now_ms() - t0));
     int  c  = i == 0 ? esp_hosted_connect_to_slave() : -1;
     bool ok = i == 0 && c == 0;
+    if (ok) {
+        c6link_raise_sdio_clock(); // the card init just set slot 1 back to 40 MHz (#583)
+    }
     portENTER_CRITICAL(&watch_lock);
     unsigned attempt = watch.attempt;
     unsigned act     = c6_watch_attached(&watch, ok, outage_uptime, now_ms());

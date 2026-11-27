@@ -1,4 +1,5 @@
-// Host test: the SD card's rules (#60): mount outcomes and power, the I/O error run, sizes, status texts, format word
+// Host test: the SD card's rules (#60): mount outcomes and power, the clock fallback (#583), the I/O error run, sizes,
+// status texts, format word
 #include "sd_policy.h"
 
 #include <errno.h>
@@ -25,6 +26,15 @@ static void test_mount_plan(void) {
     CHECK(p.state == SD_STATE_NOT_FAT && !p.keep_power);
     p = sd_policy_after_mount(SD_MOUNT_ERROR);
     CHECK(p.state == SD_STATE_ERROR && !p.keep_power);
+}
+
+// #583: a card that fails at 50 MHz after the speed choice gets one retry at 20; a missing card and a 20 MHz try none
+static void test_clock_fallback(void) {
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_HS_KHZ) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, SD_CLOCK_DEFAULT_KHZ) == SD_CLOCK_DEFAULT_KHZ);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, 0) == 0);
+    CHECK(sd_policy_fallback_khz(SD_CLOCK_DEFAULT_KHZ, SD_CLOCK_DEFAULT_KHZ) == 0);
+    CHECK(SD_CLOCK_HS_KHZ == 50000 && SD_CLOCK_DEFAULT_KHZ == 20000);
 }
 
 static void test_io_run(void) {
@@ -153,6 +163,7 @@ static void test_confirm(void) {
 
 int main(void) {
     test_mount_plan();
+    test_clock_fallback();
     test_io_run();
     test_errno();
     test_sizes();

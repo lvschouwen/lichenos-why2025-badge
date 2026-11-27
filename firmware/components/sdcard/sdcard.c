@@ -165,7 +165,7 @@ static void drop_empty_controller(void) {
     }
 }
 
-static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
+static sd_mount_outcome_t power_and_probe(uint32_t freq_khz, char *reason, size_t cap) {
     sd_pwr_ctrl_ldo_config_t const ldo = {.ldo_chan_id = SD_LDO_CHAN};
     esp_err_t                      err = sd_pwr_ctrl_new_on_chip_ldo(&ldo, &pwr);
     if (err != ESP_OK) {
@@ -194,7 +194,10 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
 
     sdmmc_host_t host       = SDMMC_HOST_DEFAULT(); // keeps SDMMC_HOST_FLAG_DEINIT_ARG: deinit is per slot
     host.slot               = SDMMC_HOST_SLOT_0;
-    host.max_freq_khz       = SDMMC_FREQ_DEFAULT; // 20 MHz, as BadgeVMS (Lucas, #60)
+    // SD_CLOCK_HS_KHZ: High Speed, 50 MHz (Lucas, #583; was 20 as BadgeVMS, #60). 50000 equals SDMMC_FREQ_DDR50, but
+    // IDF takes the DDR50 path only on a UHS-I card (1.8 V), which this slot never asks for: a High Speed switch
+    // (CMD6 SDR25), or 20 MHz when the card refuses it
+    host.max_freq_khz       = (int)freq_khz;
     host.pwr_ctrl_handle    = pwr;
     // No dma_aligned_buffer: sd_disk_read/write never hand IDF a buffer it would have to bounce itself (IDF's bounce
     // takes its chunk length from heap_caps_get_allocated_size, which need not be a cache-line multiple)
@@ -378,8 +381,24 @@ static FRESULT make_fat(void) {
     return res;
 }
 
+// A card that chose High Speed and then failed (the SCR read back at 50 MHz, a timeout) gets one more try at the
+// default speed, power cycled, so a card or a contact that cannot take 50 MHz still mounts (#583)
+static sd_mount_outcome_t probe_with_fallback(char *reason, size_t cap) {
+    sd_mount_outcome_t outcome = power_and_probe(SD_CLOCK_HS_KHZ, reason, cap);
+    bool     failed    = outcome != SD_MOUNT_OK && card;
+    uint32_t retry_khz = failed ? sd_policy_fallback_khz(SD_CLOCK_HS_KHZ, card->max_freq_khz) : 0;
+    if (retry_khz == 0) {
+        return outcome;
+    }
+    ESP_LOGW(TAG, "card init at %u kHz failed (%s): again at %u kHz", (unsigned)SD_CLOCK_HS_KHZ, reason,
+             (unsigned)retry_khz);
+    bring_down();
+    reason[0] = '\0';
+    return power_and_probe(retry_khz, reason, cap);
+}
+
 static sd_mount_outcome_t bring_up(bool format, char *reason, size_t cap) {
-    sd_mount_outcome_t outcome = power_and_probe(reason, cap);
+    sd_mount_outcome_t outcome = probe_with_fallback(reason, cap);
     if (outcome != SD_MOUNT_OK) {
         return outcome;
     }

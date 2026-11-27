@@ -22,13 +22,28 @@ typedef enum { SD_MOUNT_OK, SD_MOUNT_NO_CARD, SD_MOUNT_NOT_FAT, SD_MOUNT_ERROR }
 
 // What a mount attempt leaves behind. Power (LDO VO4, which is also the card's VDD) stays on only for a mounted card:
 // a missing or unusable card is unpowered until the next "fw sd mount" (Lucas, #60). Never a retry: a card is
-// mounted at boot or by hand, there is no polling.
+// mounted at boot or by hand, there is no polling. The one exception is the clock fallback below, inside one attempt.
 typedef struct {
     sd_state_t state;
     bool       keep_power;
 } sd_mount_plan_t;
 
 sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome);
+
+// The card's clock (Lucas, #583): SD High Speed, 50 MHz, from the SDMMC's 200 MHz source / 4, the same source and
+// divider as the C6 link on slot 1. IDF re-applies the shared source and divider on a slot switch only when the slot's
+// clock, computed from the live divider and the slot's own source, differs from what it asked for. So two slots on
+// different sources must never share a divider: slot 0 must never be set to exactly 40000 (160 MHz / 4) while slot 1
+// runs at 50000 (200 MHz / 4), or the card would run at 50 and its check would still read 40. 50 and 20 (the default
+// speed, a card that refuses High Speed: divider 8) are both safe. The one mixed state that does occur, the link at
+// IDF's 40 for the first transfers after its card init next to a card at 50, can only make either slot run at 40 or 50:
+// both inside High Speed.
+#define SD_CLOCK_HS_KHZ      50000
+#define SD_CLOCK_DEFAULT_KHZ 20000
+
+// After a failed card init at tried_khz: the clock of the one retry (power cycled), or 0 for none. negotiated_khz is
+// card->max_freq_khz, 0 when the card never got as far as the speed choice (no card: the retry would only repeat that).
+uint32_t sd_policy_fallback_khz(uint32_t tried_khz, uint32_t negotiated_khz);
 
 // How a batch of file work went (sd_end). NEUTRAL: it failed, but not because of the card (full, a bad name, no
 // memory), so it says nothing about whether the card is still there.
@@ -68,7 +83,7 @@ void sd_fmt_size(uint64_t bytes, char *out, size_t cap);
 // "SDSC" (byte addressing), "SDHC" (block addressing up to 32 GB), "SDXC" (above), "MMC"
 char const *sd_card_kind(bool is_mmc, bool high_capacity, uint64_t bytes);
 
-// "fw sd": "sd mounted /sd 29.7 GB, 28.1 GB free, SDHC 20 MHz 4-bit, errors 0", "sd no card", ...
+// "fw sd": "sd mounted /sd 29.7 GB, 28.1 GB free, SDHC 50 MHz 4-bit, errors 0", "sd no card", ...
 void sd_status_line(sd_info_t const *info, char *out, size_t cap);
 
 // About's row: "28.1 GB free of 29.7 GB", "no card", ...

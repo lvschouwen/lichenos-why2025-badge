@@ -112,3 +112,7 @@ bool c6_bundle_pending(bool changed, bool checked, bool staged, bool ident_ok) {
 bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool state_persisted) {
     return !full_path && (!attached || !ident_ok) && state_persisted;
 }
+
+uint32_t c6_sdio_raise_khz(uint32_t configured_khz, int applied_khz) {
+    return applied_khz > 0 && (uint32_t)applied_khz < configured_khz ? configured_khz : 0;
+}
