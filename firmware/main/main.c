@@ -63,6 +63,7 @@
 #include "ota_server.h"
 #include "ota_os.h"
 #include "ota_sd_update.h"
+#include "sd_update_policy.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
@@ -779,7 +780,8 @@ static void start_c6link(boot_ctx_t *ctx) {
                                       .progress       = c6_step_progress,
                                       .end            = c6_step_end,
                                       .image_on_trial = ota_image_trial_maybe, // an unread state: on trial
-                                      .notice         = c6_card_notice};
+                                      .notice         = c6_card_notice,
+                                      .image_trial_pending = ota_image_trial_pending}; // the rescue copy: off trial only
     c6link_set_boot_hooks(&boot);
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
     wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);
@@ -806,12 +808,30 @@ static bool sd_update_record_set(ota_sd_record_t const *rec) {
     return settings_set_blob(SD_UPDATE_RECORD, rec, sizeof(*rec));
 }
 
+// The boot screen's update row (#595 review M4), as the C6 step reports its own
+static void sd_update_step_begin(void) {
+    boot_progress_begin(BOOT_UPDATE);
+}
+
+static void sd_update_step_progress(int percent) {
+    boot_progress_progress(BOOT_UPDATE, percent);
+}
+
+static void sd_update_step_end(int step, char const *note) {
+    boot_progress_end(BOOT_UPDATE, step == SDU_STEP_DONE ? STEP_DONE : step == SDU_STEP_FAILED ? STEP_FAILED : STEP_SKIPPED,
+                      note);
+}
+
 // #595: after the C6 step (its card bundle went first), before the apps and the update server: a new P4 image on the
 // card is installed and restarted into; this returns when there was nothing to install
 static void start_sd_update(boot_ctx_t *ctx) {
     (void)ctx;
-    ota_sd_update_hooks_t const hooks = {
-        .notice = sd_update_notice, .record_get = sd_update_record_get, .record_set = sd_update_record_set};
+    ota_sd_update_hooks_t const hooks = {.notice        = sd_update_notice,
+                                         .step_begin    = sd_update_step_begin,
+                                         .step_progress = sd_update_step_progress,
+                                         .step_end      = sd_update_step_end,
+                                         .record_get    = sd_update_record_get,
+                                         .record_set    = sd_update_record_set};
     ota_sd_update_boot(&hooks);
 }
 

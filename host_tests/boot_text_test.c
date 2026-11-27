@@ -25,11 +25,13 @@ int main(void) {
     CHECK(strcmp(sentence(BOOT_PSRAM, -1), "Checking memory...") == 0);
     CHECK(strcmp(sentence(BOOT_C6, -1), "Waking the radio chip...") == 0);
     CHECK(strcmp(sentence(BOOT_C6, 40), "Updating the radio chip (40 %)...") == 0);
+    CHECK(strcmp(sentence(BOOT_UPDATE, -1), "Looking for an update...") == 0);
+    CHECK(strcmp(sentence(BOOT_UPDATE, 25), "Installing from the SD card (25 %)...") == 0); // #595
     CHECK(strcmp(sentence(BOOT_WIFI, -1), "Connecting to Wi-Fi...") == 0);
     CHECK(strcmp(sentence(BOOT_CLOCK, -1), "Setting the clock...") == 0);
     CHECK(strcmp(sentence(BOOT_LORA, -1), "Starting LoRa...") == 0);
     CHECK(strcmp(sentence(BOOT_APPS, -1), "Starting apps...") == 0);
-    CHECK(strcmp(sentence(BOOT_WIFI, 40), "Connecting to Wi-Fi...") == 0); // only the C6 shows a percentage
+    CHECK(strcmp(sentence(BOOT_WIFI, 40), "Connecting to Wi-Fi...") == 0); // only the C6 and the update show one
 
     char small[8];
     CHECK(boot_step_sentence(BOOT_C6, 40, small, sizeof(small)) == small); // truncated, never overruns
@@ -46,7 +48,7 @@ int main(void) {
 
     v.state[BOOT_LORA] = STEP_ACTIVE;
     v.state[BOOT_APPS] = STEP_PENDING;
-    CHECK(boot_overall_pct(&v) == 5 * 100 / 7);
+    CHECK(boot_overall_pct(&v) == 6 * 100 / 8);
     v.state[BOOT_LORA] = STEP_FAILED;
     v.state[BOOT_APPS] = STEP_SKIPPED;
     CHECK(boot_overall_pct(&v) == 100); // failed and skipped steps count as over

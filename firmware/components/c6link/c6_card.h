@@ -15,5 +15,7 @@ bool c6_card_begin(void);
 // The flasher and the IDENT expectation are done with the card: the lock goes, c6_image_dir is C6_IMAGE_DIR again
 void c6_card_end_reading(void);
 // After the attach and IDENT: copy a proven card bundle into /storage/c6, or record one that failed (c6_card_after)
-// on_c6: the C6's flash holds the source bundle (the flasher wrote it, or its check passed)
+// on_c6: the flasher completed with the source bundle on the C6 (wrote it, or its check found it)
 void c6_card_finish(bool on_c6, bool ident_ok);
+// This boot's flasher source is the card (between c6_card_begin and c6_card_finish)
+bool c6_card_from_card(void);

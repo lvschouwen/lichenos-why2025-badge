@@ -27,15 +27,16 @@
 #define PULSE_MS       1200 // one breath of the current segment
 #define SHOW_LOG_LINES 5
 
-// The mockup's short names, so eight fit under the bar at a readable size
+// The mockup's short names, so the nine fit under the bar at a readable size
 static char const *const short_labels[LICHEN_BOOT_STEP_COUNT] = {
-    "stor", "disp", "psram", "c6", "wifi", "clock", "lora", "apps"
+    "stor", "disp", "psram", "c6", "upd", "wifi", "clock", "lora", "apps"
 };
 static char const *const doing[LICHEN_BOOT_STEP_COUNT] = {
     "mounting storage",
     "starting the display",
     "checking PSRAM",
     "checking the C6",
+    "looking for an update",
     "joining Wi-Fi",
     "setting the clock",
     "starting LoRa",
@@ -113,7 +114,9 @@ static void show_steps(void) {
 
     int running = running_step();
     if (running >= 0) {
-        lichen_label_set(step_text, running == LICHEN_BOOT_C6 && view.pct >= 0 ? "flashing the C6" : doing[running]);
+        lichen_label_set(step_text, running == LICHEN_BOOT_C6 && view.pct >= 0       ? "flashing the C6"
+                                    : running == LICHEN_BOOT_UPDATE && view.pct >= 0 ? "installing from the SD card"
+                                                                                     : doing[running]);
         lv_obj_set_style_text_color(step_text, lv_color_hex(THEME_TEXT), 0);
         char pct[16] = "";
         if (running == (int)view.current && view.pct >= 0) {

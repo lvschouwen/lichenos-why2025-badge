@@ -17,6 +17,10 @@ typedef struct {
     // The running image is still on trial (ota_image_trial_maybe, #285): a reset now rolls the update back, so the
     // boot runs the full C6 check and the supervisor never offers the fallback restart. Default: true (on trial)
     bool (*image_on_trial)(void);
+    // The running image is definitely on trial (ota_image_trial_pending: PENDING_VERIFY, the only state a reset rolls
+    // back from; blank OTA data after a USB flash is not). The card's C6 bundle is copied to /storage/c6 only off
+    // trial (#595 review M1). Default: true (on trial: no copy)
+    bool (*image_trial_pending)(void);
     // A notice for the person (#595: the card's C6 bundle was ignored, failed or could not be copied). Default: the log only
     void (*notice)(char const *title, char const *body);
 } c6link_boot_hooks_t;

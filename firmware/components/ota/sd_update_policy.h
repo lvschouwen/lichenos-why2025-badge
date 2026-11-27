@@ -16,6 +16,12 @@ typedef enum {
     SDU_CARD_OK,
 } sdu_card_t;
 
+// Where esp_app_desc_t sits in an app image (after the 24-byte esp_image_header_t and the first 8-byte segment header)
+// and its ELF sha256 inside it; ota_sd_update.c pins both to the IDF structs
+#define SDU_APP_DESC_OFFSET 0x20
+#define SDU_APP_DESC_SHA    0x90
+#define SDU_APP_DESC_MAGIC  0xABCD5432u
+
 // The image header (magic, chip) and the esp_app_desc_t at offset 32: SDU_CARD_OK with the ELF sha256 in elf_sha, else
 // UNREADABLE (fewer than SDU_HEAD_LEN bytes) or NOT_APP. Needs the first SDU_HEAD_LEN bytes.
 #define SDU_HEAD_LEN 0xD0
@@ -66,6 +72,19 @@ char const *sdu_result_text(sdu_result_t r);
 #define SDU_REC_FAILED 0x02 // it failed its check after the copy (sdu_result_records), rather than being installed
 // The notice for an image skipped as tried, by the record's flags
 char const *sdu_tried_text(uint8_t flags);
+
+// The boot screen's "update" row (BOOT_UPDATE) after the step: nothing there or nothing to do is SKIPPED, a card image
+// already running is DONE, a file the badge cannot use or an install that failed is FAILED (its reason stays on screen).
+// r is read only for SDU_INSTALL.
+typedef enum { SDU_STEP_DONE, SDU_STEP_SKIPPED, SDU_STEP_FAILED } sdu_step_t;
+sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r);
+
+// Review M3: a Wi-Fi push into the update folder leaves the marker SDU_WIFI_MARK next to the image (written before the
+// file; tools/badge.sh sd-prep removes it). The install's trial needs no Wi-Fi only without it: a card prepared by hand
+// is physical access (like `fw slot other`), an image that came over Wi-Fi keeps the Wi-Fi rule (#411), so one that
+// breaks Wi-Fi still rolls back.
+#define SDU_WIFI_MARK "badge_fw.bin.wifi"
+bool sdu_trial_without_wifi(bool wifi_mark);
 
 // The text of badge_fw.bin.sha256 (sha256sum's format: 64 hex digits, either case, then the end, white space or the
 // file name) names digest

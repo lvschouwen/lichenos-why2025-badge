@@ -8,4 +8,4 @@ idf_component_register(SRCS "c6link.c" "c6_paths.c" "c6_flasher.c" "c6_firmware.
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        REQUIRES esp_hosted esp_event
                        PRIV_REQUIRES board fw_console nvs_flash app_update esp_driver_uart esp_driver_gpio esp_timer
-                                     esp_driver_sdmmc espressif__esp-serial-flasher sdcard esp_app_format)
+                                     esp_driver_sdmmc espressif__esp-serial-flasher sdcard esp_app_format storage)

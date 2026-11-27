@@ -17,6 +17,11 @@ typedef struct {
 typedef struct {
     // A notice for the person (a file ignored, an install that failed). Default: the log only
     void (*notice)(bool warn, char const *title, char const *body);
+    // The boot screen's update row (BOOT_UPDATE): begin, the install's percent, end (sdu_step_t, a short note).
+    // Default: not shown
+    void (*step_begin)(void);
+    void (*step_progress)(int percent);
+    void (*step_end)(int step, char const *note);
     // The record's store; get false: none stored. Without both no install runs (no guard, no install).
     bool (*record_get)(ota_sd_record_t *out);
     bool (*record_set)(ota_sd_record_t const *rec);
@@ -28,3 +33,8 @@ typedef struct {
 // reason, or a failure that left the boot slot alone. Its trial needs no Wi-Fi (a card is physical access, like
 // `fw slot other`); a bad image still rolls back, and the attempt record keeps it from being installed again.
 void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks);
+
+// Review M3: the update server is about to write or delete under OTA_SD_UPDATE_DIR over Wi-Fi: leave the Wi-Fi marker
+// first (SDU_WIFI_MARK), so the next install from there keeps the Wi-Fi trial rule. Takes the card's batch lock (not
+// held by the caller). False: not written, so the change must not go ahead.
+bool ota_sd_update_mark_wifi(void);

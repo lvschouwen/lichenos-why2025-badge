@@ -4,9 +4,9 @@
 
 #include <string.h>
 
-#define APP_DESC_OFFSET 0x20 // esp_app_desc_t after the 24-byte image header and the first 8-byte segment header
-#define APP_DESC_MAGIC  0xABCD5432u
-#define APP_DESC_SHA    0x90 // app_elf_sha256 inside esp_app_desc_t
+#define APP_DESC_OFFSET SDU_APP_DESC_OFFSET
+#define APP_DESC_MAGIC  SDU_APP_DESC_MAGIC
+#define APP_DESC_SHA    SDU_APP_DESC_SHA
 
 _Static_assert(APP_DESC_OFFSET + APP_DESC_SHA + SDU_SHA_LEN == SDU_HEAD_LEN, "head length");
 
@@ -85,8 +85,24 @@ char const *sdu_result_text(sdu_result_t r) {
 
 char const *sdu_tried_text(uint8_t flags) {
     return flags & SDU_REC_FAILED ? "This image failed its check after the copy before; change the file to try again"
-                                  : "This image was installed from the card before and another one runs now (a rollback "
-                                    "or a USB flash)";
+                                  : "This image was tried from the card before; change the file to try again";
+}
+
+sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r) {
+    switch (a) {
+    case SDU_SKIP_SAME: return SDU_STEP_DONE;
+    case SDU_SKIP_UNREADABLE:
+    case SDU_SKIP_NOT_APP: return SDU_STEP_FAILED;
+    case SDU_INSTALL: return r == SDU_DONE ? SDU_STEP_DONE : SDU_STEP_FAILED;
+    case SDU_SKIP_ABSENT:
+    case SDU_SKIP_TRIED:
+    case SDU_SKIP_TRIAL:
+    default: return SDU_STEP_SKIPPED;
+    }
+}
+
+bool sdu_trial_without_wifi(bool wifi_mark) {
+    return !wifi_mark;
 }
 
 static int hex_digit(char c) {

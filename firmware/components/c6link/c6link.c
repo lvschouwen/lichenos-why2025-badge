@@ -185,10 +185,12 @@ static bool current_bundle_key(char *out, size_t cap) {
     return c6_bundle_key_in(c6_image_dir(), out, cap, NULL);
 }
 
-// The bundled app's ELF sha256, from the first bytes of its .bin (no hashing of the 1 MB app)
-static bool bundle_app_sha(uint8_t out[C6_APP_SHA_LEN]) {
+// The bundled app's ELF sha256, from the first bytes of its .bin in dir (no hashing of the 1 MB app). The boot reads
+// the directory it flashed from (c6_image_dir, the card's under its lock); a runtime re-attach always /storage/c6, so
+// no other task ever reads the card through c6_image_dir (#595 review 9)
+static bool bundle_app_sha(char const *dir, uint8_t out[C6_APP_SHA_LEN]) {
     char path[64];
-    if (!c6_image_path("firmware.bin", path, sizeof(path))) {
+    if (!c6_image_path_in(dir, "firmware.bin", path, sizeof(path))) {
         return false;
     }
     FILE *f = fopen(path, "rb");
@@ -303,7 +305,7 @@ void c6link_check_ident_runtime(void) {
         return;
     }
     uint8_t expected[C6_APP_SHA_LEN];
-    rt_ident = check_ident(&rt_ident_ms, bundle_app_sha(expected) ? expected : NULL);
+    rt_ident = check_ident(&rt_ident_ms, bundle_app_sha(C6_IMAGE_DIR, expected) ? expected : NULL);
     if (rt_ident != C6_IDENT_MATCH) {
         ESP_LOGW(TAG, "C6 app not proven after the re-attach: full check on the next boot");
         c6link_set_verify_flag();
@@ -446,7 +448,7 @@ bool c6link_start(void) {
         ESP_LOGI(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
     uint8_t expected[C6_APP_SHA_LEN];
-    bool    have_expected = bundle_app_sha(expected); // from the source, while the card is still ours (#595)
+    bool    have_expected = bundle_app_sha(c6_image_dir(), expected); // from the source, while the card is ours (#595)
     c6_card_end_reading();
     // Only after the flash check (#250): c6log borrows UART1 shared, and must never overlap the flasher's exclusive lend
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
@@ -464,8 +466,12 @@ bool c6link_start(void) {
     // rests on a C6 that answered IDENT, never on an older image that cannot
     boot_info.ident = attached ? check_ident(&boot_info.ident_ms, have_expected ? expected : NULL) : C6_IDENT_NOT_ASKED;
     bool ident_ok   = boot_info.ident == C6_IDENT_MATCH;
-    // A proven card bundle becomes the /storage/c6 rescue, one the C6 holds but did not prove is recorded as failed
-    c6_card_finish(wrote || (full && err == ESP_OK), ident_ok);
+    // A proven card bundle becomes the /storage/c6 rescue, one the C6 holds but did not prove is recorded as failed.
+    // Held means the flasher completed (wrote it or found it): a flash cut by a card read error proves nothing (review 6)
+    if (wrote) {
+        ESP_LOGI(TAG, "C6 flash changed this boot (from %s)", c6_card_from_card() ? C6_CARD_DIR : C6_IMAGE_DIR);
+    }
+    c6_card_finish(full && err == ESP_OK, ident_ok);
     // A failed flash leaves the C6 unproven: still pending (#420)
     atomic_store(&s_boot_c6, BOOT_CHECKED | (key[0] ? BOOT_STAGED : 0) | (ident_ok ? BOOT_PROVEN : 0));
     // The key is stored only after a successful attach and IDENT; a failed skip sets the verify flag (full check next

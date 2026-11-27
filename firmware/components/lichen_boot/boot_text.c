@@ -5,7 +5,7 @@
 // "..." not the ellipsis glyph: the badge font lacks it
 static char const *const sentences[BOOT_STEP_COUNT] = {
     "Opening storage...", "Starting the screen...", "Checking memory...", "Waking the radio chip...",
-    "Connecting to Wi-Fi...", "Setting the clock...", "Starting LoRa...", "Starting apps...",
+    "Looking for an update...", "Connecting to Wi-Fi...", "Setting the clock...", "Starting LoRa...", "Starting apps...",
 };
 
 char const *boot_step_sentence(boot_step_t step, int pct, char *buf, size_t cap) {
@@ -16,6 +16,8 @@ char const *boot_step_sentence(boot_step_t step, int pct, char *buf, size_t cap)
         buf[0] = '\0';
     } else if (step == BOOT_C6 && pct >= 0) {
         snprintf(buf, cap, "Updating the radio chip (%d %%)...", pct);
+    } else if (step == BOOT_UPDATE && pct >= 0) {
+        snprintf(buf, cap, "Installing from the SD card (%d %%)...", pct);
     } else {
         snprintf(buf, cap, "%s", sentences[step]);
     }

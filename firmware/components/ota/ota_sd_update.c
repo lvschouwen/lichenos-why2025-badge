@@ -16,8 +16,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "esp_app_format.h"
+
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <string.h>
 
 static char const TAG[] = "sd_update";
@@ -27,7 +31,13 @@ static char const TAG[] = "sd_update";
 #define SDU_PIECE    4096 // the bounce buffer: internal RAM, only while an install runs
 #define SDU_WAIT_MS  2000 // the card's batch lock; nothing else uses the card this early
 
+#define SDU_MARK     OTA_SD_UPDATE_DIR "/" SDU_WIFI_MARK
+
 _Static_assert(sizeof(((ota_sd_record_t *)0)->elf_sha) == SDU_SHA_LEN, "record sha size");
+// The offsets sd_update_policy.c reads, against the IDF's own structs
+_Static_assert(sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) == SDU_APP_DESC_OFFSET, "desc offset");
+_Static_assert(offsetof(esp_app_desc_t, app_elf_sha256) == SDU_APP_DESC_SHA, "elf sha offset");
+_Static_assert(ESP_APP_DESC_MAGIC_WORD == SDU_APP_DESC_MAGIC, "desc magic");
 
 static ota_sd_update_hooks_t s_hooks;
 
@@ -100,6 +110,7 @@ static bool hash_file(sdu_job_t *j) {
     sha256_init(&ctx);
     long   total = 0;
     size_t n;
+    errno        = 0; // a short read with no errno is EIO below
     while ((n = fread(j->buf, 1, SDU_PIECE, j->f)) > 0) {
         sha256_update(&ctx, j->buf, n);
         total += (long)n;
@@ -132,8 +143,10 @@ static sdu_result_t write_slot(sdu_job_t *j, esp_partition_t const *slot) {
     }
     long done = 0;
     int  last = -1;
+    errno     = 0;
     while (done < j->size) {
-        size_t n = fread(j->buf, 1, SDU_PIECE, j->f);
+        size_t want = (size_t)(j->size - done < SDU_PIECE ? j->size - done : SDU_PIECE); // never past the hashed size
+        size_t n    = fread(j->buf, 1, want, j->f);
         if (n == 0 || esp_ota_write(h, j->buf, n) != ESP_OK) {
             j->err = n == 0 ? (errno ? errno : EIO) : 0;
             esp_ota_abort(h);
@@ -141,10 +154,13 @@ static sdu_result_t write_slot(sdu_job_t *j, esp_partition_t const *slot) {
         }
         done += (long)n;
         int pct = (int)(done * 100 / j->size);
+        if (pct != last && s_hooks.step_progress) {
+            s_hooks.step_progress(pct);
+        }
         if (pct / 25 != last / 25) {
             ESP_LOGI(TAG, "writing %s: %d%%", slot->label, pct);
-            last = pct;
         }
+        last = pct;
     }
     return esp_ota_end(h) == ESP_OK ? SDU_DONE : SDU_FAIL_IMAGE; // checks the image: chip, segments, hash
 }
@@ -188,13 +204,18 @@ static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
         tried_write(NULL, 0); // never made the boot slot: not tried
         return SDU_FAIL_BOOT;
     }
-    ota_image_note_slot_switch(slot); // a card is physical access: its trial needs no Wi-Fi (#411)
+    struct stat st;
+    if (sdu_trial_without_wifi(stat(SDU_MARK, &st) == 0)) {
+        ota_image_note_slot_switch(slot); // a card prepared by hand is physical access: no Wi-Fi needed (#411)
+    } else {
+        ESP_LOGI(TAG, "the image came over Wi-Fi (%s): its trial keeps the Wi-Fi rule", SDU_WIFI_MARK);
+    }
     return SDU_DONE;
 }
 
-static bool install(sdu_job_t *j) {
+static sdu_result_t install(sdu_job_t *j) {
     esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
-    j->buf = heap_caps_malloc(SDU_PIECE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    j->buf = heap_caps_aligned_alloc(64, SDU_PIECE, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA); // card and flash both DMA
     ESP_LOGI(TAG, "installing " SDU_FILE " into %s", slot ? slot->label : "?");
     int64_t      t0 = esp_timer_get_time();
     sdu_result_t r  = j->buf ? install_steps(j, slot) : SDU_FAIL_NO_SLOT;
@@ -206,11 +227,11 @@ static bool install(sdu_job_t *j) {
             tried_write(j->elf_sha, SDU_REC_FAILED | SDU_REC_TOLD);
         }
         notice(true, "SD card update not installed", sdu_result_text(r));
-        return false;
+        return r;
     }
     ESP_LOGI(TAG, "installed into %s in %u ms, restarting", slot->label,
              (unsigned)((esp_timer_get_time() - t0) / 1000));
-    return true;
+    return r;
 }
 
 static void report_skip(sdu_action_t a, uint8_t flags) {
@@ -227,38 +248,71 @@ static void report_skip(sdu_action_t a, uint8_t flags) {
     }
 }
 
-void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks) {
-    s_hooks = hooks ? *hooks : (ota_sd_update_hooks_t){0};
-    if (!sd_mounted() || !s_hooks.record_get || !s_hooks.record_set) {
-        return;
-    }
-    if (!sd_begin(SDU_WAIT_MS)) {
-        ESP_LOGW(TAG, "card busy: no look for an update this boot");
-        return;
-    }
+// The cheap look and, when D1 says so, the install; under the card's batch lock (the caller's)
+static sdu_action_t look_and_install(sdu_job_t *j, sdu_result_t *r) {
     int64_t    t0   = esp_timer_get_time();
-    sdu_job_t  j    = {0};
-    sdu_card_t card = read_head(&j);
+    sdu_card_t card = read_head(j);
     uint8_t    tried[SDU_SHA_LEN];
     uint8_t    flags = 0;
     bool       have  = tried_read(tried, &flags) && memcmp(tried, (uint8_t[SDU_SHA_LEN]){0}, SDU_SHA_LEN) != 0;
-    bool       ok   = card == SDU_CARD_OK;
+    bool       ok    = card == SDU_CARD_OK;
     uint8_t const *running = esp_app_get_description()->app_elf_sha256;
-    sdu_action_t   a = sdu_decide(card, ok && memcmp(j.elf_sha, running, SDU_SHA_LEN) == 0,
-                                  ok && have && memcmp(j.elf_sha, tried, SDU_SHA_LEN) == 0, ota_image_trial_pending());
+    sdu_action_t   a = sdu_decide(card, ok && memcmp(j->elf_sha, running, SDU_SHA_LEN) == 0,
+                                  ok && have && memcmp(j->elf_sha, tried, SDU_SHA_LEN) == 0, ota_image_trial_pending());
     ESP_LOGI(TAG, "card check %u us", (unsigned)(esp_timer_get_time() - t0));
-    bool installed = a == SDU_INSTALL && install(&j);
-    if (a != SDU_INSTALL) {
+    if (a == SDU_INSTALL) {
+        *r = install(j);
+        // the bench reads it (#595): esp_ota_end and the flash writes run on the boot task
+        ESP_LOGI(TAG, "boot task stack: %u B never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    } else {
         report_skip(a, flags);
     }
+    return a;
+}
+
+static void step_end(sdu_action_t a, sdu_result_t r) {
+    if (s_hooks.step_end) {
+        s_hooks.step_end(sdu_step_of(a, r), a == SDU_INSTALL ? sdu_result_text(r) : sdu_action_name(a));
+    }
+}
+
+void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks) {
+    s_hooks = hooks ? *hooks : (ota_sd_update_hooks_t){0};
+    if (s_hooks.step_begin) {
+        s_hooks.step_begin();
+    }
+    if (!sd_mounted() || !s_hooks.record_get || !s_hooks.record_set || !sd_begin(SDU_WAIT_MS)) {
+        if (sd_mounted()) {
+            ESP_LOGW(TAG, "card busy or no record store: no look for an update this boot");
+        }
+        step_end(SDU_SKIP_ABSENT, SDU_DONE);
+        return;
+    }
+    sdu_job_t    j = {0};
+    sdu_result_t r = SDU_DONE;
+    sdu_action_t a = look_and_install(&j, &r);
     if (j.f) {
         fclose(j.f);
     }
     sd_end(j.err ? sd_io_from_errno(j.err) : SD_IO_OK);
-    if (a == SDU_INSTALL) { // the bench reads it (#595): esp_ota_end and the flash writes run on the boot task
-        ESP_LOGI(TAG, "boot task stack: %u B never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    }
-    if (installed) {
+    step_end(a, r);
+    if (a == SDU_INSTALL && r == SDU_DONE) {
         system_restart_asked("SD card update installed"); // asked: an unread trial state must not hold it (#304)
     }
+}
+
+bool ota_sd_update_mark_wifi(void) {
+    if (!sd_begin(SDU_WAIT_MS)) {
+        return false;
+    }
+    mkdir(SD_LICHEN_DIR, 0775); // either may exist already
+    mkdir(OTA_SD_UPDATE_DIR, 0775);
+    FILE *f  = fopen(SDU_MARK, "w");
+    bool  ok = f && fputs("written over Wi-Fi\n", f) >= 0;
+    int   e  = errno;
+    if (f && fclose(f) != 0) {
+        ok = false;
+    }
+    sd_end(ok ? SD_IO_OK : sd_io_from_errno(e));
+    return ok;
 }

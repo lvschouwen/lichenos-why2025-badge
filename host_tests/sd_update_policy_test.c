@@ -130,12 +130,31 @@ static void test_result_records(void) {
     CHECK(strcmp(sdu_tried_text(SDU_REC_FAILED | SDU_REC_TOLD), sdu_tried_text(SDU_REC_FAILED)) == 0);
 }
 
+// Review M3 and M4: the trial rule by provenance, and the boot screen's row after the step
+static void test_trial_and_step(void) {
+    CHECK(sdu_trial_without_wifi(false)); // prepared by hand (sd-prep removes the marker): physical access
+    CHECK(!sdu_trial_without_wifi(true)); // came over Wi-Fi: the Wi-Fi rule, so one that breaks Wi-Fi rolls back
+    CHECK(sdu_step_of(SDU_SKIP_ABSENT, SDU_DONE) == SDU_STEP_SKIPPED);
+    CHECK(sdu_step_of(SDU_SKIP_SAME, SDU_DONE) == SDU_STEP_DONE);
+    CHECK(sdu_step_of(SDU_SKIP_TRIED, SDU_DONE) == SDU_STEP_SKIPPED);
+    CHECK(sdu_step_of(SDU_SKIP_TRIAL, SDU_DONE) == SDU_STEP_SKIPPED);
+    CHECK(sdu_step_of(SDU_SKIP_UNREADABLE, SDU_DONE) == SDU_STEP_FAILED);
+    CHECK(sdu_step_of(SDU_SKIP_NOT_APP, SDU_DONE) == SDU_STEP_FAILED);
+    CHECK(sdu_step_of(SDU_INSTALL, SDU_DONE) == SDU_STEP_DONE);
+    for (int r = SDU_FAIL_READ; r <= SDU_FAIL_BOOT; r++) {
+        CHECK(sdu_step_of(SDU_INSTALL, (sdu_result_t)r) == SDU_STEP_FAILED);
+        CHECK(sdu_step_of(SDU_SKIP_SAME, (sdu_result_t)r) == SDU_STEP_DONE); // r only counts for an install
+    }
+    CHECK(sdu_step_of((sdu_action_t)99, SDU_DONE) == SDU_STEP_SKIPPED);
+}
+
 int main(void) {
     test_head();
     test_decide_table();
     test_notice();
     test_sha_text();
     test_result_records();
+    test_trial_and_step();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

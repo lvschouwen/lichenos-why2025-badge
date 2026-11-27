@@ -164,12 +164,23 @@ bool c6_card_record(char const *card_key, uint8_t const p4_sha[C6_IDENT_SHA_LEN]
     return true;
 }
 
-c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok) {
+c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok, bool p4_trial) {
     if (!from_card) {
         return C6_CARD_KEEP;
     }
     if (ident_ok) {
-        return C6_CARD_COPY;
+        return p4_trial ? C6_CARD_KEEP : C6_CARD_COPY;
     }
     return on_c6 ? C6_CARD_RECORD_FAILED : C6_CARD_KEEP;
+}
+
+bool c6_card_copy_fits(bool free_known, uint64_t free_bytes, unsigned long const bin_sizes[3]) {
+    if (!free_known) {
+        return true;
+    }
+    uint64_t blocks = C6_CARD_COPY_SLACK + 3 * 2; // one metadata block per .bin and .md5, the .md5 data inline
+    for (int i = 0; i < 3; i++) {
+        blocks += ((uint64_t)bin_sizes[i] + 4087) / 4088;
+    }
+    return blocks * 4096 <= free_bytes;
 }

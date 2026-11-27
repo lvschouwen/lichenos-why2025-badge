@@ -133,6 +133,35 @@ static bool held_root_name(char const *name, size_t len) {
     return false;
 }
 
+static bool segment_is(char const *p, size_t len, char const *want) {
+    while (len && (p[len - 1] == '.' || p[len - 1] == ' ')) {
+        len--;
+    }
+    return len == strlen(want) && strncasecmp(p, want, len) == 0;
+}
+
+bool ota_path_in_sd_update(char const *posix) {
+    static char const *const dir[] = {"sd", "lichen", "update"};
+    size_t                   k     = 0;
+    bool                     same  = true;
+    for (char const *p = posix; *p;) {
+        if (*p == '/') {
+            p++;
+            continue;
+        }
+        size_t len = strcspn(p, "/");
+        if (p[0] == '.' && (len == 1 || (len == 2 && p[1] == '.'))) {
+            return true; // anywhere, also after a segment that differs
+        }
+        if (k < 3 && !segment_is(p, len, dir[k])) {
+            same = false;
+        }
+        k++;
+        p += len;
+    }
+    return same && k >= 3;
+}
+
 bool ota_path_onair_held(char const *posix) {
     size_t k = 0; // segments seen
     for (char const *p = posix; *p;) {

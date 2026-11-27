@@ -24,6 +24,11 @@ bool ota_stream_temp_to_posix(char const *vms, char *out, size_t cap);
 // counts as held (fails closed).
 bool ota_path_onair_held(char const *posix);
 
+// Whether a posix path is the SD card's update folder (/sd/lichen/update, #595) or anything under it: a Wi-Fi write or
+// delete there leaves the Wi-Fi marker first (ota_sd_update_mark_wifi, review M3). By segment, any case, trailing dots
+// and spaces dropped; "." or ".." anywhere counts as inside (fails closed: the marker only makes a trial stricter).
+bool ota_path_in_sd_update(char const *posix);
+
 // The decisions of an upload that don't need hardware, so the host tests pin them (#528)
 // Offset of the next '/' that ends a directory of a /storage or /sd path, after from (0: start), skipping the mount
 // point itself (mkdir on it fails); 0 when no directory is left. Walk: for (n = next_dir(p, 0); n; n = next_dir(p, n)).

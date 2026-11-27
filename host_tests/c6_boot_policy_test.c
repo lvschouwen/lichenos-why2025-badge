@@ -319,15 +319,34 @@ static void test_card_record(void) {
 static void test_card_after(void) {
     for (int w = 0; w < 2; w++) {
         for (int i = 0; i < 2; i++) {
-            CHECK(c6_card_after(false, w, i) == C6_CARD_KEEP); // /storage/c6 was the source: the card is not touched
+            for (int t = 0; t < 2; t++) {
+                CHECK(c6_card_after(false, w, i, t) == C6_CARD_KEEP); // /storage/c6 was the source: card untouched
+            }
         }
     }
-    CHECK(c6_card_after(true, true, true) == C6_CARD_COPY);
-    CHECK(c6_card_after(true, false, true) == C6_CARD_COPY);           // the C6 already ran it: still the rescue copy
-    // The retry under a new P4 image (the record is per P4): the C6 already holds the card bundle, so the flasher
-    // writes nothing, and IDENT failing again must still record it, or every boot would retry it for ever
-    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
-    CHECK(c6_card_after(true, false, false) == C6_CARD_KEEP);          // the flasher never reached the C6
+    CHECK(c6_card_after(true, true, true, false) == C6_CARD_COPY);
+    CHECK(c6_card_after(true, false, true, false) == C6_CARD_COPY); // proven without a completed check: still copied
+    // Review M1: not while the new P4 is on trial; the boot after its mark-valid copies (the card still differs)
+    CHECK(c6_card_after(true, true, true, true) == C6_CARD_KEEP);
+    // The retry under a new P4 image (the record is per P4): the flasher's check finds the bundle on the C6 and writes
+    // nothing, and IDENT failing again must still record it, or every boot would retry it for ever
+    CHECK(c6_card_after(true, true, false, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_after(true, true, false, true) == C6_CARD_RECORD_FAILED); // a failure is recorded on trial too
+    // Review 6: a flash that did not complete (a card read error half way) is never recorded: tried again next boot
+    CHECK(c6_card_after(true, false, false, false) == C6_CARD_KEEP);
+}
+
+// Review M2: the copy writes all three .bin next to the old ones first, so it needs room for a whole second bundle
+static void test_copy_fits(void) {
+    unsigned long const sizes[3] = {21472, 3072, 1669008};
+    uint64_t            need     = (uint64_t)(C6_CARD_COPY_SLACK + 6 + 6 + 1 + 409) * 4096; // 6+1+409 data blocks
+    CHECK(c6_card_copy_fits(true, need, sizes));
+    CHECK(!c6_card_copy_fits(true, need - 1, sizes));
+    CHECK(!c6_card_copy_fits(true, 0, sizes));
+    CHECK(c6_card_copy_fits(false, 0, sizes)); // unknown: the write decides
+    unsigned long const tiny[3] = {1, 1, 4088};
+    CHECK(c6_card_copy_fits(true, (uint64_t)(C6_CARD_COPY_SLACK + 6 + 3) * 4096, tiny));
+    CHECK(!c6_card_copy_fits(true, (uint64_t)(C6_CARD_COPY_SLACK + 6 + 3) * 4096 - 1, tiny));
 }
 
 // The contract-change case (#595 option A): a card with a new C6 and a new P4. The old P4 records the card bundle
@@ -348,7 +367,7 @@ static void test_card_contract_change(void) {
 
     // Boot 1, old P4: the card bundle is new, flashed, IDENT fails -> recorded under the old P4
     CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, old_p4)) == C6_CARD_NEW);
-    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_after(true, true, false, false) == C6_CARD_RECORD_FAILED);
     CHECK(c6_card_record(card, old_p4, stored, sizeof(stored)));
     // The old P4 again (say the P4 install failed): the bundle stays ignored
     CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, old_p4)) == C6_CARD_FAILED);
@@ -357,9 +376,9 @@ static void test_card_contract_change(void) {
     c6_card_t c = c6_card_classify(6, card, storage, failed_under(stored, card, new_p4));
     CHECK(c == C6_CARD_NEW && c6_card_use(c, true));
     // ... the C6 already holds it (no write), and the new P4 gets IDENT: copied, the rescue copy is updated
-    CHECK(c6_card_after(true, true, true) == C6_CARD_COPY);
+    CHECK(c6_card_after(true, true, true, false) == C6_CARD_COPY);
     // ... or IDENT fails under the new P4 too: recorded under the new P4, so boot 3 goes back to /storage/c6
-    CHECK(c6_card_after(true, true, false) == C6_CARD_RECORD_FAILED);
+    CHECK(c6_card_after(true, true, false, false) == C6_CARD_RECORD_FAILED);
     CHECK(c6_card_record(card, new_p4, stored, sizeof(stored)));
     CHECK(c6_card_classify(6, card, storage, failed_under(stored, card, new_p4)) == C6_CARD_FAILED);
 }
@@ -379,6 +398,7 @@ int main(void) {
     test_card_record();
     test_card_after();
     test_card_contract_change();
+    test_copy_fits();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

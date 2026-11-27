@@ -8,6 +8,7 @@
 #include "fw_console.h"
 #include "nvs_fail.h"
 #include "sdcard.h"
+#include "storage.h"
 
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -240,59 +241,90 @@ static bool pair_paths(int i, bool md5, copy_paths_t *p) {
            c6_image_path_in(C6_IMAGE_DIR, name, p->dst, sizeof(p->dst));
 }
 
-// One pair at a time: the .bin and its .md5 into temps, the .bin read back against that .md5, then both renamed, so
-// /storage needs room for the largest file once, not for a second bundle (as ota-c6, #299). A failure keeps the old
-// pair; pairs already swapped stay, and a .bin and .md5 that disagree after an interrupted rename make the flasher
-// leave the C6 alone. The next boot with the card copies again (the card and /storage keys still differ).
-static bool copy_pair(int i, uint8_t *buf, int *err) {
-    copy_paths_t bin, md5;
-    if (!pair_paths(i, false, &bin) || !pair_paths(i, true, &md5)) {
-        return false;
-    }
-    bool ok = copy_file(bin.src, bin.tmp, buf, err) && copy_file(md5.src, md5.tmp, buf, err) &&
-              landed_ok(bin.tmp, md5.tmp, buf) && rename(bin.tmp, bin.dst) == 0 && rename(md5.tmp, md5.dst) == 0;
-    unlink(bin.tmp); // left over after a failure; gone already after the rename
-    unlink(md5.tmp);
-    return ok;
-}
-
+// The six files into temps next to the old bundle, each .bin read back against its .md5, and only when all six landed
+// the renames, so a copy that runs out of room (firmware.bin, the largest, comes last) never leaves a mix of old and
+// new pairs that each match their own .md5 (#595 review M2). Only a power cut between two renames can still mix them;
+// the next boot with the card copies again (the card and /storage keys differ).
 static bool copy_all(uint8_t *buf, int *err) {
+    copy_paths_t p, md5;
+    bool         ok = true;
     mkdir(C6_IMAGE_DIR, 0775); // an existing directory is fine
-    bool ok = true;
+    for (int k = 0; k < 6 && ok; k++) {
+        ok = pair_paths(k / 2, k % 2, &p) && copy_file(p.src, p.tmp, buf, err);
+    }
     for (int i = 0; i < 3 && ok; i++) {
-        ok = copy_pair(i, buf, err);
+        ok = pair_paths(i, false, &p) && pair_paths(i, true, &md5) && landed_ok(p.tmp, md5.tmp, buf);
+    }
+    for (int k = 0; k < 6 && ok; k++) {
+        ok = pair_paths(k / 2, k % 2, &p) && rename(p.tmp, p.dst) == 0;
+    }
+    for (int k = 0; k < 6; k++) {
+        if (pair_paths(k / 2, k % 2, &p)) {
+            unlink(p.tmp); // left over after a failure; gone already after the rename
+        }
     }
     return ok;
 }
 
-static bool copy_to_storage(void) {
+// Room for a whole second bundle on /storage (c6_card_copy_fits), from the card's .bin sizes
+static bool copy_room(void) {
+    unsigned long sizes[3];
+    for (int i = 0; i < 3; i++) {
+        char        path[80];
+        struct stat st;
+        if (!c6_image_path_in(C6_CARD_DIR, NAMES[i], path, sizeof(path)) || stat(path, &st) != 0) {
+            return false;
+        }
+        sizes[i] = (unsigned long)st.st_size;
+    }
+    uint64_t free_b = 0, total_b = 0;
+    bool     known  = storage_free_bytes(&free_b, &total_b);
+    return c6_card_copy_fits(known, free_b, sizes);
+}
+
+typedef enum { COPY_OK, COPY_NO_ROOM, COPY_FAILED } copy_t;
+
+static copy_t copy_to_storage(void) {
     uint8_t *buf = heap_caps_malloc(COPY_PIECE, MALLOC_CAP_SPIRAM); // short-lived; fread and fwrite copy
     if (!buf) {
-        return false;
+        return COPY_FAILED;
     }
-    bool ok = false;
-    int  err = 0;
+    copy_t r   = COPY_FAILED;
+    int    err = 0;
     if (sd_mounted() && sd_begin(CARD_WAIT_MS)) {
-        ok = copy_all(buf, &err);
-        sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
+        r = !copy_room() ? COPY_NO_ROOM : copy_all(buf, &err) ? COPY_OK : COPY_FAILED;
+        sd_end(r == COPY_FAILED && err ? sd_io_from_errno(err) : SD_IO_OK);
     }
     heap_caps_free(buf);
-    return ok;
+    return r;
+}
+
+bool c6_card_from_card(void) {
+    return s.from_card;
+}
+
+static void copy_and_report(void) {
+    copy_t r = copy_to_storage();
+    if (r == COPY_OK) {
+        ESP_LOGI(TAG, "card bundle proven by IDENT, copied to " C6_IMAGE_DIR);
+        save_record(NULL);
+        return;
+    }
+    ESP_LOGW(TAG, "card bundle proven, but not copied to " C6_IMAGE_DIR " (%s; the next boot tries again)",
+             r == COPY_NO_ROOM ? "no room" : "copy failed");
+    c6_hooks_notice("C6 update not kept on the badge",
+                    r == COPY_NO_ROOM ? "Installed from the SD card, but the badge's storage has no room for the copy "
+                                        "used without a card"
+                                      : "Installed from the SD card, but the copy used without a card failed");
 }
 
 void c6_card_finish(bool on_c6, bool ident_ok) {
     c6_card_end_reading(); // no-op normally: c6link ends the reading before the attach
     char record[C6_CARD_RECORD_MAX];
-    switch (c6_card_after(s.from_card, on_c6, ident_ok)) {
+    bool trial = c6_hooks_image_trial_pending();
+    switch (c6_card_after(s.from_card, on_c6, ident_ok, trial)) {
     case C6_CARD_COPY:
-        if (copy_to_storage()) {
-            ESP_LOGI(TAG, "card bundle proven by IDENT, copied to " C6_IMAGE_DIR);
-            save_record(NULL);
-        } else {
-            ESP_LOGW(TAG, "card bundle proven, but not copied to " C6_IMAGE_DIR " (the next boot tries again)");
-            c6_hooks_notice("C6 update not kept on the badge",
-                            "Installed from the SD card, but the copy for a boot without card failed");
-        }
+        copy_and_report();
         break;
     case C6_CARD_RECORD_FAILED:
         ESP_LOGW(TAG, "card bundle flashed but not proven by IDENT: the next boot uses " C6_IMAGE_DIR);
@@ -304,6 +336,9 @@ void c6_card_finish(bool on_c6, bool ident_ok) {
         break;
     case C6_CARD_KEEP:
     default:
+        if (s.from_card && ident_ok) {
+            ESP_LOGI(TAG, "card bundle proven; copied to " C6_IMAGE_DIR " at the first boot off trial");
+        }
         break;
     }
     s.from_card = false;

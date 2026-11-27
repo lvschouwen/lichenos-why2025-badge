@@ -93,9 +93,17 @@ bool        c6_card_use(c6_card_t c, bool md5_ok);
 bool c6_card_record(char const *card_key, uint8_t const p4_sha[C6_IDENT_SHA_LEN], char *out, size_t cap);
 
 // After the attach and IDENT, for a boot whose flasher took the card bundle (from_card): COPY it into /storage/c6 once
-// IDENT proved it (the no-card rescue: the C6 is the only Wi-Fi way back in); RECORD_FAILED when the C6's flash holds
-// it (on_c6: the flasher wrote it this boot, or its check found it there already, e.g. flashed under another P4 image)
-// and IDENT did not prove it, so the next boot goes back to /storage/c6; else KEEP (the flasher never reached the C6:
-// nothing is known, the next boot tries again).
+// IDENT proved it (the no-card rescue: the C6 is the only Wi-Fi way back in), but not while the running P4 is on trial
+// (p4_trial: a definite trial): after a contract change a P4 rollback would leave the old P4 with a rescue copy it
+// cannot talk to; the first boot after the mark-valid copies it (the card still differs from /storage). RECORD_FAILED
+// when the flasher completed with the card bundle on the C6 (on_c6: written this boot or found there already, e.g.
+// flashed under another P4 image) and IDENT did not prove it, so the next boot goes back to /storage/c6. Else KEEP: a
+// flash that did not complete (a card read error, UART busy) proves nothing, the next boot tries again.
 typedef enum { C6_CARD_KEEP, C6_CARD_COPY, C6_CARD_RECORD_FAILED } c6_card_after_t;
-c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok);
+c6_card_after_t c6_card_after(bool from_card, bool on_c6, bool ident_ok, bool p4_trial);
+
+// Whether /storage has room for the rescue copy: the three new .bin files and their .md5 next to the old ones (they
+// are written whole before any rename, #595 review). LittleFS: 4088 B of each 4096 B block per file, plus one block of
+// metadata per file and C6_CARD_COPY_SLACK blocks. free unknown (free_known false): let it try, the write says.
+#define C6_CARD_COPY_SLACK 4
+bool c6_card_copy_fits(bool free_known, uint64_t free_bytes, unsigned long const bin_sizes[3]);

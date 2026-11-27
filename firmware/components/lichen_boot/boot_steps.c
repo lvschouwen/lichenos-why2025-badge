@@ -4,7 +4,7 @@
 
 static boot_view_t view = {.pct = -1};
 
-static char const *const labels[BOOT_STEP_COUNT] = {"storage", "display", "PSRAM", "C6", "Wi-Fi", "clock", "LoRa", "apps"};
+static char const *const labels[BOOT_STEP_COUNT] = {"storage", "display", "PSRAM", "C6", "update", "Wi-Fi", "clock", "LoRa", "apps"};
 
 static uint32_t (*clock_ms)(void);
 

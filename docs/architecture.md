@@ -285,21 +285,30 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   stat and the `.md5` texts only, the card bundle is *same* as `/storage/c6` (nothing to do: an up-to-date card costs
   no hashing), *incomplete* (notice, ignored), *failed before* or *new*. A new one whose three `.bin` match their
   `.md5` is this boot's source (`c6_image_dir`): the bundle key, the flasher and the boot IDENT expectation read it,
-  under the card's batch lock, released before `esp_hosted_init`. After IDENT MATCH the bundle is copied into
-  `/storage/c6`, the no-card rescue: pair by pair, the `.bin` and `.md5` into temps, the `.bin` read back against the
-  `.md5`, then both renamed (room for the largest file once, as `ota-c6`). Held by the C6 (written this boot, or found
-  there by the flasher's check) and not proven: NVS `c6_card_bad` records its key plus the running P4's ELF sha, and the boots after go back to `/storage/c6` until the card bundle
-  or the P4 image changes. The copy needs no `#420` hold: what lands on `/storage/c6` is what the C6 just proved.
+  under the card's batch lock, released before `esp_hosted_init`; a runtime re-attach's IDENT reads `/storage/c6`
+  only. After IDENT MATCH, and only while the P4 is not definitely on trial (a rollback after a contract change would
+  leave the old P4 with a rescue it cannot talk to; the first boot after the mark-valid copies), the bundle is copied
+  into `/storage/c6`, the no-card rescue: room for a whole second bundle is checked first (`c6_card_copy_fits`; no
+  room is a notice), all six files go into temps, each `.bin` is read back against its `.md5`, and only then are the
+  six renamed (a power cut between two renames can still mix them; the next boot with the card copies again). The
+  flasher completed with the bundle on the C6 (written this boot, or found there by its check) and IDENT did not prove
+  it: NVS `c6_card_bad` records its key plus the running P4's ELF sha, and the boots after go back to `/storage/c6`
+  until the card bundle or the P4 image changes. A flash cut short (a card read error) records nothing. The copy needs
+  no `#420` hold: what lands on `/storage/c6` is what the C6 just proved.
 - **P4** (`ota/ota_sd_update.c`, rules in `ota/sd_update_policy.c`, D1): the cheap look reads the image header and the
   `esp_app_desc_t` at offset 32 (208 bytes) and compares its ELF sha256 with the running app's. Installed only when it
   differs, was not tried before (settings blob `sdu_tried`, bound by main: ota opens no NVS) and the running image is
   not definitely on trial. Then: the whole file's SHA-256 against `.sha256`, the card -> inactive slot in 4 KB pieces
   through a short-lived internal buffer, `esp_ota_end`, the slot read back with `esp_partition_read` and hashed
   (`esp_partition_get_sha256` returns the image's appended hash, never the file's), the attempt recorded, then
-  `esp_ota_set_boot_partition` and `system_restart_asked`. The arrival is marked as a slot switch
-  (`ota_image_note_slot_switch`): a card is physical access, so the trial needs no Wi-Fi (#411); a bad image still
-  rolls back and the record keeps it from installing again (one notice). A card pulled or a bad file before
-  `set_boot` leaves the boot slot alone, with a notice. An image that matched its `.sha256` but failed after the copy
+  `esp_ota_set_boot_partition` and `system_restart_asked`. The boot screen's *update* row (`BOOT_UPDATE`) shows the
+  write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). Without the Wi-Fi marker
+  `badge_fw.bin.wifi` the arrival is marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is
+  physical access, so the trial needs no Wi-Fi (#411). Any Wi-Fi write or delete under the folder leaves that marker
+  first (`ota_file_change_begin` -> `ota_sd_update_mark_wifi`; no marker, no write), `sd-prep` removes it, and an image
+  that came over Wi-Fi keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls back. A bad image rolls back and the
+  record keeps it from installing again (one notice). A card pulled or a bad file before `set_boot` leaves the boot slot
+  alone, with a notice. A power cut between the record and `set_boot` blocks that image until the file changes. An image that matched its `.sha256` but failed after the copy
   (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and
   rewritten on every boot; a card read, a flash write or a boot slot that failed is tried again (`sdu_result_records`).
 - **#420:** installs from the card stay allowed with the on-air list on (D3: physical access, the security posture). A

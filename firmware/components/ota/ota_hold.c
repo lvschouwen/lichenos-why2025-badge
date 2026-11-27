@@ -5,6 +5,7 @@
 #include "c6link.h"
 #include "fw_console.h"
 #include "ota_path.h"
+#include "ota_sd_update.h"
 #include "sdcard.h"
 
 #include <string.h>
@@ -58,6 +59,12 @@ bool ota_file_change_begin(int fd, char const *posix_path) {
     }
     if (c6) {
         c6link_bundle_changed();
+    }
+    // Review M3: what lands in the card's update folder over Wi-Fi installs with the Wi-Fi trial rule
+    if (ota_path_in_sd_update(posix_path) && !ota_sd_update_mark_wifi()) {
+        ota_change_end(false);
+        ota_send_reply(fd, 500, "couldn't mark the SD card's update folder as written over Wi-Fi, nothing changed\n");
+        return false;
     }
     return true;
 }

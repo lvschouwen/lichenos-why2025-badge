@@ -86,6 +86,7 @@ static void test_unset_defaults(void) {
     CHECK(c6_hooks_stack_free() == 0);
     c6_hooks_notice("C6 update", "ignored"); // #595: unset, the log only
     CHECK(notices == 0);
+    CHECK(c6_hooks_image_trial_pending()); // #595 review M1: unset is on trial, so no rescue copy is made
     CHECK(c6_hooks_image_on_trial()); // #285: nobody said the image is valid, so a reset could roll it back
     CHECK(begins == 0 && ends == 0 && attaches == 0 && no_links == 0 && downs == 0 && ups == 0);
 }
@@ -113,7 +114,8 @@ static void test_partial_tables(void) {
 static void test_full_tables(void) {
     reset_counts();
     c6link_boot_hooks_t const boot = {
-        .begin = on_begin, .progress = on_progress, .end = on_end, .image_on_trial = on_trial, .notice = on_notice};
+        .begin = on_begin, .progress = on_progress, .end = on_end, .image_on_trial = on_trial, .notice = on_notice,
+        .image_trial_pending = on_trial};
     c6link_net_hooks_t const  net  = {
         .attached = on_attached, .no_link = on_no_link, .driver_down = on_down, .driver_up = on_up, .stack_free = on_stack};
     c6link_set_boot_hooks(&boot);
@@ -135,6 +137,7 @@ static void test_full_tables(void) {
     // ota's answer comes through either way (#285)
     trial_answer = false;
     CHECK(!c6_hooks_image_on_trial());
+    CHECK(!c6_hooks_image_trial_pending());
     trial_answer = true;
     CHECK(c6_hooks_image_on_trial());
 }

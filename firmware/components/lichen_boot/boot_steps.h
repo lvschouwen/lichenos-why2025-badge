@@ -11,6 +11,7 @@ typedef enum {
     BOOT_DISPLAY,
     BOOT_PSRAM,
     BOOT_C6,
+    BOOT_UPDATE, // the SD card's P4 image (#595): checked, and written into the inactive slot when new
     BOOT_WIFI,
     BOOT_CLOCK,
     BOOT_LORA,

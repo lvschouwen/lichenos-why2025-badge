@@ -72,6 +72,20 @@ static void test_onair_held(void) {
     CHECK(ota_path_onair_held("/sd/lichen/update./badge_fw.bin"));
     CHECK(ota_path_onair_held("//sd//lichen/x/../update/badge_fw.bin"));
     CHECK(ota_path_onair_held("/sd/lichen/update"));
+    // Review M3: which Wi-Fi writes leave the update folder's Wi-Fi marker (fails closed: it only makes a trial stricter)
+    CHECK(ota_path_to_posix("SD0:[lichen.update]badge_fw.bin", upd, sizeof(upd)) && ota_path_in_sd_update(upd));
+    CHECK(ota_path_to_posix("SD0:[lichen.update.c6]firmware.bin", upd, sizeof(upd)) && ota_path_in_sd_update(upd));
+    CHECK(ota_path_in_sd_update("/sd/lichen/update"));
+    CHECK(ota_path_in_sd_update("/SD/Lichen/UPDATE./badge_fw.bin"));
+    CHECK(ota_path_in_sd_update("//sd//lichen//update//badge_fw.bin.sha256"));
+    CHECK(ota_path_in_sd_update("/sd/lichen/apps/../update/badge_fw.bin"));
+    CHECK(ota_path_in_sd_update("/sd/./x"));
+    CHECK(!ota_path_in_sd_update("/sd/lichen/apps/x/app.elf"));
+    CHECK(!ota_path_in_sd_update("/sd/lichen/updates/badge_fw.bin"));
+    CHECK(!ota_path_in_sd_update("/sd/lichen"));
+    CHECK(!ota_path_in_sd_update("/storage/lichen/update/badge_fw.bin"));
+    CHECK(!ota_path_in_sd_update("/sd/badge_fw.bin"));
+    CHECK(!ota_path_in_sd_update(""));
     CHECK(!ota_path_onair_held("/storage/notes.txt"));
     CHECK(!ota_path_onair_held("/storage"));
     CHECK(!ota_path_onair_held(""));

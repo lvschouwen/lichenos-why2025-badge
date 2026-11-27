@@ -139,7 +139,7 @@ int main(void) {
     CHECK(v.generation == g + 4);
     CHECK(v.state[BOOT_APPS] == STEP_PENDING);
 
-    char const *want[BOOT_STEP_COUNT] = {"storage", "display", "PSRAM", "C6", "Wi-Fi", "clock", "LoRa", "apps"};
+    char const *want[BOOT_STEP_COUNT] = {"storage", "display", "PSRAM", "C6", "update", "Wi-Fi", "clock", "LoRa", "apps"};
     for (int i = 0; i < BOOT_STEP_COUNT; i++) {
         CHECK(strcmp(boot_step_label((boot_step_t)i), want[i]) == 0);
     }
