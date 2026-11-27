@@ -22,6 +22,7 @@ ESP32-P4 runs Lichen (ESP-IDF 6.1, LVGL 9.6); ESP32-C6 is a radio coprocessor (W
 
 ## Where to look
 - `docs/architecture.md`, `docs/app-api.md`, `docs/shell-design.md`, `docs/code-standard.md`, `docs/ui-standard.md` (12 UI rules; cite numbers in reviews).
+- v3 work: `docs/v3-engineering-policy.md` (priorities, build vs reuse, dependency checks, v2 lessons) and `v3/perf/targets.toml` on the `v3` branch (beat v2, measured).
 - Code questions: `graphify query "<q>"` first; `graphify update` (no path) after merges. More: `.claude/docs/graphify.md`.
 - The issue is the spec: `gh issue view N --json body,comments --jq '.body, .comments[].body'`; the latest decision wins. Labels, scoring, bench checks: `.claude/docs/issues.md`.
 
