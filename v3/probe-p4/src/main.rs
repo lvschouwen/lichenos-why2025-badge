@@ -415,8 +415,14 @@ fn b2_locks() {
     hw::drain();
     // a) a locked R-only NAPOT entry binds M and grants U.
     pmp_set(E_LOCK_NAPOT, napot(LOCK_A, 0x100), NAPOT | R | L);
+    pl!("B2 step entry {E_LOCK_NAPOT} locked: cfg {:#04x} addr {:#x}", pmp_cfg_byte(E_LOCK_NAPOT), hw::pmpaddr_r(E_LOCK_NAPOT));
+    hw::drain();
     let m_r = m_lw(LOCK_A);
+    pl!("B2 step M read {}", show(m_r));
+    hw::drain();
     let m_w = m_sw(LOCK_A, 0xdead_beef);
+    pl!("B2 step M write {:?}", m_w.err());
+    hw::drain();
     check("B2.lock-binds-m", Some(m_r == Ok(0x1111_1111) && matches!(m_w, Err(t) if t.code() == 7)),
         format_args!("locked R entry: M read {}, M write {:?}", show(m_r), m_w.err().map(|t| t.code())));
     let u_r = user(uaddr(u_load), LOCK_A, 0, false);
