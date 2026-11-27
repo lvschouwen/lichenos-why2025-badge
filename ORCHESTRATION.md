@@ -52,9 +52,11 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27)
-- #593: merged, reproduced; open until #595 B proves ota-c6 via SD. Badge fw-4fcdd719, mixed C6 bundle on /storage: no `fw c6 reflash`.
-- #595 A: wt-4 `feat/595-sd-update` (impl-595). B after A, same branch.
-- #73 BLE wave A: wt-5 #598 probe (impl-598), wt-6 #599 pure logic (impl-599), wt-7 #513 (impl-513). #597 (C6 bt_set) waits for #585 (wt-3, uncommitted work in c6/main/app_main.c, no live agent).
-- Settings: #600 cleanup (P4 part) in wt-1 (impl-600); #601 bench round, at the next wave bench. #585 resumes after #595, then #597.
-- #595 A review: rev-595a; B building in wt-4 (impl-595).
+## Live (2026-11-27, 13:55)
+- Owner order: #595 merges and is benched first; no Bluetooth merge (#598, #599) before that bench.
+- #595: wt-4 ready to merge (rev-595a); impl-595 is committing a last test edit + docs line, then `merge-one.sh wt-4 feat/595-sd-update 595`. Bench list: scratchpad bench-wave-595.md (state on #595). Badge fw-4fcdd719, mixed C6 bundle on /storage: no `fw c6 reflash`. Allow list must be OFF (owner script) and the card out before the flash.
+- Merged, waiting for that bench: #513 (48f6d905), #600 (0d90d1fb P4, d0912db2 C6). #601 measurement round at the bench.
+- #598: wt-5 909337f0 reviewed, ready; merges after the #595 bench (check that esp_hid does not come back in lichen_ble's CMakeLists, #558).
+- #599: wt-6 (impl-599) fixing review findings (2 medium); then merge after #598.
+- #585 (wt-3, uncommitted, no agent) resumes after #595; then #597. wt-2 #587 claimed, idle.
+- Owner to run: `agent-wt done wt-1 --force` (#600 content is merged, SHAs differ) and remove wt-5/firmware/build-stale-598.
