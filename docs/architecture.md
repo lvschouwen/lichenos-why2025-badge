@@ -315,7 +315,9 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   there records nothing, and no Wi-Fi delete changes either part. The no-Wi-Fi trial (a slot switch,
   `ota_image_note_slot_switch`; a card prepared by hand is physical access, #411) needs both to say no: no pending bit,
   and the image is not `wifi_sha` (`sdu_trial_without_wifi`). Otherwise the image keeps the Wi-Fi rule, so one that
-  breaks Wi-Fi still rolls back. FAT's short alias (`BADGE_~1.BIN`) can't be named over Wi-Fi. A bad image rolls back and the
+  breaks Wi-Fi still rolls back. Stricter by design: while a Wi-Fi push of the image is not installed yet (the bit is
+  set), a card prepared by hand also gets the Wi-Fi rule; with Wi-Fi off it rolls back after `OTA_VALID_AFTER_S` and
+  is then skipped as tried until the file changes. FAT's short alias (`BADGE_~1.BIN`) can't be named over Wi-Fi. A bad image rolls back and the
   record keeps it from installing again (one notice). A card pulled or a bad file before `set_boot` leaves the boot slot
   alone, with a notice. A power cut between the record and `set_boot` blocks that image until the file changes. An image that matched its `.sha256` but failed after the copy
   (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and
