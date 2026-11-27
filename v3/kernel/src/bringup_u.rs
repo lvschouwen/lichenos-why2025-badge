@@ -87,7 +87,7 @@ fn run(f: unsafe extern "C" fn(), sp: usize, a0: usize, a1: usize) -> (Option<(u
     (u.fault.map(|c| (decode(c.cause).code, c.tval as usize, c.epc as usize)), u.exit)
 }
 
-/// The PMP view U runs under must grant nothing at the core-local windows; print what the table says.
+/// The PMP view U runs under: R-only over the CPU-subsystem window (#646), nothing at TCM; print what the table says.
 fn view(t: &mut Tally) {
     begin("pmp.view");
     let e = crate::pmp::read_entries();
@@ -96,9 +96,9 @@ fn view(t: &mut Tally) {
     record(
         t,
         "pmp.view",
-        perms == [0; 4],
+        perms == [1, 1, 1, 0],
         format_args!(
-            "table says U perms at CLIC {:#x}, CLIC line 7 {:#x}, CLINT {:#x}, TCM {:#x} (want all 0)",
+            "table says U perms at CLIC {:#x}, CLIC line 7 {:#x}, CLINT {:#x}, TCM {:#x} (want 1 1 1 0: the fixed R-only window entry, hardware refuses the loads; TCM denied)",
             perms[0], perms[1], perms[2], perms[3]
         ),
     );
