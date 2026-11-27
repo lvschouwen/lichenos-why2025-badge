@@ -52,11 +52,10 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27 20:50, v3 sprint)
-- v3 tip ec1bebb4 (pushed): #615 RAM proof plus #643 perf tooling. v3 merges: rebase, ff-only, ./v3/check.sh, push.
-- wt-5 feat/612-v3-pmp (pmp-612, Sonnet): checkpoint 2 + review fixes + #646 (CPU-subsystem window hang). Running mode 4; then a fix commit.
-- wt-6 feat/612-v3-core1 (core1-612, Opus): rebasing onto e244ce2f, then one bench.
-- Then ONE Opus review of d684e561..tip (both branches), then ff onto v3. State is on #612 and #646.
-- wt-8 feat/620-v3-psram (psram-620): #645 CPU 360 MHz (owner approved IDF-style PMU/DCDC, eFuse reads only), then the #620 PSRAM re-run at full clock. State is on #620 and #645.
-- Bench lock: one load-ram at a time, runs of 120 s or less. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
+## Live (2026-11-27 21:30, v3 sprint)
+- v3 tip 67ed44dc (pushed): #612 + #646 merged and closed; leftovers on #647, #617, #619. v3 merges: rebase, ff-only, ./v3/check.sh, push.
+- wt-5 / wt-6 (#612 branches) are on v3 but still claimed: `agent-wt done` refuses because they are not merged into main. Release them by hand or teach agent-wt the v3 base.
+- wt-8 feat/620-v3-psram (psram-620): one fix commit for the review on #620 (2 high: patched ROM cache write-back, pmu_init + PVT before 360; addendum: 160->120 fallback MR re-read, `bench-experiments` feature). Then the delta review by review-620, ff onto v3, close #620 (known limit: uncached single-word writes) and #645 (default 360/120).
+- #648 perf lab: Phase 0 research agent perflab-research (read-only) writes the scratchpad file 648-phase0.md; main posts it. Phases 1-2 start after #620 is on v3. Owner priority: 360/200.
+- Bench lock: one load-ram at a time, runs of 120 s or less; roadmap first. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
 - #615 next steps are owner flash writes.
