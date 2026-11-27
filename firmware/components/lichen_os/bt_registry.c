@@ -174,6 +174,27 @@ size_t bt_reg_static_services(bt_reg_t const *r, lichen_bt_svc_t *out, size_t ca
     return n;
 }
 
+// The Bluetooth Base UUID 00000000-0000-1000-8000-00805f9b34fb, on air (little-endian), without its 32-bit field
+static uint8_t const BASE_UUID[12] = {0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00};
+
+static bool on_base(lichen_bt_uuid_t const *u) {
+    return u->len == 16 && memcmp(u->b, BASE_UUID, sizeof(BASE_UUID)) == 0;
+}
+
+// A 16-bit SIG UUID written in its 128-bit form becomes the 16-bit one, so the reserved and duplicate checks see it
+// for what it is. False for a 32-bit SIG UUID (on the base, upper bytes set): no service of ours uses one.
+static bool uuid_norm(lichen_bt_uuid_t *u) {
+    if (!on_base(u)) {
+        return true;
+    }
+    if (u->b[14] || u->b[15]) {
+        return false;
+    }
+    lichen_bt_uuid_t n = {.len = 2, .b = {u->b[12], u->b[13]}};
+    *u                 = n;
+    return true;
+}
+
 static bool uuid_ok(lichen_bt_uuid_t const *u) {
     return u->len == 2 || u->len == 16;
 }
@@ -253,6 +274,22 @@ static lichen_bt_chr_t chr_take(bt_reg_t *r, unsigned svc, lichen_bt_chr_def_t c
     return 0; // not reached: the caller counted the free slots
 }
 
+// A copy of def with its UUIDs normalised (chrs holds the characteristics); false for what cannot be copied or a
+// 32-bit SIG UUID. The rest is svc_def_check's.
+static bool norm_def(lichen_bt_svc_def_t const *def, lichen_bt_svc_def_t *n, lichen_bt_chr_def_t *chrs) {
+    if (!def || !def->chrs || def->chr_count == 0 || def->chr_count > LICHEN_BT_SVC_CHRS_MAX) {
+        return false;
+    }
+    *n = *def;
+    memcpy(chrs, def->chrs, def->chr_count * sizeof(chrs[0]));
+    n->chrs = chrs;
+    bool ok = uuid_norm(&n->uuid);
+    for (unsigned i = 0; i < def->chr_count; i++) {
+        ok = uuid_norm(&chrs[i].uuid) && ok;
+    }
+    return ok;
+}
+
 lichen_bt_err_t bt_reg_service_add(
     bt_reg_t *r, bt_owner_t owner, lichen_bt_svc_def_t const *def, lichen_bt_svc_t *svc, lichen_bt_chr_t *chrs_out
 ) {
@@ -260,6 +297,12 @@ lichen_bt_err_t bt_reg_service_add(
     if (!o || o->revoked) {
         return LICHEN_BT_NOT_FOUND;
     }
+    lichen_bt_chr_def_t chrs[LICHEN_BT_SVC_CHRS_MAX];
+    lichen_bt_svc_def_t n;
+    if (!norm_def(def, &n, chrs)) {
+        return LICHEN_BT_INVALID;
+    }
+    def               = &n; // every check and the books see the normalised UUIDs only
     lichen_bt_err_t e = svc_def_check(r, o->kind, def);
     if (e != LICHEN_BT_OK) {
         return e;
@@ -623,17 +666,31 @@ static void put_name(adv_buf_t *b, char const *name) {
 }
 
 // What uuid would add to b: its bytes, plus 2 for the list's header when it is the first of its size
+// The bytes a UUID goes on air as: a 16-bit one in its 128-bit form is packed as the 16-bit one
+static uint8_t const *uuid_view(lichen_bt_uuid_t const *u, uint8_t *len) {
+    if (on_base(u) && !u->b[14] && !u->b[15]) {
+        *len = 2;
+        return u->b + 12;
+    }
+    *len = u->len;
+    return u->b;
+}
+
 static size_t uuid_cost(adv_buf_t const *b, lichen_bt_uuid_t const *u) {
-    uint8_t have = u->len == 2 ? b->n16 : b->n128;
-    return u->len + (have ? 0u : 2u);
+    uint8_t len;
+    uuid_view(u, &len);
+    uint8_t have = len == 2 ? b->n16 : b->n128;
+    return len + (have ? 0u : 2u);
 }
 
 static bool uuid_try(adv_buf_t *b, lichen_bt_uuid_t const *u, uint8_t idx) {
-    if (b->used + uuid_cost(b, u) > BT_ADV_MAX || (u->len == 16 && b->n128 >= 1)) {
+    uint8_t len;
+    uuid_view(u, &len);
+    if (b->used + uuid_cost(b, u) > BT_ADV_MAX || (len == 16 && b->n128 >= 1)) {
         return false;
     }
     b->used += uuid_cost(b, u);
-    if (u->len == 2) {
+    if (len == 2) {
         b->i16[b->n16++] = idx;
     } else {
         b->i128[b->n128++] = idx;
@@ -647,7 +704,8 @@ static void put_lists(adv_buf_t *b, size_t start, lichen_bt_uuid_t const *uuids,
     if (b->n16) {
         uint8_t d[BT_ADV_MAX];
         for (unsigned i = 0; i < b->n16; i++) {
-            memcpy(d + 2 * i, uuids[b->i16[i]].b, 2);
+            uint8_t len;
+            memcpy(d + 2 * i, uuid_view(&uuids[b->i16[i]], &len), 2);
         }
         put_ad(b, b->n16 == all16 ? 0x03 : 0x02, d, 2u * b->n16);
     }
@@ -662,7 +720,9 @@ static bool uuids_check(lichen_bt_uuid_t const *uuids, size_t n, size_t *all16, 
         if (!uuid_ok(&uuids[i])) {
             return false;
         }
-        *(uuids[i].len == 2 ? all16 : all128) += 1;
+        uint8_t len;
+        uuid_view(&uuids[i], &len);
+        *(len == 2 ? all16 : all128) += 1;
     }
     return true;
 }

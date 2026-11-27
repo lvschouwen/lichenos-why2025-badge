@@ -47,28 +47,42 @@ static void pair_attempts(void) {
     ble_pair_open(&p, 1000);
     CHECK(ble_pair_begin(&p, 1000, 0) == BLE_PAIR_GO);
     CHECK(ble_pair_begin(&p, 1001, 0) == BLE_PAIR_BUSY); // one at a time
-    CHECK(ble_pair_end(&p, 1002, false));                // failed auth: disconnect
+    CHECK(ble_pair_end(&p, 1002, false, false));         // failed auth: disconnect
     CHECK(p.fails == 1);
     CHECK(ble_pair_begin(&p, 1003, 0) == BLE_PAIR_GO);
-    ble_pair_end(&p, 1004, false);
+    ble_pair_end(&p, 1004, false, false);
     CHECK(ble_pair_locked_ms(&p, 1004) == 0);
     CHECK(ble_pair_begin(&p, 1005, 0) == BLE_PAIR_GO);
-    ble_pair_end(&p, 2000, false); // the third: locked out for 60 s
+    ble_pair_end(&p, 2000, false, false); // the third: locked out for 60 s
     CHECK(ble_pair_locked_ms(&p, 2000) == BLE_PAIR_LOCKOUT_MS);
     CHECK(ble_pair_begin(&p, 2000 + BLE_PAIR_LOCKOUT_MS - 1, 0) == BLE_PAIR_LOCKED);
     ble_pair_open(&p, 3000); // Settings again: the lockout stays
     CHECK(ble_pair_begin(&p, 3000, 0) == BLE_PAIR_LOCKED);
     CHECK(ble_pair_begin(&p, 2000 + BLE_PAIR_LOCKOUT_MS, 0) == BLE_PAIR_GO); // over, counted from zero again
     CHECK(p.fails == 0);
-    ble_pair_end(&p, 2000 + BLE_PAIR_LOCKOUT_MS + 1, false);
+    ble_pair_end(&p, 2000 + BLE_PAIR_LOCKOUT_MS + 1, false, false);
     CHECK(p.fails == 1 && !p.locked);
     // a stale end without a begin counts nothing
-    CHECK(ble_pair_end(&p, 70000, false)); // still dropped
+    CHECK(ble_pair_end(&p, 70000, false, false)); // still dropped
     CHECK(p.fails == 1);
     // success: failures forgotten and the window closes (one pairing per window)
     CHECK(ble_pair_begin(&p, 70001, 0) == BLE_PAIR_GO);
-    CHECK(!ble_pair_end(&p, 70002, true));
+    CHECK(!ble_pair_end(&p, 70002, true, true));
     CHECK(p.fails == 0 && !ble_pair_is_open(&p, 70003));
+}
+
+// A bond without MITM protection (Just Works) is a failed pairing: no bond kept, the link dropped, counted towards the
+// lockout, and the window stays open for a proper try
+static void pair_unauthenticated(void) {
+    ble_pair_t p;
+    ble_pair_init(&p);
+    ble_pair_open(&p, 0);
+    CHECK(ble_pair_begin(&p, 1, 0) == BLE_PAIR_GO);
+    CHECK(ble_pair_end(&p, 2, true, false)); // bonded but not authenticated: disconnect, delete the bond
+    CHECK(p.fails == 1 && ble_pair_is_open(&p, 3) && !p.busy);
+    CHECK(ble_pair_begin(&p, 3, 0) == BLE_PAIR_GO);
+    CHECK(!ble_pair_end(&p, 4, true, true));
+    CHECK(p.fails == 0 && !ble_pair_is_open(&p, 5));
 }
 
 static void pair_bonds(void) {
@@ -137,7 +151,9 @@ static void stranger_link(void) {
     // it failed: back to the 10 s from the link's start (long gone)
     ble_link_pairing(&l, t0 + 9000, false);
     CHECK(ble_link_should_drop(&l, t0 + 12000));
-    l.sec.bonded = true;
+    l.sec.bonded = true; // a Just Works bond: not authenticated, still a stranger
+    CHECK(ble_link_should_drop(&l, t0 + 12000));
+    l.sec.authenticated = true;
     CHECK(!ble_link_should_drop(&l, t0 + 1000000));
     // links we made, and the peer session's, are not strangers
     ble_link_init(&l, LICHEN_BT_ROLE_CENTRAL, 0);
@@ -166,6 +182,7 @@ static void passkey(void) {
 int main(void) {
     pair_window();
     pair_attempts();
+    pair_unauthenticated();
     pair_bonds();
     access_levels();
     conn_cap();

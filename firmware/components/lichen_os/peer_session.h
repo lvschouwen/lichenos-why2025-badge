@@ -33,13 +33,13 @@
 // Equal nonces: both refuse plainly, both invites end DECLINED. Any other badge's invite while we invite is refused.
 // A peer can send DECLINE + PEER_WHY_GLARE without having won: our invite still ends, only quietly (PEER_EV_YIELD).
 //
-// Wire format, little-endian: version (1), type, seq (2), ack (2), payload length (2), payload.
+// The wire format is the contract in lichen_bt.h (LICHEN_BT_PEER_*); the constants below are taken from it.
 
-#define PEER_VERSION       1u
-#define PEER_HDR           8u
+#define PEER_VERSION       LICHEN_BT_PEER_WIRE_VERSION
+#define PEER_HDR           LICHEN_BT_PEER_HDR
 #define PEER_MSG_MAX       LICHEN_BT_PEER_MSG_MAX
 #define PEER_FRAME_MAX     (PEER_HDR + PEER_MSG_MAX)
-#define PEER_INVITE_MAX    64u
+#define PEER_INVITE_MAX    LICHEN_BT_PEER_INVITE_MAX
 #define PEER_APP_MAX       13u // an app id (app_ns rules: a-z 0-9 _)
 #define PEER_NAME_MAX      LICHEN_BT_NAME_MAX
 #define PEER_PARAM_MAX     LICHEN_BT_PEER_PARAM_MAX
@@ -48,20 +48,20 @@
 #define PEER_RATE_SLOTS    8u     // peers the rate limit remembers
 #define PEER_ANSWER_MS     30000u // the person answers an invite
 #define PEER_PAIR_MS       30000u // numeric comparison on both screens
-#define PEER_KEEPALIVE_MS  5000u
-#define PEER_SILENCE_MS    20000u
-#define PEER_RTO_MS        2000u
-#define PEER_RETRIES       5u
-#define PEER_TXQ           4u
+#define PEER_KEEPALIVE_MS  LICHEN_BT_PEER_KEEPALIVE_MS
+#define PEER_SILENCE_MS    LICHEN_BT_PEER_SILENCE_MS
+#define PEER_RTO_MS        LICHEN_BT_PEER_RTO_MS
+#define PEER_RETRIES       LICHEN_BT_PEER_RETRIES
+#define PEER_TXQ           LICHEN_BT_PEER_WINDOW
 #define PEER_RXQ           4u
 
 typedef enum {
-    PEER_F_INVITE = 1,
-    PEER_F_ACCEPT,
-    PEER_F_DECLINE,
-    PEER_F_DATA,
-    PEER_F_ACK, // also the keepalive
-    PEER_F_END,
+    PEER_F_INVITE  = LICHEN_BT_PEER_F_INVITE,
+    PEER_F_ACCEPT  = LICHEN_BT_PEER_F_ACCEPT,
+    PEER_F_DECLINE = LICHEN_BT_PEER_F_DECLINE,
+    PEER_F_DATA    = LICHEN_BT_PEER_F_DATA,
+    PEER_F_ACK     = LICHEN_BT_PEER_F_ACK, // also the keepalive
+    PEER_F_END     = LICHEN_BT_PEER_F_END,
 } peer_ftype_t;
 
 typedef struct {

@@ -68,7 +68,8 @@ ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds
     return BLE_PAIR_GO;
 }
 
-bool ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool ok) {
+bool ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool bonded, bool authenticated) {
+    bool ok = bonded && authenticated; // a Just Works bond has no MITM protection: a failure like any other
     if (!p->busy) {
         return !ok; // no pairing began (a stale callback): nothing counted, a failed link still goes
     }
@@ -155,7 +156,7 @@ void ble_link_pairing(ble_link_t *l, uint32_t now_ms, bool under_way) {
 }
 
 bool ble_link_should_drop(ble_link_t const *l, uint32_t now_ms) {
-    if (l->role != LICHEN_BT_ROLE_PERIPHERAL || l->kind != BLE_LINK_PLAIN || l->sec.bonded) {
+    if (l->role != LICHEN_BT_ROLE_PERIPHERAL || l->kind != BLE_LINK_PLAIN || (l->sec.bonded && l->sec.authenticated)) {
         return false;
     }
     if (l->pairing) {

@@ -29,6 +29,15 @@ static peer_invite_t invite_of(uint32_t nonce, char const *app, char const *name
     return inv;
 }
 
+// The constants are the wire contract of lichen_bt.h (the A7 test peer implements it)
+static void wire_contract(void) {
+    CHECK(PEER_HDR == 8 && PEER_VERSION == 1 && PEER_TXQ == LICHEN_BT_PEER_WINDOW && PEER_INVITE_MAX == 64);
+    uint8_t b[PEER_HDR + 2];
+    size_t  n      = peer_frame_build(PEER_F_DATA, 0x0201, 0x0403, "xy", 2, b, sizeof(b));
+    uint8_t want[] = {1, LICHEN_BT_PEER_F_DATA, 0x01, 0x02, 0x03, 0x04, 2, 0, 'x', 'y'};
+    CHECK(n == sizeof(want) && memcmp(b, want, n) == 0);
+}
+
 static void frames(void) {
     uint8_t      b[PEER_FRAME_MAX + 4], data[PEER_MSG_MAX + 1];
     peer_frame_t f;
@@ -436,6 +445,27 @@ static void window_and_retransmit(void) {
     free(b.s);
 }
 
+// A resend is idempotent at the receiver: the same seq twice is acked again and dropped, never delivered twice, also
+// after the app read the first copy
+static void duplicate_once(void) {
+    badge_t a = {.s = new_session(), .link = 1}, b = {.s = new_session(), .link = 11};
+    open_pair(&a, &b, 0);
+    uint8_t f[PEER_FRAME_MAX], got[4];
+    size_t  n = peer_frame_build(PEER_F_DATA, 0, 0, "m", 1, f, sizeof(f));
+    CHECK(peer_session_on_frame(b.s, 1, 11, KEY_A, f, n) == PEER_RX_OK);
+    CHECK(b.s->rxq_n == 1 && b.s->rx_next == 1 && (peer_session_take_events(b.s) & PEER_EV_MSG));
+    CHECK(peer_session_on_frame(b.s, 2, 11, KEY_A, f, n) == PEER_RX_OK);
+    CHECK(b.s->rxq_n == 1 && b.s->rx_next == 1 && !(peer_session_take_events(b.s) & PEER_EV_MSG));
+    uint8_t ack[PEER_FRAME_MAX];
+    CHECK(peer_session_next_frame(b.s, 2, ack, sizeof(ack)) == PEER_HDR && ack[1] == PEER_F_ACK && ack[4] == 1);
+    CHECK(peer_session_recv(b.s, got, sizeof(got)) == 1 && got[0] == 'm');
+    CHECK(peer_session_on_frame(b.s, 3, 11, KEY_A, f, n) == PEER_RX_OK); // once more, after the read
+    CHECK(peer_session_recv(b.s, got, sizeof(got)) == -1 && b.s->rx_next == 1);
+    CHECK(peer_session_next_frame(b.s, 3, ack, sizeof(ack)) == PEER_HDR && ack[4] == 1); // acked again
+    free(a.s);
+    free(b.s);
+}
+
 static void rx_full_and_ack_lies(void) {
     badge_t a = {.s = new_session(), .link = 1}, b = {.s = new_session(), .link = 11};
     open_pair(&a, &b, 0);
@@ -695,6 +725,7 @@ static void fuzz_open(void) {
 }
 
 int main(void) {
+    wire_contract();
     frames();
     invites();
     fuzz();
@@ -703,6 +734,7 @@ int main(void) {
     app_exit();
     decline_and_timeouts();
     window_and_retransmit();
+    duplicate_once();
     rx_full_and_ack_lies();
     seq_wrap();
     keepalive_and_silence();

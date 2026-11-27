@@ -79,6 +79,40 @@ typedef enum {
 #define LICHEN_BT_PEER_UUID                                                                                            \
     {16, {0x8c, 0xd6, 0xe3, 0x04, 0xfb, 0xf5, 0xd2, 0x92, 0xa1, 0x4f, 0x57, 0x53, 0x8d, 0xaa, 0xb8, 0x98}}
 
+// ---- The peer session's wire format: the contract another device implements (the ESP32 test peer, #73 A7) ----
+// Every frame on the peer session's L2CAP channel (PSM LICHEN_BT_PSM_PEER), all fields little-endian:
+//   byte 0    version: LICHEN_BT_PEER_WIRE_VERSION. A receiver drops a frame of any other version (a later version
+//             changes this byte; nothing else of the header is reserved).
+//   byte 1    type, below; a receiver drops an unknown one (7..255 are reserved)
+//   bytes 2-3 seq: DATA only, 0 for the others
+//   bytes 4-5 ack: in every frame, the next DATA seq the sender expects (cumulative)
+//   bytes 6-7 payload length; the frame is exactly 8 + length bytes
+//   types: 1 INVITE (1..64 B: nonce u32, app id length u8 + id [a-z0-9_]{1,13}, app version u16, name length u8 +
+//          name (no bytes below 0x20 or 0x7f, up to LICHEN_BT_NAME_MAX), param length u8 + param (up to
+//          LICHEN_BT_PEER_PARAM_MAX), nothing after); 2 ACCEPT (0 B); 3 DECLINE (0 B, or 1 B = 2: the receiver lost a
+//          glare and should wait for the sender's invite); 4 DATA (1..LICHEN_BT_PEER_MSG_MAX B); 5 ACK (0 B, also the
+//          keepalive); 6 END (0 B, or 1 B = 1: the sender's app exited)
+// The channel after both sides are secured: DATA seq starts at 0 and adds 1 per message (mod 2^16). At most
+// LICHEN_BT_PEER_WINDOW messages are unacked; past that the sender's app gets BUSY. A receiver takes only the seq it
+// expects; a duplicate (a resend) is acked again and dropped, never delivered twice; a message it has no room for is
+// not acked. The sender resends from its oldest unacked message after LICHEN_BT_PEER_RTO_MS without progress, at
+// most LICHEN_BT_PEER_RETRIES times, then ends the session. A side sends an ACK when LICHEN_BT_PEER_KEEPALIVE_MS
+// passed without a frame of its own, and ends the session after LICHEN_BT_PEER_SILENCE_MS without one from the peer.
+#define LICHEN_BT_PEER_WIRE_VERSION 1u
+#define LICHEN_BT_PEER_HDR          8u
+#define LICHEN_BT_PEER_INVITE_MAX   64u
+#define LICHEN_BT_PEER_WINDOW       4u
+#define LICHEN_BT_PEER_RTO_MS       2000u
+#define LICHEN_BT_PEER_RETRIES      5u
+#define LICHEN_BT_PEER_KEEPALIVE_MS 5000u
+#define LICHEN_BT_PEER_SILENCE_MS   20000u
+#define LICHEN_BT_PEER_F_INVITE     1u
+#define LICHEN_BT_PEER_F_ACCEPT     2u
+#define LICHEN_BT_PEER_F_DECLINE    3u
+#define LICHEN_BT_PEER_F_DATA       4u
+#define LICHEN_BT_PEER_F_ACK        5u
+#define LICHEN_BT_PEER_F_END        6u
+
 // ---- Handles. 0 is never valid; a handle carries a generation, so one of an app that stopped never matches. ----
 typedef uint32_t lichen_bt_svc_t;
 typedef uint32_t lichen_bt_chr_t;

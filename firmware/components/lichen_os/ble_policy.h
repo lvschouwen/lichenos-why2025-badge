@@ -14,7 +14,8 @@
 // - Access: a characteristic's level against the link's security, answered as the ATT error that makes a phone pair.
 // - The connection cap: BLE_CONN_MAX links, at most BLE_CONN_PERIPHERAL_MAX that peers made to us and
 //   BLE_CONN_CENTRAL_MAX that we made.
-// - A stranger's link: one a peer made to us that is not bonded is dropped BLE_UNBONDED_DROP_MS after it came up, or
+// - A stranger's link: one a peer made to us that is not bonded with authenticated keys is dropped BLE_UNBONDED_DROP_MS
+// after it came up, or
 //   BLE_PAIR_SMP_MS after its pairing started. Links we made (an app's GATT client) and the peer session's links
 //   (never bonded, the session has its own timeouts) are not strangers.
 // - The passkey: 6 digits drawn without bias, shown "123 456".
@@ -66,9 +67,10 @@ uint32_t           ble_pair_left_ms(ble_pair_t const *p, uint32_t now_ms);
 uint32_t           ble_pair_locked_ms(ble_pair_t const *p, uint32_t now_ms);
 // A peer asks to pair; bonds is how many the store holds. BLE_PAIR_GO marks it busy until ble_pair_end.
 ble_pair_verdict_t ble_pair_begin(ble_pair_t *p, uint32_t now_ms, unsigned bonds);
-// The pairing that began ended (ok: bonded). A failure counts towards the lockout. True: disconnect the link (every
-// failed authentication does).
-bool               ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool ok);
+// The pairing that began ended: bonded, and with MITM-protected keys (authenticated). Anything less is a failure: it
+// counts towards the lockout, the window stays open, and true says disconnect the link and delete any bond the stack
+// stored for it (a Just Works bond is never kept). True also for a stale end without a begin that failed.
+bool               ble_pair_end(ble_pair_t *p, uint32_t now_ms, bool bonded, bool authenticated);
 
 // ---- Access levels ----
 

@@ -211,6 +211,30 @@ to, and the pure parts that enforce them are already host-tested (`lichen_os/ble
   session runs on an L2CAP channel. One session per badge; invites are refused while one is under way, while the
   badge is not Visible, and within 10 s of the last one shown from the same badge.
 
+#### The peer session's wire format
+
+What another device must speak to be a peer (the ESP32 test peer of #73 A7). `lichen_bt.h` (`LICHEN_BT_PEER_*`) is
+the authority; `lichen_os/peer_session.c` implements it and `peer_session_test.c` pins the byte layout. Frames run
+on the L2CAP channel at PSM 0xc1, little-endian:
+
+| Bytes | Field | Notes |
+|---|---|---|
+| 0 | version | 1; a receiver drops any other (the field a later version changes) |
+| 1 | type | 1 INVITE, 2 ACCEPT, 3 DECLINE, 4 DATA, 5 ACK (also the keepalive), 6 END; 7-255 reserved, dropped |
+| 2-3 | seq | DATA only (0 for the rest): from 0 once the session is open, +1 per message, mod 2^16 |
+| 4-5 | ack | every frame: the next DATA seq the sender expects |
+| 6-7 | length | payload bytes; the frame is exactly 8 + length |
+
+- **Payloads:** INVITE 1-64 B (nonce u32, app id length + id, app version u16, name length + name, param length +
+  param); ACCEPT and ACK none; DECLINE none or `2` (the receiver lost a glare: wait for the sender's invite); DATA
+  1-512 B; END none or `1` (the sender's app exited).
+- **The window:** at most 4 unacked DATA messages (the app gets `BUSY` past that). A receiver takes only the seq it
+  expects; a duplicate is acked again and dropped, never delivered twice; a message it has no room for is not acked.
+  The sender resends from the oldest unacked after 2 s without progress, up to 5 times, then ends the session.
+- **Liveness:** an ACK after 5 s without a frame of one's own; 20 s without a frame from the peer ends the session.
+- **Before the data:** INVITE (the central), ACCEPT or DECLINE (the invitee, after its person's key press), then
+  numeric-comparison pairing (encrypted, never bonded). DATA that arrives before a side is secured is not taken.
+
 ## The two surfaces, the gate, capabilities and lifecycle
 
 Layers and the call rules: [architecture.md](architecture.md) "Layers". The surfaces and the gate are in force since

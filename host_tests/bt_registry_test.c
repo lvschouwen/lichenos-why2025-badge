@@ -32,6 +32,8 @@ static lichen_bt_uuid_t u128(uint8_t seed) {
     return u;
 }
 
+static uint8_t const *ad_find(uint8_t const *b, size_t len, uint8_t type, size_t *dlen);
+
 static lichen_bt_chr_def_t const CHR_RW = {
     .uuid    = {2, {0x19, 0x2a}},
     .props   = LICHEN_BT_PROP_READ | LICHEN_BT_PROP_WRITE,
@@ -112,6 +114,52 @@ static void services(void) {
     d = svc_def(u16(0x2003), nine, LICHEN_BT_SVC_CHRS_MAX);
     CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_OK);
     CHECK(bt_reg_service_add(&r, app, NULL, &svc, chr) == LICHEN_BT_INVALID);
+}
+
+// A 16-bit SIG UUID in its 128-bit form (on the Bluetooth Base UUID) is the same UUID: it never slips past the
+// reserved or duplicate checks, and it is kept (and advertised) as the 16-bit one
+static lichen_bt_uuid_t on_base(uint16_t v, uint16_t hi) {
+    lichen_bt_uuid_t u = {.len = 16, .b = {0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00}};
+    u.b[12]            = (uint8_t)v;
+    u.b[13]            = (uint8_t)(v >> 8);
+    u.b[14]            = (uint8_t)hi;
+    u.b[15]            = (uint8_t)(hi >> 8);
+    return u;
+}
+
+static void base_uuid(void) {
+    bt_reg_t r;
+    bt_reg_init(&r);
+    bt_owner_t          os = bt_reg_owner_add(&r, BT_OWNER_OS), app = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    lichen_bt_svc_t     svc;
+    lichen_bt_chr_t     chr[2];
+    lichen_bt_svc_def_t d = svc_def(on_base(0x1800, 0), &CHR_RW, 1);
+    CHECK(bt_reg_service_add(&r, os, &d, &svc, chr) == LICHEN_BT_INVALID); // GAP in disguise
+    d = svc_def(on_base(0x1801, 0), &CHR_RW, 1);
+    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_INVALID);
+    d = svc_def(u16(0x180f), &CHR_RW, 1);
+    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_OK);
+    d = svc_def(on_base(0x180f, 0), &CHR_RW, 1);
+    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_EXISTS); // the same service
+    d = svc_def(on_base(0x1234, 0x0001), &CHR_RW, 1);                      // a 32-bit SIG UUID: refused
+    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_INVALID);
+    // kept as 16-bit: in the books and in the advert
+    bt_reg_init(&r);
+    app                   = bt_reg_owner_add(&r, BT_OWNER_BUILTIN);
+    lichen_bt_chr_def_t c = CHR_RW;
+    c.uuid                = on_base(0x2a19, 0);
+    d                     = svc_def(on_base(0x181c, 0), &c, 1);
+    CHECK(bt_reg_service_add(&r, app, &d, &svc, chr) == LICHEN_BT_OK);
+    bt_chr_info_t info;
+    CHECK(bt_reg_chr_info(&r, app, chr[0], &info) && info.uuid.len == 2 && info.uuid.b[0] == 0x19);
+    lichen_bt_uuid_t adv[2];
+    CHECK(bt_reg_advert_uuids(&r, adv, 2) == 1 && adv[0].len == 2 && adv[0].b[0] == 0x1c && adv[0].b[1] == 0x18);
+    // and the packer folds one it is handed directly
+    bt_adv_t         a;
+    lichen_bt_uuid_t one = on_base(0x180f, 0);
+    size_t           dl;
+    CHECK(bt_adv_pack(BT_ADV_FLAGS_GEN, "Lichen", &one, 1, 0, &a) && a.adv_len == 11 + 4);
+    CHECK(ad_find(a.adv, a.adv_len, 0x03, &dl) && dl == 2);
 }
 
 static void slots_full(void) {
@@ -533,6 +581,7 @@ static void adv_uuids(void) {
 int main(void) {
     owners();
     services();
+    base_uuid();
     slots_full();
     os_budget_and_static();
     handles();
