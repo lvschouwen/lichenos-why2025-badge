@@ -146,28 +146,78 @@ static void test_trial_and_step(void) {
     CHECK(sdu_step_of((sdu_action_t)99, SDU_DONE) == SDU_STEP_SKIPPED);
 }
 
-// Review H1: the Wi-Fi provenance is the pushed image's SHA-256 in the attempt record, not a file on the card. A Wi-Fi
-// delete of anything in the folder changes no record, so the pushed image keeps the Wi-Fi trial; a card prepared by
-// hand with another image gets the no-Wi-Fi trial
+// The attempt record's provenance part as the server and the boot step change it (the glue in ota_sd_update.c):
+// begin = the pending bit before a Wi-Fi write of the image, landed = wifi_sha after its swap, install = the boot
+// step's record after it picked the trial
+typedef struct {
+    uint8_t flags;
+    uint8_t wifi_sha[SDU_SHA_LEN];
+} prov_t;
+static void prov_begin(prov_t *p) {
+    p->flags = sdu_flags_wifi_pending(p->flags);
+}
+static void prov_landed(prov_t *p, uint8_t const sha[SDU_SHA_LEN]) {
+    memcpy(p->wifi_sha, sha, SDU_SHA_LEN);
+}
+// The boot install of the card's image: true = the no-Wi-Fi trial; the record as the install leaves it
+static bool prov_install(prov_t *p, uint8_t const card[SDU_SHA_LEN]) {
+    bool by_hand = sdu_trial_without_wifi(card, p->wifi_sha, p->flags);
+    p->flags     = sdu_flags_after(p->flags, SDU_DONE);
+    return by_hand;
+}
+
+// Review H1 and the security pass on 87646eee: the provenance is the sticky pending bit plus the SHA-256 of the last
+// image that landed over Wi-Fi, both off the card; the no-Wi-Fi trial needs both to say no
 static void test_wifi_provenance(void) {
-    uint8_t pushed[SDU_SHA_LEN], hand[SDU_SHA_LEN], none[SDU_SHA_LEN] = {0};
-    memset(pushed, 0xA5, sizeof(pushed));
-    memset(hand, 0xA5, sizeof(hand));
-    hand[31] ^= 1;
-    uint8_t rec[SDU_SHA_LEN];
-    memcpy(rec, pushed, sizeof(rec)); // ota_sd_update_note_wifi_image before the pushed file landed
-    CHECK(!sdu_trial_without_wifi(pushed, rec)); // the pushed image: the Wi-Fi rule
-    // ... after any Wi-Fi delete in the folder (a marker-like name, the .sha256, badge_fw.bin itself pushed again): the
-    // record is untouched by deletes, so the same image still gets the Wi-Fi rule
-    CHECK(!sdu_trial_without_wifi(pushed, rec));
-    CHECK(sdu_trial_without_wifi(hand, rec));  // a different image copied on a PC: physical access
-    CHECK(sdu_trial_without_wifi(hand, none)); // nothing ever pushed over Wi-Fi
-    CHECK(sdu_trial_without_wifi(none, none)); // an all-zero record means none, never "matches"
-    // The record's flags: the attempt starts untold, a failed image is recorded failed and told, else unchanged
-    CHECK(sdu_flags_after(SDU_REC_TOLD, SDU_DONE) == 0);
-    CHECK(sdu_flags_after(0, SDU_FAIL_IMAGE) == (SDU_REC_FAILED | SDU_REC_TOLD));
+    uint8_t a[SDU_SHA_LEN], b[SDU_SHA_LEN], hand[SDU_SHA_LEN], none[SDU_SHA_LEN] = {0};
+    memset(a, 0xA5, sizeof(a));
+    memset(b, 0x5A, sizeof(b));
+    memset(hand, 0x3C, sizeof(hand));
+    // A lands over Wi-Fi, then push B fails its swap (wifi_sha is only written after a swap): the card holds A
+    prov_t p = {0};
+    prov_begin(&p);
+    prov_landed(&p, a);
+    prov_begin(&p); // B begins; its swap fails, so no prov_landed
+    CHECK(!prov_install(&p, a)); // A keeps the Wi-Fi trial
+    // A lands, B is abandoned half way (the same record: pending set at B's offset 0, no landing)
+    prov_t q = {0};
+    prov_begin(&q);
+    prov_landed(&q, a);
+    prov_begin(&q);
+    CHECK(!prov_install(&q, a));
+    // A lands, then push B lands too: the card holds B, which is wifi_sha now (and pending is set): the Wi-Fi trial
+    prov_t l = {0};
+    prov_begin(&l);
+    prov_landed(&l, a);
+    prov_begin(&l);
+    prov_landed(&l, b);
+    CHECK(!prov_install(&l, b));
+    CHECK(l.flags == 0); // only this real install cleared the pending bit
+    CHECK(!prov_install(&l, b)); // ... and B stays the Wi-Fi image on a later install too (wifi_sha)
+    // A skip or a failed install leaves the pending bit: only sdu_flags_after(SDU_DONE) clears it
+    for (int r = SDU_FAIL_READ; r <= SDU_FAIL_BOOT; r++) {
+        CHECK(sdu_flags_after(SDU_REC_WIFI_PENDING, (sdu_result_t)r) & SDU_REC_WIFI_PENDING);
+    }
+    // Even if the install had already cleared the pending bit, A is still wifi_sha: the Wi-Fi trial
+    CHECK(!sdu_trial_without_wifi(a, a, 0));
+    // A hand-prepared card after an install: no pending bit, another image: the no-Wi-Fi trial
+    CHECK(q.flags == 0);
+    CHECK(prov_install(&q, hand));
+    // A Wi-Fi image pushed, then any Wi-Fi delete in the folder (no record change): still the Wi-Fi trial
+    prov_t r = {0};
+    prov_begin(&r);
+    prov_landed(&r, b);
+    CHECK(!prov_install(&r, b));
+    // A hand-prepared card, nothing ever pushed: no-Wi-Fi; an all-zero wifi_sha never matches
+    CHECK(sdu_trial_without_wifi(hand, none, 0));
+    CHECK(sdu_trial_without_wifi(none, none, 0));
+    CHECK(!sdu_trial_without_wifi(hand, none, SDU_REC_WIFI_PENDING)); // pending alone keeps the Wi-Fi rule
+    // The record's flags: the install clears pending and told, a failed image is recorded failed and told and keeps
+    // pending (no trial was picked), anything else leaves them
+    CHECK(sdu_flags_after(SDU_REC_TOLD | SDU_REC_WIFI_PENDING, SDU_DONE) == 0);
+    CHECK(sdu_flags_after(SDU_REC_WIFI_PENDING, SDU_FAIL_IMAGE) == (SDU_REC_FAILED | SDU_REC_TOLD | SDU_REC_WIFI_PENDING));
     CHECK(sdu_flags_after(0, SDU_FAIL_READBACK) == (SDU_REC_FAILED | SDU_REC_TOLD));
-    CHECK(sdu_flags_after(SDU_REC_TOLD, SDU_FAIL_READ) == SDU_REC_TOLD);
+    CHECK(sdu_flags_after(SDU_REC_WIFI_PENDING, SDU_FAIL_READ) == SDU_REC_WIFI_PENDING);
     CHECK(SDU_READBACK_TRIES == 2); // L1: one more read before a read-back mismatch is recorded
     // The hex the server has (X-File-SHA256, lowercase from the receiver) to the bytes the record holds
     char    hex[65];

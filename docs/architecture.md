@@ -306,13 +306,16 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   (`esp_partition_get_sha256` returns the image's appended hash, never the file's), the attempt recorded, then
   `esp_ota_set_boot_partition` and `system_restart_asked`. The boot screen's *update* row (`BOOT_UPDATE`) shows the
   write's percent and ends done, skipped or failed with the reason (`sdu_step_of`). A slot that reads back different
-  is read once more before it counts (`SDU_READBACK_TRIES`, the #569/#593 read-path flips). Before a `badge_fw.bin`
-  lands in the folder over Wi-Fi (whole push or the streamed finish, before the swap), its SHA-256 goes into the
-  attempt record (`wifi_sha`, NVS: `ota_wifi_image_noted` -> `ota_sd_update_note_wifi_image`; not saved means not
-  written); a C6 file or anything else there records nothing, and no Wi-Fi delete changes it. An image whose SHA-256 is
-  not that one is marked as a slot switch (`ota_image_note_slot_switch`): a card prepared by hand is physical access,
-  so the trial needs no Wi-Fi (#411). The pushed image keeps the Wi-Fi rule, so one that breaks Wi-Fi still rolls
-  back (`sdu_trial_without_wifi`). FAT's short alias (`BADGE_~1.BIN`) can't be named over Wi-Fi. A bad image rolls back and the
+  is read once more before it counts (`SDU_READBACK_TRIES`, the #569/#593 read-path flips). Provenance lives in the
+  attempt record (NVS), never on the card, in two fail-safe parts: before any Wi-Fi write of `badge_fw.bin` into the
+  folder begins (a whole push, or a stream at offset 0) the sticky `SDU_REC_WIFI_PENDING` bit is set
+  (`ota_sd_update_wifi_begin`; not saved means not written), cleared only by a boot install once it picked the trial;
+  and only after its swap succeeded does `wifi_sha` become that image's SHA-256 (`ota_sd_update_wifi_landed`). So a
+  push that fails or is abandoned can't make an earlier Wi-Fi image look prepared by hand; a C6 file or anything else
+  there records nothing, and no Wi-Fi delete changes either part. The no-Wi-Fi trial (a slot switch,
+  `ota_image_note_slot_switch`; a card prepared by hand is physical access, #411) needs both to say no: no pending bit,
+  and the image is not `wifi_sha` (`sdu_trial_without_wifi`). Otherwise the image keeps the Wi-Fi rule, so one that
+  breaks Wi-Fi still rolls back. FAT's short alias (`BADGE_~1.BIN`) can't be named over Wi-Fi. A bad image rolls back and the
   record keeps it from installing again (one notice). A card pulled or a bad file before `set_boot` leaves the boot slot
   alone, with a notice. A power cut between the record and `set_boot` blocks that image until the file changes. An image that matched its `.sha256` but failed after the copy
   (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and

@@ -101,7 +101,10 @@ sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r) {
     }
 }
 
-bool sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wifi_sha[SDU_SHA_LEN]) {
+bool sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wifi_sha[SDU_SHA_LEN], uint8_t flags) {
+    if (flags & SDU_REC_WIFI_PENDING) {
+        return false;
+    }
     uint8_t any = 0;
     for (int i = 0; i < SDU_SHA_LEN; i++) {
         any |= wifi_sha[i];
@@ -109,12 +112,16 @@ bool sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wif
     return !any || memcmp(digest, wifi_sha, SDU_SHA_LEN) != 0;
 }
 
+uint8_t sdu_flags_wifi_pending(uint8_t flags) {
+    return (uint8_t)(flags | SDU_REC_WIFI_PENDING);
+}
+
 uint8_t sdu_flags_after(uint8_t old, sdu_result_t r) {
     if (r == SDU_DONE) {
         return 0;
     }
     if (sdu_result_records(r)) {
-        return (uint8_t)(SDU_REC_FAILED | SDU_REC_TOLD);
+        return (uint8_t)(SDU_REC_FAILED | SDU_REC_TOLD | (old & SDU_REC_WIFI_PENDING));
     }
     return old;
 }

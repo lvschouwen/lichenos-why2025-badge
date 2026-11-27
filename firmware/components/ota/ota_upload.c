@@ -294,16 +294,19 @@ bool ota_place_reply(int fd, ota_place_t step, int err, ota_place_names_t const 
     return true;
 }
 
-bool ota_wifi_image_noted(int fd, char const *posix, char const *sha_hex) {
-    uint8_t sha[SDU_SHA_LEN];
-    if (!ota_path_is_sd_update_image(posix)) {
-        return true;
-    }
-    if (sdu_sha_from_hex(sha_hex, sha) && ota_sd_update_note_wifi_image(sha)) {
+bool ota_wifi_image_begin(int fd, char const *posix) {
+    if (!ota_path_is_sd_update_image(posix) || ota_sd_update_wifi_begin()) {
         return true;
     }
     ota_respond(fd, 500, "couldn't record the SD card's update image as pushed over Wi-Fi, nothing written");
     return false;
+}
+
+void ota_wifi_image_landed(char const *posix, char const *sha_hex) {
+    uint8_t sha[SDU_SHA_LEN];
+    if (ota_path_is_sd_update_image(posix) && sdu_sha_from_hex(sha_hex, sha)) {
+        ota_sd_update_wifi_landed(sha);
+    }
 }
 
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
@@ -319,7 +322,7 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
     if (!ota_drive_ready(fd, vms) || !ota_storage_room(fd, vms, len, 0, 0) || !ota_file_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
     }
-    if (!ota_wifi_image_noted(fd, path, sha_hex)) {
+    if (!ota_wifi_image_begin(fd, path)) {
         ota_change_end(false);
         return false;
     }
@@ -338,6 +341,9 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         sd_end(step == OTA_PLACE_OK ? SD_IO_OK : step == OTA_PLACE_VERIFY ? SD_IO_NEUTRAL : sd_io_from_errno(err));
     }
     ota_change_end(false);
+    if (step == OTA_PLACE_OK) {
+        ota_wifi_image_landed(path, sha_hex); // only now: a failed swap leaves the image that was there recorded as it was
+    }
     ota_place_names_t const names = {.vms = vms, .path = path, .temp = temp};
     return ota_place_reply(fd, step, err, &names, len, sent);
 }

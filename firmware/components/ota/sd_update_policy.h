@@ -70,6 +70,7 @@ char const *sdu_result_text(sdu_result_t r);
 // The attempt record's flags byte (ota_sd_record_t.flags)
 #define SDU_REC_TOLD   0x01 // the "not installed again" notice was raised for this image
 #define SDU_REC_FAILED 0x02 // it failed its check after the copy (sdu_result_records), rather than being installed
+#define SDU_REC_WIFI_PENDING 0x04 // a Wi-Fi write of the update image began since the last install picked its trial
 // The notice for an image skipped as tried, by the record's flags
 char const *sdu_tried_text(uint8_t flags);
 
@@ -79,18 +80,21 @@ char const *sdu_tried_text(uint8_t flags);
 typedef enum { SDU_STEP_DONE, SDU_STEP_SKIPPED, SDU_STEP_FAILED } sdu_step_t;
 sdu_step_t sdu_step_of(sdu_action_t a, sdu_result_t r);
 
-// Review M3/H1: provenance by content, kept off the card. Before a badge_fw.bin lands in the update folder over Wi-Fi
-// its SHA-256 goes into the attempt record (wifi_sha, NVS through main's hooks), and nothing a Wi-Fi client sends can
-// take that away again (no file on the card, a delete changes nothing). The install's trial needs no Wi-Fi only for an
-// image whose SHA-256 (digest) is not that one: a card prepared by hand is physical access (like `fw slot other`), an
-// image that came over Wi-Fi keeps the Wi-Fi rule (#411), so one that breaks Wi-Fi still rolls back. A C6 push or any
-// other file in the folder records nothing.
-bool sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wifi_sha[SDU_SHA_LEN]);
+// Review M3/H1: provenance kept off the card, in the attempt record (NVS through main's hooks), fail-safe in two parts.
+// SDU_REC_WIFI_PENDING is set before any Wi-Fi write of badge_fw.bin into the update folder begins and is cleared only
+// by a boot install once it picked the trial rule (sdu_flags_after, SDU_DONE); wifi_sha is the SHA-256 of the last
+// image whose swap succeeded. A push that fails or is abandoned leaves the pending bit, so the image already there
+// (an earlier Wi-Fi one) keeps the Wi-Fi rule; a delete changes nothing; a C6 push or any other file records nothing.
+// The trial needs no Wi-Fi only when both say no: no pending bit, and the image (digest) is not wifi_sha. A card
+// prepared by hand is physical access (like `fw slot other`); an image that came over Wi-Fi keeps the Wi-Fi rule
+// (#411), so one that breaks Wi-Fi still rolls back.
+bool    sdu_trial_without_wifi(uint8_t const digest[SDU_SHA_LEN], uint8_t const wifi_sha[SDU_SHA_LEN], uint8_t flags);
+uint8_t sdu_flags_wifi_pending(uint8_t flags);
 // 64 hex digits (either case) -> 32 bytes; false for anything else
 bool sdu_sha_from_hex(char const *hex, uint8_t out[SDU_SHA_LEN]);
 // The flags of the record an install writes, from the ones it read at the start (old): the attempt before set_boot
-// (SDU_DONE) starts untold; a failure of the image (sdu_result_records) is recorded failed and told; any other result
-// keeps old as it is.
+// (SDU_DONE) starts afresh (untold, and the pending bit is cleared: this install picked its trial with it); a failure
+// of the image (sdu_result_records) is recorded failed and told, keeping the pending bit; any other result keeps old.
 uint8_t sdu_flags_after(uint8_t old, sdu_result_t r);
 
 // L1: a slot that reads back different is read once more before it counts; a second read that matches was a flip on

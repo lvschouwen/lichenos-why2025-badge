@@ -209,6 +209,8 @@ static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
     if (r != SDU_DONE) {
         return r;
     }
+    // The trial rule is picked from the record as it was read, before the attempt record clears the pending bit
+    bool by_hand = sdu_trial_without_wifi(j->digest, j->wifi_sha, j->flags);
     // Before the boot slot changes: a rollback brings the badge back here, and the record stops a second try
     if (!tried_write(j->elf_sha, sdu_flags_after(j->flags, SDU_DONE))) {
         return SDU_FAIL_RECORD;
@@ -217,7 +219,7 @@ static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
         tried_write(NULL, j->flags); // never made the boot slot: not tried
         return SDU_FAIL_BOOT;
     }
-    if (sdu_trial_without_wifi(j->digest, j->wifi_sha)) {
+    if (by_hand) {
         ota_image_note_slot_switch(slot); // a card prepared by hand is physical access: no Wi-Fi needed (#411)
     } else {
         ESP_LOGI(TAG, "the image came over Wi-Fi: its trial keeps the Wi-Fi rule");
@@ -323,17 +325,35 @@ void ota_sweep_stale_temps(void) {
     }
 }
 
-bool ota_sd_update_note_wifi_image(uint8_t const sha[32]) {
-    ota_sd_record_t r = {0};
+static bool record_load(ota_sd_record_t *r) {
     if (!s_hooks.record_get || !s_hooks.record_set) {
-        return false; // no store: fail closed, the file is not put in place
+        return false;
     }
-    if (!s_hooks.record_get(&r)) {
-        memset(&r, 0, sizeof(r)); // none stored yet
+    if (!s_hooks.record_get(r)) {
+        memset(r, 0, sizeof(*r)); // none stored yet
     }
-    if (memcmp(r.wifi_sha, sha, SDU_SHA_LEN) == 0) {
-        return true; // the same image again: no NVS write
+    return true;
+}
+
+bool ota_sd_update_wifi_begin(void) {
+    ota_sd_record_t r;
+    if (!record_load(&r)) {
+        return false; // no store: fail closed, nothing is written
+    }
+    if (r.flags & SDU_REC_WIFI_PENDING) {
+        return true; // already set: no NVS write
+    }
+    r.flags = sdu_flags_wifi_pending(r.flags);
+    return s_hooks.record_set(&r);
+}
+
+void ota_sd_update_wifi_landed(uint8_t const sha[32]) {
+    ota_sd_record_t r;
+    if (!record_load(&r) || memcmp(r.wifi_sha, sha, SDU_SHA_LEN) == 0) {
+        return;
     }
     memcpy(r.wifi_sha, sha, SDU_SHA_LEN);
-    return s_hooks.record_set(&r);
+    if (!s_hooks.record_set(&r)) {
+        ESP_LOGW(TAG, "the Wi-Fi image's SHA-256 was not saved; the pending bit keeps its Wi-Fi trial");
+    }
 }

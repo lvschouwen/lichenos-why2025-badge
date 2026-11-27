@@ -24,8 +24,9 @@ bool ota_stream_temp_to_posix(char const *vms, char *out, size_t cap);
 // counts as held (fails closed).
 bool ota_path_onair_held(char const *posix);
 
-// Whether a posix path is the image in the SD card's update folder (/sd/lichen/update/badge_fw.bin, #595): one landing
-// there over Wi-Fi has its SHA-256 recorded first (ota_sd_update_note_wifi_image, review H1). By segment, any case,
+// Whether a posix path is the image in the SD card's update folder (/sd/lichen/update/badge_fw.bin, #595): a Wi-Fi
+// write there sets the pending bit first and records its SHA-256 once it landed (ota_sd_update_wifi_begin and
+// ota_sd_update_wifi_landed, review H1). By segment, any case,
 // trailing dots and spaces dropped (FAT folds them); "." or ".." anywhere counts as it (fails closed: the record only
 // makes a trial stricter).
 bool ota_path_is_sd_update_image(char const *posix);

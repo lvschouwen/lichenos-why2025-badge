@@ -11,6 +11,7 @@
 #include "ota_hold.h"
 #include "ota_pieces.h"
 #include "ota_sd_stream.h"
+#include "ota_sd_update.h"
 #include "sdcard.h"
 #include "ota_valid.h"
 #include "sdkconfig.h"
@@ -291,6 +292,13 @@ static bool file_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     if (!ota_file_change_begin(fd, path)) {
         return false;
     }
+    // H1: the sticky pending bit before anything of the update image is written (a failed or abandoned push keeps it)
+    if (ota_path_is_sd_update_image(path) && !ota_sd_update_wifi_begin()) {
+        ota_change_end(false);
+        ota_drain_body(fd, pre_len, body);
+        ota_respond(fd, 500, "couldn't record the SD card's update image as pushed over Wi-Fi, nothing written");
+        return false;
+    }
     // The mark stays until the upload lands or is dropped (stream_abandon, finish_stream): "fw onair on" sees it
     if (sd && !sd_begin(SD_WAIT_MS)) {
         ota_change_end(false);
@@ -473,12 +481,6 @@ static void finish_stream(int fd) {
         staged_reset();
         return;
     }
-    // H1: before the swap, so a power cut after it can't leave a Wi-Fi image unrecorded
-    if (mapped && !ota_wifi_image_noted(fd, path, staged.file_sha256)) {
-        hook_end(false, false);
-        staged_reset();
-        return;
-    }
     bool locked = mapped && (!staged.sd || sd_begin(SD_FINISH_WAIT_MS));
     if (locked) {
         step = stream_swap(path, &err);
@@ -487,6 +489,9 @@ static void finish_stream(int fd) {
             sd_end(step == OTA_PLACE_OK ? SD_IO_OK : step == OTA_PLACE_VERIFY ? SD_IO_NEUTRAL : sd_io_from_errno(err));
         }
         staged.temp_live = false; // renamed, dropped, or (LOST) kept on purpose: not ours to remove any more
+    }
+    if (step == OTA_PLACE_OK) {
+        ota_wifi_image_landed(path, staged.file_sha256); // H1: only after the swap; the pending bit was set at offset 0
     }
     ota_place_names_t const names = {.vms = staged.path, .path = path, .temp = staged.temp};
     bool landed = ota_place_reply(fd, step, err, &names, staged.total, staged.sent);
