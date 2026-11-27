@@ -6,6 +6,7 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "sdcard.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ota_bmp.h"
@@ -298,7 +299,8 @@ static void start_screenshot(int fd) {
 }
 
 // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces, "zpieces" compressed pieces
-// (#298), "sd0-stream" that a file for SD0: may exceed FILE_MAX because its pieces go straight to the card (#529);
+// (#298), "sd0-stream" that a file for SD0: may exceed FILE_MAX because its pieces go straight to the card (#529),
+// "sd0-card" that a card is mounted now, so ota-firmware and ota-c6 go through its update folder (#595);
 // "storage free N" (#299) lets
 // it check a file push fits before it sends a byte
 static void respond_info(int fd) {
@@ -310,8 +312,8 @@ static void respond_info(int fd) {
     // The hw object makes the line longer than ota_respond's stack buffer: built in the PSRAM body buffer, which no other
     // request uses while this one is answered (#321)
     char *line = (char *)ota_body_buf;
-    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces sd0-stream%s%s%s%s; hw ", esp_app_get_description()->version,
-                          ota_hooks.prepare ? " prepare" : "", room, ota_hooks.api_version ? "; api " : "",
+    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces sd0-stream%s%s%s%s%s; hw ", esp_app_get_description()->version,
+                          sd_mounted() ? " sd0-card" : "", ota_hooks.prepare ? " prepare" : "", room, ota_hooks.api_version ? "; api " : "",
                           ota_hooks.api_version ? ota_hooks.api_version : "");
     n          = n < 0 ? 0 : n > 255 ? 255 : n; // snprintf says what it would have written
     n         += (int)ota_hw_json(ota_hooks.hw_text, line + n, 1024);

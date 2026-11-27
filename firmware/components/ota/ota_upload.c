@@ -11,6 +11,7 @@
 #include "ota_hold.h"
 #include "ota_path.h"
 #include "ota_pieces.h"
+#include "ota_sd_stream.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "sha256.h"
@@ -354,27 +355,6 @@ void ota_respond_begin_failed(int fd, esp_err_t err) {
     }
 }
 
-// Install a checked firmware image (received whole in memory) into the other app slot
-static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long sent) {
-    if (!ota_image_header_ok(data, len, CONFIG_IDF_FIRMWARE_CHIP_ID)) {
-        ota_respond(fd, 422, "not an app image for this chip, nothing erased or installed");
-        return false;
-    }
-    esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
-    esp_ota_handle_t       handle;
-    esp_err_t              err  = slot ? esp_ota_begin(slot, len, &handle) : ESP_ERR_NOT_FOUND;
-    if (err != ESP_OK) {
-        ota_respond_begin_failed(fd, err);
-        return false;
-    }
-    if (esp_ota_write(handle, data, len) != ESP_OK) {
-        esp_ota_abort(handle);
-        ota_respond(fd, 500, "flash write failed, nothing installed");
-        return false;
-    }
-    return ota_install_slot(fd, slot, handle, len, sent);
-}
-
 // The same for flash_chunk_same, keeping the error so the reply names it
 typedef struct {
     esp_partition_t const *part;
@@ -426,51 +406,12 @@ __attribute__((noinline)) bool ota_finish_assets(int fd, uint8_t const *data, si
     return true;
 }
 
+// A whole-body firmware push would hold the image in PSRAM until it is checked (#595 D2): only pieces are taken, which
+// go straight into the inactive slot and are hashed there before it is installed (ota_piece_http.c)
 static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
-    if (!ota_whole_body_ok(req)) {
-        ota_respond(fd, 400, "X-Piece-Size belongs to a piece (with X-Offset), nothing installed");
-        return;
-    }
-    if (req->content_length <= 0 || !req->has_sha256) {
-        ota_respond(fd, req->content_length < 0 ? 411 : 400, "needs Content-Length and X-Content-SHA256");
-        return;
-    }
-    if (req->content_length > FIRMWARE_MAX) {
-        ota_respond(fd, 413, "firmware is larger than an app slot (%d bytes)", FIRMWARE_MAX);
-        return;
-    }
-    size_t       guess = req->deflate ? FIRMWARE_MAX : (size_t)req->content_length;
-    memory_ctx_t mem   = {.cap = guess};
-    mem.data           = malloc(mem.cap);
-    if (!mem.data) {
-        ota_respond(fd, 503, "not enough memory for %zu bytes", guess);
-        return;
-    }
-    // begin first: it stops the other tasks, and the body must not start arriving before they are gone (#76)
-    hook_begin(OTA_KIND_FIRMWARE, NULL, req->content_length);
-    if (req->expect_continue) {
-        ota_send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
-    }
-    char sha_hex[OTA_SHA256_HEX + 1];
-    ota_progress_base = 0;
-    body_t body = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
-                   .max = FIRMWARE_MAX, .sink = memory_sink, .ctx = &mem};
-    bool   ok   = ota_receive_body(fd, body, sha_hex);
-    if (!ok || strcmp(sha_hex, req->sha256) != 0) {
-        hook_end(false, false);
-        free(mem.data);
-        if (ok) {
-            ota_respond(fd, 400, "SHA-256 mismatch, nothing installed (got %lld bytes, sha256 %s)", ota_last_received, sha_hex);
-        } else {
-            ota_respond(fd, 400, "transfer failed after %lld of %lld bytes, nothing installed", ota_last_received,
-                        req->content_length);
-        }
-        return;
-    }
-    // rebooting: the badge restarts into it by itself, unless the sender holds that (X-Reboot: hold, #298)
-    bool installed = finish_firmware(fd, mem.data, mem.len, ota_last_received);
-    hook_end(installed, installed && !req->hold_reboot);
-    free(mem.data);
+    (void)pre; // ota_whole_body_refused: always
+    ota_drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
+    ota_respond(fd, 400, "send firmware in pieces (X-Offset, X-Total-Size, X-File-SHA256), nothing installed");
 }
 
 // A push onto a directory name (e.g. FLASH0:c6) must not replace the directory (#5)
@@ -500,8 +441,9 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     if (!ota_drive_ready(fd, req->path)) {
         return;
     }
-    if (req->content_length > FILE_MAX) {
-        ota_respond(fd, 413, "file is larger than %d bytes", FILE_MAX);
+    if (ota_whole_body_refused(req->route, req->content_length)) { // in pieces, streamed to a temp file (#595)
+        ota_respond(fd, 413, "a file above %d bytes goes in pieces (X-Offset, X-Total-Size, X-File-SHA256)",
+                    OTA_WHOLE_FILE_MAX);
         return;
     }
     if (ota_is_directory(path)) {
@@ -514,7 +456,7 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     }
     // A plain body has its exact size; a compressed one starts from a guess and grows (up to FILE_MAX)
     size_t       guess = req->deflate ? (size_t)req->content_length * 3 : (size_t)req->content_length;
-    memory_ctx_t mem   = {.cap = guess > FILE_MAX ? FILE_MAX : (guess ? guess : 1)};
+    memory_ctx_t mem   = {.cap = guess > OTA_WHOLE_FILE_MAX ? OTA_WHOLE_FILE_MAX : (guess ? guess : 1)};
     mem.data           = malloc(mem.cap);
     if (!mem.data) {
         ota_respond(fd, 503, "not enough memory for %lld bytes", req->content_length);
@@ -527,7 +469,7 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     char sha_hex[OTA_SHA256_HEX + 1];
     ota_progress_base = 0;
     body_t body = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
-                   .max = FILE_MAX, .sink = memory_sink, .ctx = &mem};
+                   .max = OTA_WHOLE_FILE_MAX, .sink = memory_sink, .ctx = &mem};
     bool   ok   = ota_receive_body(fd, body, sha_hex);
     if (!ok || strcmp(sha_hex, req->sha256) != 0) {
         hook_end(false, false);

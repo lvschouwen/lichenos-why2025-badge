@@ -11,7 +11,7 @@
 // and whether the "tried before" notice for it was raised. ota may not open NVS (#235): main binds the settings' blob.
 typedef struct {
     uint8_t elf_sha[32]; // all zero: none (an image without an ELF sha is never installed)
-    uint8_t told;
+    uint8_t flags;       // SDU_REC_TOLD, SDU_REC_FAILED (sd_update_policy.h)
 } ota_sd_record_t;
 
 typedef struct {

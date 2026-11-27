@@ -18,7 +18,8 @@
 #include <stdint.h>
 
 #define FIRMWARE_MAX    OTA_FIRMWARE_MAX
-#define FILE_MAX        (4 * 1024 * 1024) // received into PSRAM before it touches storage (#40)
+#define FILE_MAX        (4 * 1024 * 1024) // a FLASH0: file in pieces, streamed to its temp file (#595)
+
 #define ASSETS_MAX      (3 * 1024 * 1024) // the assets partition (firmware/partitions.csv, #22)
 #define READ_TIMEOUT_S  10
 #define HEAD_DEADLINE_S 15

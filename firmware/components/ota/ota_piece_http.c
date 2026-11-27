@@ -1,6 +1,7 @@
 // Uploads in pieces (#447, from ota_server.c): PUT /firmware, /file and /assets with X-Offset. Each piece is checked
-// on its own and resent alone if damaged; firmware goes straight into the inactive slot (#37), the rest is staged in
-// PSRAM; the whole file is checked once more before it is written or installed.
+// on its own and resent alone if damaged; firmware goes straight into the inactive slot (#37), a file into a temp file
+// next to its target (SD0: #529, FLASH0: #595), assets are staged in PSRAM; the whole file is checked once more (and a
+// file read back) before it is written, swapped in or installed.
 #include "ota_server_priv.h"
 
 #include "esp_heap_caps.h"
@@ -41,10 +42,11 @@ static struct {
     bool                   ota_open;
     bool                   dirty; // the last attempt at the current piece wrote (part of) it: erase before the next
     long                   last_s; // when the last piece came: an upload left half-way is dropped (ota_piece_expire)
-    // SD0: files are not staged whole either (#529): data holds one piece (OTA_SD_PIECE_MAX) while it arrives, with no
-    // card lock; then it goes to the temp file next to the target under the lock. temp_live: the temp file exists and is
-    // this upload's to remove.
-    bool                   sd;
+    // Files are not staged whole either (SD0: #529, FLASH0: #595): data holds one piece (OTA_SD_PIECE_MAX) while it
+    // arrives, with no lock; then it goes to the temp file next to the target (on the card under its lock). temp_live:
+    // the temp file exists and is this upload's to remove.
+    bool                   streamed; // a file streamed to its temp file
+    bool                   sd;       // ... on the card
     bool                   temp_live;
     char                   temp[OTA_PATH_MAX + 16 + sizeof(OTA_STREAM_TEMP_NAME)];
 } staged;
@@ -87,8 +89,10 @@ static bool sd_stream_card_gone(void) {
     return ota_sd_stream_card_gone(sd_mounted(), info.generation, sd_generation);
 }
 
-static void sd_abandon(void) {
-    if (staged.temp_live) {
+static void stream_abandon(void) {
+    if (staged.temp_live && !staged.sd) {
+        unlink(staged.temp); // /storage: no lock, never goes away
+    } else if (staged.temp_live) {
         // A card that went (or came back as a new mount) is not unlinked on: the next sweep decides, by name
         if (!sd_stream_card_gone() && sd_begin(SD_WAIT_MS)) {
             unlink(staged.temp);
@@ -101,8 +105,8 @@ static void sd_abandon(void) {
 }
 
 static void staged_reset(void) {
-    if (staged.sd) {
-        sd_abandon();
+    if (staged.streamed) {
+        stream_abandon();
     }
     if (staged.ota_open) {
         esp_ota_abort(staged.ota);
@@ -268,13 +272,16 @@ __attribute__((noinline)) static void rehash_piece(size_t offset, size_t len, ui
 
 // ---- SD0: streamed to the card (#529) ----
 
-// Offset 0 of an SD0: file: mark the change, make the temp file empty next to the target. False = answered already
-// (the unread body dropped first). Nothing is shown or stopped yet (hook_begin comes after), so a refusal here leaves
-// the badge as it was.
-static bool sd_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
+// Offset 0 of a file: mark the change, make the temp file empty next to the target. False = answered already (the
+// unread body dropped first). Nothing is shown or stopped yet (hook_begin comes after), so a refusal here leaves the
+// badge as it was. A C6 file is marked changed here (ota_file_change_begin), before its temp is made.
+static bool file_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     char path[OTA_PATH_MAX + 16];
     long long body = req->expect_continue ? 0 : req->content_length;
-    orphan_sweep();
+    bool      sd   = ota_path_is_sd(req->path);
+    if (sd) {
+        orphan_sweep();
+    }
     if (!ota_path_to_posix(req->path, path, sizeof(path)) ||
         !ota_stream_temp_to_posix(req->path, staged.temp, sizeof(staged.temp))) {
         ota_drain_body(fd, pre_len, body);
@@ -284,8 +291,8 @@ static bool sd_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     if (!ota_file_change_begin(fd, path)) {
         return false;
     }
-    // The mark stays until the upload lands or is dropped (sd_abandon, finish_sd): "fw onair on" in between sees it
-    if (!sd_begin(SD_WAIT_MS)) {
+    // The mark stays until the upload lands or is dropped (stream_abandon, finish_stream): "fw onair on" sees it
+    if (sd && !sd_begin(SD_WAIT_MS)) {
         ota_change_end(false);
         ota_drain_body(fd, pre_len, body);
         ota_respond(fd, 409, "SD card busy or not mounted, nothing written");
@@ -296,28 +303,34 @@ static bool sd_stream_open(int fd, ota_request_t const *req, size_t pre_len) {
     if (!dir) {
         ota_mkdir_parents(path);
         unlink(staged.temp); // left by an upload that was cut
-        unlink(SD_BASE "/" OTA_STREAM_TEMP_NAME); // and one aimed at another folder, never removed
+        if (sd) {
+            unlink(SD_BASE "/" OTA_STREAM_TEMP_NAME); // and one aimed at another folder, never removed
+        }
         f = fopen(staged.temp, "wb");
     }
     int err = f ? 0 : errno;
     bool ok = f && fclose(f) == 0;
-    sd_info_t info;
-    sd_info(&info); // inside the lock: no remount can slip in between the open and this reading
-    sd_generation = info.generation;
-    sd_end(ok || dir ? SD_IO_OK : sd_io_from_errno(err));
+    if (sd) {
+        sd_info_t info;
+        sd_info(&info); // inside the lock: no remount can slip in between the open and this reading
+        sd_generation = info.generation;
+        sd_end(ok || dir ? SD_IO_OK : sd_io_from_errno(err));
+    }
     if (!ok) {
         ota_change_end(false);
         ota_drain_body(fd, pre_len, body);
         if (dir) {
             ota_respond(fd, 409, "%s is a directory, nothing written", req->path);
         } else {
-            ota_respond(fd, 500, "couldn't create the temp file on the SD card, nothing written");
+            ota_respond(fd, 500, "couldn't create the temp file on the %s, nothing written",
+                        sd ? "SD card" : "internal storage");
         }
         return false;
     }
-    staged.sd        = true;
+    staged.streamed  = true;
+    staged.sd        = sd;
     staged.temp_live = true;
-    if (ota_sd_orphan_is_live(orphan, staged.temp, true)) {
+    if (sd && ota_sd_orphan_is_live(orphan, staged.temp, true)) {
         orphan[0] = '\0'; // a leftover of the same name was just replaced by this upload's temp
     }
     ota_sd_stream_begin(&sd_stream, staged.total);
@@ -328,8 +341,8 @@ typedef enum { SD_WRITE_OK, SD_WRITE_BUSY, SD_WRITE_FAILED } sd_write_t;
 
 // A verified piece goes to the temp file at offset, under the card's lock for this write only. r+b: the temp file keeps
 // the pieces before this one; a resent piece overwrites its own place.
-static sd_write_t sd_write_piece(size_t offset, uint8_t const *data, size_t len) {
-    if (!sd_begin(SD_WAIT_MS)) {
+static sd_write_t stream_write_piece(size_t offset, uint8_t const *data, size_t len) {
+    if (staged.sd && !sd_begin(SD_WAIT_MS)) {
         return SD_WRITE_BUSY;
     }
     FILE *f   = fopen(staged.temp, "r+b");
@@ -342,14 +355,16 @@ static sd_write_t sd_write_piece(size_t offset, uint8_t const *data, size_t len)
             ok  = false;
         }
     }
-    sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
+    if (staged.sd) {
+        sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
+    }
     return ok ? SD_WRITE_OK : SD_WRITE_FAILED;
 }
 
-// One piece of an SD0: file: received into the piece buffer with no lock on the card (a slow or stalled sender must not
+// One piece of a streamed file: received into the piece buffer with no lock on the card (a slow or stalled sender must not
 // hold it), checked, then written. The running hash moves on only after the write succeeded, so a piece sent again
 // (damaged, cut off, card busy) is never hashed twice.
-__attribute__((noinline)) static bool sd_piece_receive(int fd, ota_request_t const *req, uint8_t const *pre,
+__attribute__((noinline)) static bool stream_piece_receive(int fd, ota_request_t const *req, uint8_t const *pre,
                                                        size_t pre_len, bool continued, size_t len) {
     char        sha_hex[OTA_SHA256_HEX + 1];
     fixed_ctx_t mem = {.data = staged.data, .cap = len};
@@ -380,22 +395,62 @@ __attribute__((noinline)) static bool sd_piece_receive(int fd, ota_request_t con
         return false;
     }
     sha256_update(cand, staged.data, len);
-    sd_write_t w = sd_write_piece(staged.got, staged.data, len);
+    sd_write_t w = stream_write_piece(staged.got, staged.data, len);
     if (w == SD_WRITE_BUSY) {
         ota_respond(fd, 409, "SD card busy or not mounted, send it again"); // the client retries on these words
         return false;
     }
-    if (w == SD_WRITE_FAILED) { // the card, not the link: sending it again would fail the same way
-        ota_respond(fd, 500, "the SD card couldn't take the piece at %lld (full or removed), nothing more is written",
-                    req->offset);
+    if (w == SD_WRITE_FAILED) { // the drive, not the link: sending it again would fail the same way
+        ota_respond(fd, 500, "the %s couldn't take the piece at %lld (full%s), nothing more is written",
+                    staged.sd ? "SD card" : "internal storage", req->offset, staged.sd ? " or removed" : "");
         return false;
     }
     ota_sd_stream_accept(&sd_stream, len); // inside the file: ota_piece_bounds
     return true;
 }
 
-// The last piece is in: the running hash is the file's, then the temp file takes the target's place (#528's retry)
-static void finish_sd(int fd) {
+static int temp_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    FILE *f = ctx;
+    return fseek(f, (long)off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n ? 0 : -1;
+}
+
+// The temp file read back against the whole file's SHA-256 (#593): the running hash was taken over the piece buffer,
+// not over what the drive holds. Under the card's lock on SD0: (the caller's).
+__attribute__((noinline)) static ota_place_t stream_read_back(void) {
+    FILE *f = fopen(staged.temp, "rb");
+    if (!f) {
+        return OTA_PLACE_WRITE;
+    }
+    uint8_t bounce[FLASH_CHUNK_BOUNCE]; // internal, on the server's stack: not ota_body_buf (#364)
+    int     res = ota_readback_check(temp_read, f, staged.total, bounce, sizeof(bounce), staged.file_sha256);
+    int     e   = errno;
+    fclose(f);
+    errno = e;
+    if (res != 0) {
+        ESP_LOGW(TAG, "read-back of %s %s", staged.temp, res < 0 ? "failed" : "differs from the file's SHA-256");
+    }
+    return res == 0 ? OTA_PLACE_OK : res < 0 ? OTA_PLACE_WRITE : OTA_PLACE_VERIFY;
+}
+
+// Read back, then the temp file takes the target's place (#528's retry on SD0:)
+static ota_place_t stream_swap(char const *path, int *err) {
+    if (ota_is_directory(path)) {
+        *err = EISDIR;
+        return OTA_PLACE_DIR;
+    }
+    ota_place_t step = stream_read_back();
+    if (step == OTA_PLACE_OK) {
+        step = ota_swap_temp(path, staged.temp, staged.sd);
+    }
+    *err = errno;
+    if (ota_place_drops_temp(step)) {
+        unlink(staged.temp);
+    }
+    return step;
+}
+
+// The last piece is in: the running hash is the file's, the temp file reads back as it, then it is swapped in
+static void finish_stream(int fd) {
     uint8_t digest[SHA256_DIGEST_LEN];
     char    sha_hex[OTA_SHA256_HEX + 1] = "";
     if (ota_sd_stream_final(&sd_stream, digest)) {
@@ -418,13 +473,13 @@ static void finish_sd(int fd) {
         staged_reset();
         return;
     }
-    if (mapped && sd_begin(SD_FINISH_WAIT_MS)) {
-        step = ota_is_directory(path) ? OTA_PLACE_DIR : ota_swap_temp(path, staged.temp, true);
-        err  = errno;
-        if (ota_place_drops_temp(step)) {
-            unlink(staged.temp);
+    bool locked = mapped && (!staged.sd || sd_begin(SD_FINISH_WAIT_MS));
+    if (locked) {
+        step = stream_swap(path, &err);
+        if (staged.sd) {
+            // A read-back that differs is damage in memory, not the card failing (#593)
+            sd_end(step == OTA_PLACE_OK ? SD_IO_OK : step == OTA_PLACE_VERIFY ? SD_IO_NEUTRAL : sd_io_from_errno(err));
         }
-        sd_end(step == OTA_PLACE_OK ? SD_IO_OK : sd_io_from_errno(err));
         staged.temp_live = false; // renamed, dropped, or (LOST) kept on purpose: not ours to remove any more
     }
     ota_place_names_t const names = {.vms = staged.path, .path = path, .temp = staged.temp};
@@ -443,18 +498,18 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
         !ota_storage_room(fd, req->path, (uint64_t)req->total_size, *pre_len, req->expect_continue ? 0 : req->content_length)) {
         return false;
     }
-    bool sd = req->route == OTA_ROUTE_FILE && ota_path_is_sd(req->path);
+    bool file = req->route == OTA_ROUTE_FILE;
     staged.total = (size_t)req->total_size; // the stream begins with it
     if (!stream) {
-        // SD0: holds one piece at a time, anything else the whole file
-        size_t cap  = ota_round_up(sd ? OTA_SD_PIECE_MAX : (size_t)req->total_size, STAGE_ALIGN); // 0 only on overflow
+        // A file holds one piece at a time, assets the whole image
+        size_t cap  = ota_round_up(file ? OTA_SD_PIECE_MAX : (size_t)req->total_size, STAGE_ALIGN); // 0 only on overflow
         staged.data = cap ? heap_caps_aligned_alloc(STAGE_ALIGN, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
         if (!staged.data) {
-            ota_respond(fd, 503, "not enough memory for %lld bytes", sd ? (long long)OTA_SD_PIECE_MAX : req->total_size);
+            ota_respond(fd, 503, "not enough memory for %lld bytes", file ? (long long)OTA_SD_PIECE_MAX : req->total_size);
             return false;
         }
     }
-    if (sd && !sd_stream_open(fd, req, *pre_len)) {
+    if (file && !file_stream_open(fd, req, *pre_len)) {
         staged_reset(); // frees the piece buffer
         return false;
     }
@@ -505,8 +560,8 @@ static void piece_done(int fd, bool hold) {
         staged_reset();
         return;
     }
-    if (staged.sd) {
-        finish_sd(fd);
+    if (staged.streamed) {
+        finish_stream(fd);
         return;
     }
     sha256_ctx_t whole;
@@ -521,10 +576,8 @@ static void piece_done(int fd, bool hold) {
         ota_respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing written", sha_hex);
         return;
     }
-    finished = staged.route == OTA_ROUTE_ASSETS ? ota_finish_assets(fd, staged.data, staged.total, staged.sent)
-                                                : ota_finish_file(fd, staged.path, staged.data, staged.total, staged.sent,
-                                                              staged.file_sha256);
-    hook_end(finished, finished && staged.route == OTA_ROUTE_ASSETS && !hold);
+    finished = ota_finish_assets(fd, staged.data, staged.total, staged.sent); // files are streamed: only assets here
+    hook_end(finished, finished && !hold);
     staged_reset();
 }
 
@@ -534,8 +587,8 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
     bool        stream = req->route == OTA_ROUTE_FIRMWARE;
     size_t      len    = (size_t)ota_piece_len(req); // ota_piece_bounds: inside the file, so below 4 MB
     char        sha_hex[OTA_SHA256_HEX + 1];
-    if (staged.sd) {
-        bool ok = sd_piece_receive(fd, req, pre, pre_len, continued, len);
+    if (staged.streamed) {
+        bool ok = stream_piece_receive(fd, req, pre, pre_len, continued, len);
         if (ok) {
             staged.got  += len;
             staged.sent += req->content_length;
@@ -635,8 +688,8 @@ static bool piece_refused(int fd, ota_request_t const *req, char *posix, size_t 
     if (piece_verdict_sent(fd, ota_piece_bounds(req), max)) {
         return true;
     }
-    if (sd && !ota_sd_piece_ok(ota_piece_len(req))) {
-        ota_respond(fd, 413, "a piece to SD0: is at most %d bytes", OTA_SD_PIECE_MAX);
+    if (file && !ota_sd_piece_ok(ota_piece_len(req))) { // one piece buffer of OTA_SD_PIECE_MAX (#529, #595)
+        ota_respond(fd, 413, "a file piece is at most %d bytes", OTA_SD_PIECE_MAX);
         return true;
     }
     return false;

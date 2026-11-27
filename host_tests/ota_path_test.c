@@ -62,6 +62,16 @@ static void test_onair_held(void) {
     CHECK(ota_path_onair_held("/storage/x/../lora.toml"));
     CHECK(ota_path_onair_held("/storage/./notes.txt"));
     CHECK(ota_path_onair_held("/sd/notes.txt"));
+    // #595 D3: the card's update folder installs at the next boot, so a push or delete there is held like ota-firmware;
+    // every spelling of it, and the paths badge.sh sends, fail closed
+    char upd[OTA_PATH_MAX + 16];
+    CHECK(ota_path_to_posix("SD0:[lichen.update]badge_fw.bin", upd, sizeof(upd)) && ota_path_onair_held(upd));
+    CHECK(ota_path_to_posix("SD0:[lichen.update.c6]firmware.bin.md5", upd, sizeof(upd)) && ota_path_onair_held(upd));
+    CHECK(ota_path_onair_held("/sd/lichen/update/badge_fw.bin.sha256"));
+    CHECK(ota_path_onair_held("/SD/Lichen/UPDATE/c6/firmware.bin"));
+    CHECK(ota_path_onair_held("/sd/lichen/update./badge_fw.bin"));
+    CHECK(ota_path_onair_held("//sd//lichen/x/../update/badge_fw.bin"));
+    CHECK(ota_path_onair_held("/sd/lichen/update"));
     CHECK(!ota_path_onair_held("/storage/notes.txt"));
     CHECK(!ota_path_onair_held("/storage"));
     CHECK(!ota_path_onair_held(""));

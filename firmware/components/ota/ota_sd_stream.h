@@ -43,6 +43,13 @@ bool ota_sd_orphan_is_live(char const *orphan, char const *live_temp, bool live)
 
 bool ota_sd_piece_ok(long long len);
 
+// #595 D2: nothing whole in PSRAM. A body without X-Offset is held in memory until its hash is checked, so a firmware
+// image never comes that way (its pieces go straight into the inactive slot) and a file only up to one piece's size
+// (larger files come in pieces, streamed to a temp file next to the target on either drive).
+#define OTA_WHOLE_FILE_MAX OTA_SD_PIECE_MAX
+// Whether the whole-body request on route with content_length bytes is refused and must come in pieces
+bool ota_whole_body_refused(ota_route_t route, long long content_length);
+
 void ota_sd_stream_begin(ota_sd_stream_t *s, size_t total);
 
 // Start the piece at offset: the context its bytes are hashed into (a copy of the running one), or NULL when offset is

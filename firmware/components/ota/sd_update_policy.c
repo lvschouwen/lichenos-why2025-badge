@@ -64,6 +64,31 @@ bool sdu_action_notice(sdu_action_t a, bool told) {
     return a == SDU_SKIP_UNREADABLE || a == SDU_SKIP_NOT_APP || (a == SDU_SKIP_TRIED && !told);
 }
 
+bool sdu_result_records(sdu_result_t r) {
+    return r == SDU_FAIL_IMAGE || r == SDU_FAIL_READBACK;
+}
+
+char const *sdu_result_text(sdu_result_t r) {
+    switch (r) {
+    case SDU_DONE: return "installed";
+    case SDU_FAIL_READ: return "badge_fw.bin could not be read from the card";
+    case SDU_FAIL_SHA: return "badge_fw.bin does not match badge_fw.bin.sha256";
+    case SDU_FAIL_NO_SLOT: return "no room to write it (slot, size or memory)";
+    case SDU_FAIL_WRITE: return "writing the image failed";
+    case SDU_FAIL_IMAGE: return "the image failed its check after the copy; it is not tried again";
+    case SDU_FAIL_READBACK: return "the written image did not read back the same; it is not tried again";
+    case SDU_FAIL_RECORD: return "the attempt could not be recorded";
+    case SDU_FAIL_BOOT: return "the new image could not be made the boot slot";
+    default: return "?";
+    }
+}
+
+char const *sdu_tried_text(uint8_t flags) {
+    return flags & SDU_REC_FAILED ? "This image failed its check after the copy before; change the file to try again"
+                                  : "This image was installed from the card before and another one runs now (a rollback "
+                                    "or a USB flash)";
+}
+
 static int hex_digit(char c) {
     if (c >= '0' && c <= '9') {
         return c - '0';

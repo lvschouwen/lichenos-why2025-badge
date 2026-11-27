@@ -71,12 +71,15 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   ota-info <host>                       show the firmware version the badge runs
   ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) and reboot into it
                                       (--no-reboot: the badge keeps running the old version until you reboot it,
-                                      e.g. ota-reboot; after about 3 min without one it restarts into the new one)
+                                      e.g. ota-reboot; after about 3 min without one it restarts into the new one).
+                                      With an SD card in the badge it goes to the card's lichen/update folder and the
+                                      badge installs it at the next boot (#595; --no-reboot then leaves it there)
   ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin' or 'SD0:[apps.x]app.elf'
   ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or \$BADGE_ASSETS_BIN) into the assets
                                       partition (fonts) and reboot (--no-reboot: as for ota-firmware)
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
-                                      firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
+                                      firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi; with an
+                                      SD card in the badge to its lichen/update/c6 folder, flashed from there at boot
   sdapp-push <host> <id>                push the built SD app (firmware/build/sdapps/<id>/app.elf and manifest) to
                                         SD0:[lichen.apps.<id>] over the update server (#522); build first
   ota-rm <host> <badge-path>            delete one file on the badge (FLASH0: or SD0:)
@@ -548,6 +551,45 @@ ota_sd_stream() {
     [ "$OTA_SD_STREAM" = yes ]
 }
 
+# Whether ota-firmware and ota-c6 go through the card's update folder (#595): the receiver streams SD0: pieces to the
+# card ("sd0-stream") and a card is mounted now ("sd0-card"). The badge installs from there at its next boot, C6 first.
+ota_sd_update_route() {
+    local line
+    line=$(ota_info_line "$1")
+    [[ $line == *sd0-stream* && $line == *sd0-card* ]]
+}
+
+# The firmware version /info reports ("badge_fw <version>;"), empty when the badge does not answer
+ota_version() {
+    local line
+    line=$(ota_info_line "$1")
+    line=${line#badge_fw }
+    [[ $line == *";"* ]] && printf '%s\n' "${line%%;*}"
+}
+
+# After the files are on the card: reboot, wait for the badge to come back (an install restarts it once more), and say
+# what it runs. The boot step may skip an image (tried before, a mismatch, on trial): an unchanged version says so.
+ota_sd_reboot_wait() {
+    local ip=$1 before=$2 i now
+    echo "rebooting: the badge installs from its SD card at boot (C6 first, then the P4)..."
+    cmd_ota_reboot "$ip" > /dev/null 2>&1 || true
+    sleep 20 # let it go down before polling
+    for i in $(seq 1 48); do
+        now=$(ota_version "$ip" 2>/dev/null || true)
+        if [ -n "$now" ]; then
+            if [ "$now" = "$before" ]; then
+                echo "the badge is back after about $((20 + (i - 1) * 5)) s, still on $now: nothing new was installed (see its notices, or 'fw $ip log')"
+            else
+                echo "the badge is back after about $((20 + (i - 1) * 5)) s, now on $now"
+            fi
+            return 0
+        fi
+        sleep 5
+    done
+    echo "no answer from the badge after 260 s: check its screen and the serial log" >&2
+    return 1
+}
+
 # ota_zpiece <route> <offset> <piece> <out>: write the piece as a zlib stream to <out> when the receiver takes one and
 # it comes out smaller; false = send the piece as it is. The first firmware piece always goes plain: the badge checks
 # the image header in it before it erases anything (#298).
@@ -711,11 +753,39 @@ ota_prepare() {
     esac
 }
 
+# #595: with a card in the badge the image goes to SD0:[lichen.update] (streamed to the card, nothing whole in its
+# memory), the .sha256 after it, and the boot step installs it. No /prepare: after it the badge refuses file pushes.
+ota_firmware_sd() {
+    local ip=$1 bin=$2 reboot=$3 before work
+    before=$(ota_version "$ip")
+    work=$(mktemp -d)
+    (cd "$(dirname "$bin")" && sha256sum "$(basename "$bin")") | sed 's/ .*$/  badge_fw.bin/' > "$work/badge_fw.bin.sha256"
+    echo "a card is in the badge: sending the image to its update folder"
+    if ! ota_put "$ip" file "$bin" 'SD0:[lichen.update]badge_fw.bin' ||
+        ! ota_put "$ip" file "$work/badge_fw.bin.sha256" 'SD0:[lichen.update]badge_fw.bin.sha256'; then
+        rm -f -- "$work/badge_fw.bin.sha256"; rmdir "$work"
+        echo "FAILED: the card's update folder may hold a new image without its .sha256 (the badge ignores that)" >&2
+        exit 1
+    fi
+    rm -f -- "$work/badge_fw.bin.sha256"; rmdir "$work"
+    if [ "$reboot" = --no-reboot ]; then
+        echo "on the card: the badge installs it at its next boot"
+        return 0
+    fi
+    ota_sd_reboot_wait "$ip" "$before"
+}
+
 cmd_ota_firmware() {
     local ip=$1 reboot=${2:-}
     [ "$reboot" != --no-reboot ] || OTA_HOLD=yes
-    ota_prepare "$ip" || exit 1
     local bin=${BADGE_FIRMWARE_BIN:-$REPO/firmware/build/badge_fw.bin}
+    [ -f "$bin" ] || { echo "no such file: $bin" >&2; exit 1; }
+    if ota_sd_update_route "$ip"; then
+        ota_firmware_sd "$ip" "$bin" "$reboot"
+        [ ! -f "$(dirname "$bin")/badge_fw.elf" ] || archive_elf "$(dirname "$bin")"
+        return 0
+    fi
+    ota_prepare "$ip" || exit 1
     ota_put "$ip" firmware "$bin"
     [ "$reboot" = --no-reboot ] || ota_reboot_installed "$ip"
     [ ! -f "$(dirname "$bin")/badge_fw.elf" ] || archive_elf "$(dirname "$bin")"
@@ -903,9 +973,31 @@ c6_check_local() {
     done
 }
 
+# #595: with a card in the badge the bundle goes to SD0:[lichen.update.c6]; the boot's C6 step flashes it from there and
+# copies it to the badge's own storage once the C6 proved it
+ota_c6_sd() {
+    local ip=$1 dir=$2 before name f
+    before=$(ota_version "$ip")
+    echo "a card is in the badge: sending the C6 bundle to its update folder"
+    for name in "${C6_BUNDLE_FILES[@]}"; do
+        for f in "$name.bin" "$name.bin.md5"; do
+            echo "sending $f..."
+            if ! ota_put "$ip" file "$dir/$f" "SD0:[lichen.update.c6]$f"; then
+                echo "FAILED at $f. The card holds a mixed C6 bundle, which the badge ignores (its md5 check): run ota-c6 again" >&2
+                exit 1
+            fi
+        done
+    done
+    ota_sd_reboot_wait "$ip" "$before"
+}
+
 cmd_ota_c6() {
     local ip=$1 dir=${2:-$REPO/firmware/storage_staging/c6} name f i
     c6_check_local "$dir" || exit 1
+    if ota_sd_update_route "$ip"; then
+        ota_c6_sd "$ip" "$dir"
+        return
+    fi
     # Checked before the first file, so a full drive can't leave a mixed bundle behind (#299): the files are swapped
     # in one at a time, so the largest one has to fit
     local largest

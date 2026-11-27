@@ -47,20 +47,20 @@ static void notice(bool warn, char const *title, char const *body) {
     }
 }
 
-static bool tried_read(uint8_t out[SDU_SHA_LEN], bool *told) {
+static bool tried_read(uint8_t out[SDU_SHA_LEN], uint8_t *flags) {
     ota_sd_record_t r;
-    *told = false;
+    *flags = 0;
     if (!s_hooks.record_get || !s_hooks.record_get(&r)) {
         return false;
     }
     memcpy(out, r.elf_sha, SDU_SHA_LEN);
-    *told = r.told != 0;
+    *flags = r.flags;
     return true;
 }
 
-// sha NULL clears the record (all zero); a new record starts untold. True only when saved.
-static bool tried_write(uint8_t const *sha) {
-    ota_sd_record_t r = {0};
+// sha NULL clears the record (all zero). True only when saved.
+static bool tried_write(uint8_t const *sha, uint8_t flags) {
+    ota_sd_record_t r = {.flags = sha ? flags : 0};
     if (sha) {
         memcpy(r.elf_sha, sha, SDU_SHA_LEN);
     }
@@ -70,7 +70,7 @@ static bool tried_write(uint8_t const *sha) {
 static void told_write(void) {
     ota_sd_record_t r;
     if (s_hooks.record_get && s_hooks.record_get(&r)) {
-        r.told = 1;
+        r.flags |= SDU_REC_TOLD;
         s_hooks.record_set(&r);
     }
 }
@@ -125,10 +125,10 @@ static bool sha_file_matches(sdu_job_t *j) {
 }
 
 // Pass 2: card -> slot in SDU_PIECE pieces. A card pulled here ends in esp_ota_abort: the boot slot is never touched.
-static bool write_slot(sdu_job_t *j, esp_partition_t const *slot) {
+static sdu_result_t write_slot(sdu_job_t *j, esp_partition_t const *slot) {
     esp_ota_handle_t h;
     if ((size_t)j->size > slot->size || fseek(j->f, 0, SEEK_SET) != 0 || esp_ota_begin(slot, j->size, &h) != ESP_OK) {
-        return false;
+        return SDU_FAIL_NO_SLOT;
     }
     long done = 0;
     int  last = -1;
@@ -137,7 +137,7 @@ static bool write_slot(sdu_job_t *j, esp_partition_t const *slot) {
         if (n == 0 || esp_ota_write(h, j->buf, n) != ESP_OK) {
             j->err = n == 0 ? (errno ? errno : EIO) : 0;
             esp_ota_abort(h);
-            return false;
+            return n == 0 ? SDU_FAIL_READ : SDU_FAIL_WRITE;
         }
         done += (long)n;
         int pct = (int)(done * 100 / j->size);
@@ -146,7 +146,7 @@ static bool write_slot(sdu_job_t *j, esp_partition_t const *slot) {
             last = pct;
         }
     }
-    return esp_ota_end(h) == ESP_OK; // checks the image: chip, segments, hash
+    return esp_ota_end(h) == ESP_OK ? SDU_DONE : SDU_FAIL_IMAGE; // checks the image: chip, segments, hash
 }
 
 // The slot read back (esp_partition_read, no mmap: #31) against the card file's SHA-256. esp_partition_get_sha256 is
@@ -166,45 +166,46 @@ static bool slot_matches(sdu_job_t *j, esp_partition_t const *slot) {
     return memcmp(got, j->digest, SDU_SHA_LEN) == 0;
 }
 
-static char const *install_steps(sdu_job_t *j, esp_partition_t const *slot) {
+static sdu_result_t install_steps(sdu_job_t *j, esp_partition_t const *slot) {
     if (!hash_file(j)) {
-        return "badge_fw.bin could not be read";
+        return SDU_FAIL_READ;
     }
     if (!sha_file_matches(j)) {
-        return "badge_fw.bin does not match badge_fw.bin.sha256";
+        return SDU_FAIL_SHA;
     }
-    if (!slot || !write_slot(j, slot)) {
-        return j->err ? "the card could not be read while writing" : "the image could not be written";
+    sdu_result_t r = slot ? write_slot(j, slot) : SDU_FAIL_NO_SLOT;
+    if (r == SDU_DONE && !slot_matches(j, slot)) {
+        r = SDU_FAIL_READBACK;
     }
-    if (!slot_matches(j, slot)) {
-        return "the written image did not read back the same";
+    if (r != SDU_DONE) {
+        return r;
     }
     // Before the boot slot changes: a rollback brings the badge back here, and the record stops a second try
-    if (!tried_write(j->elf_sha)) {
-        return "the attempt could not be recorded";
+    if (!tried_write(j->elf_sha, 0)) {
+        return SDU_FAIL_RECORD;
     }
     if (esp_ota_set_boot_partition(slot) != ESP_OK) {
-        tried_write(NULL); // never made the boot slot: not tried
-        return "the new image could not be made the boot slot";
+        tried_write(NULL, 0); // never made the boot slot: not tried
+        return SDU_FAIL_BOOT;
     }
     ota_image_note_slot_switch(slot); // a card is physical access: its trial needs no Wi-Fi (#411)
-    return NULL;
+    return SDU_DONE;
 }
 
 static bool install(sdu_job_t *j) {
-    j->buf = heap_caps_malloc(SDU_PIECE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!j->buf) {
-        notice(true, "SD card update not installed", "no memory for the copy");
-        return false;
-    }
     esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
+    j->buf = heap_caps_malloc(SDU_PIECE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ESP_LOGI(TAG, "installing " SDU_FILE " into %s", slot ? slot->label : "?");
-    int64_t     t0  = esp_timer_get_time();
-    char const *why = install_steps(j, slot);
+    int64_t      t0 = esp_timer_get_time();
+    sdu_result_t r  = j->buf ? install_steps(j, slot) : SDU_FAIL_NO_SLOT;
     heap_caps_free(j->buf);
     j->buf = NULL;
-    if (why) {
-        notice(true, "SD card update not installed", why);
+    if (r != SDU_DONE) {
+        // The image's own failure is recorded, told at once: one try, one notice, until the card file changes
+        if (sdu_result_records(r)) {
+            tried_write(j->elf_sha, SDU_REC_FAILED | SDU_REC_TOLD);
+        }
+        notice(true, "SD card update not installed", sdu_result_text(r));
         return false;
     }
     ESP_LOGI(TAG, "installed into %s in %u ms, restarting", slot->label,
@@ -212,14 +213,13 @@ static bool install(sdu_job_t *j) {
     return true;
 }
 
-static void report_skip(sdu_action_t a, bool told) {
+static void report_skip(sdu_action_t a, uint8_t flags) {
     ESP_LOGI(TAG, "card image: %s", sdu_action_name(a));
-    if (!sdu_action_notice(a, told)) {
+    if (!sdu_action_notice(a, flags & SDU_REC_TOLD)) {
         return;
     }
     if (a == SDU_SKIP_TRIED) {
-        notice(true, "SD card update not installed again",
-               "This image was installed from the card before and another one runs now (a rollback or a USB flash)");
+        notice(true, "SD card update not installed again", sdu_tried_text(flags));
         told_write();
     } else {
         notice(true, "SD card update ignored", a == SDU_SKIP_NOT_APP ? "badge_fw.bin is not a badge image"
@@ -240,8 +240,8 @@ void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks) {
     sdu_job_t  j    = {0};
     sdu_card_t card = read_head(&j);
     uint8_t    tried[SDU_SHA_LEN];
-    bool       told = false;
-    bool       have = tried_read(tried, &told) && memcmp(tried, (uint8_t[SDU_SHA_LEN]){0}, SDU_SHA_LEN) != 0;
+    uint8_t    flags = 0;
+    bool       have  = tried_read(tried, &flags) && memcmp(tried, (uint8_t[SDU_SHA_LEN]){0}, SDU_SHA_LEN) != 0;
     bool       ok   = card == SDU_CARD_OK;
     uint8_t const *running = esp_app_get_description()->app_elf_sha256;
     sdu_action_t   a = sdu_decide(card, ok && memcmp(j.elf_sha, running, SDU_SHA_LEN) == 0,
@@ -249,7 +249,7 @@ void ota_sd_update_boot(ota_sd_update_hooks_t const *hooks) {
     ESP_LOGI(TAG, "card check %u us", (unsigned)(esp_timer_get_time() - t0));
     bool installed = a == SDU_INSTALL && install(&j);
     if (a != SDU_INSTALL) {
-        report_skip(a, told);
+        report_skip(a, flags);
     }
     if (j.f) {
         fclose(j.f);

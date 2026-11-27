@@ -299,8 +299,20 @@ differs, by itself, Wi-Fi or not. `tools/badge.sh sd-prep <mountpoint> [c6dir]` 
   `esp_ota_set_boot_partition` and `system_restart_asked`. The arrival is marked as a slot switch
   (`ota_image_note_slot_switch`): a card is physical access, so the trial needs no Wi-Fi (#411); a bad image still
   rolls back and the record keeps it from installing again (one notice). A card pulled or a bad file before
-  `set_boot` leaves the boot slot alone, with a notice.
-- **#420:** installs from the card stay allowed with the on-air list on (D3: physical access, the security posture).
+  `set_boot` leaves the boot slot alone, with a notice. An image that matched its `.sha256` but failed after the copy
+  (`esp_ota_end`, the read-back) is recorded as tried too (flag `SDU_REC_FAILED`, one notice), so it is not erased and
+  rewritten on every boot; a card read, a flash write or a boot slot that failed is tried again (`sdu_result_records`).
+- **#420:** installs from the card stay allowed with the on-air list on (D3: physical access, the security posture). A
+  Wi-Fi push or delete anywhere under `/sd`, the update folder included, is held while the list is on
+  (`ota_path_onair_held`, pinned in `ota_path_test.c`).
+- **Wi-Fi pushes:** `/info` says `sd0-card` while a card is mounted. With `sd0-stream` and `sd0-card` the firmware
+  push of `tools/badge.sh` sends `badge_fw.bin` and then its `.sha256` to `SD0:[lichen.update]`, and its C6 push the
+  six files to `SD0:[lichen.update.c6]` (no `/prepare`: it would refuse file pushes); it reboots and polls `/info` for
+  the version, and the boot step installs. Without a card (D2) nothing is held whole in PSRAM: firmware comes only in
+  pieces, straight into the inactive slot (a whole-body `PUT /firmware` is refused, `ota_whole_body_refused`); a file
+  above `OTA_WHOLE_FILE_MAX` (256 KB) comes only in pieces, which on either drive go to a temp file next to the target
+  (`ota_piece_http.c` `file_stream_open`, one piece buffer in PSRAM), are read back against the whole file's SHA-256
+  (#593) and then swapped in. Assets are still staged whole (the 3 MB partition is written in place).
 
 ### 4. Hardware couplings
 - **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard

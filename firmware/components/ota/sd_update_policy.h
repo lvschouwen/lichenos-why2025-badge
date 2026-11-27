@@ -41,6 +41,32 @@ char const  *sdu_action_name(sdu_action_t a);
 // first time (told: that notice was raised since the attempt was recorded), the rest never
 bool sdu_action_notice(sdu_action_t a, bool told);
 
+// How an install that was let go ended. Only a failure of the image itself, after a whole copy that matched its
+// .sha256, is recorded as tried (sdu_result_records): esp_ota_end refused it, or the slot read back different. Those
+// would fail the same way on every boot, erasing and rewriting the slot each time; the record makes it one try and
+// one notice, until the file on the card changes. A card read that failed (pulled), a .sha256 mismatch (checked before
+// anything is erased), a flash write error, no memory or a boot slot that could not be set is not the image's fault
+// and is tried again at the next boot.
+typedef enum {
+    SDU_DONE,          // the boot slot is the new image
+    SDU_FAIL_READ,     // the card file could not be read (first pass or while writing)
+    SDU_FAIL_SHA,      // the file does not match badge_fw.bin.sha256 (or that file is missing)
+    SDU_FAIL_NO_SLOT,  // no inactive slot, the file is larger than it, esp_ota_begin refused, or no memory
+    SDU_FAIL_WRITE,    // a flash write failed
+    SDU_FAIL_IMAGE,    // esp_ota_end refused the written image
+    SDU_FAIL_READBACK, // the slot did not read back as the file
+    SDU_FAIL_RECORD,   // the attempt could not be saved, so the boot slot was left alone
+    SDU_FAIL_BOOT,     // esp_ota_set_boot_partition failed
+} sdu_result_t;
+bool        sdu_result_records(sdu_result_t r);
+char const *sdu_result_text(sdu_result_t r);
+
+// The attempt record's flags byte (ota_sd_record_t.flags)
+#define SDU_REC_TOLD   0x01 // the "not installed again" notice was raised for this image
+#define SDU_REC_FAILED 0x02 // it failed its check after the copy (sdu_result_records), rather than being installed
+// The notice for an image skipped as tried, by the record's flags
+char const *sdu_tried_text(uint8_t flags);
+
 // The text of badge_fw.bin.sha256 (sha256sum's format: 64 hex digits, either case, then the end, white space or the
 // file name) names digest
 bool sdu_sha256_text_ok(char const *text, size_t len, uint8_t const digest[SDU_SHA_LEN]);

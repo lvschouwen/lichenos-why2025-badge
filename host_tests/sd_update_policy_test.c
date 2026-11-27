@@ -111,11 +111,31 @@ static void test_sha_text(void) {
     CHECK(!sdu_sha256_text_ok(buf, 64, d));
 }
 
+// #595 part B: an image that matches its .sha256 but fails after the copy is recorded, so it is written once only;
+// a failure that is not the image's (the card, the flash, the boot slot) is tried again at the next boot
+static void test_result_records(void) {
+    for (int r = SDU_DONE; r <= SDU_FAIL_BOOT; r++) {
+        bool want = r == SDU_FAIL_IMAGE || r == SDU_FAIL_READBACK;
+        CHECK(sdu_result_records((sdu_result_t)r) == want);
+        CHECK(sdu_result_text((sdu_result_t)r)[0] != '?');
+    }
+    CHECK(!sdu_result_records(SDU_FAIL_READ)); // a card pulled mid-copy: tried again once it is back
+    CHECK(!sdu_result_records(SDU_FAIL_SHA));  // checked before anything is erased
+    CHECK(sdu_result_text((sdu_result_t)99)[0] == '?');
+    // The next boot with the same file: recorded as tried, and told already, so no second notice
+    CHECK(sdu_decide(SDU_CARD_OK, false, true, false) == SDU_SKIP_TRIED);
+    CHECK(!sdu_action_notice(SDU_SKIP_TRIED, (SDU_REC_FAILED | SDU_REC_TOLD) & SDU_REC_TOLD));
+    // The two kinds of tried say different things
+    CHECK(strcmp(sdu_tried_text(SDU_REC_FAILED), sdu_tried_text(0)) != 0);
+    CHECK(strcmp(sdu_tried_text(SDU_REC_FAILED | SDU_REC_TOLD), sdu_tried_text(SDU_REC_FAILED)) == 0);
+}
+
 int main(void) {
     test_head();
     test_decide_table();
     test_notice();
     test_sha_text();
+    test_result_records();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

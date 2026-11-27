@@ -2487,6 +2487,7 @@ add_test(NAME elf_archive_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 add_test(NAME badge_usage_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_usage_test.sh)
 add_test(NAME new_app_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/new_app_test.sh)
 add_test(NAME badge_log_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_log_test.sh)
+add_test(NAME badge_sd_route_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_sd_route_test.sh)
 add_test(NAME guard_onair_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/guard_onair_test.sh)
 add_test(NAME check_release_image_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_release_image_test.sh)
 add_test(NAME build_plan_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/build_plan_test.sh)

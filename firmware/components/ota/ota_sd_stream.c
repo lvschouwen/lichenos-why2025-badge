@@ -27,6 +27,10 @@ bool ota_sd_orphan_is_live(char const *orphan, char const *live_temp, bool live)
     return live && orphan[0] && strcmp(orphan, live_temp) == 0;
 }
 
+bool ota_whole_body_refused(ota_route_t route, long long content_length) {
+    return route == OTA_ROUTE_FIRMWARE || (route == OTA_ROUTE_FILE && content_length > OTA_WHOLE_FILE_MAX);
+}
+
 bool ota_sd_piece_ok(long long len) {
     return len > 0 && len <= OTA_SD_PIECE_MAX;
 }

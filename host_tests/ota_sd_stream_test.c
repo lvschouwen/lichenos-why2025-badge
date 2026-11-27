@@ -30,6 +30,15 @@ static bool piece(ota_sd_stream_t *s, uint8_t const *data, size_t off, size_t le
 }
 
 int main(void) {
+    // #595 D2: a whole body is held in memory until checked: never a firmware image, a file only up to one piece
+    CHECK(ota_whole_body_refused(OTA_ROUTE_FIRMWARE, 1));
+    CHECK(ota_whole_body_refused(OTA_ROUTE_FIRMWARE, 0));
+    CHECK(!ota_whole_body_refused(OTA_ROUTE_FILE, OTA_WHOLE_FILE_MAX));
+    CHECK(ota_whole_body_refused(OTA_ROUTE_FILE, OTA_WHOLE_FILE_MAX + 1));
+    CHECK(!ota_whole_body_refused(OTA_ROUTE_FILE, 0));
+    CHECK(!ota_whole_body_refused(OTA_ROUTE_DELETE, 4LL * 1024 * 1024));
+    CHECK(OTA_WHOLE_FILE_MAX >= 131072); // badge.sh's default piece size goes whole up to it
+
     // The cap is the free space, not the 4 MB the PSRAM stage allows
     CHECK(ota_sd_cap(true, 28ULL * 1024 * 1024 + 5, 0) == 28LL * 1024 * 1024 + 5 + OTA_SD_CAP_SLACK);
     CHECK(ota_sd_cap(true, 0, 0) == OTA_SD_CAP_SLACK); // one cluster of slack, never a cap of 0 from a stale figure
