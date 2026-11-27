@@ -39,7 +39,7 @@ variants=(
 )
 for v in "${variants[@]}"; do
   # shellcheck disable=SC2086
-  out=$(./probe-perf/build.sh $v --suite config)
+  out=$(./probe-perf/build.sh $v --suite all)
   echo "$out"
   elf=${out#*: }
   elf=${elf%.bin *}.elf
@@ -68,6 +68,6 @@ for r in "${refused[@]}"; do
   echo "refused: $args"
 done
 
-step "the default image, restored"
-./probe-perf/build.sh --suite config >/dev/null
+step "the default image (smoke), restored"
+./probe-perf/build.sh --suite smoke >/dev/null
 printf '\nv3/probe-perf/check.sh: OK\n'

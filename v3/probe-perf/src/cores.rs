@@ -27,6 +27,10 @@ static PASSES: AtomicU32 = AtomicU32::new(0);
 static CYCLES: AtomicU32 = AtomicU32::new(0);
 
 const REGION: usize = 4 << 20;
+/// Core 1 looks at STOP after every chunk, so it never runs on long after core 0 is done and its figure covers the same window.
+const CHUNK: usize = 256 << 10;
+/// Core 0's window: several passes, so the two cores overlap for far longer than the start-up and the last chunk.
+const C0_PASSES: usize = 3;
 
 /// Core 1's main loop (from `_start1`).
 #[no_mangle]
@@ -38,19 +42,20 @@ extern "C" fn core1_main() -> ! {
         GO.store(0, SeqCst);
         STATE.store(1, SeqCst);
         let (mode, start) = (MODE.load(SeqCst), mcycle());
-        let (mut passes, mut last) = (0u32, start);
+        let (mut chunks, mut last) = (0u32, start);
         while STOP.load(SeqCst) == 0 {
+            let off = (chunks as usize % (REGION / CHUNK)) * CHUNK;
             match mode {
                 READ => {
-                    core::hint::black_box(read_words(cached(PSRAM_OFFSETS.write), REGION / 4));
+                    core::hint::black_box(read_words(cached(PSRAM_OFFSETS.write + off), CHUNK / 4));
                 }
-                WRITE => write_words(cached(PSRAM_OFFSETS.copy_dst), REGION / 4, passes),
+                WRITE => write_words(cached(PSRAM_OFFSETS.copy_dst + off), CHUNK / 4, chunks),
                 _ => core::hint::spin_loop(),
             }
-            passes += 1;
+            chunks += 1;
             last = mcycle();
         }
-        PASSES.store(passes, SeqCst);
+        PASSES.store(chunks, SeqCst);
         CYCLES.store(last.wrapping_sub(start), SeqCst);
         STATE.store(2, SeqCst);
     }
@@ -66,7 +71,8 @@ fn wait_state(want: u32, ms: u64) -> bool {
     true
 }
 
-/// Start core 1 on `mode`, run `f` on core 0 meanwhile, stop core 1 and return what it did: (MB/s in hundredths of its own cycles, passes).
+/// Start core 1 on `mode`, run `f` on core 0 meanwhile, stop core 1 and return what it did: (MB/s in hundredths of its own cycles,
+/// chunks done).
 fn with_core1(mode: u32, cpu_mhz: u64, f: impl FnOnce()) -> Option<(u64, u32)> {
     MODE.store(mode, SeqCst);
     STOP.store(0, SeqCst);
@@ -80,10 +86,10 @@ fn with_core1(mode: u32, cpu_mhz: u64, f: impl FnOnce()) -> Option<(u64, u32)> {
     if !wait_state(2, 2000) {
         return None;
     }
-    let (passes, cycles) = (PASSES.load(SeqCst), CYCLES.load(SeqCst));
+    let (chunks, cycles) = (PASSES.load(SeqCst), CYCLES.load(SeqCst));
     // bytes per cycle times MHz = MB/s
-    let rate = (passes as u64 * REGION as u64 * cpu_mhz * 100) / cycles.max(1) as u64;
-    Some((rate, passes))
+    let rate = (chunks as u64 * CHUNK as u64 * cpu_mhz * 100) / cycles.max(1) as u64;
+    Some((rate, chunks))
 }
 
 fn start_core1() -> bool {
@@ -103,53 +109,70 @@ fn fail(what: &str) -> bool {
     false
 }
 
+/// Core 0's read rate over `C0_PASSES` passes of the 4 MB read region.
+fn c0_read_rate() -> u64 {
+    let read = cached(PSRAM_OFFSETS.read);
+    let t0 = ticks();
+    for _ in 0..C0_PASSES {
+        core::hint::black_box(read_words(read, REGION / 4));
+    }
+    mb_s_x100((C0_PASSES * REGION) as u64, ticks() - t0, TICK_HZ)
+}
+
+/// Core 0 reads while core 1 reads or writes another region. The two rates added are what the memory system delivers to both cores;
+/// against the solo rate they say whether a second core adds throughput or only shares it.
+fn pair(metric: &str, mode: u32, mhz: u64, solo: u64) -> bool {
+    let mut c0 = 0;
+    let Some((c1, chunks)) = with_core1(mode, mhz, || c0 = c0_read_rate()) else { return fail(metric) };
+    perf(
+        metric,
+        &[
+            ("c0_mb_s", Val::F2(c0 as i64)),
+            ("c1_mb_s", Val::F2(c1 as i64)),
+            ("solo_mb_s", Val::F2(solo as i64)),
+            ("sum_over_solo_pct", Val::F2(((c0 + c1) * 10_000 / solo.max(1)) as i64)),
+            ("c1_chunks", Val::U(chunks as u64)),
+        ],
+    );
+    true
+}
+
+/// Internal RAM on core 0 while core 1 streams PSRAM. L1 data cache is probably shared by the two cores (the ROM names two L1 I caches
+/// and one L1 D cache), in which case core 1's stream evicts core 0's buffer and this rate falls to the L2MEM refill rate.
+fn sram_vs_psram(mhz: u64) -> bool {
+    let (a, mut c0) = (buf_a(), 0);
+    let solo_t0 = ticks();
+    for _ in 0..(REGION / BUF) {
+        core::hint::black_box(read_words(a, BUF / 4));
+    }
+    let solo = mb_s_x100(REGION as u64, ticks() - solo_t0, TICK_HZ);
+    let ok = with_core1(READ, mhz, || {
+        let t0 = ticks();
+        for _ in 0..(C0_PASSES * REGION / BUF) {
+            core::hint::black_box(read_words(a, BUF / 4));
+        }
+        c0 = mb_s_x100((C0_PASSES * REGION) as u64, ticks() - t0, TICK_HZ);
+    })
+    .is_some();
+    perf("lab.dual.sram_vs_psram", &[("c0_sram_mb_s", Val::F2(c0 as i64)), ("solo_sram_mb_s", Val::F2(solo as i64))]);
+    ok || fail("lab.dual.sram_vs_psram")
+}
+
 pub fn run(cpu_mhz: u32) -> bool {
     crate::con::begin("dual");
     if !start_core1() {
         return false;
     }
-    let (read, rd_bytes) = (cached(PSRAM_OFFSETS.read), REGION as u64);
     let mhz = cpu_mhz as u64;
     wb_inv(cached(PSRAM_OFFSETS.read), 3 * REGION);
-    wb_inv(cached(PSRAM_OFFSETS.write), REGION);
     // core 0 alone, with core 1 spinning on its flag
-    let t0 = ticks();
-    core::hint::black_box(read_words(read, REGION / 4));
-    let solo = mb_s_x100(rd_bytes, ticks() - t0, TICK_HZ);
-    for (metric, mode) in [("lab.dual.read_read", READ), ("lab.dual.read_write", WRITE)] {
-        let mut c0 = 0;
-        let Some((c1, passes)) = with_core1(mode, mhz, || {
-            let t0 = ticks();
-            core::hint::black_box(read_words(read, REGION / 4));
-            c0 = mb_s_x100(rd_bytes, ticks() - t0, TICK_HZ);
-        }) else {
-            return fail(metric);
-        };
-        perf(
-            metric,
-            &[
-                ("c0_mb_s", Val::F2(c0 as i64)),
-                ("c1_mb_s", Val::F2(c1 as i64)),
-                ("solo_mb_s", Val::F2(solo as i64)),
-                ("c1_passes", Val::U(passes as u64)),
-            ],
-        );
+    let solo = c0_read_rate();
+    if !(pair("lab.dual.read_read", READ, mhz, solo) && pair("lab.dual.read_write", WRITE, mhz, solo)) {
+        return false;
     }
-    // internal RAM on core 0 while core 1 streams PSRAM: the two should not disturb each other
-    let a = buf_a();
-    let mut c0 = 0;
-    if with_core1(READ, mhz, || {
-        let t0 = ticks();
-        for _ in 0..(REGION / BUF) {
-            core::hint::black_box(read_words(a, BUF / 4));
-        }
-        c0 = mb_s_x100(rd_bytes, ticks() - t0, TICK_HZ);
-    })
-    .is_none()
-    {
-        return fail("lab.dual.sram_vs_psram");
+    if !sram_vs_psram(mhz) {
+        return false;
     }
-    perf("lab.dual.sram_vs_psram", &[("c0_sram_mb_s", Val::F2(c0 as i64))]);
     // latency under load: the 8 MB ring of the chase test while core 1 streams
     let (solo_ns, mut loaded_ns) = (chase_ring(8 << 20, 128), 0);
     if with_core1(READ, mhz, || loaded_ns = chase_ring(8 << 20, 128)).is_none() {

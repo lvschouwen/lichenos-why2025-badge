@@ -59,6 +59,8 @@ const _: () = match CFG.check() {
 };
 const _: () = assert!(CFG.l2.fits_below(0x4FF3_A000), "link.ld NOLOAD window must stay below the cache carve");
 const SUITE: &str = env!("LICHEN_PERF_SUITE");
+/// SYSTIMER ticks (low 32 bits: 268 s of range) at the start of the image.
+static START_TICKS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 const SECS: u32 = num(parse_u32(env!("LICHEN_PERF_SECS")));
 
 #[panic_handler]
@@ -93,6 +95,10 @@ fn finish() -> ! {
     if hw::temp_available() {
         temp_checkpoint("lab.temp.end");
     }
+    // how long the run took (SYSTIMER since the image started), so the load-ram timeout can be chosen from a measurement
+    let ms = (hw::ticks() as u32).wrapping_sub(START_TICKS.load(core::sync::atomic::Ordering::Relaxed)) as u64 * 1000
+        / hw::TICK_HZ;
+    con::perf("lab.run", &[("elapsed_ms", Val::U(ms))]);
     uart::drain();
     let _ = write_end(&mut con::Con, con::end_reason());
     uart::drain();
@@ -321,6 +327,7 @@ fn banner() {
 
 #[no_mangle]
 extern "C" fn pmain() -> ! {
+    START_TICKS.store(hw::ticks() as u32, core::sync::atomic::Ordering::Relaxed);
     // the first bytes after the ROM hand-over can be lost on the host side, so the banner comes twice
     banner();
     banner();

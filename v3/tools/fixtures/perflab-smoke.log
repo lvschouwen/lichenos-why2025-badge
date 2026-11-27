@@ -1,6 +1,6 @@
 Loaded 1 segments from 'load-ram.bin' to RAM, executing at 0x4ff10000.
 +-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
-lichen-v3 02761299+-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
+lichen-v3 4687f918+-cpu360-ps120-l2k256l64-dma32-ldocal platform esp32p4 perflab cpu360-ps120-l2k256l64-dma32-ldocal (#648, RAM only)
 CHECK 648.cfg INFO cpu360-ps120-l2k256l64-dma32-ldocal suite smoke
 clk: after: measured Some(360) MHz
 CHECK 648.cpu PASS measured 360 MHz, 360 expected
@@ -50,8 +50,10 @@ BEGIN park
 CHECK 648.park PASS 5 s untouched, 2 x 1024 KB (cpu-written and dma-written), 0 + 0 bad words
 BEGIN dual
 CHECK 648.core1 INFO core 1 start: Some(0) polls, running true
-PERF lab.dual.read_read c0_mb_s=56.47 c1_mb_s=74.92 solo_mb_s=111.30 c1_passes=2
-PERF lab.dual.chase_loaded ns=723.01 solo_ns=519.40
+PERF lab.dual.read_read c0_mb_s=56.47 c1_mb_s=57.04 solo_mb_s=111.30 sum_over_solo_pct=101.98 c1_chunks=49
+PERF lab.dual.sram_vs_psram c0_sram_mb_s=105.90 solo_sram_mb_s=633.64
+PERF lab.dual.chase_loaded ns=723.02 solo_ns=519.40
 CHECK 648.run PASS suites done, 0 cache sync failures
-PERF lab.temp.end celsius=40.00
+PERF lab.temp.end celsius=40.44
+PERF lab.run elapsed_ms=24097
 END ok

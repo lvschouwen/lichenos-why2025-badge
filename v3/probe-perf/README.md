@@ -27,9 +27,9 @@ clippy, every switch value, the refusals).
 | `dma` | AXI-GDMA memory to memory on four paths: MB/s, share of the CPU left, setup cycles | seconds |
 | `integrity` | whole chip, dense inverted multi-pass, written by the CPU through the cache and by DMA, read back both ways | `--secs`, default 10 (smoke) or 60 |
 | `park` | 5 s untouched, CPU-written and DMA-written 1 MB (the #569 style) | about 6 s |
-| `dual` | core 1 streams PSRAM reads or writes while core 0 reads, measures a pointer chase, or reads internal RAM | seconds; always last |
-| `smoke` | mem, cpu, irq, dma, integrity (10 s, at least one pass of each kind), park, dual | ended with END ok inside a 118 s load-ram timeout on the first full run |
-| `all` | the same with 60 s of integrity | give load-ram 120 s; not yet run |
+| `dual` | core 1 streams PSRAM reads or writes (checks STOP every 256 KB) while core 0 reads 3 x 4 MB, measures a pointer chase, or reads internal RAM | seconds; always last |
+| `smoke` | mem, cpu, irq, dma, integrity (10 s, at least one pass of each kind), park, dual | 24 s measured (`lab.run elapsed_ms`) |
+| `all` | the same with 60 s of integrity | not yet run; about 75 s estimated (smoke minus its 10 s of integrity plus 60 s), read `lab.run` from the first run |
 
 Plan a run at 120 s or less (`--secs` shortens it). It stops at the first flip, DMA fault, trap, panic or temperature at 85 C, records it as a failed point
 (`END fail`) and puts the PSRAM rail back.

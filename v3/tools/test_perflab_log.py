@@ -29,7 +29,8 @@ class PerfLines(unittest.TestCase):
         metrics, _ = pr.parse_log(text())
         self.assertEqual(metrics["lab.irq.idle"]["jitter_max_ns"], 133.0)
         self.assertEqual(metrics["lab.timer.accuracy"]["mtime_khz"], 360000.0)  # the CLINT counter runs at the CPU clock
-        self.assertEqual(metrics["lab.dual.read_read"]["c1_passes"], 2.0)
+        self.assertEqual(metrics["lab.dual.read_read"]["c1_chunks"], 49.0)
+        self.assertEqual(metrics["lab.run"]["elapsed_ms"], 24097.0)
         self.assertAlmostEqual(metrics["lab.cpu.fetch.psram512k"]["cycles_per_instr"], 12.37)
 
     def test_a_variant_is_in_the_name_so_a_later_line_cannot_replace_it(self):
@@ -49,7 +50,7 @@ class PerfLines(unittest.TestCase):
 class CheckLines(unittest.TestCase):
     def test_the_bench_report_reads_banner_checks_and_end(self):
         r = rep.parse(text())
-        self.assertEqual((r.build_id, r.platform, r.end), ("02761299+-cpu360-ps120-l2k256l64-dma32-ldocal", "esp32p4", "ok"))
+        self.assertEqual((r.build_id, r.platform, r.end), ("4687f918+-cpu360-ps120-l2k256l64-dma32-ldocal", "esp32p4", "ok"))
         ids = {c[0] for c in r.checks}
         self.assertTrue({"648.config", "648.psram", "648.integrity", "648.park", "648.run"} <= ids)
         required = ["648.cpu", "648.l2", "648.psram", "648.map", "648.config", "648.integrity", "648.park", "648.cpu.crc"]
