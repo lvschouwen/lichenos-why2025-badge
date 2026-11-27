@@ -201,7 +201,12 @@ pub fn plan(regions: &[Region], gran: u32) -> Result<Plan, PlanError> {
 
 /// Is this a safe U view (#646)? It carries the fixed entries and no earlier entry touches the window. The kernel
 /// refuses to load any other view.
-pub fn view_ok(entries: &[Entry; ENTRIES]) -> bool {
+///
+/// Decoded as the hardware holds it at granularity `gran` (`readback`, review L-c): a small NAPOT entry just below the
+/// window reads back with its low bits forced to ones, and can grow over the window that way.
+pub fn view_ok(entries: &[Entry; ENTRIES], gran: u32) -> bool {
+    let entries: [Entry; ENTRIES] = core::array::from_fn(|i| readback(entries[i], gran));
+    let entries = &entries;
     if entries[WINDOW_INDEX] != Entry::WINDOW || entries[DENY_ALL_INDEX] != Entry::DENY_ALL {
         return false;
     }
@@ -391,7 +396,7 @@ mod tests {
     #[test]
     fn every_plan_carries_the_r_only_core_local_window() {
         let p = plan(&[rg(0x1000, 0x2000, R)], G).unwrap();
-        assert!(view_ok(&p.entries));
+        assert!(view_ok(&p.entries, G));
         for a in [0x2000_0000u32, 0x2000_4000, 0x2081_0000, 0x20B0_0000, 0x2FFF_FFFF] {
             assert_eq!(u_perms(&p.entries, a), R, "{a:#x}");
         }
@@ -403,31 +408,43 @@ mod tests {
         assert_eq!(readback(Entry::WINDOW, G), Entry::WINDOW);
         let mut e = p.entries;
         e[WINDOW_INDEX] = Entry::OFF;
-        assert!(!view_ok(&e));
+        assert!(!view_ok(&e, G));
         e[WINDOW_INDEX] = Entry::WINDOW;
         e[DENY_ALL_INDEX] = Entry::OFF;
-        assert!(!view_ok(&e));
+        assert!(!view_ok(&e, G));
     }
 
     #[test]
     fn view_ok_refuses_an_earlier_entry_that_touches_the_window() {
         let base = *plan(&[rg(0x1000, 0x2000, R)], G).unwrap().entries();
-        assert!(view_ok(&base));
+        assert!(view_ok(&base, G));
         // A perm-0 NAPOT over the window in front of the fixed entry brings back the hang.
         let mut e = base;
         e[3] = Entry { cfg: NAPOT, addr: 0x09FF_FFFF };
-        assert!(!view_ok(&e));
+        assert!(!view_ok(&e, G));
         // A writable TOR pair that straddles the lower edge.
         let mut e = base;
         e[3] = Entry { cfg: 0, addr: 0x1FFF_F000 >> 2 };
         e[4] = Entry { cfg: TOR | R | W, addr: 0x2000_1000 >> 2 };
-        assert!(!view_ok(&e));
+        assert!(!view_ok(&e, G));
         // An empty TOR, or entries elsewhere, are fine.
         let mut e = base;
         e[3] = Entry { cfg: 0, addr: 0x5000_0000 >> 2 };
         e[4] = Entry { cfg: TOR | R, addr: 0x4000_0000 >> 2 };
         e[5] = Entry { cfg: NAPOT | R, addr: (0x4800_0000u32 | 0x7FF) >> 2 };
-        assert!(view_ok(&e));
+        assert!(view_ok(&e, G));
+    }
+
+    #[test]
+    fn view_ok_decodes_the_granularity_readback() {
+        // An 8-byte NAPOT at 0x1FFF_FFF8 lies below the window as written, but at G = 128 its low pmpaddr bits read
+        // back as ones and it decodes to 0..1 GiB, over the window: the view must be refused (review L-c).
+        let mut e = *plan(&[rg(0x1000, 0x2000, R)], G).unwrap().entries();
+        e[3] = Entry { cfg: NAPOT, addr: (0x1FFF_FFF8u32 | 3) >> 2 };
+        assert!(entry_range(&e, 3).is_some_and(|(_, hi)| hi <= WINDOW_BASE), "as written it stays below the window");
+        assert!(!view_ok(&e, G));
+        // At a 4-byte granularity it reads back unchanged and is harmless.
+        assert!(view_ok(&e, 4));
     }
 
     #[test]

@@ -191,6 +191,12 @@ impl Link {
         }
     }
     /// Core 1 posted an exit: report it and end the run here, so END is the last line.
+    ///
+    /// Limits (review L-g): core 0 notices only inside a mailbox wait (`recv`, `try_recv`), so core 1's exit while
+    /// core 0 runs other rows shows up at core 0's next wait, or not at all after `core1.park` (core 1 is parked
+    /// then and posts nothing). And a fatal path on either hart (`enter_fatal`) switches the whole console to raw
+    /// output: bytes still queued in core 0's ring at that moment are not sent, so the lines just before a dump can
+    /// be missing. Both are bench-only limits; #619 gets a doorbell and a per-hart fatal state.
     fn check_alive(&self) {
         let c = C1_EXIT.load(core::sync::atomic::Ordering::Acquire);
         if c != 0 {

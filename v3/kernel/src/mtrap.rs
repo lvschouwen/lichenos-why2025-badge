@@ -194,8 +194,12 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
         platform::exit(4);
     }
     // ... nor without a tick: TW is hardwired 0, so a U wfi would park the hart. A run with no tick of its own gets a
-    // watchdog tick that only preempts (nothing counts it).
-    let watchdog = with(|s| s.tick.is_none());
+    // watchdog tick that only preempts (nothing counts it). A tick that already reached its target is disarmed, so it
+    // counts as none (review L-a); its finished state is kept aside and put back after the run.
+    let (watchdog, finished) = with(|s| {
+        let live = s.tick.as_ref().is_some_and(|t| t.stats.count < t.target);
+        (!live, if live { None } else { s.tick.take() })
+    });
     if watchdog {
         tick_start(trap::us_to_ticks(WATCHDOG_US), u32::MAX);
     }
@@ -205,6 +209,7 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
     unsafe { run_user(entry, sp, a0, a1) };
     if watchdog {
         tick_stop();
+        with(|s| s.tick = finished);
     }
     with(|s| s.user.take().unwrap_or_default())
 }

@@ -58,6 +58,7 @@ fn after_ms(ms: u64) -> u64 {
 }
 
 pub fn run(t: &mut Tally) {
+    clic_top_line(t);
     begin("core1.start");
     let before = hw::core1::regs();
     kprintln!("core1: before {}", RegsLine(before));
@@ -204,7 +205,8 @@ fn clic1_sweep(t: &mut Tally) {
     extern "C" {
         static _utext: u8;
     }
-    // SAFETY: a linker symbol; only its address is used.
+    // SAFETY: `_utext` is the linker's start of the U stub page (link-esp32p4.ld); naming an extern static is the only
+    // unsafe part, its byte is never read, only the address is taken (review L-h).
     let utext = unsafe { &_utext as *const u8 as usize };
     let udata = platform::slot(0).data;
     crate::pmp::apply(utext, udata, UPAGE);
@@ -426,4 +428,28 @@ fn u_deny(t: &mut Tally, l: &mut Link) {
             ),
         );
     }
+}
+
+/// Review M-a: the CLIC driver takes ids 0..47 (16 internal + 32 external at n + 16). On core 0, line 47 (external
+/// 31, unused here) is configured with ie off, read back, and put back as it was; id 48 is refused. Masked
+/// throughout, so it cannot fire.
+fn clic_top_line(t: &mut Tally) {
+    begin("clic.line47");
+    let top = hw::clic::LINES - 1;
+    let before = hw::clic::line(top);
+    hw::clic::configure(top, hw::clic::ATTR_M_LEVEL, 0xA0);
+    let set = hw::clic::line(top);
+    hw::clic::configure(top, before[2], before[3]);
+    hw::clic::set_enabled(top, before[1] != 0);
+    let back = hw::clic::line(top);
+    let past = hw::clic::line(hw::clic::LINES);
+    record(
+        t,
+        "clic.line47",
+        Some(top == 47 && set[1] == 0 && set[2] == hw::clic::ATTR_M_LEVEL && set[3] & 0xE0 == 0xA0 && back == before),
+        format_args!(
+            "id {top}: ip/ie/attr/ctl before {before:?}, configured {set:?} (want ie 0, attr 0xc0, ctl top bits 0xa0), \
+             restored {back:?}; id 48 reads {past:?} (refused)"
+        ),
+    );
 }

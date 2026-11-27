@@ -63,7 +63,11 @@ bs_amoswap:
     amoswap.w a0, t0, (a0)
     li a7, 1
     ecall
-# esp.vld.128.ip q0, a0, 16 (Xesppie; encoding from the Espressif assembler)
+# A PIE vector load, for the PIE-off illegal-instruction row. Espressif binutils 2.45 (esp-15.2.0_20251204), `.insn 4,
+# 0x0201223b` disassembled (review L-d): objdump-xespv2p1 gives `esp.vld.128.ip q0,a0,16`; the default objdump and
+# objdump-xespv2p2 give `esp.fft.ams.s16.ld.r32.decp q0,a0,q4,q0,q0,q2,q0,0,trunc` (v2p2 encodes esp.vld.128.ip
+# q0,a0,16 as 0x0311009f). The IDF gdbstub decoder table (esp.vld.128.ip = 0x4200203b) uses the v2p1 layout, and
+# either way it is a PIE instruction, which is what the row needs: with PIE off it must be illegal.
     .global bs_vld
 bs_vld:
     .word 0x0201223b
@@ -119,7 +123,7 @@ const MISALIGNED: u32 = codes(&[4, 5]);
 const ILLEGAL: u32 = codes(&[2]);
 
 /// Safe shapes first, the ones with a PMP-denied half last.
-pub const SHAPES: [Shape; 15] = [
+pub const SHAPES: [Shape; 16] = [
     Shape { id: "u.shape.lb", f: bs_lb, addr: W, want: LOAD },
     Shape { id: "u.shape.lbu", f: bs_lbu, addr: W + 1, want: LOAD },
     Shape { id: "u.shape.lh", f: bs_lh, addr: W, want: LOAD },
@@ -135,6 +139,8 @@ pub const SHAPES: [Shape; 15] = [
     Shape { id: "u.shape.lw-straddle-low", f: bs_lw, addr: 0x1FFF_FFFE, want: MISALIGNED },
     Shape { id: "u.shape.lw-straddle-high", f: bs_lw, addr: 0x2FFF_FFFE, want: MISALIGNED },
     Shape { id: "u.shape.lh-straddle-low", f: bs_lh, addr: 0x1FFF_FFFF, want: MISALIGNED },
+    // Review L-e: the half straddling the window's top edge (0x2FFF_FFFF in the window, 0x3000_0000 PMP-denied).
+    Shape { id: "u.shape.lh-straddle-high", f: bs_lh, addr: 0x2FFF_FFFF, want: MISALIGNED },
 ];
 
 pub fn run(t: &mut Tally, sp: usize) {

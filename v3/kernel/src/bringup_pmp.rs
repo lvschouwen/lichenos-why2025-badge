@@ -406,7 +406,7 @@ fn reload_perf(utext: usize, udata: usize) {
 }
 
 /// U ecall round trip, timed in U with rdcycle around each echo ecall (ecall -> M handler -> mret -> next
-/// instruction), tick off. mcounteren.CY is set for this measurement only: it lets U read the cycle counter, a timing
+/// instruction), no tick but run_u's 10 ms watchdog. mcounteren.CY is set for this measurement only: it lets U read the cycle counter, a timing
 /// side channel, so it is cleared again straight after.
 fn syscall_perf(udata: usize) {
     begin("perf.syscall");
@@ -430,5 +430,9 @@ fn syscall_perf(udata: usize) {
         // SAFETY: the U data page is kernel-owned NOLOAD memory U just filled with SAMPLES words.
         *v = unsafe { core::ptr::read_volatile((udata + 4 * i) as *const u32) };
     }
-    print_perf("syscall.local", &mut s, "U rdcycle around one echo ecall (two rdcycle included), tick off");
+    print_perf(
+        "syscall.local",
+        &mut s,
+        "U rdcycle around one echo ecall (two rdcycle included), only the 10 ms run_u watchdog tick",
+    );
 }

@@ -158,7 +158,7 @@ pub fn report() -> pmp::Discovery {
 /// Program `want`, writing only the registers that differ from the shadow, then verify by reading back. Returns the
 /// number of registers written. Fails closed: a mismatch means U must not run with this view.
 pub fn load(want: &pmp::Plan) -> usize {
-    if !pmp::view_ok(want.entries()) {
+    if !pmp::view_ok(want.entries(), gran()) {
         kprintln!("pmp: unsafe view (fixed window/deny-all missing, or an entry touches the window; #646): halting");
         crate::platform::exit(4);
     }
@@ -169,7 +169,7 @@ pub fn load(want: &pmp::Plan) -> usize {
 #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn view_loaded() -> bool {
     // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
-    pmp::view_ok(unsafe { SHADOW[hart()].get() })
+    pmp::view_ok(unsafe { SHADOW[hart()].get() }, gran())
 }
 
 /// `load` without the view check. Only the #646 hang reproducer uses it (probe builds).

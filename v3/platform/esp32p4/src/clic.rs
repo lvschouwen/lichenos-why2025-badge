@@ -11,9 +11,11 @@ pub const ATTR_M_LEVEL: u8 = 0xC0;
 /// The highest level.
 pub const CTL_MAX: u8 = 0xFF;
 
-/// Interrupt lines the P4 CPU has (IDF SOC_CPU_INTR_NUM). An id past it is ignored: the id can come from an mcause code
-/// (up to 0xFFF), and a write 4 * id bytes past the window start would hit unrelated registers.
-pub const LINES: usize = 32;
+/// CLIC interrupt ids the P4 has: 16 internal (0..15, the timer is 7) plus 32 external, which sit at id n + 16 (IDF
+/// csr_clic.h `RV_EXTERNAL_INT_OFFSET`, interrupt_clic.c), so ids run 0..47 (review M-a: 32 was the external count
+/// only). An id past it is ignored: the id can come from an mcause code (up to 0xFFF), and a write 4 * id bytes past
+/// the window start would hit unrelated registers.
+pub const LINES: usize = 16 + 32;
 
 const fn byte(id: usize, b: usize) -> usize {
     CTRL + 4 * id + b
