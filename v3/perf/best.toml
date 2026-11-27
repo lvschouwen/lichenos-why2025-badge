@@ -1,0 +1,5 @@
+# Best measured value per ratcheted metric (#643). Only `perf_report.py --update-best` writes it, and only when a
+# value improves. Nothing is measured yet, so it is empty. Entry shape:
+#   [best."syscall.local"]
+#   value = 3.1
+#   build = "<build id>"

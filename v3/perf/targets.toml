@@ -1,0 +1,228 @@
+# Lichen OS v3 performance targets (#643, part of #642). One table per metric; the name is the PERF metric.
+#
+# key         PERF key that carries the compared value (unit is in the key name)
+# direction   "lower" or "higher" is better
+# v2          the v2 baseline, or "todo" when no v2 number exists in the repo or issues (never invented)
+# v2_*        provenance: fw commit, workload/conditions, source issue
+# target      absolute goal; omitted when it is relative (target_pct, computed against v2 once v2 is known)
+# target_pct  relative goal in percent against v2 (negative = lower than v2)
+# stretch     optional stretch goal
+# ratchet     true once the metric is measurable on a v3 build; only then can it fail the gate
+# tolerance_pct  allowed worsening against best.toml before the ratchet fails (default 5)
+# Metrics for subsystems that do not exist yet stay ratchet = false and never block bring-up.
+
+# ---- Boot ----
+["boot.first_frame"]
+key = "ms"
+direction = "lower"
+v2 = 1087
+v2_fw = "fw-869e608d"
+v2_conditions = "remote bench 2026-11-13, `fw ui perf` first frame stamp; clocks todo"
+v2_source = "#205"
+target = 2000
+ratchet = false
+
+["boot.launcher"]
+key = "ms"
+direction = "lower"
+v2 = "todo"
+v2_source = "none recorded (#205 only stamps the first frame)"
+target = 3000
+ratchet = false
+
+# ---- Graphics and input ----
+["gfx.fps"]
+key = "fps"
+direction = "higher"
+v2 = 15
+v2_fw = "todo"
+v2_conditions = "DOOM 320x200 on the #526 LVGL canvas; clocks todo"
+v2_source = "docs/app-api.md (video path section)"
+target = 60
+ratchet = false
+
+["gfx.video_fps"]
+key = "fps"
+direction = "higher"
+v2 = 53
+v2_fw = "todo"
+v2_conditions = "DOOM 320x200 on the VIDEO path (lichen_video.h); clocks todo"
+v2_source = "docs/app-api.md (video path section)"
+target = 53
+stretch = 60
+ratchet = false
+
+["input.to_display"]
+key = "p95_ms"
+direction = "lower"
+v2 = "todo"
+v2_source = "#205 added the key-to-flush p95 read-out but recorded no value (needs a physical key); the code standard fail line is 200 ms"
+target = 50
+ratchet = false
+
+# ---- Storage and update ----
+["sd.write"]
+key = "mb_s"
+direction = "higher"
+v2 = 2.30
+v2_fw = "fw-5119efd5"
+v2_conditions = "`fw sd test`, SDHC 20 MHz 4-bit, 64 KB write; later images run SDIO at 50 MHz and were not re-measured"
+v2_source = "#263"
+target = 5
+ratchet = false
+
+["sd.read"]
+key = "mb_s"
+direction = "higher"
+v2 = 4.30
+v2_fw = "fw-5119efd5"
+v2_conditions = "`fw sd test`, SDHC 20 MHz 4-bit; 4.37 on the first run"
+v2_source = "#263"
+target = 8
+ratchet = false
+
+["ota.total"]
+key = "s"
+direction = "lower"
+v2 = "todo"
+v2_source = "none recorded"
+target = 20
+ratchet = false
+
+# ---- Resources ----
+["cpu.os"]
+key = "pct"
+direction = "lower"
+v2 = "todo"
+v2_source = "none recorded"
+target_pct = -25
+ratchet = false
+
+["energy.idle"]
+key = "mw"
+direction = "lower"
+v2 = "todo"
+v2_source = "none recorded"
+target_pct = -10
+ratchet = false
+
+["mem.internal_used"]
+key = "bytes"
+direction = "lower"
+v2 = "todo"
+v2_fw = "fw-869e608d"
+v2_conditions = "`fw mem internal` free 181907, total 417251 (used would be 235344), min free 175847; idle home screen, not a defined workload"
+v2_source = "#205 (derived, confirm before use)"
+target_pct = -30
+ratchet = false
+
+["mem.dma_free"]
+key = "bytes"
+direction = "higher"
+v2 = 137179
+v2_fw = "fw-983d9e7e"
+v2_conditions = "P4 only (C6 still on old image), PSRAM 120 MHz, SD 50 MHz, Wi-Fi up, BT off; `fw mem` DMA-capable free"
+v2_source = "#591"
+target = 171474
+stretch = 204800
+ratchet = false
+
+["mem.dma_min"]
+key = "bytes"
+direction = "higher"
+v2 = 128307
+v2_fw = "fw-983d9e7e"
+v2_conditions = "as mem.dma_free; since-boot minimum"
+v2_source = "#591"
+target = 160384
+stretch = 204800
+ratchet = false
+
+["mem.psram_used"]
+key = "bytes"
+direction = "lower"
+v2 = "todo"
+v2_source = "none recorded"
+target_pct = -20
+ratchet = false
+
+["mem.psram_clock"]
+key = "mhz"
+direction = "higher"
+v2 = 120
+v2_fw = "fw-983d9e7e"
+v2_conditions = "runtime switch, 0 bad bytes; 200 MHz flips bits"
+v2_source = "#591"
+target = 120
+ratchet = false
+
+["size.footprint"]
+key = "bytes"
+direction = "lower"
+v2 = "todo"
+v2_source = "tools/standard-baseline.txt holds per-archive sizes only; no agreed total (flash image size not recorded)"
+target_pct = -30
+ratchet = false
+
+# ---- Kernel (p95) ----
+["kernel.ctx_switch"]
+key = "p95_us"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a, v2 has no PMP"
+target = 20
+stretch = 5
+ratchet = false
+
+["kernel.syscall.local"]
+key = "p95_us"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a, v2 has no syscall boundary"
+target = 10
+stretch = 2
+ratchet = false
+
+["kernel.syscall.xcore"]
+key = "p95_us"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a"
+target = 50
+stretch = 20
+ratchet = false
+
+["kernel.fault_containment"]
+key = "p95_ms"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a"
+target = 5
+stretch = 1
+ratchet = false
+
+["kernel.timer_jitter"]
+key = "max_us"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a; the timer itself runs at 1 kHz"
+target = 2
+ratchet = false
+
+# ---- Processes ----
+["proc.resident"]
+key = "count"
+direction = "higher"
+v2 = "todo"
+v2_source = "n/a"
+target = 8
+stretch = 16
+ratchet = false
+
+["proc.pmp_entries"]
+key = "max"
+direction = "lower"
+v2 = "todo"
+v2_source = "n/a"
+target = 8
+ratchet = false
