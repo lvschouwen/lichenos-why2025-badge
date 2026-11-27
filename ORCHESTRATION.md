@@ -52,8 +52,12 @@ when the run ends. The old wave logs are in git history (before #483).
 2. `gh issue list --label now` and `--label needs-lucas`; the latest comment on an issue is its state.
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
-## Live (2026-11-27, 16:40)
-- Badge runs fw-1c07dd0f (main 1c07dd0f; 2f7f9b5b has the same image code), C6 IDENT match, card stays in (memory sd-card-stays-in).
-- Next: #585 (wt-3, uncommitted, impl-585 idle: read its git log and diff first), then #597. wt-2 #587 claimed, idle.
-- #600 open for owner steps: 5b UTF-8 name written on a PC (Wi-Fi and console refuse non-ASCII paths), 5e C6 console on USB; 5d reproducible image (host).
-- Owner to run: `agent-wt done wt-1 --force`, `agent-wt done wt-4 --force` (content merged, SHAs differ); remove wt-5/firmware/build-stale-598.
+## Live (2026-11-27, v3 sprint)
+- v3 branch tip 60b81925 (pushed, v3/check.sh green). v3 merges: rebase on v3, ff-only, ./v3/check.sh, push v3.
+- wt-5 feat/612-v3-pmp d684e561 (U-mode, rebased, gate green): review-612 (Opus) reviewing; pmp-612 (Sonnet) doing checkpoint 2 and gets the review fixes.
+- wt-6 feat/612-v3-core1 (from feat/612-v3-pmp): core1-612 (Opus), checkpoint 3; rebases after the review fixes.
+- wt-7 feat/643-v3-perf (from v3): perf-643 (Sonnet), targets.toml + perf_report.py.
+- wt-8 feat/620-v3-psram: psram-620 (teammate from before the clear), uncommitted; owns v3/Cargo.toml and Cargo.lock.
+- Owner targets (v3 must beat v2): #643; every bench row gets PERF lines.
+- wt-2 #587 and wt-3 #585 hold uncommitted v2 work (not redundant). Owner to delete (my -D is denied): chore/600-settings-cleanup, feat/595-sd-update (both on main).
+- #615 next steps (rollback drill, first write) are flash writes: owner.
