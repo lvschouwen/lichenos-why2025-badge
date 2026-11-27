@@ -211,7 +211,9 @@ fn pma_rows(t: &mut Tally, udata: usize) {
         t,
         "pma.program",
         Some(matches && lock_bits == 0),
-        format_args!("entries 0..2 (L2MEM, flash, PSRAM; cacheable RWX) read back {matches}, L bits set: {lock_bits}"),
+        format_args!(
+            "entries 0..5 (L2MEM, flash, PSRAM cacheable RWX; 2 fences) read back {matches}, L bits set: {lock_bits}"
+        ),
     );
     begin("pma.live");
     // The kernel still runs, M still reaches cached L2MEM, and a U round trip still works with the new table.
@@ -426,5 +428,18 @@ fn syscall_perf(udata: usize) {
         let d = now().wrapping_sub(t0);
         *v = if u.echoes as usize == K { d.saturating_sub(f) / K as u32 } else { u32::MAX };
     }
-    print_perf("syscall.local", &mut s, "mean of 32 echo ecalls per sample, U ecall -> M handler -> mret, tick off");
+    print_perf(
+        "syscall.local.mean32",
+        &mut s,
+        "mean of 32 echo ecalls per sample, U ecall -> M handler -> mret, tick off",
+    );
+    // One ecall per run: a real per-call tail. Minus the median empty run (entry + exit ecall), which is subtracted
+    // once, so it is a slight under-estimate of the p95 by the jitter of the empty run.
+    for v in s.iter_mut() {
+        let t0 = now();
+        let u = mtrap::run_u(fnaddr(bp_u_echo_n), sp, 1, 0);
+        let d = now().wrapping_sub(t0);
+        *v = if u.echoes == 1 { d.saturating_sub(f) } else { u32::MAX };
+    }
+    print_perf("syscall.local", &mut s, "one echo ecall per run minus the median empty run, tick off");
 }

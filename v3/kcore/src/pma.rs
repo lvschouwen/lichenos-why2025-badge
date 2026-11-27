@@ -2,7 +2,8 @@
 //! decide whether it may be programmed.
 //!
 //! PMA binds M-mode as well as U, so a wrong entry can kill the kernel itself. The table is therefore additive: the
-//! kernel adds explicit cacheable entries for L2MEM, flash and PSRAM at indices below the ROM's whitelist (entry 15,
+//! kernel adds explicit cacheable entries for L2MEM, flash and PSRAM, plus unlocked no-permission fences over the two unused
+//! holes inside the whitelist, at indices below the ROM's whitelist (entry 15,
 //! `0xc000001d` / `0x11ffffff` = NAPOT 0x4000_0000 + 256 MiB, RWX, cacheable) and leaves that one in place, so no
 //! address the kernel already uses changes attributes. Entries are never locked (L, bit 29, stays clear): the bench has
 //! not yet shown whether a locked PMA fence traps or hangs.
@@ -41,12 +42,24 @@ pub const fn napot(base: u32, len: u64, attrs: u32) -> Entry {
     Entry { cfg: NAPOT | EN | attrs, addr: ((base as u64 | (len / 2 - 1)) >> 2) as u32 }
 }
 
-/// The three entries the kernel adds, as (index, entry): cacheable RWX for L2MEM, flash and PSRAM.
-pub const fn kernel_entries() -> [(usize, Entry); 3] {
+/// Holes inside the ROM whitelist that nothing uses: flash window end to PSRAM, and PSRAM end to the mask ROM.
+pub const GAP1_BASE: u32 = 0x4400_0000;
+pub const GAP1_LEN: u64 = 64 << 20;
+pub const GAP2_BASE: u32 = 0x4C00_0000;
+pub const GAP2_TOP: u32 = 0x4FC0_0000;
+/// Valid, no permissions (a fence: access faults). Never locked.
+pub const FENCE: u32 = EN;
+
+/// The entries the kernel adds, as (index, entry): cacheable RWX for L2MEM, flash and PSRAM, then unlocked
+/// no-permission fences over the two unused holes (the second is a TOR pair: base holder, then top).
+pub const fn kernel_entries() -> [(usize, Entry); 6] {
     [
         (0, napot(L2MEM_BASE, L2MEM_LEN, RWX)),
         (1, napot(FLASH_BASE, FLASH_LEN, RWX)),
         (2, napot(PSRAM_BASE, PSRAM_LEN, RWX)),
+        (3, napot(GAP1_BASE, GAP1_LEN, 0)),
+        (4, Entry { cfg: FENCE, addr: GAP2_BASE >> 2 }),
+        (5, Entry { cfg: TOR | FENCE, addr: GAP2_TOP >> 2 }),
     ]
 }
 
@@ -125,7 +138,7 @@ mod tests {
 
     #[test]
     fn kernel_entries_are_cacheable_rwx_and_never_locked() {
-        for (_, e) in kernel_entries() {
+        for (_, e) in &kernel_entries()[..3] {
             assert_eq!(e.cfg & LOCK, 0);
             assert_eq!(e.cfg & NONCACHEABLE, 0);
             assert_eq!(e.cfg & RWX, RWX);
@@ -179,6 +192,23 @@ mod tests {
                 })
                 .unwrap();
             assert!(i < 3, "{a:#x} matched entry {i}");
+        }
+    }
+
+    #[test]
+    fn fences_cover_only_the_two_unused_holes_and_never_lock() {
+        let mut t = rom_table();
+        for (i, e) in kernel_entries() {
+            assert_eq!(e.cfg & LOCK, 0);
+            t[i] = e;
+        }
+        for a in [0x4400_0000u32, 0x45AB_CDEF, 0x47FF_FFFF, 0x4C00_0000, 0x4E00_0000, 0x4FBF_FFFF] {
+            assert_eq!(lookup(&t, a).map(|d| d.perm), Some(0), "{a:#x}");
+        }
+        // The edges next to them stay RWX and cacheable.
+        for a in [0x43FF_FFFFu32, 0x4800_0000, 0x4BFF_FFFF, 0x4FC0_0000, 0x4FF7_0000] {
+            let d = lookup(&t, a).unwrap();
+            assert_eq!((d.perm, d.cacheable), (RWX, true), "{a:#x}");
         }
     }
 
