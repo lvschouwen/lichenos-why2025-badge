@@ -16,11 +16,11 @@ struct Tally {
     words: u64,
     bad: u64,
     bit_flips: [u32; 32],
-    first: [(usize, u32, u32); 4],
+    first: [(usize, u32, u32); 16],
 }
 impl Tally {
     fn new() -> Self {
-        Tally { words: 0, bad: 0, bit_flips: [0; 32], first: [(0, 0, 0); 4] }
+        Tally { words: 0, bad: 0, bit_flips: [0; 32], first: [(0, 0, 0); 16] }
     }
     fn check(&mut self, addr: usize, expected: u32, got: u32) {
         self.words += 1;
@@ -41,7 +41,7 @@ fn verdict(name: core::fmt::Arguments, t: &Tally) -> bool {
     let ok = t.bad == 0;
     pl!("psram: TEST {name} {} ({} words, {} bad)", if ok { "PASS" } else { "FAIL" }, t.words, t.bad);
     if !ok {
-        for &(a, e, g) in t.first.iter().take(t.bad.min(4) as usize) {
+        for &(a, e, g) in t.first.iter().take(t.bad.min(16) as usize) {
             pl!(
                 "psram:   at {a:#010x}: expected {e:#010x} got {g:#010x} (flipped bits {})",
                 patterns::flipped_bits(e, g)
@@ -83,10 +83,6 @@ fn walking(base: usize, name: &str) -> bool {
     ];
     for &off in &spots {
         let a = base + off;
-        if base == CACHED_BASE {
-            pl!("psram: walking cached at {a:#010x}");
-            lichen_platform_esp32p4::uart::drain();
-        }
         for n in 0..32 {
             for v in [patterns::walking_one(n), patterns::walking_zero(n)] {
                 w(a, v);
@@ -180,7 +176,7 @@ fn retention(secs: u32) -> bool {
 }
 
 /// The cache controller as the ROM left it, then one cached read and one cached write with a line before each, so a
-/// hang shows where it is.
+/// hang shows where it is (the L2 tags are undefined after a download-mode boot until `cache_invalidate_all_l2`).
 fn cache_diag() {
     const CACHE: usize = 0x3FF1_0000;
     for (n, off) in [
@@ -208,16 +204,249 @@ fn cache_diag() {
     w(CACHED_BASE + 0x20000, 0x1234_5678);
     pl!("psram: cached write ok; readback {:#010x}", r(CACHED_BASE + 0x20000));
     lichen_platform_esp32p4::uart::drain();
-    for a in [0x0usize, 0xFFFC, 0x1_0000, 0x1_0040, 0x1_1000, 0x2_0000] {
-        pl!("psram: step read cached +{a:#x}");
-        lichen_platform_esp32p4::uart::drain();
-        let v = r(CACHED_BASE + a);
-        pl!("psram: step write cached +{a:#x} (read {v:#010x})");
-        lichen_platform_esp32p4::uart::drain();
-        w(CACHED_BASE + a, 0xA5A5_0000 + a as u32);
+}
+
+/// Stress words of `len` bytes at `off`: the address pattern (its 0x...3fc -> 0x...400 steps switch ten data bits at
+/// once, the case that failed at IDF's tuning point) and a checkerboard (all 32 bits switch on every word).
+fn stress_bad(off: usize, len: usize) -> u32 {
+    let mut bad = 0u32;
+    let mut a = 0;
+    while a < len {
+        w(UNC + off + a, patterns::addr_word((off + a) as u32, false));
+        a += 4;
     }
-    pl!("psram: steps done");
-    lichen_platform_esp32p4::uart::drain();
+    let mut a = 0;
+    while a < len {
+        bad += u32::from(r(UNC + off + a) != patterns::addr_word((off + a) as u32, false));
+        a += 4;
+    }
+    let cb = |a: usize| if a & 4 == 0 { 0x5555_5555u32 } else { 0xAAAA_AAAA };
+    let mut a = 0;
+    while a < len {
+        w(UNC + off + a, cb(a));
+        a += 4;
+    }
+    let mut a = 0;
+    while a < len {
+        bad += u32::from(r(UNC + off + a) != cb(a));
+        a += 4;
+    }
+    bad
+}
+
+/// The tuning eye at 120 MHz: for each DQS phase and each delay-line setting of the IDF sweep, how many stress words
+/// read back wrong. One line per phase, 31 counts (delay line ids 0..30, see tune::delayline).
+pub fn eye() {
+    use lichen_platform_esp32p4::psram::{regs, tune};
+    // SAFETY: ROM cache maintenance; L2 holds external memory only; the 32 MB are mapped for the stress region.
+    unsafe {
+        map::cache_invalidate_all_l2();
+        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+    }
+    let (off, len) = (0x50_0000, 0x20_0000);
+    pl!("psram: eye: stress bad-word counts over {len:#x} bytes at {off:#x}; rows = DQS phase 0..3, columns = delay line id 0..30");
+    for phase in 0..4u32 {
+        let mut row = [0u32; tune::DELAYLINES];
+        for (i, cell) in row.iter_mut().enumerate() {
+            let (data, dqs) = tune::delayline(i);
+            // SAFETY: MSPI IOMUX tuning registers, PSRAM bring-up probe only.
+            unsafe {
+                regs::set_dqs_phase(phase);
+                regs::set_delaylines(data, dqs);
+            }
+            *cell = stress_bad(off, len).min(9999);
+        }
+        pl!("psram: eye phase {phase}: {row:?}");
+    }
+}
+
+// ---- diag: where do the 120 MHz flips come from? ------------------------------------------------------------------
+// Per case: write the region once, read it three times (right away, again, after DELAY_S seconds), and print the bad
+// addresses of the first read. The same set again = stored wrong at write time; a changing set = read side; a growing
+// set = retention. Region 0x400000..0x800000 (4 MB) holds the addresses that failed in the full 32 MB pass.
+const D_OFF: usize = 0x40_0000;
+const D_LEN: usize = 0x40_0000;
+const DELAY_S: u32 = 6;
+
+#[derive(Clone, Copy)]
+struct BadSet {
+    count: u32,
+    addrs: [u32; 32],
+    bits: [u32; 32],
+}
+impl BadSet {
+    fn new() -> Self {
+        BadSet { count: 0, addrs: [0; 32], bits: [0; 32] }
+    }
+    fn add(&mut self, addr: usize, expected: u32, got: u32) {
+        if (self.count as usize) < self.addrs.len() {
+            self.addrs[self.count as usize] = addr as u32;
+        }
+        self.count += 1;
+        for (b, n) in self.bits.iter_mut().enumerate() {
+            *n += ((expected ^ got) >> b) & 1;
+        }
+    }
+    fn contains(&self, a: u32) -> bool {
+        self.addrs.iter().take(self.count.min(32) as usize).any(|&x| x == a)
+    }
+    /// How many of this set's recorded addresses are also in `other`.
+    fn shared(&self, other: &BadSet) -> u32 {
+        self.addrs.iter().take(self.count.min(32) as usize).filter(|&&a| other.contains(a)).count() as u32
+    }
+}
+
+fn fifo_read_word(off: usize, buf: &mut [u32; 16], base: &mut usize) -> u32 {
+    use lichen_platform_esp32p4::psram::mspi;
+    let blk = off & !63;
+    if *base != blk {
+        // SAFETY: FIFO-path read on the initialised controller (variable dummy off, see `diag`).
+        unsafe { mspi::read_data(buf, blk as u32) };
+        *base = blk;
+    }
+    buf[(off & 63) / 4]
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Rd {
+    Axi,
+    Fifo,
+}
+fn read_region(f: &dyn Fn(usize) -> u32, how: Rd) -> BadSet {
+    let mut set = BadSet::new();
+    let (mut buf, mut base) = ([0u32; 16], usize::MAX);
+    let mut a = 0;
+    while a < D_LEN {
+        let off = D_OFF + a;
+        let g = match how {
+            Rd::Axi => r(UNC + off),
+            Rd::Fifo => fifo_read_word(off, &mut buf, &mut base),
+        };
+        let e = f(off);
+        if g != e {
+            set.add(off, e, g);
+        }
+        a += 4;
+    }
+    set
+}
+fn show_set(tag: &str, s: &BadSet, other: Option<&BadSet>) {
+    pl!("psram: diag   {tag}: {} bad", s.count);
+    if let Some(o) = other {
+        pl!("psram: diag     {} of its first {} bad addresses are also bad in read 1", s.shared(o), s.count.min(32));
+    }
+}
+fn show_addrs(s: &BadSet) {
+    for &a in s.addrs.iter().take(s.count.min(16) as usize) {
+        pl!("psram: diag     bad at {a:#x}");
+    }
+    for (b, &n) in s.bits.iter().enumerate() {
+        if n != 0 {
+            pl!("psram: diag     bit {b}: {n} words");
+        }
+    }
+}
+
+fn diag_case(name: &str, f: &dyn Fn(usize) -> u32, write_cached: bool, read_how: Rd, retention: bool) {
+    pl!("psram: diag {name}");
+    let mut a = 0;
+    while a < D_LEN {
+        let off = D_OFF + a;
+        let base = if write_cached { CACHED_BASE } else { UNC };
+        w(base + off, f(off));
+        a += 4;
+    }
+    if write_cached {
+        // SAFETY: ROM cache maintenance over the written range.
+        let rc = unsafe { map::cache_writeback_invalidate(CACHED_BASE + D_OFF, D_LEN) };
+        if rc != 0 {
+            pl!("psram: diag   writeback returned {rc}");
+        }
+    }
+    let r1 = read_region(f, read_how);
+    show_set("read 1 (right after the write)", &r1, None);
+    show_addrs(&r1);
+    let r2 = read_region(f, read_how);
+    show_set("read 2 (again)", &r2, Some(&r1));
+    if retention {
+        for _ in 0..DELAY_S {
+            delay_us(1_000_000);
+        }
+        let r3 = read_region(f, read_how);
+        show_set("read 3 (after the 6 s wait)", &r3, Some(&r1));
+    }
+}
+
+/// The cached alias really is cached: a cached write is not in PSRAM until written back.
+fn cache_proof() {
+    let at = 0x60_0000usize;
+    w(UNC + at, 0x1111_1111);
+    w(CACHED_BASE + at, 0x2222_2222);
+    let before = r(UNC + at);
+    // SAFETY: ROM cache maintenance.
+    unsafe { map::cache_writeback_invalidate(CACHED_BASE + at, 64) };
+    let after = r(UNC + at);
+    pl!("psram: diag cache proof: PSRAM holds {before:#010x} before write-back (expect 0x11111111), {after:#010x} after (expect 0x22222222)");
+}
+
+/// Case F: the same address pattern, but each single-word write is followed by a pause, so writes never queue up.
+fn diag_spaced() {
+    pl!("psram: diag F address, AXI single-word writes spaced by a pause (no write queueing), AXI read");
+    let mut a = 0;
+    while a < D_LEN {
+        w(UNC + D_OFF + a, (D_OFF + a) as u32);
+        lichen_platform_esp32p4::uart::spin(60);
+        a += 4;
+    }
+    let r1 = read_region(&|a| a as u32, Rd::Axi);
+    show_set("read 1", &r1, None);
+    show_addrs(&r1);
+}
+
+/// Case G: single words at addresses that failed in case A, written alone (long pause after each), 20 times each.
+fn diag_isolated(known: &BadSet) {
+    pl!("psram: diag G isolated writes at the {} addresses that failed in case A, 20 tries each (write value = address)", known.count.min(32));
+    let mut total_fail = 0;
+    for &a in known.addrs.iter().take(known.count.min(32) as usize) {
+        let mut fails = 0;
+        for _ in 0..20 {
+            w(UNC + a as usize, a);
+            lichen_platform_esp32p4::uart::spin(2000);
+            if r(UNC + a as usize) != a {
+                fails += 1;
+            }
+        }
+        total_fail += fails;
+        if fails != 0 {
+            pl!("psram: diag   {a:#x}: {fails} of 20 isolated writes stored wrong");
+        }
+    }
+    pl!("psram: diag   isolated writes stored wrong: {total_fail} of {}", 20 * known.count.min(32));
+}
+
+pub fn diag() {
+    use lichen_platform_esp32p4::psram::regs;
+    // SAFETY: as `eye`.
+    unsafe {
+        map::cache_invalidate_all_l2();
+        map::map_identity(PSRAM_BYTES / PAGE_BYTES);
+        regs::apply(&[regs::VAR_DUMMY_FIFO_OFF]); // FIFO-path reads were tuned with the variable dummy off
+    }
+    pl!("psram: diag: region {D_OFF:#x}..{:#x}", D_OFF + D_LEN);
+    cache_proof();
+    diag_case("A address, AXI single-word write, AXI read", &|a| a as u32, false, Rd::Axi, false);
+    diag_case("D address, AXI write, FIFO read (re-check)", &|a| a as u32, false, Rd::Fifo, false);
+    diag_spaced();
+    // the failing set of the queued-write case, rewritten and re-read, for case G
+    let mut a = 0;
+    while a < D_LEN {
+        w(UNC + D_OFF + a, (D_OFF + a) as u32);
+        a += 4;
+    }
+    let known = read_region(&|a| a as u32, Rd::Axi);
+    pl!("psram: diag baseline (queued writes again): {} bad", known.count);
+    diag_isolated(&known);
+    diag_case("E address, cached write + write-back, AXI read", &|a| a as u32, true, Rd::Axi, false);
 }
 
 /// Everything. Returns the number of failed tests.

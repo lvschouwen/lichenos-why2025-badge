@@ -36,6 +36,24 @@ mod tests;
 
 const STAGE: &str = env!("LICHEN_PSRAM_STAGE");
 
+const fn parse_override(s: &str) -> Option<u32> {
+    let b = s.as_bytes();
+    if b.is_empty() || b[0] == b'-' {
+        return None;
+    }
+    let (mut i, mut v) = (0, 0u32);
+    while i < b.len() {
+        v = v * 10 + (b[i] - b'0') as u32;
+        i += 1;
+    }
+    Some(v)
+}
+const OVERRIDE: psram::TuneOverride = psram::TuneOverride {
+    phase: parse_override(env!("LICHEN_PSRAM_PHASE")),
+    data_dl: parse_override(env!("LICHEN_PSRAM_DATA_DL")),
+    dqs_dl: parse_override(env!("LICHEN_PSRAM_DQS_DL")),
+};
+
 #[panic_handler]
 fn panic(i: &core::panic::PanicInfo) -> ! {
     pl!("psram: PANIC {i}");
@@ -68,15 +86,22 @@ extern "C" fn pmain() -> ! {
         "ldo" => Some(psram::Upto::Ldo),
         "mpll" => Some(psram::Upto::Mpll),
         "chip" => Some(psram::Upto::Chip),
-        "tune" | "all" => Some(psram::Upto::Tuned),
+        "tune" | "all" | "eye" | "diag" => Some(psram::Upto::Tuned),
         _ => None,
     };
     if let Some(upto) = upto {
         let mut log = |a: core::fmt::Arguments| pl!("psram: {a}");
         // SAFETY: the one caller, on the boot hart, in a RAM-only image that owns the machine (load-ram).
-        match unsafe { psram::init(upto, &mut log) } {
+        match unsafe { psram::init(upto, OVERRIDE, &mut log) } {
             Ok(i) => {
                 pl!("psram: init ok up to {upto:?}: mpll {} MHz, {} MB", i.mpll_mhz, i.size_bytes >> 20);
+                if STAGE == "diag" {
+                    tests::diag();
+                }
+                if STAGE == "eye" {
+                    clock_report();
+                    tests::eye();
+                }
                 if STAGE == "all" {
                     clock_report();
                     let fails = tests::run();

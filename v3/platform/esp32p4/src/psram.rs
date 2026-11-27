@@ -77,12 +77,20 @@ unsafe fn clear_tuning() {
     regs::set_delaylines(0, 0);
 }
 
+/// Bench override of the tuning choice (the probe's way to compare tuning points at 120 MHz): `None` keeps IDF's pick.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TuneOverride {
+    pub phase: Option<u32>,
+    pub data_dl: Option<u32>,
+    pub dqs_dl: Option<u32>,
+}
+
 /// Bring the PSRAM up to `upto`. Returns what was set and read; every step is logged through `log`.
 ///
 /// # Safety
 /// Owns the PSRAM supply, MPLL, the PSRAM controller and its pins: call once, from the boot hart, with nothing else
 /// using PSRAM or the MSPI IOMUX. Reads two eFuse read registers (`ldo::read_ldo_efuse`) and writes none.
-pub unsafe fn init(upto: Upto, log: Log) -> Result<Info, Error> {
+pub unsafe fn init(upto: Upto, over: TuneOverride, log: Log) -> Result<Info, Error> {
     let mut info = Info::default();
 
     // 1. LDO, then MPLL (esp_clk_tree_mpll_acquire, esp_clk_tree_mpll_freq_set)
@@ -163,7 +171,7 @@ pub unsafe fn init(upto: Upto, log: Log) -> Result<Info, Error> {
     };
     let t = tune::sweep(&mut matches);
     log(format_args!(
-        "tune: phase id {} (run {}{}), delay line id {} data {} dqs {} (run {}{})",
+        "tune: phase id {} (run {}{}), delay line id {} data {} dqs {} (run {}{}); good reads of 100 per delay line: {:?}",
         t.phase_id,
         t.phase_run,
         if t.phase_ok { "" } else { ", FALLBACK" },
@@ -171,8 +179,17 @@ pub unsafe fn init(upto: Upto, log: Log) -> Result<Info, Error> {
         t.data_dl,
         t.dqs_dl,
         t.delayline_run,
-        if t.delayline_ok { "" } else { ", FALLBACK" }
+        if t.delayline_ok { "" } else { ", FALLBACK" },
+        t.dl_good
     ));
+    let mut t = t;
+    if over.phase.is_some() || over.data_dl.is_some() || over.dqs_dl.is_some() {
+        let phase = over.phase.unwrap_or(tune::PHASES[t.phase_id]);
+        (t.data_dl, t.dqs_dl) = (over.data_dl.unwrap_or(t.data_dl), over.dqs_dl.unwrap_or(t.dqs_dl));
+        regs::set_dqs_phase(phase);
+        regs::set_delaylines(t.data_dl, t.dqs_dl);
+        log(format_args!("tune: OVERRIDE phase {phase} data {} dqs {}", t.data_dl, t.dqs_dl));
+    }
     set_psram_clock(PSRAM_MHZ);
     regs::apply(&regs::VAR_DUMMY_ON);
     info.tuned = Some(t);

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the #620 PSRAM probe: ELF, then an esptool RAM image for tools/v3-load-ram.sh.
 #   ./probe-psram/build.sh [stage]   -> target/lichen/probe-psram/probe-psram.bin (+ .elf)
-# stage (default all) is baked in at build time: dump | all (see src/main.rs).
+# stage (default all) is baked in at build time: dump | ldo | mpll | chip | tune | all (see src/main.rs).
+# LICHEN_PSRAM_PHASE (0-3), LICHEN_PSRAM_DATA_DL and LICHEN_PSRAM_DQS_DL (0-15) override IDF's tuning pick (default: auto).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET=riscv32imac-unknown-none-elf

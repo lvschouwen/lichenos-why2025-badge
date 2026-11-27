@@ -6,4 +6,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LICHEN_PSRAM_STAGE");
     let stage = std::env::var("LICHEN_PSRAM_STAGE").unwrap_or_else(|_| "all".into());
     println!("cargo:rustc-env=LICHEN_PSRAM_STAGE={stage}");
+    // tuning override: -1 = IDF's pick
+    for v in ["LICHEN_PSRAM_PHASE", "LICHEN_PSRAM_DATA_DL", "LICHEN_PSRAM_DQS_DL"] {
+        println!("cargo:rerun-if-env-changed={v}");
+        println!("cargo:rustc-env={v}={}", std::env::var(v).unwrap_or_else(|_| "-1".into()));
+    }
 }
