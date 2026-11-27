@@ -72,3 +72,7 @@ void bt_sync_retry(bt_sync_t *s, uint32_t now_ms) {
         s->said  = false;
     }
 }
+
+char const *bt_sync_set_refusal(bool want, bool effective_on) {
+    return want && !effective_on ? "held off by the system (hot)" : NULL;
+}

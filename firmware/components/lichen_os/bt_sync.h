@@ -66,3 +66,9 @@ void bt_sync_sent(bt_sync_t *s, uint32_t now_ms);
 bool bt_sync_say(bt_sync_t *s);
 // A SET went out less than BT_SYNC_RETRY_MS ago: its result may still come (the mismatch warning waits for it)
 bool bt_sync_in_flight(bt_sync_t const *s, uint32_t now_ms);
+
+// Why a console `set bt.enable` is refused after the OS switch took it (#513), or NULL when nothing is wrong. The set
+// is a CHANGE_SET: it lifts every hold on the radio and airplane mode does not hold it off, so "switched on" with the
+// radio still off means a hold landed in between (thermal), never airplane mode. Airplane mode stays on, the reply is
+// the applied value.
+char const *bt_sync_set_refusal(bool want, bool effective_on);

@@ -402,8 +402,9 @@ reg_status_t reg_p4_bt_enable_set(reg_entry_t const *e, reg_value_t const *v) {
         return REG_FAILED;
     }
     uint16_t const id = REG_ID_BT_ENABLE;
-    if (want && !lichen_radio_get(RADIO_BT)) { // the switch is on, but the radios are held off: nothing goes to the C6
-        reg_cmd_set_why(lichen_airplane_get() ? "held off: airplane mode is on" : "held off by the system (hot)");
+    char const *refusal = bt_sync_set_refusal(want, lichen_radio_get(RADIO_BT));
+    if (refusal) { // a hold landed after the set lifted it: nothing goes to the C6 (airplane mode never holds it, #513)
+        reg_cmd_set_why(refusal);
         return REG_FAILED;
     }
     if (!atomic_load(&started)) {

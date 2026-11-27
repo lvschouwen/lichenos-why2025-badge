@@ -3,6 +3,7 @@
 #include "reg.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -130,10 +131,21 @@ static void bookkeeping(void) {
     CHECK(s.tries == 1); // in flight: no second SET piled on it
 }
 
+static void set_refusal(void) {
+    // #513: airplane mode on, Bluetooth switched on over the console: it comes on, so there is nothing to refuse
+    CHECK(bt_sync_set_refusal(true, true) == NULL);
+    CHECK(bt_sync_set_refusal(false, false) == NULL);
+    CHECK(bt_sync_set_refusal(false, true) == NULL);
+    // A hold that landed after the set: the thermal wording, never "airplane mode"
+    char const *why = bt_sync_set_refusal(true, false);
+    CHECK(why && !strstr(why, "airplane") && strstr(why, "hot"));
+}
+
 int main(void) {
     bookkeeping();
     old_c6();
     mapping();
+    set_refusal();
     no_storm();
     if (failures) {
         printf("%d failure(s)\n", failures);
