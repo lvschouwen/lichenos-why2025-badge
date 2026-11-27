@@ -23,8 +23,9 @@ const _: () = {
     assert!(o.perm + (1 << 20) <= CHIP);
     assert!(o.chase + (8 << 20) <= o.read && o.chase >= 0x5C_0000);
     assert!(o.dma + (8 << 20) <= o.read);
-    // the park test runs last and reuses the ring window (it holds 0xC4AB4C, the address of the #569 flip)
-    assert!(o.park >= o.chase && o.park + (2 << 20) <= o.chase + (8 << 20));
+    // the park test runs after the rings and reuses their window: the CPU region at `park` (1 MB, holds 0xC4AB4C, the #569 flip address) and
+    // the DMA region 2 MB above it (1 MB)
+    assert!(o.park >= o.chase && o.park + (3 << 20) <= o.chase + (8 << 20));
 };
 /// Where each test uses the chip (all outside the hole 0x54_0000-0x5C_0000, which only the integrity suite writes).
 pub struct Offsets {

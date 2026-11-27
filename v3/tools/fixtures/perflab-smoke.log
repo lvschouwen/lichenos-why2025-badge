@@ -11,7 +11,7 @@ CHECK 648.l2 PASS 256 KB, 64 B lines read back; carve starts at 0x4ff80000
 psram: ldo: now xpd=1 sw_owner=1 tieh=0 dref=12 mul=2
 CHECK 648.psram PASS 120 MHz requested, calibrated: true (None)
 CHECK 648.map PASS 32 MB mapped with the hole, 0 cache sync failures
-PERF lab.config cpu_mhz=360 psram_mhz=120 l2_kb=256 l2_line_b=64 dma_burst_b=32 ldo_dref=12 ldo_mul=2
+PERF lab.config cpu_mhz=359 psram_mhz=120 psram_bus_div=4 l2_kb=256 l2_line_b=64 dma_burst_b=32 ldo_dref=12 ldo_mul=2
 CHECK 648.config PASS cpu360-ps120-l2k256l64-dma32-ldocal requested; cpu 360 MHz measured, read back from the registers
 BEGIN mem
 PERF lab.mem.sram.seq_read mb_s=638.38
@@ -41,9 +41,9 @@ PERF lab.dma.sram_to_sram mb_s=173.27 cpu_free_pct=98.63 setup_cycles=992 burst_
 PERF lab.dma.psram_to_psram mb_s=77.59 cpu_free_pct=99.83 setup_cycles=992 burst_b=32
 BEGIN integrity
 integrity: whole chip 32 MB, hole 0x540000-0x5C0000 included, watch class 0x400 mod 0x800 in 0x540000-0x640000
-PERF lab.integrity.cached.addr mb_s=29.27 words=8388608 bad=0 watch=0
-PERF lab.integrity.dma_write.addr mb_s=18.62 words=8388608 bad=0 watch=0
-PERF lab.integrity.dma_read.addr mb_s=18.62 words=8388608 bad=0 watch=0
+PERF lab.integrity.cached.addr mb_s=13.52 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_write.addr_inv mb_s=14.41 words=8388608 bad=0 watch=0
+PERF lab.integrity.dma_read.addr_inv mb_s=14.84 words=8388608 bad=0 watch=0
 PERF lab.temp.integrity celsius=40.00
 CHECK 648.integrity PASS 2 pattern passes, each cached and DMA, whole chip, 0 bad words (0 cache sync failures)
 BEGIN park
@@ -55,5 +55,5 @@ PERF lab.dual.sram_vs_psram c0_sram_mb_s=105.90 solo_sram_mb_s=633.64
 PERF lab.dual.chase_loaded ns=723.02 solo_ns=519.40
 CHECK 648.run PASS suites done, 0 cache sync failures
 PERF lab.temp.end celsius=40.44
-PERF lab.run elapsed_ms=24097
+PERF lab.run elapsed_ms=26113
 END ok

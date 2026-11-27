@@ -17,6 +17,9 @@ cargo fmt -p lichen-perflab -p lichen-probe-perf -- --check
 step "host tests (perflab maths)"
 cargo test --locked -q -p lichen-perflab --target $HOST
 
+step "host tests (platform register maths, bench-experiments speeds included)"
+cargo test --locked -q -p lichen-platform-esp32p4 --features bench-experiments --target $HOST
+
 step "clippy -D warnings"
 CL=(cargo clippy --locked -q --target-dir target/clippy)
 "${CL[@]}" -p lichen-perflab --all-targets --target $HOST -- -D warnings

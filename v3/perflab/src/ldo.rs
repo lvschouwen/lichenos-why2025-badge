@@ -67,6 +67,11 @@ pub const fn ana_after(old: u32, to: Step) -> u32 {
     (old & !MASK) | to.bits()
 }
 
+/// The field bits of an ANA word as the rail had them before a step: what the restore puts back (not a hardcoded pair).
+pub const fn baseline_bits(ana: u32) -> u32 {
+    ana & MASK
+}
+
 /// What the two words say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct State {
@@ -147,6 +152,14 @@ mod tests {
         // the intermediate pairs of a two-write change are exactly what the single write avoids
         assert!(within_ceiling(7, 2) && nominal_mv_x10(7, 2) < 14_000); // a brownout
         assert!(!within_ceiling(12, 5)); // 2925 mV
+    }
+
+    #[test]
+    fn the_baseline_is_exactly_the_two_fields() {
+        let ana = 0x7280_0000 | 1 << 27 | 1 << 26 | 0x55;
+        assert_eq!(baseline_bits(ana), 0x7280_0000);
+        // restoring it into the stepped word gives back the original fields and keeps the other bits
+        assert_eq!(ana_after(0xC100_0000 | 1 << 27, Step::Mv1900) & !MASK, 1 << 27);
     }
 
     #[test]

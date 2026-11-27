@@ -25,6 +25,28 @@ static STOP: AtomicU32 = AtomicU32::new(0);
 static STATE: AtomicU32 = AtomicU32::new(0);
 static PASSES: AtomicU32 = AtomicU32::new(0);
 static CYCLES: AtomicU32 = AtomicU32::new(0);
+/// A trap on core 1: set by its trap handler (which only parks), reported by core 0.
+static C1_TRAPPED: AtomicU32 = AtomicU32::new(0);
+static C1_CAUSE: AtomicU32 = AtomicU32::new(0);
+static C1_EPC: AtomicU32 = AtomicU32::new(0);
+
+/// Called from core 1's trap handler.
+pub fn core1_trapped(mcause: u32, mepc: u32) {
+    C1_CAUSE.store(mcause, SeqCst);
+    C1_EPC.store(mepc, SeqCst);
+    C1_TRAPPED.store(1, SeqCst);
+}
+
+/// Core 0, in `finish`: say what core 1 trapped on, once.
+pub fn report_core1_trap() {
+    if C1_TRAPPED.swap(2, SeqCst) == 1 {
+        check(
+            "648.core1.trap",
+            Verdict::Fail,
+            format_args!("core 1 trapped: mcause={:#x} mepc={:#x}", C1_CAUSE.load(SeqCst), C1_EPC.load(SeqCst)),
+        );
+    }
+}
 
 const REGION: usize = 4 << 20;
 /// Core 1 looks at STOP after every chunk, so it never runs on long after core 0 is done and its figure covers the same window.
@@ -64,6 +86,9 @@ extern "C" fn core1_main() -> ! {
 fn wait_state(want: u32, ms: u64) -> bool {
     let t0 = ticks();
     while STATE.load(SeqCst) != want {
+        if C1_TRAPPED.load(SeqCst) != 0 {
+            return false;
+        }
         if ticks().saturating_sub(t0) > ms * TICK_HZ / 1000 {
             return false;
         }
@@ -163,7 +188,8 @@ pub fn run(cpu_mhz: u32) -> bool {
     if !start_core1() {
         return false;
     }
-    let mhz = cpu_mhz as u64;
+    // core 1 counts its own cycles: convert with the measured clock (SYSTIMER against mcycle), not the nominal one
+    let mhz = lichen_platform_esp32p4::clock::measure_mhz().unwrap_or(cpu_mhz) as u64;
     wb_inv(cached(PSRAM_OFFSETS.read), 3 * REGION);
     // core 0 alone, with core 1 spinning on its flag
     let solo = c0_read_rate();

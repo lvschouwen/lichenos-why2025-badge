@@ -1,7 +1,7 @@
 //! The probe's own hardware access: time, the PSRAM rail step, the die temperature, cache and DMA registers. Everything the platform
 //! keeps private and #648 needs is re-declared here (the platform's psram files belong to #650 meanwhile); the words and fields come
 //! from `lichen-perflab`, which tests them.
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::Relaxed};
 use lichen_perflab::dma::{Burst, RX_MASK, TX_MASK};
 use lichen_perflab::ldo::{self, Step};
 use lichen_perflab::temp;
@@ -38,6 +38,10 @@ pub fn mcycle() -> u32 {
 
 /// Set before the step is written, cleared once the calibrated pair is read back: while it is set every exit path restores 12/2.
 static STEPPED: AtomicBool = AtomicBool::new(false);
+/// The dref and mul fields as they were just before the step: the restore writes these back.
+static BASELINE: AtomicU32 = AtomicU32::new(0);
+/// An analog I2C transaction that never finished (a temperature read after it is not trusted).
+static I2C_FAULT: AtomicBool = AtomicBool::new(false);
 
 pub fn ldo_state() -> ldo::State {
     // SAFETY: the two PMU words of the PSRAM rail, reads.
@@ -48,8 +52,8 @@ pub fn ldo_state() -> ldo::State {
 /// verifies with `ldo_restore_verify` once it may print.
 pub fn ldo_restore_raw() {
     if STEPPED.load(Relaxed) {
-        // SAFETY: the same register and masked write as the step, with the calibrated pair.
-        unsafe { modify32(ldo::ANA_REG, ldo::MASK, Step::Calibrated.bits()) };
+        // SAFETY: the same register and masked write as the step, with the fields read before it.
+        unsafe { modify32(ldo::ANA_REG, ldo::MASK, BASELINE.load(Relaxed)) };
     }
 }
 
@@ -60,11 +64,20 @@ pub fn ldo_restore_verify() -> bool {
     }
     wait_us(ldo::SETTLE_US);
     let st = ldo_state();
-    let ok = st.is(Step::Calibrated);
+    let base = BASELINE.load(Relaxed);
+    let ok = st.xpd == 1 && st.tieh == 0 && st.dref == base >> 28 && st.mul == (base >> 23) & 7;
     crate::con::pass_if(
         ok,
         "648.ldo.restore",
-        format_args!("dref={} mul={} xpd={} tieh={} (12/2, xpd 1, tieh 0 expected)", st.dref, st.mul, st.xpd, st.tieh),
+        format_args!(
+            "dref={} mul={} xpd={} tieh={} ({}/{} before the step, xpd 1, tieh 0 expected)",
+            st.dref,
+            st.mul,
+            st.xpd,
+            st.tieh,
+            base >> 28,
+            (base >> 23) & 7
+        ),
     );
     if ok {
         STEPPED.store(false, Relaxed);
@@ -84,6 +97,8 @@ pub fn ldo_step(to: Step) -> bool {
         );
         return false;
     }
+    // SAFETY: a read of the rail's word.
+    BASELINE.store(ldo::baseline_bits(unsafe { read32(ldo::ANA_REG) }), Relaxed);
     STEPPED.store(true, Relaxed);
     // SAFETY: one masked 32-bit write of dref and mul together (read, merge, one write); XPD and TIEH are in the other register and
     // untouched. The restore path undoes it.
@@ -130,7 +145,12 @@ static TEMP_OK: AtomicBool = AtomicBool::new(false);
 static TEMP_RANGE: AtomicUsize = AtomicUsize::new(temp::FIRST_RANGE);
 
 unsafe fn i2c_wait() {
-    while read32(ANA_MST) & (1 << 25) != 0 {}
+    for _ in 0..100_000 {
+        if read32(ANA_MST) & (1 << 25) == 0 {
+            return;
+        }
+    }
+    I2C_FAULT.store(true, Relaxed);
 }
 unsafe fn i2c_write(reg: u32, data: u32) {
     modify32(ANA_CONF2, 0x00FF_FFFF, 0);
@@ -209,6 +229,16 @@ fn temp_raw() -> Option<u32> {
 
 /// Degrees in hundredths, uncalibrated (see `temp`), switching to a better range when the reading is near the edge of this one.
 pub fn temp_celsius_x100() -> Option<i32> {
+    I2C_FAULT.store(false, Relaxed);
+    let c = temp_read();
+    if I2C_FAULT.load(Relaxed) {
+        None
+    } else {
+        c
+    }
+}
+
+fn temp_read() -> Option<i32> {
     let mut range = TEMP_RANGE.load(Relaxed);
     for _ in 0..2 {
         let c = temp::celsius_x100(temp_raw()?, temp::RANGES[range].offset);
@@ -260,4 +290,10 @@ pub fn dma_burst_readback() -> u32 {
 
 pub fn ldo_stepped() -> bool {
     STEPPED.load(Relaxed)
+}
+
+/// The PSRAM bus clock word the controller holds (SPIMEM2 + 0x50): low byte is the divider minus one.
+pub fn psram_bus_word() -> u32 {
+    // SAFETY: a PSRAM controller register, a read.
+    unsafe { read32(lichen_platform_esp32p4::psram::regs::BUS_CLOCK_SPIMEM2) }
 }

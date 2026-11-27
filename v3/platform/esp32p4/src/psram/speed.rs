@@ -35,7 +35,9 @@ pub const SPEED_160: Speed = Speed {
     rd_reg_dummy: 2 * (6 - 1),
     wr_dummy: 2 * (6 - 1),
 };
-/// Experiment (#648): 200 MHz = MPLL 400 / 2 (IDF's own setting for rev < 3), LC7 / WLC7 (14 and 7 cycles). v2 saw bit 8/9 flips here on the
+/// Experiment (#648): 200 MHz = MPLL 400 / 2 (IDF's own setting for rev < 3), LC7 / WLC7 (14 and 7 cycles). Checked against ESP-IDF v6.1
+/// `components/esp_psram/device/esp_psram_impl_ap_hex.c:36-41` (dummies 2*(14-1), 2*(7-1), 2*(7-1), read latency 4, write latency 1) and
+/// `esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_tuning_configs.h:26-28` (MPLL 400). v2 saw bit 8/9 flips here on the
 /// uncached path; the lab runs it through the cached and DMA paths only.
 #[cfg(feature = "bench-experiments")]
 pub const SPEED_200: Speed = Speed {

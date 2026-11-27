@@ -30,7 +30,7 @@ class PerfLines(unittest.TestCase):
         self.assertEqual(metrics["lab.irq.idle"]["jitter_max_ns"], 133.0)
         self.assertEqual(metrics["lab.timer.accuracy"]["mtime_khz"], 360000.0)  # the CLINT counter runs at the CPU clock
         self.assertEqual(metrics["lab.dual.read_read"]["c1_chunks"], 49.0)
-        self.assertEqual(metrics["lab.run"]["elapsed_ms"], 24097.0)
+        self.assertEqual(metrics["lab.run"]["elapsed_ms"], 26113.0)
         self.assertAlmostEqual(metrics["lab.cpu.fetch.psram512k"]["cycles_per_instr"], 12.37)
 
     def test_a_variant_is_in_the_name_so_a_later_line_cannot_replace_it(self):

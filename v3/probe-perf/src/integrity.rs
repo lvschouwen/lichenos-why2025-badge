@@ -97,6 +97,12 @@ fn verify_dma(p: Pattern) -> Result<Tally, Name> {
     let (mut t, mut steps, mut off) = (Tally::new(), 0, 0);
     while off < CHIP {
         wb_inv(cached(off), BUF);
+        // poison: the buffer holds the complement of what the read must bring, so a transfer that does nothing cannot pass
+        let mut a = 0;
+        while a < BUF {
+            wr(buf_b() + a, !p.word((off + a) as u32));
+            a += 4;
+        }
         wb_inv(buf_b(), BUF);
         xfer(cached(off), buf_b(), BUF, &mut steps).map_err(|f| fault(off, f))?;
         inv(buf_b(), BUF); // the DMA wrote the buffer behind the cache
@@ -142,12 +148,14 @@ fn show_fail(what: &str, t: &Tally) {
     }
 }
 
+/// `mb_s` is the chip's 32 MB over the time of the phase the line names (cached: fill and read-back; dma_write: fill and read-back;
+/// dma_read: the read alone).
 fn report(kind: &str, p: Pattern, t: &Tally, ticks_used: u64) {
     let name = Name::new(kind, p);
     perf(
         name.as_str(),
         &[
-            ("mb_s", Val::F2(mb_s_x100(2 * CHIP as u64, ticks_used, TICK_HZ) as i64)),
+            ("mb_s", Val::F2(mb_s_x100(CHIP as u64, ticks_used, TICK_HZ) as i64)),
             ("words", Val::U(t.words)),
             ("bad", Val::U(t.bad)),
             ("watch", Val::U(t.watch)),
@@ -166,22 +174,29 @@ fn cached_pass(p: Pattern) -> bool {
     t.clean()
 }
 
+/// The DMA pass writes the OPPOSITE of the pattern the cached pass just left on the chip, so a DMA that raises its end flag and drops the
+/// data reads back as the old pattern and fails.
 fn dma_pass(p: Pattern) -> bool {
-    let t0 = ticks();
-    let res = fill_dma(p).and_then(|()| {
+    let p = p.opposite();
+    let (mut t_write, mut t_read) = (0, 0);
+    let res = (|| {
+        let t0 = ticks();
+        fill_dma(p)?;
         let w = verify_cached(p); // the DMA write path, read back by the CPU
+        t_write = ticks() - t0;
+        let t1 = ticks();
         let r = verify_dma(p)?; // the DMA read path
-        Ok((w, r))
-    });
+        t_read = ticks() - t1;
+        Ok::<_, Name>((w, r))
+    })();
     match res {
         Err(why) => {
             check("648.integrity", Verdict::Fail, format_args!("dma {}: {}", p.name(), why.as_str()));
             false
         }
         Ok((w, r)) => {
-            let used = ticks() - t0;
-            report("dma_write", p, &w, used);
-            report("dma_read", p, &r, used);
+            report("dma_write", p, &w, t_write); // the DMA fill and the CPU read-back
+            report("dma_read", p, &r, t_read); // the DMA read-back alone
             if !w.clean() {
                 show_fail(label("dma write, cpu read-back", p).as_str(), &w);
             }

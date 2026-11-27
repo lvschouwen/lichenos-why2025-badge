@@ -59,6 +59,8 @@ const _: () = match CFG.check() {
 const _: () = assert!(CFG.l2.fits_below(0x4FF3_A000), "link.ld NOLOAD window must stay below the cache carve");
 const SUITE: &str = env!("LICHEN_PERF_SUITE");
 /// SYSTIMER ticks (low 32 bits: 268 s of range) at the start of the image.
+/// The MPLL frequency the PSRAM init read back (MHz).
+static MPLL_READ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 static START_TICKS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 const SECS: u32 = num(parse_u32(env!("LICHEN_PERF_SECS")));
 
@@ -80,9 +82,19 @@ extern "C" fn ptrap(mcause: usize) {
         return;
     }
     hw::ldo_restore_raw();
-    let (e, t): (usize, usize);
+    let (e, t, hart): (usize, usize, usize);
     // SAFETY: reads of M-mode trap CSRs.
-    unsafe { core::arch::asm!("csrr {}, mepc", "csrr {}, mtval", out(reg) e, out(reg) t) };
+    unsafe {
+        core::arch::asm!("csrr {}, mepc", "csrr {}, mtval", "csrr {}, mhartid", out(reg) e, out(reg) t, out(reg) hart)
+    };
+    if hart != 0 {
+        // core 1 only leaves its mark and parks: core 0 reports it (one END, one UART writer, one hart on the analog I2C master)
+        cores::core1_trapped(mcause as u32, e as u32);
+        loop {
+            // SAFETY: wfi only stalls the hart.
+            unsafe { core::arch::asm!("wfi") };
+        }
+    }
     con::check("648.trap", Verdict::Fail, format_args!("mcause={mcause:#x} mepc={e:#x} mtval={t:#x}"));
     finish()
 }
@@ -90,6 +102,7 @@ extern "C" fn ptrap(mcause: usize) {
 /// The one way out. The rail first (a raw write, nothing printed before it), then its read-back, the last temperature, END.
 fn finish() -> ! {
     hw::ldo_restore_raw();
+    cores::report_core1_trap();
     hw::ldo_restore_verify();
     if hw::temp_available() {
         temp_checkpoint("lab.temp.end");
@@ -195,6 +208,9 @@ fn psram_step() -> bool {
     // SAFETY: the one init call of this image (boot hart, RAM-only).
     let r = unsafe { psram_init(CFG.psram_mhz, &mut log) };
     let ok = calibrated(&r);
+    if let Ok(i) = &r {
+        MPLL_READ.store(i.mpll_mhz, core::sync::atomic::Ordering::Relaxed);
+    }
     con::pass_if(
         ok,
         "648.psram",
@@ -245,12 +261,16 @@ fn config_report() -> bool {
     let (l2kb, l2line) = hw::l2_readback();
     let burst = hw::dma_burst_readback();
     let ldo = hw::ldo_state();
-    let ps = psram::current_mhz();
+    // the bus divider the controller holds, over the MPLL the init read back
+    let div = (hw::psram_bus_word() & 0xFF) + 1;
+    let mpll = MPLL_READ.load(core::sync::atomic::Ordering::Relaxed);
+    let ps = mpll / div; // low byte + 1: never 0
     con::perf(
         "lab.config",
         &[
             ("cpu_mhz", Val::U(cpu as u64)),
             ("psram_mhz", Val::U(ps as u64)),
+            ("psram_bus_div", Val::U(div as u64)),
             ("l2_kb", Val::U((l2kb >> 10) as u64)),
             ("l2_line_b", Val::U(l2line as u64)),
             ("dma_burst_b", Val::U(burst as u64)),
@@ -259,6 +279,8 @@ fn config_report() -> bool {
         ],
     );
     let ok = ps == CFG.psram_mhz
+        && cpu * 100 >= CFG.cpu_mhz * 97
+        && cpu * 100 <= CFG.cpu_mhz * 103
         && l2kb == CFG.l2.kb as usize * 1024
         && l2line == CFG.l2.line as usize
         && burst == CFG.burst.bytes()

@@ -42,6 +42,20 @@ impl Pattern {
             Pattern::Zeros => "zeros",
         }
     }
+    /// The complementary pattern: every word is the bitwise inverse. A pass that writes this after `self` changes every bit of the
+    /// chip, so a write that is dropped cannot read back as the expected data.
+    pub const fn opposite(self) -> Pattern {
+        match self {
+            Pattern::Addr => Pattern::AddrInv,
+            Pattern::AddrInv => Pattern::Addr,
+            Pattern::Rand(s) => Pattern::RandInv(s),
+            Pattern::RandInv(s) => Pattern::Rand(s),
+            Pattern::Aa => Pattern::Mask55,
+            Pattern::Mask55 => Pattern::Aa,
+            Pattern::Ones => Pattern::Zeros,
+            Pattern::Zeros => Pattern::Ones,
+        }
+    }
     /// The word that belongs at byte offset `off` (4-byte aligned) of the chip.
     pub const fn word(self, off: u32) -> u32 {
         match self {
@@ -145,6 +159,16 @@ mod tests {
         }
         let names: std::collections::BTreeSet<_> = PASSES.iter().map(|p| p.name()).collect();
         assert_eq!(names.len(), PASSES.len());
+    }
+
+    #[test]
+    fn the_opposite_changes_every_bit_of_every_word() {
+        for p in PASSES {
+            assert_eq!(p.opposite().opposite(), p);
+            for off in [0u32, 4, 0x400, 0x55_8C00, 0x1FF_FFFC] {
+                assert_eq!(p.word(off) ^ p.opposite().word(off), u32::MAX, "{}", p.name());
+            }
+        }
     }
 
     #[test]
