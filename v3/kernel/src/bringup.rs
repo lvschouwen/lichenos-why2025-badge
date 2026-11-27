@@ -140,6 +140,8 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     user(&mut t);
     crate::bringup_u::run_rows(&mut t);
     crate::bringup_pmp::run(&mut t);
+    // Core-local U rows go last: a hang there must not hide the rows before them.
+    crate::bringup_u::core_local_rows(&mut t);
 
     let dropped = platform::take_dropped();
     record(&mut t, "log.ring", Some(dropped == 0), format_args!("dropped={dropped}"));

@@ -220,18 +220,70 @@ fn deny(t: &mut Tally, utext: usize, udata: usize, sp: usize) {
         ("u.deny.tcm-store", u_store, 0x3010_0000, 7),
     ];
     run_cases(t, sp, &cases);
+}
+
+/// EXPERIMENT 0 = production (narrow grant + sweep), 1 = PMP-denied probe (known to hang: for diagnosis only).
+const MODE: u8 = 0;
+
+/// Core-local rows: LAST in the bench order, because a hang here must not hide later rows.
+pub fn core_local_rows(t: &mut Tally) {
+    // SAFETY: linker symbols; only their addresses are used.
+    let (utext, udata) = unsafe { (&_utext as *const u8 as usize, &_udata as *const u8 as usize) };
+    let sp = udata + UPAGE;
     use lichen_kcore::pmp::{self as kp, Region};
     let r = |base: usize, end: u64, perm| Region { base: base as u32, end, perm };
+    if MODE == 1 {
+        crate::pmp::apply(utext, udata, UPAGE);
+        kprintln!("DIAG PMP-denied U load at the CLINT: a hang here, with no 'T' from the trap handler, means no trap");
+        run_cases(t, sp, &CORE_LOCAL[..1]);
+        return;
+    }
     let view = [
         r(utext, (utext + UPAGE) as u64, kp::R | kp::X),
         r(udata, (udata + UPAGE) as u64, kp::R | kp::W),
-        r(0x2000_0000, 0x3000_0000, kp::R | kp::W),
+        r(CLINT_BASE, (CLINT_BASE + CLINT_LEN) as u64, kp::R | kp::W),
+        r(CLIC_BASE, (CLIC_BASE + CLIC_LEN) as u64, kp::R | kp::W),
     ];
     match crate::pmp::load_regions(&view) {
-        Ok(_) => run_cases(t, sp, &CORE_LOCAL),
+        Ok(_) => {
+            run_cases(t, sp, &CORE_LOCAL);
+            sweep(t, sp, "u.sweep.clint", CLINT_BASE, CLINT_LEN);
+            sweep(t, sp, "u.sweep.clic", CLIC_BASE, CLIC_LEN);
+        }
         Err(e) => record(t, "u.deny.core-local", false, format_args!("cannot plan the core-local view: {e:?}")),
     }
     crate::pmp::apply(utext, udata, UPAGE);
+}
+
+const CLINT_BASE: usize = 0x2000_0000;
+const CLINT_LEN: usize = 0x1_0000;
+const CLIC_BASE: usize = 0x2080_0000;
+const CLIC_LEN: usize = 0x2000;
+
+/// U loads and stores every word of the granted pages: every one must fault (hardware privilege check). A word that
+/// does not is a FINDING and fails the row. A BEGIN line per 4 KB block names a hang.
+fn sweep(t: &mut Tally, sp: usize, id: &str, base: usize, len: usize) {
+    let (mut words, mut bad) = (0u32, 0u32);
+    for blk in (0..len).step_by(0x1000) {
+        kprintln!("BEGIN {id}.{:#x}", base + blk);
+        platform::flush();
+        for a in (base + blk..base + blk + 0x1000).step_by(4) {
+            for (f, want) in [(u_load as unsafe extern "C" fn(), 5u16), (u_store, 7)] {
+                let (fault, exit) = run(f, sp, a, 0);
+                words += 1;
+                if !fault.is_some_and(|(code, tval, _)| code == want && tval == a) || exit.is_some() {
+                    bad += 1;
+                    if bad <= 16 {
+                        kprintln!(
+                            "FINDING {id}: U {} at {a:#010x} did not fault as expected: {fault:x?} exit {exit:x?}",
+                            if want == 5 { "load" } else { "store" }
+                        );
+                    }
+                }
+            }
+        }
+    }
+    record(t, id, bad == 0, format_args!("{words} U accesses over {base:#x}..{:#x}, {bad} did not fault", base + len));
 }
 
 fn ecall(t: &mut Tally, sp: usize) {
