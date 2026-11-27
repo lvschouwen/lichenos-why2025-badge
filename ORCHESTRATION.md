@@ -54,8 +54,8 @@ when the run ends. The old wave logs are in git history (before #483).
 
 ## Live (2026-11-27 21:30, v3 sprint)
 - v3 tip 67ed44dc (pushed): #612 + #646 merged and closed; leftovers on #647, #617, #619. v3 merges: rebase, ff-only, ./v3/check.sh, push.
-- wt-5 / wt-6 (#612 branches) are on v3 but still claimed: `agent-wt done` refuses because they are not merged into main. Release them by hand or teach agent-wt the v3 base.
-- wt-8 feat/620-v3-psram (psram-620): one fix commit for the review on #620 (2 high: patched ROM cache write-back, pmu_init + PVT before 360; addendum: 160->120 fallback MR re-read, `bench-experiments` feature). Then the delta review by review-620, ff onto v3, close #620 (known limit: uncached single-word writes) and #645 (default 360/120).
+- v3 slots: `agent-wt done` refuses branches merged into v3 (not main). Recipe: `git -C <slot> checkout --detach origin/v3 && agent-wt release <slot>`; the branch stays (wt-5/wt-6 #612 branches kept).
+- wt-8 feat/620-v3-psram: fix commit 0dcdf4e7 (check green, bench PASS 360/120 and 400/160). Delta review by review-620 running. Then ff onto v3, ./v3/check.sh, push, close #620 (known limit: uncached single-word writes) and #645 (default 360/120).
 - #648 perf lab: Phase 0 research agent perflab-research (read-only) writes the scratchpad file 648-phase0.md; main posts it. Phases 1-2 start after #620 is on v3. Owner priority: 360/200.
 - Bench lock: one load-ram at a time, runs of 120 s or less; roadmap first. wt-2 #587 and wt-3 #585 hold uncommitted v2 work.
 - #615 next steps are owner flash writes.
