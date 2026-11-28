@@ -4,6 +4,7 @@
 
 pub mod account;
 pub mod check;
+pub mod console;
 pub mod handles;
 pub mod image;
 pub mod l2;
