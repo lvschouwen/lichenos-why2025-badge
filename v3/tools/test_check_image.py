@@ -34,7 +34,11 @@ class ElfTests(unittest.TestCase):
         self.assertIn("outside", errs[0])
 
     def test_loaded_image_into_rom_stack(self):
-        self.assertTrue(ci.check_elf_bytes(elf([(0x4FF10000, 0x19000, 0x19000)])))
+        self.assertTrue(ci.check_elf_bytes(elf([(0x4FF10000, 0x2B000, 0x2B000)])))
+
+    def test_loaded_image_past_the_old_stage_bound(self):
+        # #658: the load window ends at 0x4FF3ABD0, so an image past the old 0x4FF28ED0 bound passes
+        self.assertEqual(ci.check_elf_bytes(elf([(0x4FF10000, 0x19000, 0x19000)])), [])
 
     def test_noload_into_cache_carve(self):
         self.assertTrue(ci.check_elf_bytes(elf([(0x4FF40000, 0, 0x50000)])))

@@ -1,6 +1,7 @@
 /* v3 bring-up image for the ESP32-P4, loaded by the ROM download mode (esptool load-ram), never written to flash. RAM only:
  * no segment outside L2MEM. Numbers mirror platform/esp32p4/src/mem.rs and v3/tools/check_image.py.
- *  - LOAD   0x4FF10000 up to 0x4FF28ED0: what the ROM copies in, and below the v3 boot stage (#615) that sits at 0x4FF28ED0..0x4FF3ABD0. It is where esptool's own rev1 stub
+ *  - LOAD   0x4FF10000 up to 0x4FF3ABD0 (#658, IDF's bound below the ROM stack): what the ROM copies in. Above 0x4FF28ED0 it
+ *           overlaps the v3 boot stage's window (#615), which must move before it can chain-load such a kernel. It is where esptool's own rev1 stub
  *           keeps its text, so download mode is known to leave it alone.
  *  - NOLOAD from 0x4FF40000 up to the L2 cache carve (0x4FF80000 for the 256 KB reset-state cache; the kernel reads the
  *           real size at boot and CHECKs it): bss and stacks, zeroed by the kernel itself, untouched while loading.
@@ -8,7 +9,7 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 MEMORY {
-  LOAD   (rwx) : ORIGIN = 0x4FF10000, LENGTH = 0x18ED0
+  LOAD   (rwx) : ORIGIN = 0x4FF10000, LENGTH = 0x2ABD0
   NOLOAD (rw)  : ORIGIN = 0x4FF40000, LENGTH = 0x40000
 }
 SECTIONS {
@@ -29,7 +30,7 @@ SECTIONS {
   PROVIDE(_kfault_stack_top = _fault_stack_top);
   PROVIDE(_kfault_stack1_top = _fault_stack1_top);
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
-  ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
+  ASSERT(_load_end <= 0x4FF3ABD0, "loaded image runs into the ROM stack area (#658)")
   ASSERT(_udata == 0x4FF70000, "the U data page must be the first data slot (SLOT_DATA in kcore/src/slots.rs)")
   ASSERT(_eutext - _utext == 4096, "the U stub page must be exactly one 4 KB NAPOT page")
   ASSERT(_noload_end <= 0x4FF60000, "kernel bss and stacks must stay below the app slots at 0x4FF60000")

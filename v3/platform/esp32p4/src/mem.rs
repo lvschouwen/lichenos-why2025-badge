@@ -9,9 +9,10 @@
 pub const L2MEM_BASE: usize = 0x4FF0_0000;
 /// Where esptool's rev1 stub keeps its text; load-ram is known to leave it alone. The image loads from here.
 pub const LOAD_BASE: usize = 0x4FF1_0000;
-/// The loaded image must end below this: the v3 boot stage (#615) is loaded by the ROM at 0x4FF28ED0..0x4FF3ABD0, so one
-/// limit serves both the stage-booted and the load-ram route (the ROM stack at 0x4FF3AFC0 is above it).
-pub const LOAD_LIMIT: usize = 0x4FF2_8ED0;
+/// The loaded image must end below this: IDF's own bound for what the ROM loads (the ROM stack at 0x4FF3AFC0 is above it).
+/// Since #658 this overlaps the window where the ROM puts the v3 boot stage (0x4FF28ED0..0x4FF3ABD0, #615): the stage must
+/// move out of it before it can chain-load a kernel that ends above 0x4FF28ED0 (it refuses an overlapping segment today).
+pub const LOAD_LIMIT: usize = 0x4FF3_ABD0;
 /// NOLOAD memory starts here: nothing the ROM writes while loading reaches it.
 pub const NOLOAD_BASE: usize = 0x4FF4_0000;
 /// NOLOAD memory ends here: the carve of the 256 KB cache that the P4 reset value implies (0x4FFC0000 - 256 KB).
