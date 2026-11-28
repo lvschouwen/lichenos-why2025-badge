@@ -161,6 +161,7 @@ fn dump(tag: &str, mcause: u32, c: Cause) {
 }
 
 fn on_timer(s: &mut State) {
+    let deadline = s.user_deadline;
     let Some(t) = s.tick.as_mut() else {
         hw::clint::disarm();
         s.stray += 1;
@@ -172,15 +173,29 @@ fn on_timer(s: &mut State) {
         s.stray += 1;
         return;
     }
+    if t.stats.count >= t.target {
+        // Already done (only a U run's deadline keeps the line armed): nothing to count.
+        disarm_or_deadline(deadline);
+        return;
+    }
     t.stats.record(t.cmp, now);
     if t.stats.count >= t.target {
-        hw::clint::disarm();
+        disarm_or_deadline(deadline);
         return;
     }
     let (next, skipped) = trap::next_deadline(t.cmp, t.period, hw::clint::mtime());
     t.stats.add_missed(skipped);
     t.cmp = next;
     hw::clint::set_cmp(next);
+}
+
+/// A finished tick disarms, unless a U run is in progress: then the compare goes to the run's deadline, so the run
+/// still ends there (review L3). m_trap ends the run on that tick (`trap_past`).
+fn disarm_or_deadline(deadline: Option<u64>) {
+    match deadline {
+        Some(d) => hw::clint::set_cmp(d),
+        None => hw::clint::disarm(),
+    }
 }
 
 extern "C" {
@@ -201,9 +216,10 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
         kprintln!("KERNEL: run_u without a safe PMP view (#646): halting");
         platform::exit(4);
     }
-    // ... nor without a tick: TW is hardwired 0, so a U wfi would park the hart. A run with no tick of its own gets a
-    // watchdog tick that only preempts (nothing counts it). A tick that already reached its target is disarmed, so it
-    // counts as none (review L-a); its finished state is kept aside and put back after the run.
+    // ... nor without a tick: a spinning stub would keep the hart (TW is WARL and reads 0; a U wfi itself is an
+    // illegal instruction on the P4, #657). A run with no tick of its own gets a watchdog tick that only preempts
+    // (nothing counts it), and every run ends at its deadline. A tick that already reached its target is disarmed, so
+    // it counts as none (review L-a); its finished state is kept aside and put back after the run.
     let (watchdog, finished) = with(|s| {
         let live = s.tick.as_ref().is_some_and(|t| t.stats.count < t.target);
         (!live, if live { None } else { s.tick.take() })

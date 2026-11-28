@@ -81,3 +81,19 @@ pub unsafe fn start(entry: usize, poll_limit: u32) -> Option<u32> {
     set_boot(entry as u32);
     Some(polls)
 }
+
+/// PMU stall code for HP core 1 that stops it (IDF `esp_cpu_stall`, `pmu_ll_hp_set_sw_stall_code` 0x86).
+const STALL_CODE_STALL: u32 = 0x0086_0000;
+
+/// Stall core 1 where it is (IDF esp_cpu_stall(1)): stall code 0x86, then wait for the stalled bit. Returns whether it
+/// reads stalled within `poll_limit` polls. Fail-closed use (#617 review M1): core 1 stops running U code before core
+/// 0 reuses memory core 1 may still be using. Never undone in this boot.
+///
+/// # Safety
+/// Core 1 must have been started (`start`); whatever it was doing stops mid-instruction stream, so nothing may wait on
+/// it afterwards.
+pub unsafe fn stall(poll_limit: u32) -> bool {
+    let v = read32(PMU_SW_STALL);
+    write32(PMU_SW_STALL, (v & !STALL_CODE_MASK) | STALL_CODE_STALL);
+    (0..poll_limit).any(|_| read32(CORESTALLED_ST) & 2 != 0)
+}

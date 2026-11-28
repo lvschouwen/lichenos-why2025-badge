@@ -63,6 +63,7 @@ pub const KCANARY_VALUE: u32 = 0x5AFE_C0DE;
 #[no_mangle]
 extern "C" fn kmain() -> ! {
     platform::init();
+    sched::init();
     kprintln!("\nlichen-v3 poc kernel, platform {}, abi {}", platform::NAME, lichen_abi::ABI_VERSION);
     pmp::report();
     // SAFETY: called once, before any app runs and before interrupts are enabled; no other &mut Kernel exists.
@@ -75,6 +76,7 @@ extern "C" fn kmain() -> ! {
 #[cfg(feature = "esp32p4")]
 #[no_mangle]
 extern "C" fn kmain(hart: usize, boot_info: *const u8) -> ! {
+    sched::init();
     bringup::run(hart, boot_info)
 }
 

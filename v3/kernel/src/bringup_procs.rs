@@ -1,7 +1,7 @@
 //! #617 bench rows, run by core 0 before core 1 parks: the process stage on core 1 (`procs`), judged from core 1's
 //! process table once it replied, the switch cost PERF line, and a ping afterwards as proof core 1's kernel survived.
 use crate::bringup::{begin, record};
-use crate::platform;
+use crate::platform::{self, hw};
 use crate::procs::{self, APPS, IDLE, TARGET_OFFSET};
 use crate::sched::{self, End, Kernel, State};
 use crate::smp::{self, Link, REPLY};
@@ -31,8 +31,17 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     begin("proc.run");
     let r = l.call(smp::OP_PROCS, [0; 6], STAGE_MS);
     let Some(r) = r.filter(|r| r.op == smp::OP_PROCS | REPLY) else {
-        record(t, "proc.run", Some(false), format_args!("no reply from core 1 within {STAGE_MS} ms"));
-        return;
+        // Core 1 may still run P0/P1 in slots 0 and 1, which the harness reloads next (review M1): stop it and end the
+        // run here, fail closed.
+        // SAFETY: core 1 was started; nothing waits on it after this (the run ends below).
+        let stalled = unsafe { hw::core1::stall(1_000_000) };
+        record(
+            t,
+            "proc.run",
+            Some(false),
+            format_args!("no reply from core 1 within {STAGE_MS} ms; core 1 stalled: {stalled}; run ends here"),
+        );
+        crate::bringup::finish(*t)
     };
     let [outcome, ticks, mintstatus, at_leave, stack, _] = r.a;
     // SAFETY: core 1 replied, so its stage is over and it does not touch its table again (the mailbox pop ordered
@@ -78,8 +87,9 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     );
 }
 
-/// INFO: what a U `wfi` does on core 1 (the idle process cannot use it, see `procs`). run_u always has a tick, so
-/// the stub cannot park the hart; it exits with a0 if the wfi returns.
+/// The U `wfi` policy (#657): a U wfi on core 1 is an illegal instruction and ends the process (the idle process
+/// spins, see `procs`). run_u always has a tick, so the stub cannot park the hart if that ever changes; it exits
+/// with a0 if the wfi returns.
 fn u_wfi(t: &mut Tally, l: &mut Link) {
     extern "C" {
         fn u_wfi();
@@ -90,10 +100,11 @@ fn u_wfi(t: &mut Tally, l: &mut Link) {
         record(t, "proc.u-wfi", Some(false), format_args!("no reply within 100 ms"));
         return;
     };
+    // U wfi policy (#657): illegal, the process ends. TW is WARL and reads back 0 here, yet the core refuses U wfi.
     record(
         t,
         "proc.u-wfi",
-        None,
+        Some(code == 2 && exited == 0 && epc == u_wfi as *const () as usize as u32),
         format_args!(
             "U wfi on core 1: exited {exited} (a0 {a0:#x}), else code {code} ({}) mtval {tval:#x} mepc {epc:#x}",
             lichen_kcore::trap::exception_name(code as u16)
@@ -155,11 +166,7 @@ fn perf_line(p: &mut sched::SwitchPerf, hz: u64) {
     let pm = &mut p.pmp;
     let (pmed, pp95) = perf::median_p95(&mut pm.buf[..pm.n]).unwrap_or((0, 0));
     let us = |c: u32| Us100(perf::cycles_to_us100(c, hz));
-    crate::kprintln!(
-        "perf: kernel.ctx_switch = core 1, tick-driven switch between two U processes: mcycle from the trap entry \
-         stamp (after 5 register saves) through the tick, schedule, PMP view reload and the return check, to the end \
-         of trap_handler; the 33-load restore and mret are not in it; pmp_* = pmp::switch alone"
-    );
+    crate::kprintln!("perf: kernel.ctx_switch = core 1 tick switch, trap entry stamp to trap_handler end (no restore)");
     crate::kprintln!(
         "PERF kernel.ctx_switch median_us={} p95_us={} min_us={} max_us={} n={n} median_cycles={med} \
          pmp_median_cycles={pmed} pmp_p95_cycles={pp95} pmp_median_us={} pmp_writes={} cpu_hz={hz} mtime_hz={}",
@@ -173,6 +180,6 @@ fn perf_line(p: &mut sched::SwitchPerf, hz: u64) {
     );
     let [m0, m1, m2, m3] = p.marks;
     crate::kprintln!(
-        "perf: kernel.ctx_switch breakdown of the last switch, cycles from the entry stamp: on_trap entered {m0}, tick handled {m1}, supervisor done {m2}, scheduled with the PMP reload {m3}"
+        "perf: kernel.ctx_switch last switch, cycles: on_trap {m0}, tick {m1}, supervisor {m2}, scheduled {m3}"
     );
 }

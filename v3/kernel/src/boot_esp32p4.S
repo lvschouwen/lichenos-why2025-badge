@@ -10,8 +10,8 @@ _start:
     csrci mstatus, 8
     li t0, 0x6000               # mstatus.FS = off: no FPU state for U to see or leave behind
     csrc mstatus, t0
-    li t0, 0x200000             # mstatus.TW = 1 requested; the bench shows it reads back 0 (WARL), so U can run wfi
-    csrs mstatus, t0            # and only a running tick wakes it (run_u always has one)
+    li t0, 0x200000             # mstatus.TW = 1 requested; TW is WARL and reads back 0, yet a U wfi is still an
+    csrs mstatus, t0            # illegal instruction on the P4 (#657, row proc.u-wfi): the process ends
     la t0, trap_entry
     ori t0, t0, 3
     csrw mtvec, t0
@@ -44,7 +44,7 @@ _start1:
     csrci mstatus, 8
     li t0, 0x6000               # mstatus.FS = off, as _start: no FPU state for U to see or leave behind
     csrc mstatus, t0
-    li t0, 0x200000             # mstatus.TW = 1, as _start: wfi in a lower mode traps
+    li t0, 0x200000             # mstatus.TW = 1, as _start (reads back 0, WARL); U wfi is illegal anyway (#657)
     csrs mstatus, t0
     la t0, trap_entry
     ori t0, t0, 3

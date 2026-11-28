@@ -53,6 +53,8 @@ extern "C" {
 /// of it below `stage`'s frame.
 const STACK1: usize = 8192;
 const PAINT: u32 = 0x5A17_5A17;
+/// Set on core 1 around `stage`'s task_run: `leave` refuses to task_leave outside it (review L5).
+static IN_STAGE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// mintstatus as `leave` found it, inside the trap that ends the stage (core 1 only).
 static LEAVE_MINTSTATUS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -142,6 +144,9 @@ pub fn target(i: usize) -> usize {
 
 /// Core 0: fill core 1's process table. Core 1 must be waiting in its mailbox loop (it does not touch its table until
 /// OP_PROCS), and its parked U stubs must not run from the slots (they run from the stub page).
+///
+/// The views are planned here at core 0's PMP granularity (`pmp::gran()` of hart 0). Both harts measured 128 B at
+/// boot (pmp.report), and `pmp::switch` on core 1 halts fail-closed if its own granularity differs (review L4).
 pub fn prepare() -> Result<(), LoadError> {
     // SAFETY: core 1 does not use its Kernel until OP_PROCS (module doc); this is the only reference to it.
     let k = unsafe { sched::of(1) };
@@ -195,6 +200,11 @@ fn high_water(bottom: usize, top: usize) -> u32 {
 /// Core 1, on OP_PROCS: run the prepared processes until the stage ends. Reply a = [outcome, ticks, mintstatus after
 /// the stage, mintstatus at the leave inside its last trap, stack bytes used below `stage`'s frame, 0].
 pub fn stage() -> [u32; 6] {
+    // Entered from the mailbox loop at level 0: a raised CLIC level (mintstatus.mil) or a nonzero mcause.mpil (bits
+    // 23:16, what the first mret would restore) would mask the tick for the whole stage (review L1). Read only.
+    if hw::trap::mintstatus() != 0 || (hw::trap::mcause() >> 16) & 0xFF != 0 {
+        return [NOT_PREPARED, 0, 0, 0, 0, 0];
+    }
     crate::smp::uninhibit_mcycle();
     let (bottom, top) = paint();
     let (mtvec, mscratch) = (hw::trap::mtvec() as usize, csr::mscratch());
@@ -218,7 +228,9 @@ pub fn stage() -> [u32; 6] {
     };
     // SAFETY: ctx is process 0's context, set up by the loader; MPP = U, its view is loaded and checked, the vector
     // and the tick are this hart's. Control comes back here only through task_leave (`leave`).
+    IN_STAGE.store(true, core::sync::atomic::Ordering::Relaxed);
     let outcome = unsafe { trap::task_run(ctx) } as u32;
+    IN_STAGE.store(false, core::sync::atomic::Ordering::Relaxed);
     platform::timer_stop();
     csr::set_mtvec(mtvec);
     csr::set_mscratch(mscratch);
@@ -246,8 +258,15 @@ pub fn finish(_k: &mut Kernel) -> ! {
 }
 
 fn leave(outcome: u32) -> ! {
+    if !IN_STAGE.load(core::sync::atomic::Ordering::Relaxed) || crate::smp::hartid() != 1 {
+        platform::enter_fatal();
+        crate::kprintln!("procs: stage end outside core 1's stage: halting");
+        platform::exit(5);
+    }
     LEAVE_MINTSTATUS.store(hw::trap::mintstatus(), core::sync::atomic::Ordering::Relaxed);
-    // SAFETY: trap context on core 1 inside `stage`'s task_run (Supervisor::Procs is set only there); the caller's
-    // borrow of the Kernel is not used again.
+    // SAFETY: on core 1 inside `stage`'s task_run (IN_STAGE, checked above). Only `stage` installs task_trap_entry
+    // on core 1, and task_run fills this hart's task_kctx before the first entry to U, so every trap that reaches
+    // here came from that run and task_kctx[1] holds `stage`'s frame. The caller's borrow of the Kernel is not used
+    // again.
     unsafe { trap::task_leave(outcome as usize) }
 }

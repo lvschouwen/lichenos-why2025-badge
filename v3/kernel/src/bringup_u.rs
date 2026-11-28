@@ -122,8 +122,8 @@ fn boot_state(t: &mut Tally, udata: usize) {
     begin("boot.state");
     let ms = hw::trap::mstatus();
     record(t, "boot.mstatus", ms & 0x6000 == 0, format_args!("mstatus={ms:#010x}: FS {} (want 0)", (ms >> 13) & 3));
-    // TW is probably hardwired 0 on this core (WARL): set it and read it back. If so U can run wfi, which only waits
-    // for the next interrupt, and the tick still preempts it.
+    // TW is WARL: set it and read it back (it reads 0 on this core). Whatever it reads, a U wfi is an illegal
+    // instruction on the P4 and ends the process (#657, row proc.u-wfi).
     // SAFETY: setting mstatus.TW only makes wfi in lower modes trap.
     unsafe { core::arch::asm!("csrs mstatus, {0}", in(reg) 0x20_0000usize, options(nomem, nostack)) };
     let tw = (hw::trap::mstatus() >> 21) & 1;
@@ -131,7 +131,7 @@ fn boot_state(t: &mut Tally, udata: usize) {
         "boot.tw",
         Verdict::Info,
         "mstatus.TW after set = {tw} ({})",
-        if tw == 1 { "implemented" } else { "hardwired 0 (WARL): U can run wfi, the tick still preempts it" }
+        if tw == 1 { "implemented" } else { "hardwired 0 (WARL); U wfi is illegal anyway, #657" }
     );
     record(
         t,

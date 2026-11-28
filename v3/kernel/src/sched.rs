@@ -10,6 +10,7 @@ use crate::global::Global;
 use crate::handles::Handles;
 use crate::trap::Context;
 use crate::{csr, kprintln, platform, pmp, syscall, tests};
+use core::mem::MaybeUninit;
 use lichen_kcore::sched::{over_budget, pick_next};
 use lichen_kcore::view::View;
 
@@ -145,8 +146,17 @@ impl Kernel {
     }
 }
 
-/// In .data (the PCBs' None values are not all-zero bytes), so kept apart from the samples below.
-static KERNELS: [Global<Kernel>; HARTS] = [const { Global::new(Kernel::new()) }; HARTS];
+/// Uninitialised in .bss (a const-initialised table would sit in .data, since the PCBs' None values are not all-zero
+/// bytes): `init` writes both before anything else uses them.
+static KERNELS: [Global<MaybeUninit<Kernel>>; HARTS] = [const { Global::new(MaybeUninit::uninit()) }; HARTS];
+
+/// Write both harts' tables. Called once by kmain on core 0, before the first `this` / `of` and before core 1 starts.
+pub fn init() {
+    for k in &KERNELS {
+        // SAFETY: called once at boot on core 0, before any reference into KERNELS exists and before core 1 runs.
+        unsafe { k.get() }.write(Kernel::new());
+    }
+}
 /// All zero, so in .bss: 1 KB per hart that the loaded image does not carry. Same ownership rules as KERNELS.
 static PERF: [Global<SwitchPerf>; HARTS] = [const {
     Global::new(SwitchPerf {
@@ -186,9 +196,10 @@ fn hart() -> usize {
 /// This hart's Kernel.
 ///
 /// # Safety
-/// As `Global::get`: no other live reference to this hart's Kernel.
+/// As `Global::get`: no other live reference to this hart's Kernel; `init` has run.
 pub unsafe fn this() -> &'static mut Kernel {
-    KERNELS[hart()].get()
+    // SAFETY (init): kmain wrote both tables before any caller runs.
+    KERNELS[hart()].get().assume_init_mut()
 }
 
 /// Hart `h`'s Kernel, from another hart: the OP_PROCS hand-off only (see the module doc).
@@ -197,7 +208,8 @@ pub unsafe fn this() -> &'static mut Kernel {
 /// Hart `h` must not use its Kernel meanwhile (core 1 waits in its mailbox loop), and no other reference to it exists.
 #[cfg(feature = "esp32p4")]
 pub unsafe fn of(h: usize) -> &'static mut Kernel {
-    KERNELS[h & 1].get()
+    // SAFETY (init): kmain wrote both tables before any caller runs.
+    KERNELS[h & 1].get().assume_init_mut()
 }
 
 pub fn end_proc(k: &mut Kernel, i: usize, why: End) {
