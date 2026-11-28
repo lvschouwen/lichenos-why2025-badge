@@ -231,7 +231,12 @@ impl Link {
         crate::services::settle();
         r
     }
-    /// A reply to a core 1 request (`services`), bounded like `send`. False if core 1 never made room.
+    /// A reply to a core 1 request (`services`), bounded like `send`. False if core 1 never made room in ANSWER_US.
+    ///
+    /// Lost reply (review L4): TO_C1 holds QLEN messages and core 1 has at most MAX_PROCS calls in flight, draining
+    /// TO_C1 at every trap, so a full queue means core 1 has stopped taking traps (hung or parked). The reply is then
+    /// dropped and counted (`services` Stats::refused); the caller stays Blocked and its slot busy until the stage
+    /// ends (deadline or `procs::poll`), and the next stage starts with fresh slots (`Calls::carry`).
     pub fn answer(&mut self, m: Msg) -> bool {
         let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(ANSWER_US);
         self.send(m, deadline)

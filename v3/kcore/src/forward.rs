@@ -20,39 +20,60 @@ pub fn in_region(ptr: usize, len: usize, base: usize, size: usize) -> bool {
     }
 }
 
+/// One process's slot in `Calls`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Slot {
+    Free,
+    /// A call is in flight with this seq; the caller waits for it.
+    Waiting(u32),
+    /// The caller is gone (`cancel`) but core 0 may still read its bounce buffer for call `seq`: the slot stays lent
+    /// until that call's reply comes back (stale) or the stage ends (`carry`).
+    Lent(u32),
+}
+
 /// The calls in flight on one hart, one slot per process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Calls<const N: usize> {
     seq: u32,
-    waiting: [Option<u32>; N],
-    /// Replies that matched no call in flight.
+    slots: [Slot; N],
+    /// Replies that matched no call in flight (a lent slot's reply included).
     pub stale: u32,
 }
 
 impl<const N: usize> Calls<N> {
     pub const fn new() -> Self {
-        Self { seq: 0, waiting: [None; N], stale: 0 }
+        Self { seq: 0, slots: [Slot::Free; N], stale: 0 }
     }
 
-    /// Start a call for `proc`: its fresh sequence number, or None when `proc` already has one in flight (the limit
-    /// is one) or is out of range. Sequence numbers are never reused within the table's life (they wrap at 2^32).
+    /// Start a call for `proc`: its fresh sequence number, or None when `proc`'s slot is not free (a call in flight,
+    /// the limit is one, or lent) or out of range. Sequence numbers are never reused within the table's life (they
+    /// wrap at 2^32).
     pub fn begin(&mut self, proc: usize) -> Option<u32> {
-        let w = self.waiting.get_mut(proc)?;
-        if w.is_some() {
+        let w = self.slots.get_mut(proc)?;
+        if *w != Slot::Free {
             return None;
         }
         self.seq = self.seq.wrapping_add(1);
-        *w = Some(self.seq);
+        *w = Slot::Waiting(self.seq);
         Some(self.seq)
     }
 
     /// A reply for `proc` with `seq` arrived: true if it answers that process's call in flight (which is then done).
-    /// Anything else is stale and counted.
+    /// Anything else is stale and counted; the reply a lent slot waits for frees it.
     pub fn complete(&mut self, proc: usize, seq: u32) -> bool {
-        match self.waiting.get_mut(proc) {
-            Some(w) if *w == Some(seq) => {
-                *w = None;
+        let Some(w) = self.slots.get_mut(proc) else {
+            self.stale = self.stale.saturating_add(1);
+            return false;
+        };
+        match *w {
+            Slot::Waiting(s) if s == seq => {
+                *w = Slot::Free;
                 true
+            }
+            Slot::Lent(s) if s == seq => {
+                *w = Slot::Free;
+                self.stale = self.stale.saturating_add(1);
+                false
             }
             _ => {
                 self.stale = self.stale.saturating_add(1);
@@ -61,25 +82,42 @@ impl<const N: usize> Calls<N> {
         }
     }
 
-    /// `proc` ended or its request never left: forget its call, so a late reply is stale.
+    /// `proc` ended: its call answers nobody now, but core 0 may still be reading its bounce buffer, so the slot is
+    /// lent (not free) until that call's reply or the stage end.
     pub fn cancel(&mut self, proc: usize) {
-        if let Some(w) = self.waiting.get_mut(proc) {
-            *w = None;
+        if let Some(w) = self.slots.get_mut(proc) {
+            if let Slot::Waiting(s) = *w {
+                *w = Slot::Lent(s);
+            }
         }
+    }
+
+    /// The request never left (the mailbox was full): nobody reads the buffer, the slot is free again at once.
+    pub fn withdraw(&mut self, proc: usize) {
+        if let Some(w) = self.slots.get_mut(proc) {
+            if matches!(*w, Slot::Waiting(_)) {
+                *w = Slot::Free;
+            }
+        }
+    }
+
+    /// `proc`'s slot holds a call in flight or is lent: nothing may load a new process there or begin a call.
+    pub fn busy(&self, proc: usize) -> bool {
+        self.slots.get(proc).is_some_and(|w| *w != Slot::Free)
     }
 
     /// An empty table for the next stage that goes on from this one's sequence numbers, so a late reply from this
     /// stage can never match a call of the next one.
     pub const fn carry(&self) -> Self {
-        Self { seq: self.seq, waiting: [None; N], stale: 0 }
+        Self { seq: self.seq, slots: [Slot::Free; N], stale: 0 }
     }
 
     pub fn in_flight(&self, proc: usize) -> bool {
-        self.waiting.get(proc).is_some_and(|w| w.is_some())
+        self.slots.get(proc).is_some_and(|w| matches!(w, Slot::Waiting(_)))
     }
 
     pub fn outstanding(&self) -> usize {
-        self.waiting.iter().filter(|w| w.is_some()).count()
+        self.slots.iter().filter(|w| matches!(w, Slot::Waiting(_))).count()
     }
 }
 
@@ -127,6 +165,28 @@ impl<const N: usize> Lines<N> {
         n
     }
 
+    /// The longest prefix of `bytes` whose `cost` stays within `budget`: a WRITE larger than the console can ever take
+    /// is cut to this and reports the shorter length, like a partial POSIX write.
+    pub fn fit_len(&self, proc: usize, bytes: &[u8], prefix_len: usize, budget: usize) -> usize {
+        let others = self.open.iter().enumerate().any(|(i, &o)| o && i != proc);
+        let mut open = self.open.get(proc).copied().unwrap_or(false);
+        let mut n = if others { 2 } else { 0 };
+        for (i, &b) in bytes.iter().enumerate() {
+            let step = match (printable(b), open, b == b'\n') {
+                (false, _, _) => 0,
+                (true, o, nl) => (if o { 0 } else { prefix_len }) + if nl { 2 } else { 1 },
+            };
+            if n + step > budget {
+                return i;
+            }
+            n += step;
+            if printable(b) {
+                open = b != b'\n';
+            }
+        }
+        bytes.len()
+    }
+
     /// Emit `bytes` from `proc`: `prefix()` before each of its lines, `emit(b)` for each printable byte. If another
     /// process has a line open, it is ended first (`emit(b'\n')`). Returns the bytes `emit` saw.
     pub fn render(&mut self, proc: usize, bytes: &[u8], mut prefix: impl FnMut(), mut emit: impl FnMut(u8)) -> usize {
@@ -162,6 +222,59 @@ impl<const N: usize> Lines<N> {
 }
 
 impl<const N: usize> Default for Lines<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Requests held in arrival order (core 0's console): the oldest is served first and nothing overtakes it.
+#[derive(Clone, Copy, Debug)]
+pub struct Fifo<T: Copy, const N: usize> {
+    buf: [Option<T>; N],
+    head: usize,
+    len: usize,
+}
+
+impl<T: Copy, const N: usize> Fifo<T, N> {
+    pub const fn new() -> Self {
+        Self { buf: [None; N], head: 0, len: 0 }
+    }
+    /// Append `v`; gives it back when full.
+    pub fn push(&mut self, v: T) -> Result<(), T> {
+        if self.len == N {
+            return Err(v);
+        }
+        self.buf[(self.head + self.len) % N] = Some(v);
+        self.len += 1;
+        Ok(())
+    }
+    pub fn front(&self) -> Option<T> {
+        if self.len == 0 {
+            None
+        } else {
+            self.buf[self.head]
+        }
+    }
+    pub fn pop(&mut self) -> Option<T> {
+        let v = self.front()?;
+        self.buf[self.head] = None;
+        self.head = (self.head + 1) % N;
+        self.len -= 1;
+        Some(v)
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    /// Any held entry matches `f`.
+    pub fn any(&self, f: impl Fn(&T) -> bool) -> bool {
+        (0..self.len).any(|i| self.buf[(self.head + i) % N].as_ref().is_some_and(&f))
+    }
+}
+
+impl<T: Copy, const N: usize> Default for Fifo<T, N> {
     fn default() -> Self {
         Self::new()
     }
@@ -238,14 +351,38 @@ mod tests {
         assert_eq!(c.stale, 4);
     }
 
+    /// Review M2: a cancelled call leaves its slot lent (core 0 may still read the bounce buffer). Only that call's
+    /// own reply, or the stage end, frees it; until then no call can begin there.
     #[test]
-    fn a_cancelled_call_turns_its_late_reply_stale() {
+    fn a_cancelled_call_lends_its_slot_until_its_reply() {
         let mut c = Calls::<2>::new();
         let s = c.begin(1).unwrap();
         c.cancel(1);
+        assert!(c.busy(1) && !c.in_flight(1));
+        assert_eq!(c.begin(1), None, "a lent slot refuses a new call");
+        assert!(!c.complete(1, s.wrapping_add(5)), "another seq does not free it");
+        assert!(c.busy(1));
+        assert!(!c.complete(1, s), "its own late reply answers nobody ...");
+        assert!(!c.busy(1), "... but frees the slot");
+        assert_eq!(c.stale, 2);
         let s2 = c.begin(1).unwrap();
-        assert!(!c.complete(1, s), "the old call's reply must not answer the new one");
         assert!(c.complete(1, s2));
+    }
+
+    #[test]
+    fn the_stage_end_frees_a_lent_slot() {
+        let mut c = Calls::<2>::new();
+        c.begin(0).unwrap();
+        c.cancel(0);
+        assert!(!c.carry().busy(0));
+    }
+
+    #[test]
+    fn a_request_that_never_left_frees_its_slot_at_once() {
+        let mut c = Calls::<2>::new();
+        c.begin(0).unwrap();
+        c.withdraw(0);
+        assert!(!c.busy(0));
     }
 
     #[test]
@@ -322,6 +459,46 @@ mod tests {
         assert_eq!(cost, 256 * 13);
         assert!(!fits(cost, 4096, 1024));
         assert!(fits(l.cost(0, &[b'x'; 256], 11), 4096, 1024), "a full line of text does fit");
+    }
+
+    proptest! {
+        /// `fit_len` is the longest prefix whose cost fits the budget.
+        #[test]
+        fn fit_len_is_the_longest_prefix_that_fits(open in any::<bool>(), bytes in proptest::collection::vec(any::<u8>(), 0..80), budget in 0usize..300) {
+            let mut l = Lines::<3>::new();
+            if open {
+                rendered(&mut l, 0, b"x");
+            }
+            let n = l.fit_len(0, &bytes, 4, budget);
+            prop_assert!(n <= bytes.len());
+            prop_assert!(l.cost(0, &bytes[..n], 4) <= budget);
+            if n < bytes.len() {
+                prop_assert!(l.cost(0, &bytes[..n + 1], 4) > budget);
+            }
+        }
+    }
+
+    #[test]
+    fn a_write_of_newlines_is_cut_to_what_the_console_can_take() {
+        let l = Lines::<3>::new();
+        let n = l.fit_len(0, &[b'\n'; 256], 11, 3072);
+        assert_eq!(n, 3072 / 13);
+        assert_eq!(l.fit_len(0, &[b'x'; 256], 11, 3072), 256);
+    }
+
+    #[test]
+    fn held_requests_leave_in_arrival_order() {
+        let mut f = Fifo::<u32, 3>::new();
+        for v in [7, 8, 9] {
+            f.push(v).unwrap();
+        }
+        assert_eq!(f.push(10), Err(10));
+        assert!(f.any(|&v| v == 8) && !f.any(|&v| v == 10));
+        assert_eq!(f.pop(), Some(7));
+        f.push(10).unwrap();
+        let out: Vec<u32> = core::iter::from_fn(|| f.pop()).collect();
+        assert_eq!(out, [8, 9, 10]);
+        assert!(f.is_empty() && f.front().is_none());
     }
 
     #[test]

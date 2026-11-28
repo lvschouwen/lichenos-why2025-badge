@@ -38,9 +38,14 @@ pub fn target() -> usize {
 /// Core 0: core 1's table gets the worker and a rogue in `mode`, which ends on `cycle_budget` cycles (None: no budget).
 /// Same hand-off rules as `procs::prepare`.
 pub fn prepare_pair(mode: usize, cycle_budget: Option<u64>) -> Result<(), LoadError> {
+    prepare_pair_ping(0, mode, cycle_budget)
+}
+
+/// As `prepare_pair`, with the worker also a pinger: a forwarded WRITE every `ping_every` rounds (0: never).
+pub fn prepare_pair_ping(ping_every: usize, mode: usize, cycle_budget: Option<u64>) -> Result<(), LoadError> {
     let k = fresh();
     let s = platform::slot(WORKER_SLOT);
-    loader::load(k, WORKER_SLOT, "worker", WORKER, s, [0; 4], None)?;
+    loader::load(k, WORKER_SLOT, "worker", WORKER, s, [ping_every, 0, 0, 0], None)?;
     let s = platform::slot(ROGUE_SLOT);
     loader::load(k, ROGUE_SLOT, "rogue", ROGUE, s, [mode, target(), 0, 0], None)?;
     k.procs[ROGUE_SLOT].cycle_budget = cycle_budget;

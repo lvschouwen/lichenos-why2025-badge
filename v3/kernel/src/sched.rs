@@ -76,6 +76,11 @@ pub struct Pcb {
     pub call_entry: u32,
     #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
     pub call_woken: bool,
+    /// Forwarded calls that came back, and the longest round trip among them (cycles).
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub call_n: u32,
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub call_max: u32,
 }
 impl Pcb {
     pub const EMPTY: Self = Self {
@@ -97,6 +102,8 @@ impl Pcb {
         reclaim_cycles: 0,
         call_entry: 0,
         call_woken: false,
+        call_n: 0,
+        call_max: 0,
     };
 }
 

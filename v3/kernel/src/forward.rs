@@ -15,7 +15,10 @@
 //! - Core 0 holds a WRITE while its console is short of room (`services`): the caller stays blocked, so the flood
 //!   goes at the UART's rate (about 66 bytes per ms on the #619 bench) and never pushes the kernel's rows out of the log ring.
 //! - Latency: when no other process can run, core 1 waits for the reply inside the trap for up to FAST_WAIT_US
-//!   (`fast` in the counts) instead of switching to idle, which would leave the reply until the next tick.
+//!   (`fast` in the counts) instead of switching to idle, which would leave the reply until the next tick. The wait
+//!   is billed to the caller whether the reply came or not.
+//! - A process that ends with a call in flight leaves its slot lent (`Calls::cancel`): core 0 may still read its
+//!   bounce buffer, so no call begins there and nothing loads there until that call's reply or the stage end.
 use crate::global::Global;
 use crate::platform::hw;
 use crate::sched::{Kernel, Samples, State, MAX_PROCS};
@@ -24,9 +27,10 @@ use crate::{csr, timebase};
 use lichen_abi::{err, sys, WRITE_MAX};
 use lichen_kcore::account::bill_service;
 
-/// How long core 1 waits in the trap for a reply when nothing else can run: well under the 1 ms tick, and far above
-/// a mailbox round trip (about 11 us at 40 MHz, `kernel.mailbox_rtt`).
-const FAST_WAIT_US: u64 = 500;
+/// How long core 1 waits in the trap for a reply when nothing else can run: a few round trips (the #619 bench measured
+/// a forwarded WRITE at 30.7 us median, 32.7 us p95 at 40 MHz), so a reply core 0 holds back does not keep the trap
+/// (and core 1's tick) waiting; that call is answered at a later trap instead. The spin is billed to the caller.
+const FAST_WAIT_US: u64 = 50;
 
 /// One process's bounce buffer: core 1 fills it before the OP_SYS push (Release), core 0 reads it after its pop
 /// (Acquire) and is done with it before it pushes the reply; core 1 touches it again only after that reply (the caller
@@ -86,7 +90,7 @@ pub fn write(k: &mut Kernel, cur: usize, ptr: usize, len: usize) -> bool {
     let m = Msg { op: OP_SYS, seq, a: [cur as u32, sys::WRITE as u32, len as u32, 0, 0, 0] };
     // SAFETY: core 1's trap path during a stage; the mailbox loop holds no borrow meanwhile.
     if unsafe { smp::c1() }.tx.push(m).is_err() {
-        k.calls.cancel(cur);
+        k.calls.withdraw(cur);
         k.fwd.refused += 1;
         k.procs[cur].ctx.regs[10] = err::EAGAIN as usize;
         return false;
@@ -107,6 +111,7 @@ pub fn write(k: &mut Kernel, cur: usize, ptr: usize, len: usize) -> bool {
             k.procs[cur].call_woken = false;
             k.fwd.fast += 1;
             let c = (csr::mcycle() as u32).wrapping_sub(k.procs[cur].call_entry);
+            note(&mut k.procs[cur], c);
             // SAFETY: core 1's trap path, the only reference.
             unsafe { perf() }.fast.push(c);
             return false;
@@ -115,7 +120,16 @@ pub fn write(k: &mut Kernel, cur: usize, ptr: usize, len: usize) -> bool {
             break;
         }
     }
+    // No reply in time: the spin was for this caller, so it is the caller's (review M1), not the kernel's.
+    let p = &mut k.procs[cur];
+    bill_service(&mut p.meter, &mut k.kernel_time, csr::mcycle() as u32);
     true
+}
+
+/// One finished call of `p`: its round trip in cycles.
+fn note(p: &mut crate::sched::Pcb, cycles: u32) {
+    p.call_n += 1;
+    p.call_max = p.call_max.max(cycles);
 }
 
 /// Another process (not idle) could run now.
@@ -152,7 +166,9 @@ pub fn resumed(k: &mut Kernel, i: usize, now: u32) {
     if p.call_woken {
         p.call_woken = false;
         k.fwd.slow += 1;
+        let c = now.wrapping_sub(p.call_entry);
+        note(p, c);
         // SAFETY: core 1's trap path (resume runs inside on_trap), the only reference.
-        unsafe { perf() }.slow.push(now.wrapping_sub(p.call_entry));
+        unsafe { perf() }.slow.push(c);
     }
 }

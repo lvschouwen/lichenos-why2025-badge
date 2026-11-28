@@ -17,6 +17,15 @@ cargo fmt --all -- --check
 step "host tests (kcore, abi; proptest; platform register maths)"
 cargo test --locked -q -p lichen-kcore -p lichen-abi -p lichen-platform-esp32p4 --target $HOST
 
+# Optional (#619, review L-f): the SPSC mailbox under miri's data race detector and weak-memory emulation. Needs the
+# nightly toolchain with the miri component; without it the step is skipped with a note, never a failure.
+step "miri: kcore mailbox (optional)"
+if cargo +nightly miri --version >/dev/null 2>&1; then
+  cargo +nightly miri test --locked -q -p lichen-kcore --target $HOST --target-dir target/miri mailbox
+else
+  echo "skipped: no nightly miri (rustup component add --toolchain nightly miri rust-src)"
+fi
+
 step "python tests (bench report, image check, licence check)"
 python3 -I -m unittest discover -s tools -p 'test_*.py'
 

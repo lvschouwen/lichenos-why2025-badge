@@ -1,7 +1,7 @@
 //! The well-behaved process of the #618 stage: it counts rounds, checks its own memory (a canary block) and its
 //! handle every round, and never yields or exits, so only the tick moves it aside and only its budget (none here) or
-//! the stage's deadline ends it. Corruption or a revoked handle ends it with a non-zero code. It prints nothing: core 1's
-//! console is raw (kernel/src/procs.rs).
+//! the stage's deadline ends it. Corruption or a revoked handle ends it with a non-zero code. It prints nothing, unless
+//! a0 makes it a pinger too (#619: a short WRITE every a0 rounds, forwarded to core 0's console).
 #![no_std]
 #![no_main]
 
@@ -19,7 +19,9 @@ fn pattern(i: usize) -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn app_main(_a0: usize, _a1: usize, _a2: usize, _a3: usize) -> isize {
+pub extern "C" fn app_main(a0: usize, _a1: usize, _a2: usize, _a3: usize) -> isize {
+    // a0 != 0 (#619): also a pinger, a short forwarded WRITE every a0 rounds; one that comes back short ends it (7).
+    let ping_every = a0 as u32;
     let canary = core::ptr::addr_of_mut!(CANARY) as *mut u32;
     let rounds = core::ptr::addr_of_mut!(ROUNDS);
     for i in 0..WORDS {
@@ -41,6 +43,10 @@ pub extern "C" fn app_main(_a0: usize, _a1: usize, _a2: usize, _a3: usize) -> is
         }
         if abi::handle_use(h as usize) != 0 {
             return 3;
+        }
+        // SAFETY: as above.
+        if ping_every != 0 && unsafe { rounds.read_volatile() }.is_multiple_of(ping_every) && abi::write("w\n") != 2 {
+            return 7;
         }
     }
 }

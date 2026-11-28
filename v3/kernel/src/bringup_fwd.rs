@@ -4,6 +4,10 @@
 //!   flood    the rogue floods full-size WRITEs for the whole stage next to the worker. Each call blocks it, core 0
 //!            holds the replies while its console is short of room, and the worker must keep at least FLOOR_PCT of
 //!            core 1's cycles (its fair share of two is 50 %; the floor leaves the kernel's trap time out).
+//!   ping     the same flood, the worker also a pinger (a short WRITE every PING_EVERY rounds): held WRITEs are
+//!            served in arrival order, so each ping waits behind at most one flood line, and its round trip stays
+//!            under PING_BOUND_MS (about 4.3 ms of console drain for one 267 B line at 66 B/ms, plus up to two ticks
+//!            for the reply to be picked up and the worker's turn).
 //!   budget   the same flood with a small cycle budget: the forwarding work billed to the rogue ends it on its budget,
 //!            with a call in flight; its late reply is stale on core 1, and termination gives everything back.
 use crate::bringup::{begin, record};
@@ -27,10 +31,61 @@ const FLOOR_PCT: u64 = 45;
 /// The budget stage's rogue: well under the ~50k cycles its flood takes over FLOOD_MS (50059 on the c9152874 bench).
 const FLOOD_BUDGET: u64 = 20_000;
 
+/// The pinger's period in worker rounds (a round is about 30 us at 40 MHz alone), its round-trip bound, and how many
+/// pings the stage must see come back.
+const PING_EVERY: usize = 200;
+const PING_BOUND_MS: u64 = 10;
+const MIN_PINGS: u32 = 5;
+
 pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     latency(t, l, cpu_hz);
     flood(t, l, cpu_hz);
+    ping(t, l, cpu_hz);
     budget(t, l, cpu_hz);
+}
+
+fn ping(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
+    if !load(t, "fwd.ping.load", || apps::prepare_pair_ping(PING_EVERY, apps::WRITE_LOOP, None)) {
+        return;
+    }
+    let outcome = stage(t, l, "fwd.ping", FLOOD_MS, u32::MAX)[0];
+    let svc = services::take_stats();
+    // SAFETY: as in `latency`.
+    let k = unsafe { sched::of(1) };
+    let (w, r) = (&k.procs[WORKER_SLOT], &k.procs[ROGUE_SLOT]);
+    let max_us = perf::cycles_to_us100(w.call_max, cpu_hz) / 100;
+    let bound_cycles = cpu_hz / 1000 * PING_BOUND_MS;
+    record(
+        t,
+        "fwd.ping.bound",
+        Some(
+            outcome == procs::TIMED_OUT
+                && w.state.alive()
+                && w.end.is_none()
+                && r.end.is_none()
+                && w.call_n >= MIN_PINGS
+                && (w.call_max as u64) <= bound_cycles,
+        ),
+        format_args!(
+            "the worker pinged during the flood: {} pings came back (want >= {MIN_PINGS}), the slowest in {max_us} us \
+             (want <= {PING_BOUND_MS} ms); worker {:?} end {:x?}, rogue {:?} end {:x?} with {} of its WRITEs back; core 0 \
+             served {}, held {} for room, refused {}",
+            w.call_n,
+            w.state,
+            w.end,
+            r.state,
+            r.end,
+            r.call_n,
+            svc.served,
+            svc.held,
+            svc.refused
+        ),
+    );
+    crate::kprintln!(
+        "PERF kernel.syscall.xcore_ping max_us={max_us} n={} bound_ms={PING_BOUND_MS} cpu_hz={cpu_hz}",
+        w.call_n
+    );
+    alive(t, l, "fwd.alive4");
 }
 
 fn load(t: &mut Tally, id: &str, f: impl FnOnce() -> Result<(), crate::loader::LoadError>) -> bool {

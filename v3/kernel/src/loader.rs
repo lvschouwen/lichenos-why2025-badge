@@ -15,6 +15,9 @@ pub fn load(
     args: [usize; 4],
     budget: Option<u32>,
 ) -> Result<(), LoadError> {
+    if k.calls.busy(i) {
+        return Err(LoadError::Busy);
+    }
     let (entry, heap) = validate(blob, &slot)?;
     // validate refuses an image longer than its slot; checked again here, so a regression there is a refused image
     // and a FAIL row, never a wrapping length in the write_bytes below.

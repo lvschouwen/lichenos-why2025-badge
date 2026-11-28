@@ -25,6 +25,8 @@ pub enum LoadError {
     Entry,
     Heap,
     ImageEnd,
+    /// The slot's last process ended with a forwarded call in flight: core 0 may still read its bounce buffer (#619).
+    Busy,
 }
 
 fn word(b: &[u8], i: usize) -> usize {
