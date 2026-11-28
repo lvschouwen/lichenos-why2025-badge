@@ -144,6 +144,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     crate::bringup_core1::run(&mut t);
     // Core-local U rows go last: a hang there must not hide the rows before them.
     crate::bringup_u::core_local_rows(&mut t);
+    crate::bringup_psram::run(&mut t);
     // The isolation harness (#613) takes the hart over for good (its own trap vector) and ends the run in `finish`.
     crate::bringup_iso::run(t)
 }

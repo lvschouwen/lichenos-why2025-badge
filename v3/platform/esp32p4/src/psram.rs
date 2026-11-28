@@ -106,7 +106,8 @@ pub struct TuneOverride {
     pub dqs_dl: Option<u32>,
 }
 
-/// Bring the PSRAM up to `upto`. Returns what was set and read; every step is logged through `log`.
+/// Bring the PSRAM up to `upto`. Returns what was set and read; every step is logged through `log` (nothing with the
+/// `quiet-init` feature).
 ///
 /// # Safety
 /// Owns the PSRAM supply, MPLL, the PSRAM controller and its pins: call once, from the boot hart, with nothing else
@@ -135,6 +136,12 @@ unsafe fn init_checked(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> R
 }
 
 unsafe fn init_run(upto: Upto, over: TuneOverride, sp: Speed, log: Log) -> Result<Info, Error> {
+    // `quiet-init`: a closure the compiler sees through, so the progress lines and their format strings are dropped.
+    #[cfg(feature = "quiet-init")]
+    let log = {
+        let _ = log;
+        &mut |_: core::fmt::Arguments| {}
+    };
     let mut info = Info::default();
     // The FIFO-path dummies stay those of the speed the chip is programmed for (the previous init, or the 120 MHz reset
     // default) until the mode registers are written below: mode registers are read with the chip's current read latency.

@@ -25,6 +25,8 @@ mod bringup_pmp;
 #[cfg(feature = "esp32p4")]
 mod bringup_procs;
 #[cfg(feature = "esp32p4")]
+mod bringup_psram;
+#[cfg(feature = "esp32p4")]
 mod bringup_shapes;
 #[cfg(feature = "esp32p4")]
 mod bringup_u;
@@ -34,6 +36,8 @@ mod mtrap;
 mod procs;
 #[cfg(feature = "esp32p4")]
 mod procs_apps;
+#[cfg(feature = "esp32p4")]
+mod psram;
 #[cfg(feature = "esp32p4")]
 mod smp;
 #[cfg(feature = "esp32p4")]

@@ -20,4 +20,4 @@ soak-646 = []
 [dependencies]
 lichen-abi = { path = "../abi" }
 lichen-kcore = { path = "../kcore" }
-lichen-platform-esp32p4 = { path = "../platform/esp32p4", optional = true }
+lichen-platform-esp32p4 = { path = "../platform/esp32p4", optional = true, features = ["quiet-init"] }

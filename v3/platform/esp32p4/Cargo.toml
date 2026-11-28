@@ -8,3 +8,6 @@ description = "ESP32-P4 (rev v1.0) hardware layer: hand-written registers, no es
 [features]
 # Rev 1.0 runs the CPU at 360 MHz and the PSRAM at 120 MHz. 400 / 160 MHz are probe experiments (#645), never for the kernel.
 bench-experiments = []
+# The kernel's build (#621): `psram::init` logs nothing, its progress lines cost ~3.3 KB of the loaded image. The caller
+# prints a summary from the returned `Info`. The probes keep the full log.
+quiet-init = []
