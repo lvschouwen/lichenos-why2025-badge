@@ -6,7 +6,8 @@
 use crate::global::Global;
 use crate::kprintln;
 use core::sync::atomic::{AtomicU32, Ordering};
-use lichen_kcore::pmp::{self, Entry, PlanError, Region, ENTRIES};
+use lichen_kcore::pmp::{self, Entry, Region, ENTRIES};
+use lichen_kcore::view::{self, View};
 
 macro_rules! pmp_csrs {
     ($($i:literal),*) => {
@@ -157,6 +158,7 @@ pub fn report() -> pmp::Discovery {
 
 /// Program `want`, writing only the registers that differ from the shadow, then verify by reading back. Returns the
 /// number of registers written. Fails closed: a mismatch means U must not run with this view.
+#[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn load(want: &pmp::Plan) -> usize {
     if !pmp::view_ok(want.entries(), gran()) {
         kprintln!("pmp: unsafe view (fixed window/deny-all missing, or an entry touches the window; #646): halting");
@@ -179,9 +181,6 @@ pub fn load_unchecked(want: &pmp::Plan) -> usize {
 }
 
 fn write_plan(want: &pmp::Plan) -> usize {
-    // Whatever app view was loaded is gone from here on; `apply` records the new one once it is verified.
-    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
-    *unsafe { APPLIED[hart()].get() } = None;
     // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
     let sh = unsafe { SHADOW[hart()].get() };
     let mut writes = 0;
@@ -220,28 +219,72 @@ fn verify(want: &pmp::Plan) {
     }
 }
 
-/// Plan and load U regions. Exits on a plan error: the kernel's own regions are fixed, a bad one is a kernel bug.
-pub fn load_regions(regions: &[Region]) -> Result<usize, PlanError> {
-    Ok(load(&pmp::plan(regions, gran())?))
+/// One app's view: its text (R+X) and its data (R+W), everything else denied. The bring-up's U rows load it with
+/// `apply`; a process gets it once at load (`app_view`) and `switch` loads it.
+#[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+pub fn apply(text: usize, data: usize, len: usize) {
+    load(app_view(text, data, len).plan());
 }
 
-/// Which app view (text, data, len) the hardware holds, per hart: set by `apply` after the readback verified it,
-/// cleared by every other load. The harness asserts it is the running task's slot before each return to U.
-static APPLIED: [Global<Option<(usize, usize, usize)>>; HARTS] = [const { Global::new(None) }; HARTS];
-
-/// One app's view: its text (R+X) and its data (R+W), everything else denied. Called on every switch to that app.
-pub fn apply(text: usize, data: usize, len: usize) {
+/// The checked view of one app slot. Exits on a plan error: the slots are the kernel's own table, so a bad one is a
+/// kernel bug.
+pub fn app_view(text: usize, data: usize, len: usize) -> View {
     let r = |base: usize, perm| Region { base: base as u32, end: (base + len) as u64, perm };
-    if let Err(e) = load_regions(&[r(text, pmp::R | pmp::X), r(data, pmp::R | pmp::W)]) {
-        kprintln!("pmp: cannot plan the app view: {e:?}: halting");
+    checked(&[r(text, pmp::R | pmp::X), r(data, pmp::R | pmp::W)])
+}
+
+/// Plan `regions` and check the result once (`View::new`, the #646 rule). Exits on a plan error or an unsafe view.
+pub fn checked(regions: &[Region]) -> View {
+    match pmp::plan(regions, gran()).map(|p| View::new(p, gran())) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            kprintln!("pmp: a planned process view is not safe (#646): halting");
+            crate::platform::exit(4)
+        }
+        Err(e) => {
+            kprintln!("pmp: cannot plan the process view: {e:?}: halting");
+            crate::platform::exit(4)
+        }
+    }
+}
+
+/// The context-switch reload (#617): write only the registers where `v` differs from the shadow, then read back only
+/// those. `v` was checked when it was built, so nothing here walks all 16 entries. Returns the registers written.
+/// Fails closed on a readback mismatch, or on a view checked at another granularity than this hart's.
+pub fn switch(v: &View) -> u32 {
+    if v.gran() != gran() {
+        kprintln!("pmp: view checked at granularity {}, this hart has {}: halting", v.gran(), gran());
         crate::platform::exit(4);
     }
-    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
-    *unsafe { APPLIED[hart()].get() } = Some((text, data, len));
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
+    let sh = unsafe { SHADOW[hart()].get() };
+    let d = view::diff(sh, v);
+    let w = v.entries();
+    for (i, e) in w.iter().enumerate() {
+        if d.addr & (1 << i) != 0 {
+            write_addr(i, e.addr);
+            sh[i].addr = e.addr;
+        }
+    }
+    for (n, word) in d.cfg.iter().enumerate() {
+        if let Some(word) = *word {
+            write_cfg(n, word);
+            for b in 4 * n..4 * n + 4 {
+                sh[b].cfg = w[b].cfg;
+            }
+        }
+    }
+    let addr_bad = (0..ENTRIES).find(|&i| d.addr & (1 << i) != 0 && read_addr(i) != view::addr_readback(v, i));
+    let cfg_bad = (0..4).find(|&n| d.cfg[n].is_some_and(|word| read_cfg(n) != word));
+    if addr_bad.is_some() || cfg_bad.is_some() {
+        kprintln!("pmp: readback mismatch after a switch (pmpaddr {addr_bad:?}, pmpcfg {cfg_bad:?}): halting");
+        crate::platform::exit(4);
+    }
+    d.writes()
 }
 
-/// Is the loaded view exactly `apply(text, data, len)`'s?
-pub fn applied_is(text: usize, data: usize, len: usize) -> bool {
-    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
-    *unsafe { APPLIED[hart()].get() } == Some((text, data, len))
+/// Does this hart's PMP (per the shadow, which every write above and in `write_plan` keeps) hold `v`?
+pub fn holds(v: &View) -> bool {
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists.
+    view::holds(unsafe { SHADOW[hart()].get() }, v)
 }

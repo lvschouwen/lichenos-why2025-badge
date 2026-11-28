@@ -47,6 +47,8 @@ pub const OP_PARK: u32 = 6;
 pub const OP_URUN: u32 = 7;
 /// Core 1's U-visible boot state. Reply a = [HWLP state 0x7f1, PIE state 0x7f2, mcounteren, mstatus, 0, 0].
 pub const OP_BOOT: u32 = 8;
+/// Run the process stage core 0 prepared in core 1's table (#617, `procs::stage`). Reply a = [outcome, ticks, 0..].
+pub const OP_PROCS: u32 = 9;
 /// Set on every reply.
 pub const REPLY: u32 = 0x8000_0000;
 
@@ -238,6 +240,7 @@ extern "C" fn kmain1() -> ! {
             OP_TICK => tick_run(m.a[0] as u64, m.a[1]),
             OP_USPIN => u_spin(m.a[0] as usize),
             OP_URUN => u_run(m.a[0] as usize, m.a[1] as usize),
+            OP_PROCS => crate::procs::stage(),
             OP_BOOT => {
                 [hw::trap::hwlp_state(), hw::trap::pie_state(), hw::trap::mcounteren(), hw::trap::mstatus(), 0, 0]
             }

@@ -11,6 +11,8 @@ pub mod perf;
 pub mod pma;
 pub mod pmp;
 pub mod ring;
+pub mod sched;
 pub mod slots;
 pub mod timebase;
 pub mod trap;
+pub mod view;

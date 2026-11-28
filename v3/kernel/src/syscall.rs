@@ -3,7 +3,7 @@
 //! so there is no TOCTOU window today; with a second core the copy-first rule is what keeps it safe.)
 use crate::kprint;
 use crate::loader::STACK_RESERVE;
-use crate::sched::{end_task, End, Kernel, Task};
+use crate::sched::{end_proc, End, Kernel, Pcb};
 use lichen_abi::{err, sys, WRITE_MAX};
 
 fn in_region(ptr: usize, len: usize, base: usize, size: usize) -> bool {
@@ -12,29 +12,29 @@ fn in_region(ptr: usize, len: usize, base: usize, size: usize) -> bool {
         None => false,
     }
 }
-fn user_range_ok(t: &Task, ptr: usize, len: usize) -> bool {
+fn user_range_ok(t: &Pcb, ptr: usize, len: usize) -> bool {
     in_region(ptr, len, t.slot.text, t.slot.len) || in_region(ptr, len, t.slot.data, t.slot.len)
 }
 
 /// Returns true when the caller gives up the CPU.
 pub fn dispatch(k: &mut Kernel, cur: usize) -> bool {
-    let r = k.tasks[cur].ctx.regs;
+    let r = k.procs[cur].ctx.regs;
     let (n, a0, a1) = (r[17], r[10], r[11]);
     let ret: isize = match n {
         sys::EXIT => {
-            end_task(k, cur, End::Exit(a0 as isize));
+            end_proc(k, cur, End::Exit(a0 as isize));
             return true;
         }
         sys::WRITE => {
             if a1 > WRITE_MAX {
                 err::EINVAL
-            } else if !user_range_ok(&k.tasks[cur], a0, a1) {
+            } else if !user_range_ok(&k.procs[cur], a0, a1) {
                 err::EFAULT
             } else {
                 let mut buf = [0u8; WRITE_MAX];
                 // SAFETY: [a0, a0+a1) lies inside the caller's own slot (checked above), which is mapped RAM.
                 unsafe { core::ptr::copy_nonoverlapping(a0 as *const u8, buf.as_mut_ptr(), a1) };
-                kprint!("[{}] ", k.tasks[cur].name);
+                kprint!("[{}] ", k.procs[cur].name);
                 for &b in &buf[..a1] {
                     if b == b'\n' || (0x20..0x7F).contains(&b) {
                         kprint!("{}", b as char);
@@ -44,12 +44,12 @@ pub fn dispatch(k: &mut Kernel, cur: usize) -> bool {
             }
         }
         sys::YIELD => {
-            k.tasks[cur].ctx.regs[10] = 0;
+            k.procs[cur].ctx.regs[10] = 0;
             return true;
         }
         sys::TICKS => k.ticks as isize,
         sys::SBRK => {
-            let t = &mut k.tasks[cur];
+            let t = &mut k.procs[cur];
             let limit = t.slot.data + t.slot.len - STACK_RESERVE;
             let incr = a0 as isize;
             match t.brk.checked_add_signed(incr) {
@@ -68,6 +68,6 @@ pub fn dispatch(k: &mut Kernel, cur: usize) -> bool {
         sys::HANDLE_CLOSE => k.handles.close(cur, a0),
         _ => err::ENOSYS,
     };
-    k.tasks[cur].ctx.regs[10] = ret as usize;
+    k.procs[cur].ctx.regs[10] = ret as usize;
     false
 }

@@ -109,6 +109,8 @@ pub fn run(t: &mut Tally) {
     u_deny(t, &mut l);
     // The access shapes go last on core 1: they are the likeliest to find a new hang (review H1).
     shapes(t, &mut l);
+    // U processes on core 1 (#617) after every core 1 row: a hang there must not hide them.
+    crate::bringup_procs::run(t, &mut l, cpu_hz().0);
 
     begin("core1.park");
     let p = l.call(smp::OP_PARK, [0; 6], 100);

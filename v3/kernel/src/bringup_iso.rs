@@ -50,10 +50,10 @@ pub fn run(t: Tally) -> ! {
         // SAFETY: a copy out; the borrow ends at once.
         bringup::finish(*unsafe { tally() })
     }
-    // SAFETY: the bring-up holds no reference into KERNEL (only the harness uses it), and no app runs yet.
-    let k = unsafe { sched::KERNEL.get() };
+    // SAFETY: the bring-up holds no reference into core 0's Kernel (only the harness uses it), and no app runs yet.
+    let k = unsafe { sched::this() };
     let blob = tests::load_b(k);
-    loaded_check(k.tasks[0].slot.text, blob);
+    loaded_check(k.procs[0].slot.text, blob);
     begin("iso.enter");
     tests::enter(k)
 }

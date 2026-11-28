@@ -21,11 +21,15 @@ mod bringup_core1;
 #[cfg(feature = "esp32p4")]
 mod bringup_pmp;
 #[cfg(feature = "esp32p4")]
+mod bringup_procs;
+#[cfg(feature = "esp32p4")]
 mod bringup_shapes;
 #[cfg(feature = "esp32p4")]
 mod bringup_u;
 #[cfg(feature = "esp32p4")]
 mod mtrap;
+#[cfg(feature = "esp32p4")]
+mod procs;
 #[cfg(feature = "esp32p4")]
 mod smp;
 #[cfg(feature = "esp32p4")]
@@ -62,7 +66,7 @@ extern "C" fn kmain() -> ! {
     kprintln!("\nlichen-v3 poc kernel, platform {}, abi {}", platform::NAME, lichen_abi::ABI_VERSION);
     pmp::report();
     // SAFETY: called once, before any app runs and before interrupts are enabled; no other &mut Kernel exists.
-    let k = unsafe { sched::KERNEL.get() };
+    let k = unsafe { sched::this() };
     tests::boot(k)
 }
 

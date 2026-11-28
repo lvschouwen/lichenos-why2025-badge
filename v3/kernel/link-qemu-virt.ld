@@ -8,5 +8,7 @@ SECTIONS {
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) } > KRAM
   .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > KRAM
   .stack (NOLOAD) : ALIGN(16) { _stack_bottom = .; . += 16K; _stack_top = .; . += 2K; _kfault_stack_top = .; } > KRAM
+  /* Single hart: task_kernel_trap's hart 1 branch is never taken here. */
+  PROVIDE(_kfault_stack1_top = _kfault_stack_top);
   /DISCARD/ : { *(.eh_frame*) }
 }

@@ -61,17 +61,12 @@ pub fn mask_irq(code: usize) {
     }
 }
 
-/// Checked before every return to U (`trap::check_return`): the fixed window entry and the deny-all are loaded (a U
-/// window load would hang the P4, #646).
-pub fn view_safe() -> bool {
-    crate::pmp::view_loaded()
-}
-
 /// Code the loader just wrote must reach instruction fetch (write-back L1 DCache, per-core ICache): see
 /// `hw::cache::sync_icache`. A failed cache operation stops the run; the app must not execute stale bytes.
 pub fn sync_icache(addr: usize, len: usize) {
-    // SAFETY: the slot is L2MEM that no core executes from while the kernel loads it (core 1 is parked in wfi on
-    // kernel text, #612 core1.park), and only core 0 uses the cache sync registers.
+    // SAFETY: the slot is L2MEM that no core executes from while the kernel loads it (core 1 waits in its mailbox
+    // loop on kernel text for the #617 process stage, and is parked in wfi there for the harness, #612 core1.park),
+    // and only core 0 uses the cache sync registers.
     let rc = unsafe { hw::cache::sync_icache(addr, len) };
     if rc != 0 {
         crate::kprintln!("KERNEL: cache sync of the app text at {addr:#x} failed (rc {rc}): halting");

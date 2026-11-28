@@ -48,12 +48,16 @@ pub struct URun {
     pub exit: Option<usize>,
     /// The exception that ended the run otherwise.
     pub fault: Option<Caught>,
+    /// The run was still going at its deadline (`RUN_LIMIT_US`) and was ended by the tick (review L-b, #617).
+    pub timed_out: bool,
 }
 
 struct State {
     tick: Option<Tick>,
     /// Some while a U run is in progress.
     user: Option<URun>,
+    /// The mtime at which the U run in progress is ended by the next tick.
+    user_deadline: Option<u64>,
     /// Set by `expect_fault`: the next exception at this pc is recorded and skipped instead of ending the run.
     expect_pc: Option<u32>,
     caught: Option<Caught>,
@@ -63,8 +67,9 @@ struct State {
 /// One per hart (#612 checkpoint 3), each touched only by its own hart: by its handler and by its kernel code with
 /// MIE clear (see the module invariant). The tick, U run and fault state are per core like the CLINT compare, the
 /// CLIC and mscratch they go with.
-static STATE: [Global<State>; 2] =
-    [const { Global::new(State { tick: None, user: None, expect_pc: None, caught: None, stray: 0 }) }; 2];
+static STATE: [Global<State>; 2] = [const {
+    Global::new(State { tick: None, user: None, user_deadline: None, expect_pc: None, caught: None, stray: 0 })
+}; 2];
 
 /// This hart's State.
 ///
@@ -184,6 +189,9 @@ extern "C" {
 
 /// Watchdog tick period for U runs that have no tick of their own.
 const WATCHDOG_US: u64 = 10_000;
+/// Any U run ends at the first tick after this long (review L-b): a spinning stub cannot keep the hart. The longest
+/// legitimate run, the 4M-iteration preemption spin, takes well under a second at the 40 MHz ROM clock.
+const RUN_LIMIT_US: u64 = 2_000_000;
 
 /// Run U code at `entry` (on the U stub page, under the PMP view the caller applied) until it exits or faults.
 pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
@@ -203,7 +211,11 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
     if watchdog {
         tick_start(crate::timebase::us_to_ticks(WATCHDOG_US), u32::MAX);
     }
-    with(|s| s.user = Some(URun::default()));
+    let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(RUN_LIMIT_US);
+    with(|s| {
+        s.user = Some(URun::default());
+        s.user_deadline = Some(deadline);
+    });
     // SAFETY: run_user saves the kernel's callee-saved registers and returns here through to_kernel when m_trap ends
     // the run; no &mut into STATE is live across it (the `with` borrow above has ended).
     unsafe { run_user(entry, sp, a0, a1) };
@@ -211,7 +223,10 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
         tick_stop();
         with(|s| s.tick = finished);
     }
-    with(|s| s.user.take().unwrap_or_default())
+    with(|s| {
+        s.user_deadline = None;
+        s.user.take().unwrap_or_default()
+    })
 }
 
 fn set_mepc(v: u32) {
@@ -246,6 +261,10 @@ fn from_user(s: &mut State, frame: &mut Frame, mcause: u32, c: Cause) -> usize {
     1
 }
 
+fn trap_past(deadline: Option<u64>) -> bool {
+    lichen_kcore::sched::past_deadline(hw::clint::mtime(), deadline)
+}
+
 #[no_mangle]
 extern "C" fn m_trap(frame: *mut Frame) -> usize {
     let mcause = hw::trap::mcause();
@@ -259,6 +278,10 @@ extern "C" fn m_trap(frame: *mut Frame) -> usize {
             if c.mpp == 0 {
                 if let Some(u) = s.user.as_mut() {
                     u.preempts += 1;
+                    if trap_past(s.user_deadline) {
+                        u.timed_out = true;
+                        return 1;
+                    }
                 }
             }
         } else {

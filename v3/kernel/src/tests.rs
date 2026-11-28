@@ -149,20 +149,22 @@ pub fn load_b(k: &mut Kernel) -> &'static [u8] {
     HEARTBEAT
 }
 
-/// Install the task trap vector, start the tick and enter B. From here on the kernel runs only inside traps.
+/// Install the process trap vector, start the tick and enter B. From here on the kernel runs only inside traps: the
+/// harness never calls `task_leave`, it ends the run from trap context (`finish`).
 pub fn enter(k: &mut Kernel) -> ! {
     csr::clear_mscratch();
     csr::set_mtvec(trap::task_trap_entry as *const () as usize | platform::MTVEC_MODE);
     platform::timer_init();
     k.current = B;
-    let s = k.tasks[B].slot;
-    crate::pmp::apply(s.text, s.data, s.len);
+    let ctx = crate::sched::schedule_current(k);
     csr::mstatus_return_to_user();
-    trap::check_return(k, &k.tasks[B].ctx);
-    // SAFETY: task B's context was set up by the loader; mstatus.MPP = U, PMP holds B's view, mtvec points at
-    // task_trap_entry, the tick is armed, and mscratch is loaded by enter_user. Control comes back only through
-    // task_trap_entry.
-    unsafe { trap::enter_user(&mut k.tasks[B].ctx) }
+    trap::check_return(k, ctx);
+    // SAFETY: B's context was set up by the loader; mstatus.MPP = U, the PMP holds B's view, mtvec points at
+    // task_trap_entry, the tick is armed, and task_restore loads mscratch. Control comes back only through
+    // task_trap_entry; `k`'s borrow is not used past this call.
+    unsafe { trap::task_run(ctx) };
+    kprintln!("harness: task_leave on core 0 (never called there)");
+    platform::exit(5)
 }
 
 fn record(k: &mut Kernel, case: &Case, ok: bool, detail: core::fmt::Arguments) {
@@ -235,11 +237,11 @@ fn start_next(k: &mut Kernel) {
                 LoadError2::Heap => LoadError::Heap,
                 LoadError2::TooBig => LoadError::TooBig,
             };
-            let ok = r.as_ref().err() == Some(&want) && k.tasks[A].state != State::Ready;
+            let ok = r.as_ref().err() == Some(&want) && k.procs[A].state != State::Ready;
             record(k, case, ok, format_args!("loader said {r:?}"));
             continue;
         }
-        let bdata = k.tasks[B].slot.data;
+        let bdata = k.procs[B].slot.data;
         let reload = matches!(case.expect, Expect::Reload);
         let mut small = [0u8; RELOAD_LEN];
         let image: &[u8] = if reload { reload_image(&slot, &mut small) } else { ATTACKER };
@@ -272,8 +274,8 @@ fn start_next(k: &mut Kernel) {
 
 /// Called after every trap: judge a finished attacker and start the next case.
 pub fn poll(k: &mut Kernel) {
-    if k.tasks[B].state != State::Ready {
-        kprintln!("B is no longer running: {:?}", k.tasks[B].end);
+    if k.procs[B].state != State::Ready {
+        kprintln!("B is no longer running: {:?}", k.procs[B].end);
         finish(k);
     }
     if k.harness.running.is_none() && k.harness.next == 0 {
@@ -281,21 +283,21 @@ pub fn poll(k: &mut Kernel) {
         return;
     }
     if let Some(ci) = k.harness.running {
-        if k.tasks[A].state == State::Ended {
-            k.harness.judging = Some((ci, k.tasks[A].end.unwrap(), k.tasks[B].syscalls));
+        if k.procs[A].state == State::Ended {
+            k.harness.judging = Some((ci, k.procs[A].end.unwrap(), k.procs[B].syscalls));
             k.harness.running = None;
-            k.tasks[A].state = State::Free;
+            k.procs[A].state = State::Free;
         }
         return;
     }
     // B must make at least one more system call after A ended: proof it survived, not just that it is marked Ready.
     let Some((ci, end, b_then)) = k.harness.judging else { return };
-    if k.tasks[B].syscalls <= b_then {
+    if k.procs[B].syscalls <= b_then {
         return;
     }
     k.harness.judging = None;
     let case = &CASES[ci];
-    let text = k.tasks[A].slot;
+    let text = k.procs[A].slot;
     let in_text = |pc: usize| pc >= text.text && pc < text.text + text.len;
     let target = k.harness.target;
     let as_expected = match (case.expect, end) {
@@ -321,13 +323,13 @@ pub fn poll(k: &mut Kernel) {
 }
 
 pub fn finish(k: &mut Kernel) -> ! {
-    let b = k.tasks[B].state == State::Ready;
+    let b = k.procs[B].state == State::Ready;
     kprintln!(
         "SUMMARY: {} pass, {} fail, B {} after {} syscalls, {} ticks",
         k.harness.pass,
         k.harness.fail,
         if b { "still running" } else { "DEAD" },
-        k.tasks[B].syscalls,
+        k.procs[B].syscalls,
         k.ticks
     );
     #[cfg(feature = "esp32p4")]

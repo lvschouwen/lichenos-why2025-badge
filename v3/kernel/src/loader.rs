@@ -1,7 +1,7 @@
 //! App image loader. An image is linked for one slot (fixed addresses, see apps/app.ld.in) and starts with a header:
 //! magic, ABI version, entry, heap start, image end. Everything in the header is checked against the slot before a
-//! single byte is copied; a bad image is refused and nothing runs.
-use crate::sched::{Kernel, State, Task};
+//! single byte is copied; a bad image is refused and nothing runs. The process's PMP view is planned here too (#617).
+use crate::sched::{Kernel, Pcb, State};
 use crate::trap::Context;
 
 pub use lichen_kcore::image::{validate, LoadError, Slot, STACK_RESERVE};
@@ -32,6 +32,8 @@ pub fn load(
     ctx.pc = entry;
     ctx.regs[2] = slot.data + slot.len; // sp
     ctx.regs[10..14].copy_from_slice(&args);
-    k.tasks[i] = Task { state: State::Ready, ctx, name, slot, heap_start: heap, brk: heap, budget, ..Task::EMPTY };
+    // The view is planned and checked here, once: a switch to this process only loads it (#617).
+    let view = Some(crate::pmp::app_view(slot.text, slot.data, slot.len));
+    k.procs[i] = Pcb { state: State::Ready, ctx, name, slot, view, heap_start: heap, brk: heap, budget, ..Pcb::EMPTY };
     Ok(())
 }
