@@ -54,6 +54,7 @@ when the run ends. The old wave logs are in git history (before #483).
 
 ## Live (2026-11-28, v3 Foundation milestone, owner brief: badge is a dedicated v3 device)
 - v2 paused; v3 only. Milestone "v3 Foundation" (#659 kernel, #660 console, #661 Rust bench tool, #662 memory map, #663 acceptance, plus #615 #616 #619 #621 #622 #623 #624-#626 #647 #655).
-- Agents: fwd-619 (wt-6), alloc-621 + review-621 (wt-7), stage-615 (wt-5, waits on main's ota_1 write), bench-661 (Opus, wt-4 `feat/661-v3-bench-tool`, Rust `v3/bench`).
+- Agents: stage-615 (wt-5, review fixes then boot contract), fwd-619 (wt-6, in review-619), clock-655 (wt-7, #655), bench-661 (wt-4, Rust `v3/bench`). State: #642 latest comment.
+- Flash-boot capture: scratchpad `reset_capture.py` (EN reset + mirror to badge-serial.log) until lichen-bench lands.
 - Kept: wt-4's orphan v2 docs commit is on branch `docs/595-pending-bit-keep`.
 - v3 graph: graphify-v3/ (refresh after each v3 merge, .claude/docs/graphify.md).
