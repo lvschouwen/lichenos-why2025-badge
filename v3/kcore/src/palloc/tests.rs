@@ -10,11 +10,12 @@ struct Mem {
     pages: HashMap<usize, u8>,
     fail: bool,
     zeroed: Vec<(usize, usize)>,
+    exec: (usize, usize),
 }
 const BOOT: u8 = 0xA5;
 impl Mem {
     fn new() -> Mem {
-        Mem { pages: HashMap::new(), fail: false, zeroed: Vec::new() }
+        Mem { pages: HashMap::new(), fail: false, zeroed: Vec::new(), exec: EXEC }
     }
     fn read(&self, off: usize) -> u8 {
         *self.pages.get(&(off / PAGE)).unwrap_or(&BOOT)
@@ -34,7 +35,7 @@ impl Scrub for Mem {
             return false;
         }
         // The kind passed is the arena's: an exec page is never zeroed as data (that would skip the ICache).
-        let exec = off >= EXEC.0 && off + len <= EXEC.0 + EXEC.1;
+        let exec = off >= self.exec.0 && off + len <= self.exec.0 + self.exec.1;
         assert_eq!(kind == Kind::Exec, exec, "{off:#x}+{len:#x} zeroed as {kind:?}");
         self.zeroed.push((off, len));
         self.write(off, len, 0);
@@ -92,6 +93,7 @@ fn check_invariants(a: &Palloc, quota: &[usize; OWNERS]) {
         let sum: usize = live.iter().filter(|b| b.owner == o).map(|b| b.len).sum();
         assert_eq!(a.usage(o), sum);
         assert!(sum <= *q, "owner {o} holds {sum} over its quota {q}");
+        assert!(live.iter().filter(|b| b.owner == o).count() <= OWNER_BLOCKS);
     }
 }
 
@@ -162,6 +164,8 @@ proptest! {
                                 Error::BadOwner
                             } else if a.usage(owner) + len > quotas[owner] {
                                 Error::Quota
+                            } else if before.iter().filter(|b| b.owner == owner).count() >= OWNER_BLOCKS {
+                                Error::BlockLimit
                             } else if before.len() == BLOCKS {
                                 Error::NoSlot
                             } else if !fits(&before, kind, len) {
@@ -207,7 +211,8 @@ proptest! {
                 Op::FailNextZero => mem.fail = true,
             }
             check_invariants(&a, &quotas);
-            // A page that was ever executable was never writable, and the reverse.
+            // A page that was ever executable was never writable, and the reverse. (Holds by construction while the
+            // arenas are disjoint; kept as the end-to-end statement of the X/W split.)
             prop_assert!(ever[0].is_disjoint(&ever[1]));
         }
     }
@@ -316,4 +321,55 @@ fn the_constants_match_the_p4_map() {
     assert_eq!(HOLE_START % PAGE, 0);
     assert_eq!(HOLE_END % PAGE, 0);
     assert!(!u_region_ok(&Region { base: CACHED_BASE as u32, end: (CACHED_BASE + PAGE) as u64, perm: R | W | X }));
+}
+
+#[test]
+fn the_p4_arenas_configure_and_exec_starts_at_page_zero() {
+    let mut a = Palloc::EMPTY;
+    assert_eq!(a.configure(EXEC_ARENA, DATA_ARENA), Ok(()));
+    a.set_quota(0, 1 << 20).unwrap();
+    let mut mem = Mem { exec: EXEC_ARENA, ..Mem::new() };
+    let (_, e) = a.alloc(0, Kind::Exec, PAGE, &mut mem).unwrap();
+    assert_eq!(e.off, 0, "page 0 is a valid exec page");
+    let (_, d) = a.alloc(0, Kind::Data, PAGE, &mut mem).unwrap();
+    assert_eq!(d.off, HOLE_END);
+    assert!(u_region_ok(&u_region(&e)) && u_region_ok(&u_region(&d)));
+}
+
+#[test]
+fn an_owner_holds_at_most_owner_blocks() {
+    let mut a = fresh(1 << 20);
+    let mut mem = Mem::new();
+    for _ in 0..OWNER_BLOCKS {
+        a.alloc(0, Kind::Data, PAGE, &mut mem).unwrap();
+    }
+    assert_eq!(a.alloc(0, Kind::Exec, PAGE, &mut mem), Err(Error::BlockLimit));
+    assert!(a.alloc(1, Kind::Data, PAGE, &mut mem).is_ok(), "the limit is per owner");
+}
+
+#[test]
+fn block_lookup_refuses_stale_and_foreign_handles() {
+    let mut a = fresh(1 << 20);
+    let mut mem = Mem::new();
+    let (h, b) = a.alloc(0, Kind::Data, PAGE, &mut mem).unwrap();
+    assert_eq!(a.block(0, h), Some(b));
+    assert_eq!(a.block(1, h), None);
+    a.free(0, h, &mut mem).unwrap();
+    assert_eq!(a.block(0, h), None);
+    let (h2, _) = a.alloc(1, Kind::Data, PAGE, &mut mem).unwrap();
+    assert_eq!(a.block(0, h2), None);
+    assert_eq!(a.block(0, Handle(BLOCKS as u32)), None);
+}
+
+#[test]
+fn a_slot_whose_generation_runs_out_is_retired() {
+    let mut a = fresh(1 << 20);
+    let mut mem = Mem::new();
+    a.slots[0].gen = GEN_MAX - 1;
+    let (h, _) = a.alloc(0, Kind::Data, PAGE, &mut mem).unwrap();
+    assert_eq!(h.0 & 0xFF, 0);
+    a.free(0, h, &mut mem).unwrap();
+    let (h2, _) = a.alloc(0, Kind::Data, PAGE, &mut mem).unwrap();
+    assert_ne!(h2.0 & 0xFF, 0, "slot 0 is retired, not reused");
+    assert_eq!(a.block(0, h), None);
 }

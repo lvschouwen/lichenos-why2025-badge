@@ -231,6 +231,13 @@ fn entry_range(entries: &[Entry; ENTRIES], i: usize) -> Option<(u64, u64)> {
     (lo < hi).then_some((lo, hi))
 }
 
+/// Does any entry of `entries` give U a permission on some byte of `[lo, hi)`? Conservative: an entry counts even when
+/// a lower one would shadow it. The kernel asks this before it zeroes memory a view might still reach (#621).
+pub fn grants_any(entries: &[Entry; ENTRIES], lo: u64, hi: u64) -> bool {
+    (0..ENTRIES)
+        .any(|i| entries[i].cfg & PERM_MASK != 0 && entry_range(entries, i).is_some_and(|(a, b)| a < hi && lo < b))
+}
+
 /// What U-mode may do at byte `a` under `entries` (spec semantics: the lowest matching entry decides, no match = deny).
 /// This is the oracle the tests compare plans against; the kernel never calls it on the hot path.
 pub fn u_perms(entries: &[Entry; ENTRIES], a: u32) -> u8 {
@@ -737,5 +744,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn grants_any_sees_a_region_and_ignores_the_deny_all() {
+        let p = plan(&[Region { base: 0x4800_0000, end: 0x4801_0000, perm: R | W }], GRAN_P4).unwrap();
+        let e = p.entries();
+        assert!(grants_any(e, 0x4800_FFFC, 0x4801_0004));
+        assert!(!grants_any(e, 0x4801_0000, 0x4802_0000));
+        assert!(!grants_any(e, 0x8800_0000, 0x8801_0000), "deny-all has no permission bits");
+        // the fixed window entry is R: it counts for its own range
+        assert!(grants_any(e, WINDOW_BASE, WINDOW_BASE + 4));
     }
 }

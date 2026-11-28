@@ -176,6 +176,14 @@ pub fn shadow_matches() -> bool {
     read_entries().iter().zip(sh.iter()).all(|(hw, s)| *hw == pmp::readback(*s, g))
 }
 
+/// Does the view this hart holds (per the shadow) give U any permission on `[lo, hi)`? The PSRAM zeroing refuses
+/// while it does (#621).
+#[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+pub fn shadow_grants_any(lo: usize, hi: usize) -> bool {
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
+    pmp::grants_any(unsafe { SHADOW[hart()].get() }, lo as u64, hi as u64)
+}
+
 /// Is the view the hardware holds (per the shadow) a safe one? `run_u` asserts it before every U entry.
 #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn view_loaded() -> bool {

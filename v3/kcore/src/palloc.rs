@@ -33,6 +33,15 @@ pub const HOLE_START: usize = 0x54_0000;
 pub const HOLE_END: usize = 0x5C_0000;
 /// Owners (process ids) with a quota.
 pub const OWNERS: usize = 8;
+/// Live blocks per owner at most: each is one NAPOT entry of the owner's PMP view, whose dynamic window holds 8 and
+/// already carries the app's text and data. Past it a view could not be planned and the kernel would halt (review M5).
+pub const OWNER_BLOCKS: usize = 4;
+/// The ESP32-P4 arenas (physical): code below the excluded range, stacks and heaps above it. 0x40_0000..0x54_0000
+/// stays out of both (the kernel's own buffers later, and a gap far wider than a guard).
+pub const EXEC_ARENA: (usize, usize) = (0, 0x40_0000);
+pub const DATA_ARENA: (usize, usize) = (HOLE_END, PSRAM_BYTES - HOLE_END);
+/// A slot whose generation reaches this is retired, never reused: an old handle can never match again (review L1).
+const GEN_MAX: u32 = 0xFF_FFFF;
 /// Live blocks at most.
 pub const BLOCKS: usize = 32;
 
@@ -65,6 +74,8 @@ pub enum Error {
     /// Not a power of two of at least one page, or larger than the arena.
     BadSize,
     Quota,
+    /// The owner holds `OWNER_BLOCKS` blocks already.
+    BlockLimit,
     NoSpace,
     /// The block table is full.
     NoSlot,
@@ -133,6 +144,7 @@ impl Arena {
 struct Slot {
     block: Block,
     live: bool,
+    retired: bool,
     gen: u32,
 }
 impl Slot {
@@ -157,7 +169,12 @@ impl Palloc {
     /// All zero: a `static` of it lands in bss (NOLOAD L2MEM, nothing against the loaded-image limit).
     pub const EMPTY: Palloc = Palloc {
         arenas: [Arena::EMPTY; 2],
-        slots: [Slot { block: Block { off: 0, len: 0, kind: Kind::Exec, owner: 0 }, live: false, gen: 0 }; BLOCKS],
+        slots: [Slot {
+            block: Block { off: 0, len: 0, kind: Kind::Exec, owner: 0 },
+            live: false,
+            retired: false,
+            gen: 0,
+        }; BLOCKS],
         quota: [0; OWNERS],
         usage: [0; OWNERS],
         ready: false,
@@ -175,10 +192,14 @@ impl Palloc {
         if !ok(exec) || !ok(data) || overlaps(exec.0, exec.1 + GUARD, data.0, data.1 + GUARD) {
             return Err(Error::BadArena);
         }
-        *self = Palloc::EMPTY;
+        // In place, field by field: `*self = EMPTY` may build the ~5 KB value on the kernel stack first (review L2).
         for (a, (b, l)) in self.arenas.iter_mut().zip([exec, data]) {
-            (a.base, a.pages) = (b, l / PAGE);
+            (a.base, a.pages, a.used, a.clean) = (b, l / PAGE, Bits::ZERO, Bits::ZERO);
         }
+        for s in self.slots.iter_mut() {
+            (s.live, s.retired, s.gen) = (false, false, 0);
+        }
+        (self.quota, self.usage) = ([0; OWNERS], [0; OWNERS]);
         self.ready = true;
         Ok(())
     }
@@ -208,7 +229,10 @@ impl Palloc {
         if self.usage[owner] + len > self.quota[owner] {
             return Err(Error::Quota);
         }
-        let i = self.slots.iter().position(|s| !s.live).ok_or(Error::NoSlot)?;
+        if self.blocks().filter(|b| b.owner == owner).count() >= OWNER_BLOCKS {
+            return Err(Error::BlockLimit);
+        }
+        let i = self.slots.iter().position(|s| !s.live && !s.retired).ok_or(Error::NoSlot)?;
         let n = len / PAGE;
         let p = a.find(n).ok_or(Error::NoSpace)?;
         let a = &mut self.arenas[kind as usize];
@@ -239,6 +263,12 @@ impl Palloc {
         (s.gen == h.0 >> 8 && s.get().is_some_and(|b| b.owner == owner)).then_some(i)
     }
 
+    /// `owner`'s live block `h`, or None for a stale, never issued or another owner's handle. The kernel grants and
+    /// loads code only through this, never from a `Block` value it was handed (review H1).
+    pub fn block(&self, owner: usize, h: Handle) -> Option<Block> {
+        self.lookup(owner, h).and_then(|i| self.slots[i].get())
+    }
+
     /// Free `owner`'s block `h` and zero it. The pages are free either way; if the zeroing failed they stay dirty and
     /// are zeroed before anyone gets them again. Returns whether the zeroing succeeded.
     pub fn free(&mut self, owner: usize, h: Handle, s: &mut dyn Scrub) -> Result<bool, Error> {
@@ -249,7 +279,8 @@ impl Palloc {
     fn drop_slot(&mut self, i: usize, s: &mut dyn Scrub) -> bool {
         let Some(b) = self.slots[i].get() else { return true };
         self.slots[i].live = false;
-        self.slots[i].gen = (self.slots[i].gen + 1) & 0xFF_FFFF;
+        self.slots[i].gen += 1;
+        self.slots[i].retired = self.slots[i].gen >= GEN_MAX;
         self.usage[b.owner] -= b.len;
         let a = &mut self.arenas[b.kind as usize];
         let (p, n) = ((b.off - a.base) / PAGE, b.len / PAGE);

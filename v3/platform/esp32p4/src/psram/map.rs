@@ -233,6 +233,10 @@ static SYNC_BROKEN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicB
 #[link_section = ".text.ram.cache_sync"]
 unsafe fn sync(ctrl_op: u32, addr: usize, len: usize) -> i32 {
     use core::ptr::{read_volatile as rd, write_volatile as wr};
+    // The caller's memory stores (a fill, a zeroing) must be ordered before the SYNC_CTRL store that starts the
+    // operation (I/O): `rw, rw` would not order them against the device write (as in `cache::sync_icache`, #621 M1).
+    #[cfg(target_arch = "riscv32")]
+    core::arch::asm!("fence iorw, iorw", options(nostack));
     // After a timeout the controller may still be busy with the old operation: refuse everything until the program restarts.
     if SYNC_BROKEN.load(core::sync::atomic::Ordering::Relaxed) {
         return 1;
