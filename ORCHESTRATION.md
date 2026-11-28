@@ -56,7 +56,7 @@ when the run ends. The old wave logs are in git history (before #483).
 - 2026-11-28 08:40: v2 PAUSED by the owner, v3 only. v3 tip d871ac1c (#617, #658, #618 merged). Owner allowed P4 flash writes (order on the #615 comment; restore image ~/badge-backups/...-20261127-190658.bin).
   - fwd-619 (Opus, wt-6 `feat/619-v3-syscall-forwarding`): core 1 to core 0 syscall forwarding; Opus review after.
   - alloc-621 (Opus, wt-7, 4 commits to bf552aa6): fixing review-621's H1/H2/M1-M6 and rebasing on d871ac1c; then a delta review. Follow-up issue to file: PSRAM stacks/heaps wired into loader/procs/end_proc (hook points in alloc-621's report).
-  - stage-615 (Opus, wt-5 `feat/615-v3-stage-relocate-jump`): stage relocation (staging 0x4FF40000, handoff page 0x4FF0F000) plus jump proof over load-ram; then the Opus review, then the flash order.
+  - stage-615 (Opus, wt-5, c9f54fee): STANDING BY. The stage runs and refuses both slots (ota_1 now holds an IDF image). Main must add a badge.sh region-write verb, then write a c9f54fee kernel into ota_1 at 0x420000 (see the #615 comment of 08:45), then message stage-615.
   - v3 graph: graphify-v3/ (refresh after each v3 merge, .claude/docs/graphify.md).
 - v3 tip 18b59011: #654/#653, #656 and #613 merged and closed overnight (#607 closed too). Agent proc-617 (Opus, wt-6 `feat/617-v3-process-model`) is running. Unattended bench = kernel load-ram at the ROM clock only; no #648 matrix runs, no flash writes.
 
