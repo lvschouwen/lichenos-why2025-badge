@@ -53,7 +53,7 @@ when the run ends. The old wave logs are in git history (before #483).
 3. A claimed slot with no live agent holds interrupted work: read its `git log` and check log before reassigning.
 
 ## Live (2026-11-28 06:10, overnight, owner asleep)
-- 2026-11-28 morning: v3 tip 6c160494. v3 slots: `git -C <slot> checkout -b <br> origin/v3` + `agent-wt claim` (`reset --force` is refused by auto mode).
+- 2026-11-28 08:00: v3 tip 3ec7e49c (#617 merged). Running: acct-618 (Sonnet, wt-6 `feat/618-v3-accounting-kill`), alloc-621 (Opus, wt-7 `feat/621-v3-psram-allocator`); #619 waits for #618. v3 slots: `git -C <slot> checkout -b <br> origin/v3` + `agent-wt claim`.
 - v3 tip 18b59011: #654/#653, #656 and #613 merged and closed overnight (#607 closed too). Agent proc-617 (Opus, wt-6 `feat/617-v3-process-model`) is running. Unattended bench = kernel load-ram at the ROM clock only; no #648 matrix runs, no flash writes.
 
 ## Live (2026-11-27 21:30, v3 sprint)
