@@ -24,7 +24,7 @@ pub fn load(
         core::ptr::write_bytes((slot.text + blob.len()) as *mut u8, 0, slot.len - blob.len());
         core::ptr::write_bytes(slot.data as *mut u8, 0, slot.len);
     }
-    crate::platform::sync_icache();
+    crate::platform::sync_icache(slot.text, slot.len);
     let mut ctx = Context::ZERO;
     ctx.pc = entry;
     ctx.regs[2] = slot.data + slot.len; // sp

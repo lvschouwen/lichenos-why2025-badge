@@ -1,6 +1,9 @@
 //! The isolation harness. App B (heartbeat) runs for the whole session in slot 0. Each test loads app A (attacker)
 //! into slot 1 with a test id, waits until A ends, checks how it ended, that B is still running and advanced, and
 //! that the kernel canary is intact. Image-rejection tests run without starting any app.
+//!
+//! Both platforms run the same cases and the same judging. qemu-virt (#607) prints `TEST` lines and a `SUMMARY`; the
+//! ESP32-P4 (#613) prints one bench `CHECK iso.<id>` row per case and ends the bring-up run (`bringup_iso`).
 use crate::loader::{self, LoadError};
 use crate::sched::{End, Kernel, State};
 use crate::{csr, kprintln, platform, trap};
@@ -92,8 +95,14 @@ fn kcanary() -> u32 {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(crate::KCANARY)) }
 }
 
+#[cfg(feature = "qemu-virt")]
 pub fn boot(k: &mut Kernel) -> ! {
-    csr::set_mtvec(trap::trap_entry as *const () as usize);
+    load_b(k);
+    enter(k)
+}
+
+/// Load app B into slot 0. Returns its image, for the caller's own checks of what landed in the slot.
+pub fn load_b(k: &mut Kernel) -> &'static [u8] {
     let s = platform::slot(B);
     if let Err(e) = loader::load(k, B, "B", HEARTBEAT, s, [0; 4], None) {
         kprintln!("boot: heartbeat image refused: {e:?}");
@@ -106,13 +115,22 @@ pub fn boot(k: &mut Kernel) -> ! {
         s.data,
         ATTACKER.len()
     );
+    HEARTBEAT
+}
+
+/// Install the task trap vector, start the tick and enter B. From here on the kernel runs only inside traps.
+pub fn enter(k: &mut Kernel) -> ! {
+    csr::clear_mscratch();
+    csr::set_mtvec(trap::task_trap_entry as *const () as usize | platform::MTVEC_MODE);
     platform::timer_init();
-    csr::enable_timer_irq();
     k.current = B;
+    let s = k.tasks[B].slot;
     crate::pmp::apply(s.text, s.data, s.len);
     csr::mstatus_return_to_user();
+    platform::before_user();
     // SAFETY: task B's context was set up by the loader; mstatus.MPP = U, PMP holds B's view, mtvec points at
-    // trap_entry, and mscratch is loaded by enter_user. Control comes back only through trap_entry.
+    // task_trap_entry, the tick is armed, and mscratch is loaded by enter_user. Control comes back only through
+    // task_trap_entry.
     unsafe { trap::enter_user(&mut k.tasks[B].ctx) }
 }
 
@@ -122,7 +140,10 @@ fn record(k: &mut Kernel, case: &Case, ok: bool, detail: core::fmt::Arguments) {
     } else {
         k.harness.fail += 1;
     }
+    #[cfg(feature = "qemu-virt")]
     kprintln!("TEST {:3} {:34} {} ({})", case.id, case.name, if ok { "PASS" } else { "FAIL" }, detail);
+    #[cfg(feature = "esp32p4")]
+    crate::bringup_iso::row(case.id, case.name, ok, detail);
 }
 
 fn bad_image(kind: LoadError2, s: &crate::sched::Slot, buf: &mut [u8; 64]) -> usize {
@@ -171,10 +192,12 @@ fn start_next(k: &mut Kernel) {
             Target::KernelData => core::ptr::addr_of!(crate::KCANARY) as usize,
             Target::KernelText => crate::platform::init as *const () as usize,
             Target::OtherApp => bdata + 64,
-            Target::Mmio => platform::UART_BASE,
+            Target::Mmio => platform::MMIO_TARGET,
             Target::StolenHandle => k.handles.first_of(B).unwrap_or(0),
         };
         let args = [case.id, a1, bdata + 64, core::ptr::addr_of!(crate::KCANARY) as usize];
+        #[cfg(feature = "esp32p4")]
+        crate::bringup_iso::begin_case(case.id);
         match loader::load(k, A, "A", ATTACKER, slot, args, Some(BUDGET)) {
             Ok(()) => {
                 k.harness.running = Some(k.harness.next - 1);
@@ -235,5 +258,8 @@ pub fn finish(k: &mut Kernel) -> ! {
         k.tasks[B].syscalls,
         k.ticks
     );
+    #[cfg(feature = "esp32p4")]
+    crate::bringup_iso::done(k.harness.pass, k.harness.fail, CASES.len() as u32, b);
+    #[cfg(feature = "qemu-virt")]
     platform::exit(if k.harness.fail == 0 && b { 0 } else { 1 })
 }

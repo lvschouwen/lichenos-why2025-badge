@@ -3,6 +3,10 @@ use crate::sched::Slot;
 
 pub const NAME: &str = "qemu-virt";
 pub const UART_BASE: usize = 0x1000_0000;
+/// The peripheral the MMIO isolation case reads.
+pub const MMIO_TARGET: usize = UART_BASE;
+/// mtvec mode bits: direct.
+pub const MTVEC_MODE: usize = 0;
 const CLINT_MTIMECMP: usize = 0x0200_4000;
 const CLINT_MTIME: usize = 0x0200_BFF8;
 const TEST_DEV: usize = 0x0010_0000;
@@ -14,6 +18,12 @@ const SLOT_DATA: usize = 0x8080_0000;
 const SLOT_LEN: usize = 0x1_0000;
 
 pub fn init() {}
+/// Nothing to check here: the qemu-virt build has no fixed PMP window (#646 is a P4 hang).
+pub fn before_user() {}
+/// The console is a plain polled UART here, so a fault dump needs no switch.
+pub fn enter_fatal() {}
+/// CLINT interrupts are the only ones enabled, so nothing else can be pending.
+pub fn mask_irq(_code: usize) {}
 
 pub fn slot(i: usize) -> Slot {
     Slot { text: SLOT_TEXT + i * SLOT_LEN, data: SLOT_DATA + i * SLOT_LEN, len: SLOT_LEN }
@@ -41,6 +51,7 @@ fn mtime() -> u64 {
 }
 pub fn timer_init() {
     timer_rearm();
+    crate::csr::enable_timer_irq();
 }
 pub fn timer_rearm() {
     let t = mtime() + TICK;
@@ -54,7 +65,7 @@ pub fn timer_rearm() {
 pub fn is_timer_irq(code: usize) -> bool {
     code == 7
 }
-pub fn sync_icache() {
+pub fn sync_icache(_addr: usize, _len: usize) {
     // SAFETY: fence.i orders the loader's stores before later instruction fetches on this hart.
     unsafe { core::arch::asm!("fence.i") };
 }

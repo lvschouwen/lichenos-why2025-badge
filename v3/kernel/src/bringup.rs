@@ -46,12 +46,12 @@ fn hartid() -> usize {
     v
 }
 
-fn begin(id: &str) {
+pub fn begin(id: &str) {
     kprintln!("BEGIN {id}");
     platform::flush();
 }
 
-fn record(t: &mut Tally, id: &str, ok: Option<bool>, detail: core::fmt::Arguments) {
+pub fn record(t: &mut Tally, id: &str, ok: Option<bool>, detail: core::fmt::Arguments) {
     let v = match ok {
         Some(true) => Verdict::Pass,
         Some(false) => Verdict::Fail,
@@ -66,7 +66,7 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     hw::uart::spin(2_000_000); // esptool is still reading the MEM_END reply
     kprintln!("");
     kprintln!(
-        "lichen-v3 {BUILD_ID} platform {} abi {} (#612 traps + tick, RAM only)",
+        "lichen-v3 {BUILD_ID} platform {} abi {} (#612 traps + tick, #613 isolation, RAM only)",
         platform::NAME,
         lichen_abi::ABI_VERSION
     );
@@ -144,7 +144,12 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     crate::bringup_core1::run(&mut t);
     // Core-local U rows go last: a hang there must not hide the rows before them.
     crate::bringup_u::core_local_rows(&mut t);
+    // The isolation harness (#613) takes the hart over for good (its own trap vector) and ends the run in `finish`.
+    crate::bringup_iso::run(t)
+}
 
+/// The last rows and END. The harness calls this from trap context, once every case is judged.
+pub fn finish(mut t: Tally) -> ! {
     let dropped = platform::take_dropped();
     record(&mut t, "log.ring", Some(dropped == 0), format_args!("dropped={dropped}"));
 

@@ -8,13 +8,15 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LICHEN_BUILD_ID");
     let id = std::env::var("LICHEN_BUILD_ID").unwrap_or_else(|_| "unknown".into());
     println!("cargo:rustc-env=LICHEN_BUILD_ID={id}");
-    // Only the qemu-virt build embeds apps; the bring-up image has none.
-    if plat == "qemu-virt" {
-        for v in ["LICHEN_APP_HEARTBEAT", "LICHEN_APP_ATTACKER"] {
-            println!("cargo:rerun-if-env-changed={v}");
-            if let Ok(p) = std::env::var(v) {
-                println!("cargo:rerun-if-changed={p}");
-            }
+    // Both builds embed the two harness apps, each linked for its platform's slots (v3/build.sh builds them first).
+    // Without the variables (a plain cargo call, e.g. the gate's esp32p4 clippy) the images build.sh wrote are used.
+    for (v, app) in [("LICHEN_APP_HEARTBEAT", "heartbeat"), ("LICHEN_APP_ATTACKER", "attacker")] {
+        println!("cargo:rerun-if-env-changed={v}");
+        let p = std::env::var(v).unwrap_or_else(|_| format!("{dir}/../target/lichen/{plat}/{app}.bin"));
+        if !std::path::Path::new(&p).is_file() {
+            panic!("{v}: no app image at {p}; run v3/build.sh {plat} first");
         }
+        println!("cargo:rerun-if-changed={p}");
+        println!("cargo:rustc-env={v}={p}");
     }
 }

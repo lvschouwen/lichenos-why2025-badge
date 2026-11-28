@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the v3 kernel.
 #   ./build.sh qemu-virt [run]   the #607 isolation harness: apps first (each linked for its slot), then the kernel
-#   ./build.sh esp32p4           the RAM-only bring-up image: target/lichen/esp32p4/kernel.bin (+ .elf), for load-ram
+#   ./build.sh esp32p4           the RAM-only bring-up image: target/lichen/esp32p4/kernel.bin (+ .elf), for load-ram;
+#                                it ends with the same isolation harness, apps linked for the P4 slots (#613)
 # The banner's build id is the git sha, "-dirty" when v3/ has uncommitted changes: rebuild after every commit or rebase.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,7 +14,8 @@ mkdir -p "$OUT"
 export LICHEN_BUILD_ID=$(git rev-parse --short=8 HEAD)$(git diff --quiet HEAD -- . || echo -dirty)
 case $PLAT in
   qemu-virt) TEXT0=$((0x80400000)); DATA0=$((0x80800000)); LEN=$((0x10000)) ;;
-  esp32p4) ;;
+  # The app slots of kcore/src/slots.rs (SLOT_TEXT, SLOT_DATA, SLOT_LEN): NOLOAD L2MEM above the kernel (#613).
+  esp32p4) TEXT0=$((0x4FF60000)); DATA0=$((0x4FF70000)); LEN=$((0x8000)) ;;
   *) echo "unknown platform $PLAT" >&2; exit 2 ;;
 esac
 app() { # name slot
@@ -38,6 +40,9 @@ if [ "$PLAT" = qemu-virt ]; then
 else
   ESPTOOL=${ESPTOOL:-$(ls ~/.espressif/python_env/idf6.1_py3.*_env/bin/esptool 2>/dev/null | head -1)}
   [ -x "$ESPTOOL" ] || { echo "esptool not found: set ESPTOOL" >&2; exit 2; }
+  app heartbeat 0
+  app attacker 1
+  LICHEN_APP_HEARTBEAT=$PWD/$OUT/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/$OUT/attacker.bin \
   cargo build --locked -q --release -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 \
     --target-dir target/kernel-esp32p4
   KELF=target/kernel-esp32p4/$TARGET/release/lichen-kernel

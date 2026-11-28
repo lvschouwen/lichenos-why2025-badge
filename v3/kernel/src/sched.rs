@@ -94,7 +94,9 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
             }
             switch = true;
         } else {
-            kprintln!("trap: unexpected interrupt {code}");
+            // Masked, or a level line (the P4 CLIC) would be taken again on every return and starve both apps.
+            kprintln!("trap: unexpected interrupt {code}, line masked");
+            platform::mask_irq(code);
         }
     } else if code == 8 {
         k.tasks[cur].ctx.pc += 4;

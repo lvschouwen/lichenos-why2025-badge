@@ -1,12 +1,14 @@
-# Trap entry and exit. Context = x0..x31 at 4*i, pc at 128 (see trap.rs).
-# Invariant: while an app runs, mscratch holds its Context; while the kernel runs, mscratch is 0. A trap taken in the
-# kernel therefore finds 0 after the swap and goes to kernel_trap, never through an app's context.
+# Task trap entry and exit for the isolation harness (#607 on qemu-virt, #613 on the ESP32-P4). Context = x0..x31 at
+# 4*i, pc at 128 (see trap.rs). Invariant: while an app runs, mscratch holds its Context; while the kernel runs, mscratch
+# is 0. A trap taken in the kernel therefore finds 0 after the swap and goes to task_kernel_trap, never through an app's
+# context. On the P4 this is a second vector next to boot_esp32p4.S's trap_entry (hence the names): the harness installs
+# it once the bring-up rows are done and never goes back. mcause is never written (CLIC aliases mpp/mpie/mpil there).
 .section .text.trap, "ax"
 .balign 256
-.global trap_entry
-trap_entry:
+.global task_trap_entry
+task_trap_entry:
     csrrw a0, mscratch, a0
-    beqz a0, kernel_trap
+    beqz a0, task_kernel_trap
     sw x1, 4(a0)
     sw x2, 8(a0)
     sw x3, 12(a0)
@@ -44,12 +46,12 @@ trap_entry:
     csrw mscratch, zero
     la sp, _stack_top
     call trap_handler
-    j restore
+    j task_restore
 
 # enter_user(ctx): mstatus.MPP must already be U.
 .global enter_user
 enter_user:
-restore:
+task_restore:
     lw t0, 128(a0)
     csrw mepc, t0
     csrw mscratch, a0
@@ -86,7 +88,7 @@ restore:
     lw x10, 40(x10)
     mret
 
-kernel_trap:
+task_kernel_trap:
     la sp, _stack_top
     call kernel_fault
 1:  j 1b

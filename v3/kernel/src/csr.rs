@@ -15,8 +15,15 @@ read_csr!(mcause, "mcause");
 read_csr!(mtval, "mtval");
 read_csr!(mepc, "mepc");
 
+/// mscratch = 0: "the kernel runs" for task_trap_entry, so a kernel fault goes to kernel_fault and never through a
+/// stale pointer (on the P4 mscratch held the bring-up vector's trap stack top until the harness took over).
+pub fn clear_mscratch() {
+    // SAFETY: mscratch is only read by the trap entry; 0 is its kernel-running value.
+    unsafe { core::arch::asm!("csrw mscratch, zero", options(nomem, nostack)) };
+}
 pub fn set_mtvec(v: usize) {
-    // SAFETY: v is the address of trap_entry (256-byte aligned, direct mode); set once at boot.
+    // SAFETY: v is the address of task_trap_entry (256-byte aligned) with the platform's mode bits (direct on
+    // qemu-virt, CLIC on the P4); set once, when the harness takes over the hart.
     unsafe { core::arch::asm!("csrw mtvec, {0}", in(reg) v, options(nomem, nostack)) };
 }
 /// Prepare mstatus so mret lands in U-mode: MPP = 0 (U), MPIE = 1.
@@ -27,6 +34,7 @@ pub fn mstatus_return_to_user() {
         core::arch::asm!("csrs mstatus, {0}", in(reg) 0x80usize, options(nomem, nostack));
     }
 }
+#[cfg(feature = "qemu-virt")]
 pub fn enable_timer_irq() {
     // SAFETY: sets mie.MTIE. In M-mode mstatus.MIE stays 0, so the kernel itself is never interrupted; in U-mode
     // M-level interrupts are always taken.

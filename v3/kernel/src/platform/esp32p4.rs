@@ -21,6 +21,67 @@ pub fn enter_fatal() {
 
 pub fn init() {}
 
+// The isolation harness (#613, tests.rs) runs the same scheduler as qemu-virt. What it needs from the chip follows.
+
+/// The peripheral the MMIO isolation case reads: UART0's status register, the address #612's `u.deny.peri` row
+/// proved faults cleanly (code 5) on this chip.
+pub const MMIO_TARGET: usize = 0x500C_A01C;
+/// mtvec mode bits: the P4 hardwires CLIC mode (3).
+pub const MTVEC_MODE: usize = 3;
+/// The harness tick: 1 ms, as on qemu-virt, so the CPU budget (50 ticks) means the same on both. A function, not a
+/// const: the mtime rate is measured at boot (#654, `crate::timebase`).
+fn tick() -> u64 {
+    crate::timebase::us_to_ticks(1000)
+}
+
+/// CLINT compare plus CLIC line 7 (M level, highest priority, threshold 0), as `mtrap::tick_start` arms it.
+pub fn timer_init() {
+    let line = lichen_kcore::trap::IRQ_MTIMER as usize;
+    hw::clint::disarm();
+    hw::clic::configure(line, hw::clic::ATTR_M_LEVEL, hw::clic::CTL_MAX);
+    hw::clic::set_threshold(0);
+    timer_rearm();
+    hw::clic::set_enabled(line, true);
+}
+/// The next deadline, one period from now. `set_cmp` reads back, so the level line has dropped before the mret.
+pub fn timer_rearm() {
+    hw::clint::set_cmp(hw::clint::mtime() + tick());
+}
+pub fn timer_stop() {
+    hw::clic::set_enabled(lichen_kcore::trap::IRQ_MTIMER as usize, false);
+    hw::clint::disarm();
+}
+pub fn is_timer_irq(code: usize) -> bool {
+    code == lichen_kcore::trap::IRQ_MTIMER as usize
+}
+/// A stray CLIC line is masked (`m_trap` does the same), or its level would be taken again on every return.
+pub fn mask_irq(code: usize) {
+    if code < hw::clic::LINES {
+        hw::clic::set_enabled(code, false);
+    }
+}
+
+/// Every return to U passes here: never without the fixed window entry (a U window load would hang the P4, #646).
+pub fn before_user() {
+    if !crate::pmp::view_loaded() {
+        enter_fatal();
+        crate::kprintln!("KERNEL: return to U without a safe PMP view (#646): halting");
+        exit(4);
+    }
+}
+
+/// Code the loader just wrote must reach instruction fetch (write-back L1 DCache, per-core ICache): see
+/// `hw::cache::sync_icache`. A failed cache operation stops the run; the app must not execute stale bytes.
+pub fn sync_icache(addr: usize, len: usize) {
+    // SAFETY: the slot is L2MEM that no core executes from while the kernel loads it (core 1 is parked in wfi on
+    // kernel text, #612 core1.park), and only core 0 uses the cache sync registers.
+    let rc = unsafe { hw::cache::sync_icache(addr, len) };
+    if rc != 0 {
+        crate::kprintln!("KERNEL: cache sync of the app text at {addr:#x} failed (rc {rc}): halting");
+        exit(4);
+    }
+}
+
 pub use lichen_kcore::image::Slot;
 
 /// App slot `i` from the one table in `lichen_kcore::slots` (32 KB NAPOT text and data regions in NOLOAD L2MEM, above
