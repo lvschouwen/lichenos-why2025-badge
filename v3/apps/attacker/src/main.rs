@@ -1,11 +1,11 @@
-//! App A: one deliberate violation per test id (a0). a1 = the test's target (address or handle), a2 = app B's data
-//! base, a3 = a kernel data address. A fault test that reaches its `return 100` means the protection did NOT trigger.
+//! App A: one deliberate violation per test id (a0). a1 = the test's target (address or handle; for 4 a spot in this
+//! app's own data, for 5 its own entry), a2 = app B's data base, a3 = a kernel data address. The kernel checks that
+//! each fault points at a1 (tests.rs). A fault test that reaches its `return 100` means the protection did NOT
+//! trigger. Cases 16..18 are ESP32-P4 extension state (the qemu-virt kernel never runs them).
 #![no_std]
 #![no_main]
 
 use lichen_abi::{self as abi, err};
-
-static mut CODE_BUF: [u16; 8] = [0; 8];
 
 fn raw_write(ptr: usize, len: usize) -> isize {
     abi::syscall(abi::sys::WRITE, ptr, len, 0)
@@ -26,13 +26,13 @@ pub extern "C" fn app_main(test: usize, a1: usize, a2: usize, a3: usize) -> isiz
             }
             3 => core::ptr::write_volatile(a1 as *mut u32, 0xBAD0_BAD0),
             4 => {
-                // c.ret into our own (RW, not X) data, then jump to it.
-                let p = core::ptr::addr_of_mut!(CODE_BUF) as *mut u16;
+                // c.ret into our own (RW, not X) data at a1 (the kernel passes our heap start), then jump to it.
+                let p = a1 as *mut u16;
                 p.write_volatile(0x8082);
                 let f: extern "C" fn() = core::mem::transmute(p);
                 f();
             }
-            5 => core::ptr::write_volatile(app_main as *const () as usize as *mut u32, 0),
+            5 => core::ptr::write_volatile(a1 as *mut u32, 0),
             6 => {
                 core::ptr::read_volatile(a1 as *const u32);
             }
@@ -50,6 +50,12 @@ pub extern "C" fn app_main(test: usize, a1: usize, a2: usize, a3: usize) -> isiz
                 f();
             }
             15 => core::arch::asm!("csrw mtvec, zero"),
+            // fmv.w.x f0, zero: F is not in the target ISA string, so encoded by hand. mstatus.FS is off.
+            16 => core::arch::asm!(".word 0xF0000053"),
+            // esp.lp.setupi 0, 4, +8 (Espressif binutils esp-15.2.0, -march=rv32imafc_xesploop). HWLP state is off.
+            17 => core::arch::asm!(".word 0x0042502b"),
+            // A PIE vector load (bringup_shapes.rs `u.shape.pie-vld`, the same word). PIE state is off.
+            18 => core::arch::asm!(".word 0x0201223b"),
             _ => return -1,
         }
     }

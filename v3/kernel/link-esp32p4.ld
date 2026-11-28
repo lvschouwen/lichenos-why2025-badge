@@ -24,6 +24,9 @@ SECTIONS {
   .stack1 (NOLOAD) : ALIGN(16) { . += 8K; _stack1_top = .; . += 4K; _trap_stack1_top = .; . += 2K; _fault_stack1_top = .; _noload_end = .; } > NOLOAD
   /* U data page for the stubs (#612): the first data slot of the plan (0x4FF70000), 4 KB of it. */
   .udata 0x4FF70000 (NOLOAD) : { _udata = .; . += 4K; _eudata = .; } > NOLOAD
+  /* The task vector's kernel-fault stack (trap.S task_kernel_trap): nested_trap's, which cannot run once the harness
+     owns the hart (the bring-up vector is no longer installed then). */
+  PROVIDE(_kfault_stack_top = _fault_stack_top);
   /DISCARD/ : { *(.eh_frame*) *(.comment) *(.riscv.attributes) }
   ASSERT(_load_end <= 0x4FF28ED0, "loaded image runs into the v3 boot stage")
   ASSERT(_udata == 0x4FF70000, "the U data page must be the first data slot (SLOT_DATA in kcore/src/slots.rs)")

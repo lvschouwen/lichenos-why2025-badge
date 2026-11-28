@@ -4,6 +4,11 @@
 //! (tests.rs, sched.rs); this file only connects them to the bench protocol: a `BEGIN iso.<id>` before each case, one
 //! `CHECK iso.<id>` row per case, a summary row, then the bring-up's last rows and END.
 //!
+//! On top of the 21 shared cases the P4 runs four of its own (tests.rs): FPU, hardware-loop and PIE instructions from
+//! U with their state off (illegal), and iso.19, which loads a different image into A's slot after the attacker ran
+//! there and checks the new code runs. That case exercises the ICache invalidate in `hw::cache::sync_icache`; the
+//! others do not (every attacker load writes the same bytes).
+//!
 //! The harness takes the hart over for good. It installs its own trap vector (trap.S, full app contexts, so B and A
 //! can be switched), and the kernel runs only inside traps from then on. So the bring-up's Tally moves into a static
 //! first: the bring-up stack is abandoned on the first entry to U (every trap starts again at `_stack_top`).
@@ -28,6 +33,23 @@ pub fn run(t: Tally) -> ! {
     begin("iso.boot");
     // SAFETY: the first use; no other reference to TALLY exists.
     *unsafe { tally() } = t;
+    // The slots must lie below the L2 cache carve the chip really has, or the loader would write into the cache.
+    let reg = hw::cache::l2_cachesize_reg();
+    let carve = lichen_kcore::l2::cache_size_bytes(reg).map(lichen_kcore::l2::carve_start);
+    if carve.is_none_or(|c| lichen_kcore::slots::NOLOAD_LIMIT > c) {
+        record(
+            // SAFETY: the only reference to TALLY while it lives; `record` does not reach TALLY itself.
+            unsafe { tally() },
+            "iso.summary",
+            Some(false),
+            format_args!(
+                "harness skipped: app slots end at {:#x}, cache carve {carve:x?}",
+                lichen_kcore::slots::NOLOAD_LIMIT
+            ),
+        );
+        // SAFETY: a copy out; the borrow ends at once.
+        bringup::finish(*unsafe { tally() })
+    }
     // SAFETY: the bring-up holds no reference into KERNEL (only the harness uses it), and no app runs yet.
     let k = unsafe { sched::KERNEL.get() };
     let blob = tests::load_b(k);

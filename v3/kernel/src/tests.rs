@@ -17,10 +17,24 @@ const BUDGET: u32 = 50;
 
 #[derive(Clone, Copy)]
 enum Expect {
-    Fault(usize),
+    /// The fault code, and where it must have happened.
+    Fault(usize, At),
     Exit0,
     Budget,
     Reject(LoadError2),
+    /// A different image in A's slot (`reload_image`): it must run its own code, not stale cached attacker code.
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    Reload,
+}
+/// Where a fault must point, beyond its code: a fault elsewhere is not the protection under test.
+#[derive(Clone, Copy)]
+enum At {
+    /// mtval is the target address, and the faulting pc is in A's text.
+    Target,
+    /// A jump to the target: mtval and the pc are both the target.
+    Jump,
+    /// The faulting pc is in A's text (illegal instructions; mtval is the instruction or 0, chip-dependent).
+    InText,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LoadError2 {
@@ -38,6 +52,10 @@ enum Target {
     OtherApp,
     Mmio,
     StolenHandle,
+    /// A's own heap start (data, never executable): where case 4 writes its instruction.
+    OwnData,
+    /// A's own entry (text, never writable).
+    OwnText,
 }
 struct Case {
     id: usize,
@@ -52,23 +70,34 @@ const LOAD_FAULT: usize = 5;
 const STORE_FAULT: usize = 7;
 const INSN_FAULT: usize = 1;
 const ILLEGAL: usize = 2;
+const RELOAD_EXIT: isize = 0x613;
 static CASES: &[Case] = &[
-    c(0, "read kernel memory", Target::KernelData, Expect::Fault(LOAD_FAULT)),
-    c(1, "write kernel memory", Target::KernelData, Expect::Fault(STORE_FAULT)),
-    c(2, "read other app memory", Target::OtherApp, Expect::Fault(LOAD_FAULT)),
-    c(3, "write other app memory", Target::OtherApp, Expect::Fault(STORE_FAULT)),
-    c(4, "execute own data", Target::None, Expect::Fault(INSN_FAULT)),
-    c(5, "write own code", Target::None, Expect::Fault(STORE_FAULT)),
-    c(6, "read peripheral MMIO", Target::Mmio, Expect::Fault(LOAD_FAULT)),
-    c(7, "write pmpcfg0 (disable PMP)", Target::None, Expect::Fault(ILLEGAL)),
-    c(8, "mret (privileged)", Target::None, Expect::Fault(ILLEGAL)),
-    c(9, "illegal instruction", Target::None, Expect::Fault(ILLEGAL)),
+    c(0, "read kernel memory", Target::KernelData, Expect::Fault(LOAD_FAULT, At::Target)),
+    c(1, "write kernel memory", Target::KernelData, Expect::Fault(STORE_FAULT, At::Target)),
+    c(2, "read other app memory", Target::OtherApp, Expect::Fault(LOAD_FAULT, At::Target)),
+    c(3, "write other app memory", Target::OtherApp, Expect::Fault(STORE_FAULT, At::Target)),
+    c(4, "execute own data", Target::OwnData, Expect::Fault(INSN_FAULT, At::Jump)),
+    c(5, "write own code", Target::OwnText, Expect::Fault(STORE_FAULT, At::Target)),
+    c(6, "read peripheral MMIO", Target::Mmio, Expect::Fault(LOAD_FAULT, At::Target)),
+    c(7, "write pmpcfg0 (disable PMP)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    c(8, "mret (privileged)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    c(9, "illegal instruction", Target::None, Expect::Fault(ILLEGAL, At::InText)),
     c(10, "invalid syscall arguments", Target::None, Expect::Exit0),
     c(11, "forged, stale and stolen handles", Target::StolenHandle, Expect::Exit0),
     c(12, "memory quota exhaustion", Target::None, Expect::Exit0),
     c(13, "endless loop (CPU budget)", Target::None, Expect::Budget),
-    c(14, "jump into kernel code", Target::KernelText, Expect::Fault(INSN_FAULT)),
-    c(15, "write mtvec (hijack traps)", Target::None, Expect::Fault(ILLEGAL)),
+    c(14, "jump into kernel code", Target::KernelText, Expect::Fault(INSN_FAULT, At::Jump)),
+    c(15, "write mtvec (hijack traps)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    // ESP32-P4 only (#613): core-local extension state that _start leaves OFF, and the ICache after a reload. Not on
+    // qemu-virt, whose gate pins its 21 cases.
+    #[cfg(feature = "esp32p4")]
+    c(16, "FPU instruction (FS off)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    #[cfg(feature = "esp32p4")]
+    c(17, "hardware loop setup (HWLP off)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    #[cfg(feature = "esp32p4")]
+    c(18, "PIE vector load (PIE off)", Target::None, Expect::Fault(ILLEGAL, At::InText)),
+    #[cfg(feature = "esp32p4")]
+    c(19, "other image in the same slot runs", Target::None, Expect::Reload),
     c(100, "image: bad magic", Target::None, Expect::Reject(LoadError2::Magic)),
     c(101, "image: wrong ABI version", Target::None, Expect::Reject(LoadError2::Abi)),
     c(102, "image: entry outside image", Target::None, Expect::Reject(LoadError2::Entry)),
@@ -81,12 +110,14 @@ pub struct Harness {
     running: Option<usize>,
     /// A finished attacker waiting for proof that B kept running: (case, how A ended, B's syscall count then).
     judging: Option<(usize, End, u32)>,
+    /// The running case's target (a1), for judging where its fault happened.
+    target: usize,
     pass: u32,
     fail: u32,
 }
 impl Harness {
     pub const fn new() -> Self {
-        Self { next: 0, running: None, judging: None, pass: 0, fail: 0 }
+        Self { next: 0, running: None, judging: None, target: 0, pass: 0, fail: 0 }
     }
 }
 
@@ -127,7 +158,7 @@ pub fn enter(k: &mut Kernel) -> ! {
     let s = k.tasks[B].slot;
     crate::pmp::apply(s.text, s.data, s.len);
     csr::mstatus_return_to_user();
-    platform::before_user();
+    trap::check_return(k, &k.tasks[B].ctx);
     // SAFETY: task B's context was set up by the loader; mstatus.MPP = U, PMP holds B's view, mtvec points at
     // task_trap_entry, the tick is armed, and mscratch is loaded by enter_user. Control comes back only through
     // task_trap_entry.
@@ -160,6 +191,31 @@ fn bad_image(kind: LoadError2, s: &crate::sched::Slot, buf: &mut [u8; 64]) -> us
     buf.len()
 }
 
+const RELOAD_LEN: usize = 32;
+
+/// A 32-byte image for A's slot that is not the attacker: header, then `li a0, 0x613; li a7, EXIT; ecall`. Its entry
+/// is the attacker's entry address (text + 20) with different bytes, so the run shows the ICache dropped the
+/// attacker's code: stale lines would run the attacker's _start instead, which exits with another code.
+fn reload_image<'a>(s: &crate::sched::Slot, buf: &'a mut [u8; RELOAD_LEN]) -> &'a [u8] {
+    const LI_A0: u32 = ((RELOAD_EXIT as u32) << 20) | (10 << 7) | 0x13; // addi a0, zero, 0x613
+    const LI_A7: u32 = ((lichen_abi::sys::EXIT as u32) << 20) | (17 << 7) | 0x13; // addi a7, zero, EXIT
+    const ECALL: u32 = 0x73;
+    let words = [
+        lichen_abi::IMAGE_MAGIC,
+        lichen_abi::ABI_VERSION,
+        (s.text + 20) as u32,
+        s.data as u32,
+        (s.text + RELOAD_LEN) as u32,
+        LI_A0,
+        LI_A7,
+        ECALL,
+    ];
+    for (i, w) in words.iter().enumerate() {
+        buf[4 * i..4 * i + 4].copy_from_slice(&w.to_le_bytes());
+    }
+    &buf[..]
+}
+
 /// Start the next case; image cases are judged on the spot.
 fn start_next(k: &mut Kernel) {
     while k.harness.next < CASES.len() {
@@ -169,12 +225,9 @@ fn start_next(k: &mut Kernel) {
         if let Expect::Reject(kind) = case.expect {
             let mut buf = [0u8; 64];
             let n = bad_image(kind, &slot, &mut buf);
-            let r = if kind == LoadError2::TooBig {
-                let big = crate::sched::Slot { len: 16, ..slot };
-                loader::validate(&buf[..n], &big).map(|_| ())
-            } else {
-                loader::load(k, A, "A", &buf[..n], slot, [0; 4], Some(BUDGET))
-            };
+            // TooBig: a slot shorter than the image, through the same load path as the others.
+            let s = if kind == LoadError2::TooBig { crate::sched::Slot { len: 16, ..slot } } else { slot };
+            let r = loader::load(k, A, "A", &buf[..n], s, [0; 4], Some(BUDGET));
             let want = match kind {
                 LoadError2::Magic => LoadError::Magic,
                 LoadError2::Abi => LoadError::Abi,
@@ -187,6 +240,11 @@ fn start_next(k: &mut Kernel) {
             continue;
         }
         let bdata = k.tasks[B].slot.data;
+        let reload = matches!(case.expect, Expect::Reload);
+        let mut small = [0u8; RELOAD_LEN];
+        let image: &[u8] = if reload { reload_image(&slot, &mut small) } else { ATTACKER };
+        // Entry and heap start of A's own image, for the OwnText / OwnData targets (a bad image is refused below).
+        let (entry, heap) = loader::validate(image, &slot).unwrap_or((0, 0));
         let a1 = match case.target {
             Target::None => 0,
             Target::KernelData => core::ptr::addr_of!(crate::KCANARY) as usize,
@@ -194,11 +252,14 @@ fn start_next(k: &mut Kernel) {
             Target::OtherApp => bdata + 64,
             Target::Mmio => platform::MMIO_TARGET,
             Target::StolenHandle => k.handles.first_of(B).unwrap_or(0),
+            Target::OwnData => heap,
+            Target::OwnText => entry,
         };
+        k.harness.target = a1;
         let args = [case.id, a1, bdata + 64, core::ptr::addr_of!(crate::KCANARY) as usize];
         #[cfg(feature = "esp32p4")]
         crate::bringup_iso::begin_case(case.id);
-        match loader::load(k, A, "A", ATTACKER, slot, args, Some(BUDGET)) {
+        match loader::load(k, A, "A", image, slot, args, Some(BUDGET)) {
             Ok(()) => {
                 k.harness.running = Some(k.harness.next - 1);
                 return;
@@ -234,10 +295,21 @@ pub fn poll(k: &mut Kernel) {
     }
     k.harness.judging = None;
     let case = &CASES[ci];
+    let text = k.tasks[A].slot;
+    let in_text = |pc: usize| pc >= text.text && pc < text.text + text.len;
+    let target = k.harness.target;
     let as_expected = match (case.expect, end) {
-        (Expect::Fault(c), End::Fault { cause, .. }) => c == cause,
+        (Expect::Fault(c, at), End::Fault { cause, tval, pc }) => {
+            c == cause
+                && match at {
+                    At::Target => tval == target && in_text(pc),
+                    At::Jump => tval == target && pc == target,
+                    At::InText => in_text(pc),
+                }
+        }
         (Expect::Exit0, End::Exit(0)) => true,
         (Expect::Budget, End::Budget) => true,
+        (Expect::Reload, End::Exit(code)) => code == RELOAD_EXIT,
         _ => false,
     };
     let canary_ok = kcanary() == crate::KCANARY_VALUE;

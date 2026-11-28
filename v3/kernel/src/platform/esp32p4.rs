@@ -61,13 +61,10 @@ pub fn mask_irq(code: usize) {
     }
 }
 
-/// Every return to U passes here: never without the fixed window entry (a U window load would hang the P4, #646).
-pub fn before_user() {
-    if !crate::pmp::view_loaded() {
-        enter_fatal();
-        crate::kprintln!("KERNEL: return to U without a safe PMP view (#646): halting");
-        exit(4);
-    }
+/// Checked before every return to U (`trap::check_return`): the fixed window entry and the deny-all are loaded (a U
+/// window load would hang the P4, #646).
+pub fn view_safe() -> bool {
+    crate::pmp::view_loaded()
 }
 
 /// Code the loader just wrote must reach instruction fetch (write-back L1 DCache, per-core ICache): see

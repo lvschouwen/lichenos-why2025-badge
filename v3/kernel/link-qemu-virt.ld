@@ -7,6 +7,6 @@ SECTIONS {
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) } > KRAM
   .data : ALIGN(4) { *(.data .data.*) *(.sdata .sdata.*) } > KRAM
   .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > KRAM
-  .stack (NOLOAD) : ALIGN(16) { _stack_bottom = .; . += 16K; _stack_top = .; } > KRAM
+  .stack (NOLOAD) : ALIGN(16) { _stack_bottom = .; . += 16K; _stack_top = .; . += 2K; _kfault_stack_top = .; } > KRAM
   /DISCARD/ : { *(.eh_frame*) }
 }

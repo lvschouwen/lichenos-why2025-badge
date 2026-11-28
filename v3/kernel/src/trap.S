@@ -88,7 +88,11 @@ task_restore:
     lw x10, 40(x10)
     mret
 
+# A trap in the kernel: the swap above left a0 = 0 and the kernel's a0 in mscratch. Swap back, so mscratch is 0 again
+# while the kernel runs (any further trap also lands here), and report on a stack of its own, not over the frames of
+# whatever trapped.
 task_kernel_trap:
-    la sp, _stack_top
+    csrrw a0, mscratch, zero
+    la sp, _kfault_stack_top
     call kernel_fault
 1:  j 1b

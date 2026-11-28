@@ -18,8 +18,10 @@ const SLOT_DATA: usize = 0x8080_0000;
 const SLOT_LEN: usize = 0x1_0000;
 
 pub fn init() {}
-/// Nothing to check here: the qemu-virt build has no fixed PMP window (#646 is a P4 hang).
-pub fn before_user() {}
+/// No platform rule beyond the task's own view: qemu-virt has no fixed PMP window (#646 is a P4 hang).
+pub fn view_safe() -> bool {
+    true
+}
 /// The console is a plain polled UART here, so a fault dump needs no switch.
 pub fn enter_fatal() {}
 /// CLINT interrupts are the only ones enabled, so nothing else can be pending.

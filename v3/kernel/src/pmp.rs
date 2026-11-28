@@ -179,6 +179,9 @@ pub fn load_unchecked(want: &pmp::Plan) -> usize {
 }
 
 fn write_plan(want: &pmp::Plan) -> usize {
+    // Whatever app view was loaded is gone from here on; `apply` records the new one once it is verified.
+    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
+    *unsafe { APPLIED[hart()].get() } = None;
     // SAFETY: this hart's shadow, MIE clear, no other reference to it exists (the other hart uses its own).
     let sh = unsafe { SHADOW[hart()].get() };
     let mut writes = 0;
@@ -222,6 +225,10 @@ pub fn load_regions(regions: &[Region]) -> Result<usize, PlanError> {
     Ok(load(&pmp::plan(regions, gran())?))
 }
 
+/// Which app view (text, data, len) the hardware holds, per hart: set by `apply` after the readback verified it,
+/// cleared by every other load. The harness asserts it is the running task's slot before each return to U.
+static APPLIED: [Global<Option<(usize, usize, usize)>>; HARTS] = [const { Global::new(None) }; HARTS];
+
 /// One app's view: its text (R+X) and its data (R+W), everything else denied. Called on every switch to that app.
 pub fn apply(text: usize, data: usize, len: usize) {
     let r = |base: usize, perm| Region { base: base as u32, end: (base + len) as u64, perm };
@@ -229,4 +236,12 @@ pub fn apply(text: usize, data: usize, len: usize) {
         kprintln!("pmp: cannot plan the app view: {e:?}: halting");
         crate::platform::exit(4);
     }
+    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
+    *unsafe { APPLIED[hart()].get() } = Some((text, data, len));
+}
+
+/// Is the loaded view exactly `apply(text, data, len)`'s?
+pub fn applied_is(text: usize, data: usize, len: usize) -> bool {
+    // SAFETY: this hart's entry, MIE clear, no other reference to it exists.
+    *unsafe { APPLIED[hart()].get() } == Some((text, data, len))
 }
