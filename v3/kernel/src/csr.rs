@@ -16,6 +16,20 @@ read_csr!(mtval, "mtval");
 read_csr!(mepc, "mepc");
 // mcycle, low word on RV32 (callers time short spans with wrapping_sub). The stamp in trap.S is the same counter.
 read_csr!(mcycle, "mcycle");
+#[cfg(feature = "esp32p4")]
+read_csr!(mcycleh, "mcycleh");
+
+/// The whole 64-bit mcycle: high, low, high again until the high word did not move between the reads.
+#[cfg(feature = "esp32p4")]
+pub fn mcycle64() -> u64 {
+    loop {
+        let hi = mcycleh();
+        let lo = mcycle();
+        if mcycleh() == hi {
+            return (hi as u64) << 32 | lo as u64;
+        }
+    }
+}
 
 /// mscratch = 0: "the kernel runs" for task_trap_entry, so a kernel fault goes to kernel_fault and never through a
 /// stale pointer (on the P4 mscratch held the bring-up vector's trap stack top until the harness took over).

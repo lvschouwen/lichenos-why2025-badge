@@ -20,6 +20,7 @@ pub const ROGUE_SLOT: usize = 1;
 pub const CRASH: usize = 0;
 pub const SPIN: usize = 1;
 pub const EXIT: usize = 2;
+pub const WRITE_LOOP: usize = 3;
 /// The exit code of rogue's EXIT mode.
 pub const ROGUE_EXIT_CODE: isize = 77;
 /// Where in the worker's data the crashing rogue stores: inside its canary block, so a store that got through would

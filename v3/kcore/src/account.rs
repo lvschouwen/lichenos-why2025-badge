@@ -6,9 +6,11 @@
 //! the 1 ms tick ends every span.
 use crate::image::Slot;
 
-/// CPU time of one process: cycles spent in U mode between the point the kernel resumed it and its next trap entry.
-/// The kernel's own work (trap entry to the next resume) is nobody's: it shows up as the gap between the sum of all
-/// meters and the wall clock.
+/// CPU time of one process: cycles from the point the kernel resumed it to its next trap entry. The kernel's restore
+/// and mret path after the resume stamp counts as process time (the stamp is taken before it), and so does the service
+/// time of a trap that returns to the same process (`keep_running`). The kernel's own work for a trap that switches
+/// processes (trap entry to the next resume) is nobody's: a `Meter` of its own holds it, and meters plus kernel add up
+/// to the wall clock.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Meter {
     cycles: u64,
@@ -28,6 +30,13 @@ impl Meter {
         self.cycles += entry.wrapping_sub(self.resumed) as u64;
         self.resumed = entry;
         self.cycles
+    }
+    /// The trap ends with the same process running again at `now`: the time since its trap entry (the syscall's service
+    /// time) is the process's own, so a loop of slow syscalls cannot hide in the kernel's time. Returns the total.
+    pub fn keep_running(&mut self, now: u32) -> u64 {
+        let total = self.charge(now);
+        self.resume(now);
+        total
     }
     pub fn cycles(&self) -> u64 {
         self.cycles
@@ -103,6 +112,28 @@ mod tests {
         assert_eq!(a.cycles() + b.cycles() + kernel.cycles(), now.wrapping_sub(start) as u64);
         assert_eq!(a.cycles(), 40_000 + 41_000);
         assert_eq!(kernel.cycles(), 1_900 + 2_100 + 1_950 + 2_000);
+    }
+
+    /// A process looping on a slow syscall (the trap's service time dwarfs its own run) is charged for the service, so
+    /// its cycle budget ends it.
+    #[test]
+    fn service_time_of_a_syscall_loop_is_charged_to_the_caller() {
+        let mut m = Meter::new();
+        let mut now = 0u32;
+        m.resume(now);
+        let mut ended_at = None;
+        for round in 0..100u32 {
+            now += 50; // the process: a few instructions
+            m.charge(now); // trap entry
+            now += 900_000; // the kernel's service (a busy-wait UART write)
+            let total = m.keep_running(now);
+            if over_cycles(total, Some(2_000_000)) {
+                ended_at = Some(round);
+                break;
+            }
+        }
+        assert_eq!(ended_at, Some(2), "three slow calls pass a 2M budget");
+        assert_eq!(m.cycles(), 3 * 900_050);
     }
 
     #[test]

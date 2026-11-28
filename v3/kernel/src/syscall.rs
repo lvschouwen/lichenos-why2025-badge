@@ -16,6 +16,18 @@ fn user_range_ok(t: &Pcb, ptr: usize, len: usize) -> bool {
     in_region(ptr, len, t.slot.text, t.slot.len) || in_region(ptr, len, t.slot.data, t.slot.len)
 }
 
+/// Core 1's console is the raw busy-wait UART (about 23 ms for a full WRITE with interrupts off): a process there could
+/// stall the hart and dodge its budget with it, so WRITE is denied until core 0 offers a console service (#618).
+fn denied_write(k: &Kernel) -> bool {
+    #[cfg(feature = "esp32p4")]
+    return k.sup == crate::sched::Supervisor::Procs;
+    #[cfg(not(feature = "esp32p4"))]
+    {
+        let _ = k;
+        false
+    }
+}
+
 /// Returns true when the caller gives up the CPU.
 pub fn dispatch(k: &mut Kernel, cur: usize) -> bool {
     let r = k.procs[cur].ctx.regs;
@@ -26,7 +38,9 @@ pub fn dispatch(k: &mut Kernel, cur: usize) -> bool {
             return true;
         }
         sys::WRITE => {
-            if a1 > WRITE_MAX {
+            if denied_write(k) {
+                err::EPERM
+            } else if a1 > WRITE_MAX {
                 err::EINVAL
             } else if !user_range_ok(&k.procs[cur], a0, a1) {
                 err::EFAULT

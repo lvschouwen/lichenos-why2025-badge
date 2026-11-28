@@ -75,11 +75,12 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     // SAFETY: as `k` above: core 1 is done with its samples.
     perf_line(unsafe { sched::perf_of(1) }, cpu_hz);
     alive(t, l, "proc.alive");
-    stage2(t, l, cpu_hz);
+    stage2(t, l);
+    crate::bringup_apps::run(t, l, cpu_hz);
 }
 
 /// Stage 2: P0 as before, P1 never faults (budget BUDGET2), idle never finishes, so the deadline ends the stage.
-fn stage2(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
+fn stage2(t: &mut Tally, l: &mut Link) {
     if !load(t, "proc.load2", [UNTIL[0], NEVER], [BUDGET, BUDGET2]) {
         return;
     }
@@ -111,7 +112,6 @@ fn stage2(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     );
     fault_row(t, k, 0, "proc.budget.p0");
     alive(t, l, "proc.alive2");
-    crate::bringup_apps::run(t, l, cpu_hz);
 }
 
 /// Core 0 fills core 1's table for a stage (`procs::prepare`).

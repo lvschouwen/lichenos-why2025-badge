@@ -147,7 +147,7 @@ pub struct Kernel {
     pub kernel_time: Meter,
     /// mcycle the stage took on its hart (set by `procs::stage`): the wall clock the meters add up to.
     #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
-    pub stage_cycles: u32,
+    pub stage_cycles: u64,
     /// Tick-driven switches, [from][to].
     pub preempts: [[u32; MAX_PROCS]; MAX_PROCS],
 }
@@ -316,8 +316,7 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
     }
     supervise(k);
     marks[2] = csr::mcycle() as u32;
-    if !switch && k.procs[cur].state == State::Ready {
-        resume(k, cur);
+    if !switch && k.procs[cur].state == State::Ready && keep_running(k, cur) {
         return &mut k.procs[cur].ctx;
     }
     let next = schedule(k);
@@ -335,6 +334,17 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
     }
     resume(k, k.current);
     next
+}
+
+/// The trap returns to the same process: its service time is the process's (see `Meter::keep_running`), so the budget is
+/// checked again; false when that ended it (the caller schedules another process).
+fn keep_running(k: &mut Kernel, cur: usize) -> bool {
+    let total = k.procs[cur].meter.keep_running(csr::mcycle() as u32);
+    if Some(cur) != k.idle && over_cycles(total, k.procs[cur].cycle_budget) {
+        end_proc(k, cur, End::Budget);
+        return false;
+    }
+    true
 }
 
 /// The kernel is done with this trap and hands the CPU to process `i`: the span since the trap entry is the kernel's,

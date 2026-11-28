@@ -50,6 +50,14 @@ pub fn run(t: &mut Tally, l: &mut crate::smp::Link, cpu_hz: u64) {
     released(t, k, "apps.spin.released");
     accounting(t, k, "apps.spin", cpu_hz);
 
+    if !load(t, "apps.write.load", || apps::prepare_pair(apps::WRITE_LOOP, Some(budget))) {
+        return;
+    }
+    stage(t, l, "apps.write", DEADLINE_MS, u32::MAX);
+    // SAFETY: as above.
+    let k = unsafe { sched::of(1) };
+    write_row(t, k, budget, cpu_hz);
+
     if !load(t, "apps.replace.load", apps::prepare_replace) {
         return;
     }
@@ -99,6 +107,25 @@ fn crash_rows(t: &mut Tally, k: &Kernel) {
             apps::target(),
             k.procs[WORKER_SLOT].state,
             k.procs[WORKER_SLOT].end
+        ),
+    );
+}
+
+/// The WRITE loop: the first call came back EPERM (else exit 5) and the budget ended it, over a loop of syscalls.
+fn write_row(t: &mut Tally, k: &Kernel, budget: u64, cpu_hz: u64) {
+    let r = &k.procs[ROGUE_SLOT];
+    let slack = KILL_SLACK_TICKS * cpu_hz / 1000;
+    let cycles = r.meter.cycles();
+    let (alive, alone, _) = survivor_ok(k);
+    record(
+        t,
+        "apps.write.kill",
+        Some(r.end == Some(End::Budget) && cycles > budget && cycles <= budget + slack && alive),
+        format_args!(
+            "rogue loops on full WRITEs (denied on core 1, EPERM): ended {:x?} (want Budget; Exit(5) = a WRITE got \
+             through) at {cycles} cycles of a {budget} budget (at most {slack} over), {} syscalls; the worker ran on \
+             alone for {alone} ticks",
+            r.end, r.syscalls
         ),
     );
 }
@@ -156,7 +183,7 @@ fn accounting(t: &mut Tally, k: &Kernel, id: &str, cpu_hz: u64) {
             p.reclaim_cycles
         );
     }
-    let wall = k.stage_cycles as u64;
+    let wall = k.stage_cycles;
     let kernel = k.kernel_time.cycles();
     crate::kprintln!("PERF proc.account stage={id} name=kernel cycles={kernel} cpu_hz={cpu_hz}");
     let id = account_id(id);

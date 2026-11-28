@@ -13,6 +13,9 @@ const SPIN: usize = 1;
 /// that runs is this one only if the instruction fetch sees the new bytes.
 const EXIT: usize = 2;
 const EXIT_CODE: isize = 77;
+/// a0: a loop of full-size WRITEs. The kernel denies WRITE on core 1 (EPERM), so each call is a quick trap; either way
+/// the cycle budget ends it, whatever the kernel spends on each call.
+const WRITE_LOOP: usize = 3;
 
 #[no_mangle]
 pub extern "C" fn app_main(mode: usize, other: usize, _a2: usize, _a3: usize) -> isize {
@@ -26,6 +29,18 @@ pub extern "C" fn app_main(mode: usize, other: usize, _a2: usize, _a3: usize) ->
             core::hint::spin_loop();
         },
         EXIT => return EXIT_CODE,
+        WRITE_LOOP => {
+            let line = [b'x'; abi::WRITE_MAX];
+            // SAFETY: bytes of `line` are ASCII.
+            let s = unsafe { core::str::from_utf8_unchecked(&line) };
+            // An allowed write would busy-wait the hart's UART: tell the kernel's row (exit code 5, not a budget end).
+            if abi::write(s) != abi::err::EPERM {
+                return 5;
+            }
+            loop {
+                abi::write(s);
+            }
+        }
         _ => return -1,
     }
     // The store did not fault: isolation failed.

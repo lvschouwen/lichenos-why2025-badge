@@ -244,9 +244,12 @@ pub fn stage(deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
     // SAFETY: ctx is process 0's context, set up by the loader; MPP = U, its view is loaded and checked, the vector
     // and the tick are this hart's. Control comes back here only through task_leave (`leave`).
     IN_STAGE.store(true, core::sync::atomic::Ordering::Relaxed);
-    let c0 = csr::mcycle() as u32;
+    // Code core 0 loaded since this hart last ran must be fetched fresh (#618 review): fence.i on the fetching hart.
+    // SAFETY: fence.i only orders this hart's instruction fetch after earlier stores.
+    unsafe { core::arch::asm!(".option push", ".option arch, +zifencei", "fence.i", ".option pop") };
+    let c0 = csr::mcycle64();
     let outcome = unsafe { trap::task_run(ctx) } as u32;
-    let stage_cycles = (csr::mcycle() as u32).wrapping_sub(c0);
+    let stage_cycles = csr::mcycle64() - c0;
     IN_STAGE.store(false, core::sync::atomic::Ordering::Relaxed);
     platform::timer_stop();
     csr::set_mtvec(mtvec);
