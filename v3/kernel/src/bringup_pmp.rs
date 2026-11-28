@@ -241,6 +241,8 @@ enum Src {
 static SRC: AtomicU8 = AtomicU8::new(0);
 /// The timebase's rate in Hz; 0 until `calibrate` picks a source (`ticks_to_ns` then gives 0, never a wrong number).
 static HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The clock generation `HZ` was calibrated in (#655): `print_perf` refuses a rate from another one.
+static CAL_GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 fn src() -> Src {
     if SRC.load(Ordering::Relaxed) == 1 {
@@ -258,8 +260,37 @@ fn now() -> u32 {
         Src::Mtime => hw::clint::mtime() as u32,
     }
 }
+/// The rate if it was calibrated in the current clock generation, else 0 (a PERF line then reads 0, never a number in
+/// the wrong rate).
 fn hz() -> u64 {
-    HZ.load(Ordering::Relaxed) as u64
+    let r =
+        lichen_kcore::timebase::Rate { hz: HZ.load(Ordering::Relaxed) as u64, gen: CAL_GEN.load(Ordering::Relaxed) };
+    r.at(crate::timebase::gen())
+}
+
+fn set_hz(f: u64) {
+    HZ.store(f as u32, Ordering::Relaxed);
+    CAL_GEN.store(crate::timebase::gen(), Ordering::Relaxed);
+}
+
+/// mcycle against mtime over 100 us at the current mtime rate.
+fn mcycle_hz() -> u64 {
+    let (c0, m0) = (now(), hw::clint::mtime());
+    let window = crate::timebase::us_to_ticks(100);
+    while hw::clint::mtime() - m0 < window {}
+    let (c1, m1) = (now(), hw::clint::mtime());
+    perf::clock_hz(c1.wrapping_sub(c0), (m1 - m0) as u32, crate::timebase::hz())
+}
+
+/// After a clock change (`timebase::switch`): calibrate again in the new generation, if a source was ever picked.
+pub fn clock_changed() {
+    if HZ.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    match src() {
+        Src::Mcycle => set_hz(mcycle_hz()),
+        Src::Mtime => set_hz(crate::timebase::hz()),
+    }
 }
 
 /// Run a one-CSR stub and say whether it executed (true) or faulted illegal (false).
@@ -282,13 +313,9 @@ fn calibrate(t: &mut Tally) {
     });
     if usable {
         SRC.store(Src::Mcycle as u8, Ordering::Relaxed);
-        let (c0, m0) = (now(), hw::clint::mtime());
-        let window = crate::timebase::us_to_ticks(100);
-        while hw::clint::mtime() - m0 < window {}
-        let (c1, m1) = (now(), hw::clint::mtime());
-        let f = perf::clock_hz(c1.wrapping_sub(c0), (m1 - m0) as u32, mtime_hz);
+        let f = mcycle_hz();
         if (10_000_000..1_000_000_000).contains(&f) {
-            HZ.store(f as u32, Ordering::Relaxed);
+            set_hz(f);
             record(
                 t,
                 "perf.clock",
@@ -301,10 +328,10 @@ fn calibrate(t: &mut Tally) {
             );
             return;
         }
-        kprintln!("perf: mcycle counted {} over {} mtime ticks -> {f} Hz", c1.wrapping_sub(c0), m1 - m0);
+        kprintln!("perf: mcycle against mtime over 100 us -> {f} Hz, not plausible");
     }
     SRC.store(Src::Mtime as u8, Ordering::Relaxed);
-    HZ.store(mtime_hz as u32, Ordering::Relaxed);
+    set_hz(mtime_hz);
     record(
         t,
         "perf.clock",
@@ -318,6 +345,11 @@ fn calibrate(t: &mut Tally) {
 
 fn print_perf(name: &str, samples: &mut [u32], note: &str) {
     let hz = hz();
+    if hz == 0 {
+        // #655: calibrated in another clock generation (or never): no number in a wrong rate goes out.
+        kprintln!("perf: {name}: no PERF line, the clock changed since the calibration");
+        return;
+    }
     let Some((med, p95)) = perf::median_p95(samples) else { return };
     let (min, max) = (samples[0], samples[samples.len() - 1]); // sorted by median_p95
     let us = |c: u32| {

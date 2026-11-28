@@ -142,9 +142,17 @@ pub struct Link {
     stale: u32,
 }
 
+/// Set once `start` released core 1 (#655: a clock switch must come before, it cannot re-arm core 1's timer).
+static C1_STARTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn core1_started() -> bool {
+    C1_STARTED.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 /// Start core 1 at `_start1`. Core 0 must print nothing until `Link::recv` returns UP (see the console rule).
 /// Returns the link and the stall polls, or None if core 1 stayed stalled.
 pub fn start() -> Option<(Link, u32)> {
+    C1_STARTED.store(true, core::sync::atomic::Ordering::Relaxed);
     // Everything core 0 wrote so far (bss, the console ring) is ordered before core 1 can run.
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     // SAFETY: _start1 sets up its own stacks and mtvec (boot_esp32p4.S); this is the only call (bringup runs once).

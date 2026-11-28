@@ -12,6 +12,7 @@ use crate::global::Global;
 use crate::platform::{self, hw};
 use crate::{kcheck, kprintln};
 use lichen_kcore::check::Verdict;
+use lichen_kcore::timebase::{self, Epoch};
 use lichen_kcore::trap::{self, Cause, PeriodStats};
 
 /// The caller-saved registers trap_entry stores, in its order, then the interrupted sp.
@@ -97,6 +98,24 @@ pub fn tick_start(period: u64, target: u32) -> u32 {
     hw::clint::set_cmp(cmp);
     hw::clic::set_enabled(trap::IRQ_MTIMER as usize, true);
     thresh
+}
+
+/// A clock change (`timebase::switch`, #655): this hart's tick period in ticks of the new rate, its pending compare
+/// and the U-run deadline moved to the same wall time (one that passed during the switch fires once, at once), and
+/// the tick's gap statistics restarted (they were in ticks of the old rate).
+pub fn clock_changed(old: &Epoch, new: &Epoch) {
+    let cmp = with(|s| {
+        s.user_deadline = s.user_deadline.map(|d| old.rearm(new, d));
+        let t = s.tick.as_mut()?;
+        t.period = timebase::rescale(t.period, old.hz, new.hz).max(1);
+        t.cmp = old.rearm(new, t.cmp);
+        t.stats.rebase();
+        // A finished tick stays disarmed (or on the U deadline, which no U run holds during a switch).
+        (t.stats.count < t.target).then_some(t.cmp)
+    });
+    if let Some(c) = cmp {
+        hw::clint::set_cmp(c);
+    }
 }
 
 pub fn tick_stop() -> Option<Tick> {
@@ -205,7 +224,7 @@ extern "C" {
 /// Watchdog tick period for U runs that have no tick of their own.
 const WATCHDOG_US: u64 = 10_000;
 /// Any U run ends at the first tick after this long (review L-b): a spinning stub cannot keep the hart. The longest
-/// legitimate run, the 4M-iteration preemption spin, takes well under a second at the 40 MHz ROM clock.
+/// legitimate run, the 4M-iteration preemption spin, takes well under a second even at the 40 MHz ROM clock.
 const RUN_LIMIT_US: u64 = 2_000_000;
 
 /// Run U code at `entry` (on the U stub page, under the PMP view the caller applied) until it exits or faults.

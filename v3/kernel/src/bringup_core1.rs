@@ -349,6 +349,7 @@ fn coherence(t: &mut Tally, l: &mut Link) {
 
 fn timer(t: &mut Tally, l: &mut Link) {
     begin("core1.timer");
+    let gen = timebase::gen();
     let ms = C1_TICK_US * C1_TICKS as u64 / 1000 + 1000;
     let r = l.call(smp::OP_TICK, [C1_TICK_US as u32, C1_TICKS, 0, 0, 0, 0], ms);
     let Some(r) = r else {
@@ -373,8 +374,8 @@ fn timer(t: &mut Tally, l: &mut Link) {
     );
     kprintln!(
         "PERF kernel.timer_jitter max_us={} p2p_us={} n={count} period_us={C1_TICK_US}",
-        Us { ticks: jitter, hz: timebase::hz() },
-        Us { ticks: (gmax.saturating_sub(gmin)) as u64, hz: timebase::hz() }
+        Us { ticks: jitter, hz: timebase::hz_in(gen) },
+        Us { ticks: (gmax.saturating_sub(gmin)) as u64, hz: timebase::hz_in(gen) }
     );
 }
 

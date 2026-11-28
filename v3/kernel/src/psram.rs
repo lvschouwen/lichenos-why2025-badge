@@ -1,10 +1,9 @@
 //! PSRAM in the kernel (#621): bring-up, the kernel-only MMU map, and app memory from `lichen_kcore::palloc`.
 //!
-//! - **Clock:** the kernel stays at the ROM clock (CPU on the 40 MHz XTAL) with PSRAM at 120 MHz. `cpu_to_360` would
-//!   make every cached rate stale and lands with #655's `clock_changed`, kept separate. IDF wants CPU >= PSRAM MHz
-//!   (the MSPI write FIFO can overflow otherwise, #620); until #655 every zeroing checks the controller's RX overflow
-//!   and TX underflow flags and fails closed (pages stay dirty, nothing is granted) if either is ever set. The bit-8
-//!   flips #620 found are uncached single-word stores, which this module never does.
+//! - **Clock:** PSRAM at 120 MHz, brought up after the CPU went to 360 MHz (#655, bringup `clock`): IDF wants CPU >=
+//!   PSRAM MHz (the MSPI write FIFO can overflow otherwise, #620). The #621 stopgap that failed every zeroing on the
+//!   controller's sticky FIFO error flags is gone with that; the `psram.mspi` row still reads them after the rows.
+//!   The bit-8 flips #620 found are uncached single-word stores, which this module never does.
 //! - **MMU:** `map_identity` puts physical page n at virtual page n of the window, once: a physical page has exactly
 //!   one cached address and the hardware's uncached alias of it. The MMU registers are SPIMEM2 MMIO, which no U view
 //!   grants. The excluded range (#620) stays unmapped.
@@ -46,8 +45,8 @@ pub fn mspi_errors() -> u32 {
 /// Zeroing through the cached alias, then written back and dropped from the data caches (`map::sync` orders the stores
 /// before the operation with `fence iorw, iorw`): the chip holds zeros and no cached line holds the old data. Exec
 /// blocks are also dropped from both cores' L1 ICache (`sync_icache`: ROM `Cache_Invalidate_Addr` with the ICache
-/// map, then `fence.i`): the next owner must not run the last owner's code. Fails if the MSPI FIFO flags are set.
-/// (The uncached alias is never written: #620's bit-8 flips.)
+/// map, then `fence.i`): the next owner must not run the last owner's code. (The uncached alias is never written:
+/// #620's bit-8 flips.)
 struct CachedZero;
 impl Scrub for CachedZero {
     fn zero(&mut self, off: usize, len: usize, kind: Kind) -> bool {
@@ -55,13 +54,10 @@ impl Scrub for CachedZero {
         // SAFETY: [off, off + len) is mapped PSRAM inside an arena (the allocator only names its own pages). Callers
         // are `with` (core 0, enforced) and `release_owner` has checked no view of this hart reaches the owner's
         // blocks; a fresh grant's pages belong to no one yet.
-        let ok = unsafe {
+        unsafe {
             core::ptr::write_bytes(a as *mut u8, 0, len);
             map::cache_writeback_invalidate(a, len) == 0 && (kind == Kind::Data || hw::cache::sync_icache(a, len) == 0)
-        };
-        // Stopgap for CPU 40 MHz < PSRAM 120 MHz (review-621 M2, owner decision: keep until #655). #655, which brings
-        // cpu_to_360 and clock_changed, must lift it: drop this check and the sticky-flag fail-closed it implies.
-        ok && mspi_errors() == 0
+        }
     }
 }
 

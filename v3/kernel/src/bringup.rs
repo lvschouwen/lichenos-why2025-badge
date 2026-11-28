@@ -6,6 +6,7 @@ use crate::platform::{self, hw};
 use crate::{kcheck, kprintln};
 use lichen_kcore::check::{Tally, Verdict};
 use lichen_kcore::l2;
+use lichen_kcore::perf::Us;
 
 pub const BUILD_ID: &str = env!("LICHEN_BUILD_ID");
 
@@ -26,7 +27,7 @@ extern "C" {
 }
 
 const UPAGE: usize = 4096;
-/// U spin length for the preemption case: several 100 us ticks at any plausible ROM core clock.
+/// U spin length for the preemption case: several 100 us ticks at any plausible core clock (40 to 400 MHz).
 const U_SPIN: usize = 4_000_000;
 
 /// The core 0 tick under test: 1 ms, 10 000 of them (#612 checkpoint 1).
@@ -136,6 +137,10 @@ pub fn run(hart: usize, boot_info: *const u8) -> ! {
     }
 
     mtime_rate(&mut t);
+    if !clock(&mut t) {
+        // Every rate the kernel holds is unknown: no row after this could be judged.
+        finish(t)
+    }
     timer(&mut t);
     fault(&mut t);
     user(&mut t);
@@ -164,7 +169,7 @@ pub fn finish(mut t: Tally) -> ! {
 /// only say `XtalOrCpu`.
 fn mtime_rate(t: &mut Tally) {
     begin("timebase");
-    let m = crate::timebase::remeasure();
+    let m = crate::timebase::boot();
     let cpu_mhz = hw::clock::measure_mhz();
     let src_sel = hw::psram::systimer::src_sel();
     let detail = format_args!(
@@ -189,12 +194,117 @@ fn mtime_rate(t: &mut Tally) {
     }
 }
 
+/// The periodic tick armed across the clock switch (#655): a period longer than the switch takes (it prints every
+/// register write, about 0.54 s at 115200 baud on the bench), so the first deadline falls after it, and three of them
+/// so the rescaled period is judged too (left at 40 MHz ticks, the second would come after 1.11 s).
+const REARM_US: u64 = 1_000_000;
+const REARM_TICKS: u32 = 3;
+/// How far each tick may fire from its deadline, judged by SYSTIMER: 0.1 % of the longest interval (the remeasure is
+/// good to about 250 ppm, #654) plus the wake-up.
+const REARM_TOL_US: u64 = REARM_US * REARM_TICKS as u64 / 1000;
+/// The production clock (#645 owner decision: CPU 360, PSRAM 120 on rev 1.0).
+const CPU_MHZ: u32 = 360;
+const CPU_TOL_PCT: u32 = 1;
+
+fn within_pct(a: u64, b: u64, pct: u64) -> bool {
+    b != 0 && a.abs_diff(b) * 100 <= b * pct
+}
+
+/// The CPU to 360 MHz through `timebase::switch` (#655), with a tick armed before it at the boot rate that must
+/// fire on time after it. False when the switch or the remeasure failed: the kernel cannot judge time then.
+fn clock(t: &mut Tally) -> bool {
+    begin("clock");
+    let sys0 = hw::psram::systimer::now_ticks().unwrap_or(0);
+    let us0 = crate::timebase::now_us();
+    mtrap::tick_start(crate::timebase::us_to_ticks(REARM_US), REARM_TICKS);
+    let sw = crate::timebase::switch(|| {
+        let mut log = |a: core::fmt::Arguments| {
+            kprintln!("{a}");
+            platform::flush();
+        };
+        // SAFETY: core 0 with nothing else running (`switch` halts otherwise), a RAM-only image: nothing runs from
+        // flash or PSRAM while the clock tree and the core supply change.
+        unsafe { hw::clock::cpu_to_360(&mut log) }
+    });
+    let mhz = match sw.out {
+        Ok((_, after)) => after,
+        Err(_) => None,
+    };
+    let ok_switch = sw.out.is_ok() && sw.m.hz.is_some();
+    let cpu_ok = mhz.is_some_and(|m| within_pct(m as u64, CPU_MHZ as u64, CPU_TOL_PCT as u64));
+    let hz = sw.m.hz.unwrap_or(0);
+    let source = lichen_kcore::timebase::mtime_source(hz, mhz.unwrap_or(0) as u64 * 1_000_000);
+    record(
+        t,
+        "clock.cpu",
+        Some(ok_switch && cpu_ok && source.is_some()),
+        format_args!(
+            "{:?}: CPU {mhz:?} MHz by mcycle vs SYSTIMER (want {CPU_MHZ} +- {CPU_TOL_PCT} %), mtime {hz} Hz source={source:?}, \
+             generation {} -> {}, switch {} us by SYSTIMER",
+            sw.out.map(|_| ()),
+            sw.old.gen,
+            sw.new.gen,
+            sw.sys_ticks / 16
+        ),
+    );
+    if !ok_switch {
+        mtrap::tick_stop();
+        return false;
+    }
+    kprintln!("PERF cpu.clock mhz={}", mhz.unwrap_or(0));
+    rearm_row(t, sys0, us0, sw.sys_ticks / 16);
+    true
+}
+
+/// timer.rearm: the tick armed before the switch fires at 1, 2 and 3 periods by SYSTIMER (a deadline that the switch
+/// outlasted fires once, at once), misses none, and the monotonic clock moved by as much as SYSTIMER.
+fn rearm_row(t: &mut Tally, sys0: u64, us0: u64, switch_us: u64) {
+    use hw::psram::systimer;
+    begin("timer.rearm");
+    let limit = sys0 + 2 * REARM_US * REARM_TICKS as u64 * systimer::TICKS_PER_US;
+    let mut at = [0u64; REARM_TICKS as usize];
+    let mut seen = 0;
+    while seen < REARM_TICKS && systimer::now_ticks().is_some_and(|s| s < limit) {
+        mtrap::wait_irq();
+        let n = mtrap::tick_count().min(REARM_TICKS);
+        let now = systimer::now_ticks().unwrap_or(0);
+        while seen < n {
+            at[seen as usize] = systimer::elapsed(sys0, now) / systimer::TICKS_PER_US;
+            seen += 1;
+        }
+    }
+    let us1 = crate::timebase::now_us();
+    let (count, missed) = mtrap::tick_stop().map_or((0, 0), |k| (k.stats.count, k.stats.missed));
+    // Deadline k is k periods after arming, or at once after the switch if the switch outlasted it.
+    let err = |k: usize| at[k].abs_diff(((k as u64 + 1) * REARM_US).max(switch_us));
+    let worst = (0..REARM_TICKS as usize).map(err).max().unwrap_or(u64::MAX);
+    let got = at[REARM_TICKS as usize - 1];
+    let mono = us1.saturating_sub(us0);
+    let ok = count == REARM_TICKS
+        && missed == 0
+        && worst <= REARM_TOL_US
+        && us1 >= us0
+        && mono.abs_diff(got) <= REARM_TOL_US;
+    record(
+        t,
+        "timer.rearm",
+        Some(ok),
+        format_args!(
+            "{REARM_US} us tick armed at the boot rate: {count} of {REARM_TICKS} fired at {at:?} us by SYSTIMER \
+             (want each period +- {REARM_TOL_US}, worst error {worst} us), missed {missed}, monotonic clock \
+             {us0} -> {us1} us ({mono} us)"
+        ),
+    );
+    kprintln!("PERF kernel.timer_rearm err_us={worst} switch_us={switch_us}");
+}
+
 /// 10k CLINT ticks through the CLIC and the real trap vector, taken from the kernel's wait loop.
 fn timer(t: &mut Tally) {
     begin("timer");
     let mtvec = hw::trap::mtvec();
     record(t, "trap.mtvec", Some(mtvec & 3 == 3), format_args!("mtvec={mtvec:#010x} (mode 3 = CLIC)"));
     let before = hw::clic::line(lichen_kcore::trap::IRQ_MTIMER as usize);
+    let gen = crate::timebase::gen();
     let period = crate::timebase::us_to_ticks(TICK_US);
     kprintln!("timer: mtimectl={:#x} line 7 before ip/ie/attr/ctl {before:?}", hw::clint::ctl());
     platform::flush();
@@ -237,6 +347,17 @@ fn timer(t: &mut Tally) {
             s.lat_max,
             s.missed
         ),
+    );
+    let hz = crate::timebase::hz_in(gen);
+    let jitter = lichen_kcore::perf::jitter_max(period, s.gap_min, s.gap_max);
+    kprintln!(
+        "perf: kernel.timer_jitter_core0 = core 0's tick, max |gap - {TICK_US} us|; core 0 in wfi, nothing printing"
+    );
+    kprintln!(
+        "PERF kernel.timer_jitter_core0 max_us={} p2p_us={} n={} period_us={TICK_US}",
+        Us { ticks: jitter, hz },
+        Us { ticks: s.gap_max.saturating_sub(s.gap_min), hz },
+        s.count
     );
     let stray = mtrap::stray_irqs();
     record(t, "timer.stray", Some(stray == 0), format_args!("{stray} interrupt(s) other than the tick"));

@@ -8,7 +8,7 @@
 //! `psram::release_owner` refuses while a loaded view still reaches the blocks.
 use crate::bringup::{begin, record};
 use crate::platform::{self, hw};
-use crate::{mtrap, psram};
+use crate::{kprintln, mtrap, psram};
 use lichen_kcore::check::Tally;
 use lichen_kcore::palloc::{Block, Error, Handle, Kind, CACHED_BASE, HOLE_START, PAGE, UNCACHED_BASE};
 use lichen_kcore::pmp::{Region, R, X};
@@ -29,6 +29,8 @@ const FETCH_FAULT: u16 = 1;
 const ILLEGAL: u16 = 2;
 const NO_FAULT: u16 = 0xFFF;
 const MARK: usize = 0x6210_A5A5;
+/// The production PSRAM clock (#645 owner decision).
+const PSRAM_MHZ: u32 = 120;
 
 /// A block as the kernel holds it: the handle is what grants and code loads go through.
 #[derive(Clone, Copy)]
@@ -83,12 +85,23 @@ pub fn run(t: &mut Tally) {
         Err(why) => return record(t, "psram.init", Some(false), format_args!("{why} failed: no PSRAM rows")),
     };
     let tune = info.tuned.map(|t| (t.phase_id as u32, t.data_dl, t.dqs_dl)).unwrap_or_default();
+    let cpu = hw::clock::measure_mhz();
+    let mhz = hw::psram::current_mhz();
+    // #655: IDF wants the CPU clock at least the PSRAM clock (the MSPI FIFOs, #620). The PSRAM clock is the one init
+    // programmed and calibrated at (MPLL / divider, read back inside init); the CPU clock is measured.
+    record(
+        t,
+        "clock.psram",
+        Some(mhz == PSRAM_MHZ && cpu.is_some_and(|c| c >= mhz)),
+        format_args!("PSRAM {mhz} MHz as programmed (want {PSRAM_MHZ}), CPU {cpu:?} MHz measured (want >= PSRAM)"),
+    );
+    kprintln!("PERF mem.psram_clock mhz={mhz}");
     record(
         t,
         "psram.init",
         Some(info.size_bytes as usize >= hw::psram::map::MAPPED_BYTES),
         format_args!(
-            "{} MB at {} MHz, CPU on the ROM clock; ldo {} {}, mpll {}, mr0 {:#x} mr4 {:#x} mr8 {:#x}, tune {} {} {}",
+            "{} MB at {} MHz, CPU at {cpu:?} MHz; ldo {} {}, mpll {}, mr0 {:#x} mr4 {:#x} mr8 {:#x}, tune {} {} {}",
             info.size_bytes >> 20,
             hw::psram::current_mhz(),
             info.ldo_dref,
@@ -238,7 +251,7 @@ fn nonzero(b: &Block) -> (usize, usize) {
     (w.clone().filter(|&o| psram::read_cached(o) != 0).count(), w.filter(|&o| psram::read_uncached(o) != 0).count())
 }
 
-/// A's data and exec blocks are filled and written back (the chip must hold the fill: write-back at the ROM clock
+/// A's data and exec blocks are filled and written back (the chip must hold the fill: write-back at CPU 360 / PSRAM 120
 /// reaches PSRAM, and the zeros afterwards are not the alloc-time ones). Releasing A while its view is loaded is
 /// refused; with the stub view it goes through, and both blocks read zero through both aliases. A's handle is dead
 /// after that; owner 2 gets A's data pages back and its U load reads 0.

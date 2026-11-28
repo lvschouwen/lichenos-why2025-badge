@@ -131,6 +131,11 @@ impl PeriodStats {
         self.last = Some(now);
         self.count += 1;
     }
+    /// The clock changed rate (#655): gaps and latencies so far are in ticks of the old rate, and the next gap would
+    /// mix the two. Forget them; the event and missed counts stay.
+    pub fn rebase(&mut self) {
+        *self = PeriodStats { count: self.count, missed: self.missed, ..PeriodStats::new() };
+    }
     pub fn add_missed(&mut self, n: u64) {
         self.missed += n;
     }
@@ -219,6 +224,24 @@ mod tests {
         s.record(200, 260);
         assert!(!s.stable(100, 50));
         assert!(s.stable(100, 60));
+    }
+
+    #[test]
+    fn stats_rebase_drops_the_old_rate() {
+        // #655: a 40 000-tick gap at 40 MHz, then the switch to 360 MHz; the first gap after it is 360 000 ticks of the
+        // new rate. Kept across the switch, the old gap alone makes a stable 1000 us tick look unstable.
+        let mut s = PeriodStats::new();
+        s.record(0, 0);
+        s.record(40_000, 40_000);
+        s.add_missed(2);
+        s.rebase();
+        assert_eq!((s.count, s.missed), (2, 2));
+        s.record(1_000_000, 1_000_000);
+        s.record(1_360_000, 1_360_000);
+        s.record(1_720_000, 1_720_001);
+        assert_eq!((s.gap_min, s.gap_max), (360_000, 360_001));
+        assert_eq!((s.lat_min, s.lat_max), (0, 1));
+        assert_eq!(s.count, 5);
     }
 
     #[test]
