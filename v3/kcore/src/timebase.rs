@@ -144,6 +144,15 @@ impl Epoch {
     }
 }
 
+/// The measured CPU clock is at `want_mhz` within `tol_pct` (#655): bringup brings PSRAM up at 120 MHz only then, so
+/// the CPU is never below the PSRAM clock. False for no measurement or a zero target.
+pub const fn cpu_at(measured_mhz: Option<u32>, want_mhz: u32, tol_pct: u32) -> bool {
+    match measured_mhz {
+        Some(m) => want_mhz != 0 && (m.abs_diff(want_mhz) as u64) * 100 <= want_mhz as u64 * tol_pct as u64,
+        None => false,
+    }
+}
+
 /// A rate calibrated in clock generation `gen` (#655): `Us` values and PERF lines may use it only while the clock is
 /// still in that generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -324,6 +333,17 @@ mod tests {
     }
 
     #[test]
+    fn cpu_at_gates_psram_on_the_cpu_clock() {
+        // review-655 M1: a switch that returned Ok but left the CPU on XTAL (or unmeasured) must not pass.
+        assert!(cpu_at(Some(360), 360, 1));
+        assert!(cpu_at(Some(357), 360, 1)); // 0.83 %
+        assert!(!cpu_at(Some(356), 360, 1)); // 1.1 %
+        assert!(!cpu_at(Some(40), 360, 1));
+        assert!(!cpu_at(None, 360, 1));
+        assert!(!cpu_at(Some(0), 0, 1));
+    }
+
+    #[test]
     fn rate_is_void_in_another_generation() {
         let r = Rate { hz: MHZ40, gen: 1 };
         assert_eq!(r.at(1), MHZ40);
@@ -363,7 +383,7 @@ mod tests {
         }
 
         #[test]
-        fn rearm_never_moves_a_deadline_earlier(
+        fn rearm_keeps_a_deadline_within_1_us_of_rounding(
             d in 0u64..1u64 << 40,
             sys in 0u64..1u64 << 30,
             hz0 in 1_000_000u64..=1_000_000_000,

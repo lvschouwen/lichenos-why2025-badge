@@ -18,7 +18,7 @@ const C1_TICKS: u32 = 5000;
 /// Jitter target (#612): under 2 us. The jitter is a near-constant number of CPU cycles (wake from wfi, trap entry,
 /// core 0 polling the shared L2MEM): 80-84 at the 40 MHz ROM clock (2.03-2.10 us, the c47df3e1 FAILs) and 90-100
 /// at 360 MHz (0.25-0.28 us, #655). So the target holds only at the production clock, which the kernel always runs
-/// at since #655 (a failed switch ends the run before this row).
+/// at since #655 (bringup `clock` ends the run before this row when the switch fails or the CPU is not at 360 MHz).
 const JITTER_TARGET_US: u64 = 2;
 const U_SPIN: u32 = 4_000_000;
 const UPAGE: usize = 4096;

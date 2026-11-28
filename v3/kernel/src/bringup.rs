@@ -206,12 +206,9 @@ const REARM_TOL_US: u64 = REARM_US * REARM_TICKS as u64 / 1000;
 const CPU_MHZ: u32 = 360;
 const CPU_TOL_PCT: u32 = 1;
 
-fn within_pct(a: u64, b: u64, pct: u64) -> bool {
-    b != 0 && a.abs_diff(b) * 100 <= b * pct
-}
-
 /// The CPU to 360 MHz through `timebase::switch` (#655), with a tick armed before it at the boot rate that must
-/// fire on time after it. False when the switch or the remeasure failed: the kernel cannot judge time then.
+/// fire on time after it. False when the switch or the remeasure failed (the kernel cannot judge time then) or the
+/// CPU is not at 360 MHz (PSRAM 120 would then run above it).
 fn clock(t: &mut Tally) -> bool {
     begin("clock");
     let sys0 = hw::psram::systimer::now_ticks().unwrap_or(0);
@@ -231,7 +228,7 @@ fn clock(t: &mut Tally) -> bool {
         Err(_) => None,
     };
     let ok_switch = sw.out.is_ok() && sw.m.hz.is_some();
-    let cpu_ok = mhz.is_some_and(|m| within_pct(m as u64, CPU_MHZ as u64, CPU_TOL_PCT as u64));
+    let cpu_ok = lichen_kcore::timebase::cpu_at(mhz, CPU_MHZ, CPU_TOL_PCT);
     let hz = sw.m.hz.unwrap_or(0);
     let source = lichen_kcore::timebase::mtime_source(hz, mhz.unwrap_or(0) as u64 * 1_000_000);
     record(
@@ -247,7 +244,8 @@ fn clock(t: &mut Tally) -> bool {
             sw.sys_ticks / 16
         ),
     );
-    if !ok_switch {
+    // Fail closed (review-655 M1): with the CPU not at its clock, PSRAM must not come up at 120 MHz above it.
+    if !ok_switch || !cpu_ok {
         mtrap::tick_stop();
         return false;
     }
@@ -265,7 +263,11 @@ fn rearm_row(t: &mut Tally, sys0: u64, us0: u64, switch_us: u64) {
     let mut at = [0u64; REARM_TICKS as usize];
     let mut seen = 0;
     while seen < REARM_TICKS && systimer::now_ticks().is_some_and(|s| s < limit) {
-        mtrap::wait_irq();
+        // wfi only once the line is pending: a tick re-armed into the far future then ends in a FAIL at `limit`, not
+        // in a hang (review-655 M2). Polling the pending bit costs a few us of the 3 ms tolerance.
+        if hw::clic::line(lichen_kcore::trap::IRQ_MTIMER as usize)[0] & 1 != 0 {
+            mtrap::wait_irq();
+        }
         let n = mtrap::tick_count().min(REARM_TICKS);
         let now = systimer::now_ticks().unwrap_or(0);
         while seen < n {

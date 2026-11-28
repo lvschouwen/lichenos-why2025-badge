@@ -97,7 +97,8 @@ pub struct Switched<R> {
 }
 
 /// The one way to change the CPU clock (#655): run `change`, then `clock_changed`. Core 0, before core 1 starts (core
-/// 1's mtimecmp and tick are its own and this hart cannot re-arm them), never from a trap handler: it halts otherwise.
+/// 1's mtimecmp and tick are its own and this hart cannot re-arm them): it halts otherwise. Never from a trap handler
+/// (not checked: the kernel has one caller, bringup).
 pub fn switch<R>(change: impl FnOnce() -> R) -> Switched<R> {
     if crate::smp::hartid() != 0 || crate::smp::core1_started() {
         platform::enter_fatal();
@@ -119,6 +120,7 @@ fn clock_changed(pre: u64, s0: Option<u64>) -> (Measured, Epoch, Epoch, u64) {
     let old = unsafe { *EPOCH.get() };
     let (s1, now) = (hw::psram::systimer::now_ticks(), hw::clint::mtime());
     let (Some(hz), Some(s0), Some(s1)) = (m.hz, s0, s1) else {
+        // HZ, the epoch and the armed compares stay at the old rate, now wrong: the caller ends the run (bringup clock).
         return (Measured { hz: None, ..m }, old, old, 0);
     };
     let elapsed = hw::psram::systimer::elapsed(s0, s1);
