@@ -94,6 +94,9 @@ mod tests {
         w[2] = S.text as u32 + 0x10_0000;
         assert_eq!(validate(&image(w, 64), &S), Err(LoadError::Entry));
         let mut w = good();
+        w[2] = S.text as u32 + 20;
+        assert_eq!(validate(&image(w, 20), &S), Err(LoadError::Entry), "entry at the image end (#656)");
+        let mut w = good();
         w[2] = S.text as u32 + 21;
         assert_eq!(validate(&image(w, 64), &S), Err(LoadError::Entry), "odd entry");
         let mut w = good();
@@ -140,7 +143,9 @@ mod tests {
             }
         }
         #[test]
-        fn a_header_built_from_the_slot_is_accepted(total in 20usize..0x1_0000, heap_off in 0usize..(0x1_0000 - 4096)) {
+        // The entry sits at text + 20 (just past the header), so the image must hold at least one 2-byte instruction
+        // after it: total 20 puts the entry at the image end, which `validate` rightly refuses (#656).
+        fn a_header_built_from_the_slot_is_accepted(total in 22usize..0x1_0000, heap_off in 0usize..(0x1_0000 - 4096)) {
             let w = [IMAGE_MAGIC, ABI_VERSION, S.text as u32 + 20, (S.data + heap_off) as u32, (S.text + total) as u32];
             prop_assert_eq!(validate(&image(w, total), &S), Ok((S.text + 20, S.data + heap_off)));
         }
