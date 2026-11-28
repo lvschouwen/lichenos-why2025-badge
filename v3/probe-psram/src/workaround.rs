@@ -324,6 +324,27 @@ fn dma_selftest() {
     }
 }
 
+/// Compare the hole pages at physical offsets `offs` with pattern `p`, read over the MSPI FIFO path. The FIFO-path reads were
+/// tuned with the variable dummy off (as `diag` does); it goes back on afterwards for the AXI reads.
+fn fifo_hole(offs: &[usize], p: Pat, t: &mut Tally) {
+    use lichen_platform_esp32p4::psram::{mspi, regs};
+    let mut buf = [0u32; 16];
+    // SAFETY: FIFO-path reads on the initialised controller, no AXI access runs meanwhile.
+    unsafe { regs::apply(&[regs::VAR_DUMMY_FIFO_OFF]) };
+    for &o in offs {
+        for blk in (0..CHUNK).step_by(64) {
+            // SAFETY: as above; 64 bytes at a 64-byte aligned physical offset.
+            unsafe { mspi::read_data(&mut buf, (o + blk) as u32) };
+            for (i, &got) in buf.iter().enumerate() {
+                let off = o + blk + 4 * i;
+                t.add(off, word(p, off), got);
+            }
+        }
+    }
+    // SAFETY: back to the AXI-path setting.
+    unsafe { regs::apply(&regs::VAR_DUMMY_ON) };
+}
+
 /// With-hole -> identity remap: dirty lines of the hole must reach the hole's own PSRAM through the old entries and leave the cache;
 /// nothing may land in the usable range, and the API refuses the hole afterwards.
 fn remap_case() {
@@ -348,6 +369,15 @@ fn remap_case() {
     if cached_addr(H[0]).is_some() || cached_addr(H[1]).is_some() {
         t.bad += 1;
     }
+    // The hole's own PSRAM, straight after the unmap and before any re-map, through the MSPI FIFO path (no MMU, no cache): the
+    // dirty lines must have been written back by `map_identity` itself. With the old page order they are still dirty in the
+    // cache here, and the memory holds the control cases' old data.
+    let mut f = Tally::new();
+    fifo_hole(&H, ph, &mut f);
+    f.show(
+        format_args!("(d) hole read over the FIFO path right after the unmap (no MMU, no cache)"),
+        format_args!("dirty hole lines written back by the unmap itself"),
+    );
     // a stray write-back over the usable range would show now
     for (lo, hi) in [(0, EXCLUDED_START), (EXCLUDED_END, TOTAL)] {
         wb_inv(CACHED_BASE + lo, hi - lo);

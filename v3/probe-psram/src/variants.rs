@@ -301,5 +301,8 @@ pub fn isolate() {
 
 /// The uncached address-in-address diagnostic once (for comparing speeds), after the window is mapped by the caller.
 pub fn aia_base() {
+    // The 6 MB include the hole; the preceding stage may have left it unmapped.
+    // SAFETY: MMU window; diagnostics only.
+    unsafe { map::map_identity_with_hole((32 << 20) / PAGE_BYTES) };
     run("base", format_args!("no change, uncached single-word stores (diagnostic only)"));
 }
