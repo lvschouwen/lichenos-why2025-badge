@@ -23,6 +23,7 @@ pub mod sys {
 pub mod err {
     pub const EPERM: isize = -1;
     pub const EBADF: isize = -9;
+    pub const EAGAIN: isize = -11;
     pub const ENOMEM: isize = -12;
     pub const EFAULT: isize = -14;
     pub const EINVAL: isize = -22;

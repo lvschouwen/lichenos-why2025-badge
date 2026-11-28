@@ -42,6 +42,15 @@ impl Meter {
         self.cycles
     }
 }
+
+/// A trap that blocks its caller (a forwarded syscall, #619): the kernel's work for it up to `now` (trap entry,
+/// validation, the copy, the mailbox push) is the caller's, like a syscall that returns at once, and the kernel's own
+/// time starts at `now`. Without it a flood of blocking calls would run unmetered in the kernel's time.
+pub fn bill_service(caller: &mut Meter, kernel: &mut Meter, now: u32) -> u64 {
+    let total = caller.charge(now);
+    kernel.resume(now);
+    total
+}
 impl Default for Meter {
     fn default() -> Self {
         Self::new()
@@ -134,6 +143,20 @@ mod tests {
         }
         assert_eq!(ended_at, Some(2), "three slow calls pass a 2M budget");
         assert_eq!(m.cycles(), 3 * 900_050);
+    }
+
+    /// A blocking call's service time is the caller's, the switch after it the kernel's: still adds up to the clock.
+    #[test]
+    fn a_blocking_calls_service_is_the_callers() {
+        let (mut caller, mut kernel) = (Meter::new(), Meter::new());
+        caller.resume(1_000);
+        let entry = 1_500u32;
+        caller.charge(entry);
+        kernel.resume(entry);
+        let total = bill_service(&mut caller, &mut kernel, 2_300);
+        assert_eq!(total, 500 + 800, "run plus service");
+        assert_eq!(kernel.charge(2_900), 600, "only the switch after the service");
+        assert_eq!(caller.cycles() + kernel.cycles(), 2_900 - 1_000);
     }
 
     #[test]

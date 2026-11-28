@@ -12,6 +12,7 @@ use crate::trap::Context;
 use crate::{csr, kprintln, platform, pmp, syscall, tests};
 use core::mem::MaybeUninit;
 use lichen_kcore::account::{over_cycles, reclaim_ranges, Meter};
+use lichen_kcore::forward::Calls;
 use lichen_kcore::sched::{over_budget, pick_next};
 use lichen_kcore::view::View;
 
@@ -23,7 +24,16 @@ const HARTS: usize = 2;
 pub enum State {
     Free,
     Ready,
+    /// Waiting for the reply to a forwarded syscall (#619): never scheduled until the reply makes it Ready.
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    Blocked,
     Ended,
+}
+impl State {
+    /// Still a live process (it may run again), whether it can run right now or waits for a reply.
+    pub fn alive(self) -> bool {
+        matches!(self, State::Ready | State::Blocked)
+    }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum End {
@@ -60,6 +70,12 @@ pub struct Pcb {
     pub ended_tick: u64,
     /// mcycle spent giving the process's memory back at its end.
     pub reclaim_cycles: u32,
+    /// The trap entry stamp of the forwarded call this process waits for, and whether its reply woke it while another
+    /// process ran (the latency sample is then taken when it is resumed, `resume`).
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub call_entry: u32,
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub call_woken: bool,
 }
 impl Pcb {
     pub const EMPTY: Self = Self {
@@ -79,6 +95,8 @@ impl Pcb {
         image_len: 0,
         ended_tick: 0,
         reclaim_cycles: 0,
+        call_entry: 0,
+        call_woken: false,
     };
 }
 
@@ -97,7 +115,7 @@ pub struct Samples {
 }
 impl Samples {
     pub const CAP: usize = 128;
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self { buf: [0; Self::CAP], n: 0 }
     }
     pub fn push(&mut self, v: u32) {
@@ -150,6 +168,25 @@ pub struct Kernel {
     pub stage_cycles: u64,
     /// Tick-driven switches, [from][to].
     pub preempts: [[u32; MAX_PROCS]; MAX_PROCS],
+    /// Forwarded syscalls in flight, one per process at most (#619, `forward`).
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub calls: Calls<MAX_PROCS>,
+    /// Forwarded calls this stage: sent, answered while the caller waited in the trap, answered later.
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub fwd: FwdCount,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+pub struct FwdCount {
+    pub sent: u32,
+    pub fast: u32,
+    pub slow: u32,
+    /// Refused on core 1 before they left (the mailbox was full): the caller got EAGAIN.
+    pub refused: u32,
+}
+impl FwdCount {
+    const ZERO: Self = Self { sent: 0, fast: 0, slow: 0, refused: 0 };
 }
 impl Kernel {
     const fn new() -> Self {
@@ -166,6 +203,8 @@ impl Kernel {
             kernel_time: Meter::new(),
             stage_cycles: 0,
             preempts: [[0; MAX_PROCS]; MAX_PROCS],
+            calls: Calls::new(),
+            fwd: FwdCount::ZERO,
         }
     }
     /// Back to the boot state (core 0 before it fills core 1's table).
@@ -248,6 +287,8 @@ pub fn end_proc(k: &mut Kernel, i: usize, why: End) {
     p.state = State::Ended;
     p.end = Some(why);
     p.ended_tick = k.ticks;
+    // A call in flight is forgotten: its late reply is stale and cannot wake the next process in this slot.
+    k.calls.cancel(i);
     k.handles.release_owner(i);
     if k.reclaim && Some(i) != k.idle {
         reclaim(&mut k.procs[i]);
@@ -311,7 +352,9 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         end_proc(k, cur, End::Fault { cause: code, tval: mtval, pc });
     }
     // After the trap's own outcome, so a fault or an exit keeps its cause; any trap can end a process that is over.
-    if k.procs[cur].state == State::Ready && Some(cur) != k.idle && over_cycles(spent, k.procs[cur].cycle_budget) {
+    // A caller that just blocked is checked too: its forwarding work was billed to it (`forward`).
+    let spent = spent.max(k.procs[cur].meter.cycles());
+    if k.procs[cur].state.alive() && Some(cur) != k.idle && over_cycles(spent, k.procs[cur].cycle_budget) {
         end_proc(k, cur, End::Budget);
     }
     supervise(k);
@@ -321,7 +364,7 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
     }
     let next = schedule(k);
     // A switch that ended a process zeroed its memory inside the trap: not a switch cost, so no sample.
-    let ended = k.procs[cur].state != State::Ready;
+    let ended = k.procs[cur].state == State::Ended;
     if tick && k.current != cur && !ended {
         k.preempts[cur][k.current] += 1;
         marks[3] = csr::mcycle() as u32;
@@ -353,6 +396,8 @@ fn resume(k: &mut Kernel, i: usize) {
     let now = csr::mcycle() as u32;
     k.kernel_time.charge(now);
     k.procs[i].meter.resume(now);
+    #[cfg(feature = "esp32p4")]
+    crate::forward::resumed(k, i, now);
 }
 
 fn supervise(k: &mut Kernel) {

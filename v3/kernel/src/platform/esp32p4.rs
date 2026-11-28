@@ -112,6 +112,23 @@ fn pump(r: &mut Ring<LOG_RING>) {
     }
 }
 
+/// Bytes the console ring can take before it drops (core 0's forwarded console, #619, checks it first).
+pub fn console_free() -> usize {
+    if raw() {
+        return 0;
+    }
+    // SAFETY: as `putc`.
+    LOG_RING - unsafe { RING.get() }.len()
+}
+
+/// Move queued bytes into the UART FIFO without waiting (core 0's service loop, while it holds a forwarded WRITE).
+pub fn console_pump() {
+    if !raw() {
+        // SAFETY: as `putc`.
+        pump(unsafe { RING.get() });
+    }
+}
+
 /// Block until every queued byte has left the UART.
 pub fn flush() {
     if raw() {

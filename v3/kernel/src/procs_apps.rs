@@ -21,6 +21,9 @@ pub const CRASH: usize = 0;
 pub const SPIN: usize = 1;
 pub const EXIT: usize = 2;
 pub const WRITE_LOOP: usize = 3;
+pub const PING: usize = 4;
+/// apps/rogue's PING mode: this many one-byte WRITEs, then a newline.
+pub const PINGS: u32 = 100;
 /// The exit code of rogue's EXIT mode.
 pub const ROGUE_EXIT_CODE: isize = 77;
 /// Where in the worker's data the crashing rogue stores: inside its canary block, so a store that got through would
@@ -47,9 +50,14 @@ pub fn prepare_pair(mode: usize, cycle_budget: Option<u64>) -> Result<(), LoadEr
 
 /// Core 0: the rogue in EXIT mode alone in the worker's slot, over the code core 1 ran from there before.
 pub fn prepare_replace() -> Result<(), LoadError> {
+    prepare_solo(EXIT)
+}
+
+/// Core 0: the rogue in `mode` alone, in slot 0 (a stage needs process 0), with idle.
+pub fn prepare_solo(mode: usize) -> Result<(), LoadError> {
     let k = fresh();
     let s = platform::slot(WORKER_SLOT);
-    loader::load(k, WORKER_SLOT, "rogue", ROGUE_SLOT0, s, [EXIT, 0, 0, 0], None)?;
+    loader::load(k, WORKER_SLOT, "rogue", ROGUE_SLOT0, s, [mode, 0, 0, 0], None)?;
     procs::install_idle(k);
     Ok(())
 }

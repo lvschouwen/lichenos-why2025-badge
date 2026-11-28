@@ -9,13 +9,15 @@
 //! (review M5). After UP core 1 only answers messages, and core 0 prints the results. `exit` on hart 1 posts its
 //! code (`post_exit`) and parks; core 0's next mailbox wait sees it and ends the run with END fatal.
 //!
-//! The message set is the bench's. #619 (syscall forwarding) adds its own ops on the same queues; `Msg` already has
-//! room for a syscall number and six arguments, and `Link::call` matches replies by sequence number, dropping stale
-//! ones after a timeout (review L1).
+//! The message set is the bench's, plus one request the other way (#619): OP_SYS, a syscall a U process on core 1
+//! made, forwarded by core 1's kernel (`forward`). Core 0 answers it from inside `Link::call` (`services`), so a stage
+//! that core 0 waits on can use core 0's services; the reply goes back on TO_C1, where core 1's trap path (not its
+//! mailbox loop) takes it. `Link::call` matches its own replies by sequence number, dropping stale ones after a
+//! timeout (review L1); core 1's loop drops any reply it finds (an answer to a call whose stage already ended).
 //!
 //! For #619 (review L6): the PMA is programmed on core 0 only (bringup_pmp). Core 1 still runs on the ROM PMA, which
-//! is enough for L2MEM; before core 1 touches flash or PSRAM, or runs U code that does, it must program its own PMA
-//! (the PMA CSRs are per hart, like the PMP).
+//! is enough for L2MEM, and forwarding keeps core 1 there (the bounce buffers are kernel bss); before core 1 touches
+//! flash or PSRAM, or runs U code that does, it must program its own PMA (the PMA CSRs are per hart, like the PMP).
 use crate::kprintln;
 use crate::mtrap;
 use crate::platform::{self, hw};
@@ -51,6 +53,9 @@ pub const OP_BOOT: u32 = 8;
 /// Run the process stage core 0 prepared in core 1's table (#617, `procs::stage`): a[0] deadline ms, a[1] idle
 /// ticks to wait for (0: the defaults). Reply: see `procs::stage`.
 pub const OP_PROCS: u32 = 9;
+/// Core 1 -> core 0 (#619): process a[0] on core 1 made syscall a[1]; for WRITE a[2] is the length of the bytes in
+/// that process's bounce buffer (`forward`). Reply (on TO_C1) a = [process, result as isize, 0, 0, 0, 0].
+pub const OP_SYS: u32 = 10;
 /// Set on every reply.
 pub const REPLY: u32 = 0x8000_0000;
 
@@ -69,6 +74,8 @@ extern "C" {
 }
 
 const UPAGE: usize = 4096;
+/// How long core 0 waits for room in TO_C1 to answer a core 1 request: core 1 drains it at every trap.
+const ANSWER_US: u64 = 10_000;
 const U_TICK_US: u64 = 100;
 
 pub fn hartid() -> usize {
@@ -103,6 +110,24 @@ pub fn uninhibit_mcycle() {
 
 /// Set by `post_exit` (hart 1's `exit`): the exit code + 1, 0 while core 1 runs.
 static C1_EXIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Core 1's ends of the two queues: written once by `kmain1`, then used by its mailbox loop and, while a process
+/// stage runs (the loop waits inside `procs::stage` then), by its trap path (`forward`). Core 1 only.
+pub struct C1Ends {
+    pub rx: Consumer<'static, Msg, QLEN>,
+    pub tx: Producer<'static, Msg, QLEN>,
+}
+static C1: crate::global::Global<core::mem::MaybeUninit<C1Ends>> =
+    crate::global::Global::new(core::mem::MaybeUninit::uninit());
+
+/// Core 1's queue ends.
+///
+/// # Safety
+/// Core 1 only, after `kmain1` wrote them; no other reference from `c1` is live (the mailbox loop takes its borrow per
+/// message and holds none across `procs::stage`, whose traps take their own).
+pub unsafe fn c1() -> &'static mut C1Ends {
+    C1.get().assume_init_mut()
+}
 
 /// Hart 1 is done for good with `code`; core 0 ends the run (see the console rule).
 pub fn post_exit(code: u32) {
@@ -179,20 +204,37 @@ impl Link {
         self.stale
     }
     /// Send `op` and wait up to `ms` for its own reply: a reply to an earlier, timed-out call is dropped and counted,
-    /// so one timeout does not shift every later answer by one (review L1).
+    /// so one timeout does not shift every later answer by one (review L1). Requests from core 1 (OP_SYS, #619) that
+    /// arrive meanwhile are served (`services`), and whatever the services still hold is settled before it returns.
     pub fn call(&mut self, op: u32, a: [u32; 6], ms: u64) -> Option<Msg> {
         let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(ms * 1000);
         let seq = self.next_seq();
         if !self.send(Msg { op, seq, a }, deadline) {
             return None;
         }
-        loop {
-            let r = self.recv(deadline)?;
-            if r.op == op | REPLY && r.seq == seq {
-                return Some(r);
+        let r = loop {
+            if let Some(r) = self.try_recv() {
+                if r.op & REPLY == 0 {
+                    crate::services::request(self, r);
+                } else if r.op == op | REPLY && r.seq == seq {
+                    break Some(r);
+                } else {
+                    self.stale += 1;
+                }
+                continue;
             }
-            self.stale += 1;
-        }
+            crate::services::poll(self);
+            if hw::clint::mtime() >= deadline {
+                break None;
+            }
+        };
+        crate::services::settle();
+        r
+    }
+    /// A reply to a core 1 request (`services`), bounded like `send`. False if core 1 never made room.
+    pub fn answer(&mut self, m: Msg) -> bool {
+        let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(ANSWER_US);
+        self.send(m, deadline)
     }
     /// Core 1 posted an exit: report it and end the run here, so END is the last line.
     ///
@@ -224,15 +266,21 @@ extern "C" fn kmain1() -> ! {
     let cfg = core::array::from_fn::<u32, 4, _>(|w| {
         (0..4).fold(0u32, |acc, b| acc | (crate::pmp::cfg_byte(w * 4 + b) as u32) << (8 * b))
     });
-    // SAFETY: hart 1 is the only consumer of TO_C1 and the only producer of TO_C0; kmain1 runs once.
-    let (mut rx, mut tx) = unsafe { (TO_C1.consumer(), TO_C0.producer()) };
+    // SAFETY: hart 1 is the only consumer of TO_C1 and the only producer of TO_C0; kmain1 runs once, before anything
+    // on core 1 calls `c1`.
+    unsafe { C1.get() }.write(C1Ends { rx: unsafe { TO_C1.consumer() }, tx: unsafe { TO_C0.producer() } });
     let up = Msg { op: OP_UP, seq: 0, a: [hartid() as u32, mtvec, cfg[0], cfg[1], cfg[2], cfg[3]] };
-    reply(&mut tx, up);
+    reply(up);
     loop {
-        let Some(m) = rx.pop() else {
+        // SAFETY: core 1, after the write above; the borrow ends with this statement.
+        let Some(m) = (unsafe { c1() }).rx.pop() else {
             core::hint::spin_loop();
             continue;
         };
+        if m.op & REPLY != 0 {
+            // An answer to a forwarded call whose stage already ended (#619): nobody waits for it.
+            continue;
+        }
         let a = match m.op {
             OP_PING => m.a.map(|x| !x),
             OP_COHERE => {
@@ -247,18 +295,20 @@ extern "C" fn kmain1() -> ! {
                 [hw::trap::hwlp_state(), hw::trap::pie_state(), hw::trap::mcounteren(), hw::trap::mstatus(), 0, 0]
             }
             OP_PARK => {
-                reply(&mut tx, Msg { op: m.op | REPLY, seq: m.seq, a: [0; 6] });
+                reply(Msg { op: m.op | REPLY, seq: m.seq, a: [0; 6] });
                 park()
             }
             _ => [u32::MAX; 6],
         };
-        reply(&mut tx, Msg { op: m.op | REPLY, seq: m.seq, a });
+        reply(Msg { op: m.op | REPLY, seq: m.seq, a });
     }
 }
 
 /// Core 0 never has more requests outstanding than the reply queue holds, so a full queue only means core 0 is
 /// slow or gone: retry.
-fn reply(tx: &mut Producer<'static, Msg, QLEN>, m: Msg) {
+fn reply(m: Msg) {
+    // SAFETY: core 1's mailbox loop, outside any stage; the borrow ends in this call.
+    let tx = unsafe { &mut c1().tx };
     while tx.push(m).is_err() {
         core::hint::spin_loop();
     }

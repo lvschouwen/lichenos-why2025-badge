@@ -207,10 +207,13 @@ mod tests {
         assert_eq!((c.pop(), c.pop()), (Some(1), None));
     }
 
-    /// Two OS threads, one per side, 200k messages through a small queue: none lost, duplicated or reordered.
+    /// Two OS threads, one per side, 200k messages through a small queue: none lost, duplicated or reordered. Under
+    /// miri (#619, review L-f: `cargo +nightly miri test -p lichen-kcore mailbox`) the same test runs with fewer
+    /// messages: miri's data race detector and weak-memory emulation then check the Release/Acquire pairs that x86 TSO
+    /// cannot (a Relaxed publication of `tail` or `head` is reported as a data race on the slot).
     #[test]
     fn two_threads_keep_fifo() {
-        const MSGS: u32 = 200_000;
+        const MSGS: u32 = if cfg!(miri) { 2_000 } else { 200_000 };
         static Q: Spsc<[u32; 2], 16> = Spsc::starting_at(u32::MAX - 100);
         // SAFETY: the only split of Q.
         let (mut p, mut c) = unsafe { Q.split() };
@@ -236,9 +239,51 @@ mod tests {
         assert_eq!(c.pop(), None);
     }
 
+    /// The queue as the kernel uses it (#619): requests one way, replies the other, a full message struct per slot,
+    /// across the u32 wrap. Small enough for miri; the reply must carry what the request carried.
+    #[test]
+    fn request_reply_round_trips_between_threads() {
+        const CALLS: u32 = if cfg!(miri) { 300 } else { 50_000 };
+        static REQ: Spsc<[u32; 8], 4> = Spsc::starting_at(u32::MAX - 2);
+        static REP: Spsc<[u32; 8], 4> = Spsc::starting_at(u32::MAX - 1);
+        // SAFETY: the only split of each queue.
+        let ((mut req_tx, mut req_rx), (mut rep_tx, mut rep_rx)) = unsafe { (REQ.split(), REP.split()) };
+        let server = std::thread::spawn(move || {
+            for _ in 0..CALLS {
+                let m = loop {
+                    match req_rx.pop() {
+                        Some(m) => break m,
+                        None => std::hint::spin_loop(),
+                    }
+                };
+                let mut r = m;
+                r[1] = m[2..].iter().fold(0u32, |a, &x| a.wrapping_add(x));
+                while rep_tx.push(r).is_err() {
+                    std::hint::spin_loop();
+                }
+            }
+        });
+        for seq in 0..CALLS {
+            let m = [seq, 0, seq ^ 1, seq ^ 2, seq ^ 3, seq ^ 4, seq ^ 5, seq ^ 6];
+            while req_tx.push(m).is_err() {
+                std::hint::spin_loop();
+            }
+            let r = loop {
+                match rep_rx.pop() {
+                    Some(r) => break r,
+                    None => std::hint::spin_loop(),
+                }
+            };
+            let sum = m[2..].iter().fold(0u32, |a, &x| a.wrapping_add(x));
+            assert_eq!((r[0], r[1], &r[2..]), (seq, sum, &m[2..]), "reply {seq}");
+        }
+        server.join().unwrap();
+    }
+
     proptest! {
         /// Model check against a bounded VecDeque from any start index: same accept/refuse, same FIFO output.
         #[test]
+        #[cfg_attr(miri, ignore)] // hundreds of cases: minutes under miri; the threaded tests are miri's target
         fn matches_a_model(start in any::<u32>(), ops in proptest::collection::vec(proptest::option::of(any::<u16>()), 0..300)) {
             let q = Spsc::<u16, 8>::starting_at(start);
             // SAFETY: the only split of this queue.

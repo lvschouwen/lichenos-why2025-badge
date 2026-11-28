@@ -31,6 +31,8 @@ mod bringup_shapes;
 #[cfg(feature = "esp32p4")]
 mod bringup_u;
 #[cfg(feature = "esp32p4")]
+mod forward;
+#[cfg(feature = "esp32p4")]
 mod mtrap;
 #[cfg(feature = "esp32p4")]
 mod procs;
@@ -38,6 +40,8 @@ mod procs;
 mod procs_apps;
 #[cfg(feature = "esp32p4")]
 mod psram;
+#[cfg(feature = "esp32p4")]
+mod services;
 #[cfg(feature = "esp32p4")]
 mod smp;
 #[cfg(feature = "esp32p4")]
@@ -53,6 +57,8 @@ mod tests;
 mod trap;
 use lichen_kcore::handles;
 
+#[cfg(feature = "esp32p4")]
+mod bringup_fwd;
 #[cfg(feature = "esp32p4")]
 mod bringup_iso;
 

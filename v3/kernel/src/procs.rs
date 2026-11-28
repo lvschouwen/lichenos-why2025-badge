@@ -266,8 +266,10 @@ pub fn stage(deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
 
 /// The stage's supervisor, after every trap on core 1: end it when its work is done or its deadline passed.
 pub fn poll(k: &mut Kernel) {
-    // Free counts as done: a stage may load fewer than APPS processes (#618).
-    let apps_done = k.procs[..APPS].iter().all(|p| p.state != State::Ready);
+    // Replies to forwarded calls wake their callers (#619); they run at their next turn.
+    crate::forward::drain(k);
+    // Free counts as done: a stage may load fewer than APPS processes (#618). A process blocked on a call is not done.
+    let apps_done = k.procs[..APPS].iter().all(|p| !p.state.alive());
     if apps_done && k.procs[IDLE].ticks >= IDLE_GOAL.load(core::sync::atomic::Ordering::Relaxed) {
         leave(DONE);
     }

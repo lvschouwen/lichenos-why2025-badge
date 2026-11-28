@@ -2,6 +2,7 @@
 //! and a misbehaving one is ended while the other keeps running. Three stages:
 //!   crash   rogue stores into the worker's memory: it faults and only it ends
 //!   spin    rogue never faults: its cycle budget ends it
+//!   fwd     forwarded WRITEs (#619, `bringup_fwd`): their round trip, and a flood next to the worker
 //!   replace core 0 loads the rogue (exit 77) over the worker's image in slot 0, which core 1 ran just before; the
 //!           exit code says whose bytes core 1's instruction fetch saw
 //! After each kill the rows check what termination gave back (memory zeroed, handles, PMP view) and print the per
@@ -50,13 +51,8 @@ pub fn run(t: &mut Tally, l: &mut crate::smp::Link, cpu_hz: u64) {
     released(t, k, "apps.spin.released");
     accounting(t, k, "apps.spin", cpu_hz);
 
-    if !load(t, "apps.write.load", || apps::prepare_pair(apps::WRITE_LOOP, Some(budget))) {
-        return;
-    }
-    stage(t, l, "apps.write", DEADLINE_MS, u32::MAX);
-    // SAFETY: as above.
-    let k = unsafe { sched::of(1) };
-    write_row(t, k, budget, cpu_hz);
+    // #619: forwarded syscalls, the round trip and a flood next to the worker.
+    crate::bringup_fwd::run(t, l, cpu_hz);
 
     if !load(t, "apps.replace.load", apps::prepare_replace) {
         return;
@@ -111,25 +107,6 @@ fn crash_rows(t: &mut Tally, k: &Kernel) {
     );
 }
 
-/// The WRITE loop: the first call came back EPERM (else exit 5) and the budget ended it, over a loop of syscalls.
-fn write_row(t: &mut Tally, k: &Kernel, budget: u64, cpu_hz: u64) {
-    let r = &k.procs[ROGUE_SLOT];
-    let slack = KILL_SLACK_TICKS * cpu_hz / 1000;
-    let cycles = r.meter.cycles();
-    let (alive, alone, _) = survivor_ok(k);
-    record(
-        t,
-        "apps.write.kill",
-        Some(r.end == Some(End::Budget) && cycles > budget && cycles <= budget + slack && alive),
-        format_args!(
-            "rogue loops on full WRITEs (denied on core 1, EPERM): ended {:x?} (want Budget; Exit(5) = a WRITE got \
-             through) at {cycles} cycles of a {budget} budget (at most {slack} over), {} syscalls; the worker ran on \
-             alone for {alone} ticks",
-            r.end, r.syscalls
-        ),
-    );
-}
-
 fn spin_rows(t: &mut Tally, k: &Kernel, budget: u64, cpu_hz: u64) {
     let r = &k.procs[ROGUE_SLOT];
     let slack = KILL_SLACK_TICKS * cpu_hz / 1000;
@@ -170,7 +147,7 @@ fn released(t: &mut Tally, k: &Kernel, id: &str) {
 }
 
 /// Per-process CPU accounting: PERF lines for the numbers, one row for how well they add up to the stage's clock.
-fn accounting(t: &mut Tally, k: &Kernel, id: &str, cpu_hz: u64) {
+pub(crate) fn accounting(t: &mut Tally, k: &Kernel, id: &str, cpu_hz: u64) {
     let mut sum = 0u64;
     for p in &k.procs {
         sum += p.meter.cycles();
