@@ -69,7 +69,15 @@ pub fn set_quota(owner: usize, bytes: usize) -> Result<(), Error> {
 pub fn alloc(owner: usize, kind: Kind, len: usize) -> Result<(Handle, Block), Error> {
     with(|a| a.alloc(owner, kind, len, &mut CachedZero))
 }
-/// Every block of `owner` back, zeroed: the hook for a process's end.
+/// Write the cached lines of `[off, off + len)` back to the chip (they stay cached). False if the range is not an
+/// arena's or the sync failed.
+pub fn writeback(off: usize, len: usize) -> bool {
+    // SAFETY: core 0 only (module doc), the one user of the cache sync registers here.
+    map::cached_range(off, len).is_some_and(|a| unsafe { map::cache_writeback(a, len) } == 0)
+}
+/// Every block of `owner` back, zeroed: the hook for a process's end. Core 0 must reap: `end_proc` runs in a trap,
+/// on core 1 for the #617 processes, and this module is core 0 only (an unlocked `Global`, the cache sync
+/// registers). The owner's PMP view must be unloaded first, so no U run still reaches the pages being zeroed.
 pub fn release_owner(owner: usize) -> bool {
     with(|a| a.release_owner(owner, &mut CachedZero))
 }

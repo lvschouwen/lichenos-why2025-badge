@@ -160,14 +160,18 @@ fn deny_rows(t: &mut Tally, a: &Block, b: &Block, sp: usize) {
     );
 }
 
-/// A's block is filled, freed, and must read zero through both aliases; owner 2 gets the same pages back and reads 0.
+/// A's block is filled and written back (the chip must hold the fill: proof that write-back at the ROM clock reaches
+/// PSRAM, and that the zeros after the release are not the alloc-time ones), released, and must read zero through both
+/// aliases; owner 2 gets the same pages back and its U load reads 0.
 fn zero_row(t: &mut Tally, a: Block, b: Block) {
     begin("psram.zero");
     let words = (a.off..a.off + a.len).step_by(4);
     for o in words.clone() {
         // SAFETY: A's block, mapped, owned by the kernel while no U runs.
-        unsafe { core::ptr::write_volatile((cached(&a) + o - a.off) as *mut u32, MARK as u32) };
+        unsafe { core::ptr::write_volatile((cached(&a) + o - a.off) as *mut u32, (o ^ MARK) as u32) };
     }
+    let wb = psram::writeback(a.off, a.len);
+    let bad_fill = words.clone().filter(|&o| psram::read_uncached(o) != (o ^ MARK) as u32).count();
     // A's process ends: its blocks come back through the same path an exit takes.
     let zeroed = psram::release_owner(0);
     let bad_c = words.clone().filter(|&o| psram::read_cached(o) != 0).count();
@@ -185,9 +189,9 @@ fn zero_row(t: &mut Tally, a: Block, b: Block) {
     record(
         t,
         "psram.zero",
-        Some(zeroed && bad_c == 0 && bad_u == 0 && reuse == 0 && released),
+        Some(wb && bad_fill == 0 && zeroed && bad_c == 0 && bad_u == 0 && reuse == 0 && released),
         format_args!(
-            "A's {} words filled and released: zeroed {zeroed}, non-zero cached {bad_c} uncached {bad_u}; owner 2 got \
+            "A's {} words filled, written back {wb}, chip differs from the fill in {bad_fill}; released: zeroed {zeroed}, non-zero cached {bad_c} uncached {bad_u}; owner 2 got \
              {c_off:#x} (A {:#x}, B {:#x}), its U load reads {reuse:#x}; all released {released}",
             a.len / 4,
             a.off,
