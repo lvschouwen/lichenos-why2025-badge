@@ -59,6 +59,8 @@ impl Scrub for CachedZero {
             core::ptr::write_bytes(a as *mut u8, 0, len);
             map::cache_writeback_invalidate(a, len) == 0 && (kind == Kind::Data || hw::cache::sync_icache(a, len) == 0)
         };
+        // Stopgap for CPU 40 MHz < PSRAM 120 MHz (review-621 M2, owner decision: keep until #655). #655, which brings
+        // cpu_to_360 and clock_changed, must lift it: drop this check and the sticky-flag fail-closed it implies.
         ok && mspi_errors() == 0
     }
 }
