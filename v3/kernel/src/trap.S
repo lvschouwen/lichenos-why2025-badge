@@ -120,7 +120,7 @@ task_restore:
     mret
 
 # task_leave(v) -> !: from trap context (mscratch is 0), return v from this hart's task_run. The trap frames below the
-# saved sp are dropped; the caller restores mtvec and mscratch for whatever runs next.
+# saved sp are dropped; the caller restores mtvec and mscratch for whatever runs next. a0 = v passes through.
 .global task_leave
 task_leave:
     csrr t0, mhartid
@@ -143,7 +143,15 @@ task_leave:
     lw s11, 52(t1)
     lw gp, 56(t1)
     lw tp, 60(t1)
-    ret
+    # Out of the trap through mret, not ret: on the P4 CLIC mret is what puts the interrupt level back (mil from
+    # mcause.mpil, 0 for a trap from U), and the stage usually ends inside a tick. MPP = M and MPIE = 0, so this lands
+    # in task_run's caller in M-mode with MIE still clear.
+    csrw mepc, ra
+    li t0, 0x1800
+    csrs mstatus, t0
+    li t0, 0x80
+    csrc mstatus, t0
+    mret
 
 # A trap in the kernel: the swap above left a0 = 0 and the kernel's a0 in mscratch. Swap back, so mscratch is 0 again
 # while the kernel runs (any further trap also lands here), and report on a stack of its own, not over the frames of

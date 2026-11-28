@@ -145,7 +145,15 @@ to_kernel:
     lw s11, 52(t0)
     lw gp, 56(t0)
     lw tp, 60(t0)
-    ret
+    # Back into the kernel through mret, not ret (#617): mret puts the CLIC interrupt level back (mil from mcause.mpil,
+    # 0 for a trap from U). An exit or fault never raised it, but a run ended by its deadline ends inside a tick.
+    # MPP = M and MPIE = 0: this lands in run_user's caller in M-mode with MIE clear, as `ret` did.
+    csrw mepc, ra
+    li t0, 0x1800
+    csrs mstatus, t0
+    li t0, 0x80
+    csrc mstatus, t0
+    mret
 
 # Each hart has its own fault stack, so a nested trap on one core cannot run over the other's dump.
 nested_trap:

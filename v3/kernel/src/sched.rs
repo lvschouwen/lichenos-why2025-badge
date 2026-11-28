@@ -94,10 +94,12 @@ impl Samples {
 pub struct SwitchPerf {
     /// mcycle from the trap entry stamp to the end of trap_handler.
     pub switch: Samples,
-    /// mcycle around `pmp::switch` alone.
+    /// mcycle around `pmp::switch` alone, for the same switches.
     pub pmp: Samples,
-    /// PMP registers written by the last switch.
+    /// PMP registers written by the last tick-driven switch.
     pub pmp_writes: u32,
+    /// (mcycle, registers written) of the last `pmp::switch`, whatever caused it.
+    pub last_pmp: (u32, u32),
     /// Set by `on_trap` for trap_handler: this trap was a tick that switched processes.
     pub pending: bool,
     /// The last tick-driven switch, mcycle from the entry stamp at: on_trap's start, the tick handled (rearm and
@@ -151,6 +153,7 @@ static PERF: [Global<SwitchPerf>; HARTS] = [const {
         switch: Samples::new(),
         pmp: Samples::new(),
         pmp_writes: 0,
+        last_pmp: (0, 0),
         pending: false,
         marks: [0; 4],
     })
@@ -255,6 +258,8 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         let p = unsafe { perf() };
         p.pending = true;
         p.marks = marks.map(|m| m.wrapping_sub(entry));
+        p.pmp.push(p.last_pmp.0);
+        p.pmp_writes = p.last_pmp.1;
     }
     next
 }
@@ -283,9 +288,7 @@ fn load_view(k: &mut Kernel, i: usize) {
     let writes = pmp::switch(v);
     let c = (csr::mcycle() as u32).wrapping_sub(c0);
     // SAFETY: this hart's samples; kernel context with MIE clear, the only reference.
-    let p = unsafe { perf() };
-    p.pmp_writes = writes;
-    p.pmp.push(c);
+    unsafe { perf() }.last_pmp = (c, writes);
 }
 
 /// Pick the next process (round robin, idle last) and load its PMP view. Only a change of process reloads the PMP.

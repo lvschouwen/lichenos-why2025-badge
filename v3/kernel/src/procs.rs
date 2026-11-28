@@ -46,7 +46,15 @@ extern "C" {
     fn u_idle();
     static proc_spin_start: u8;
     static proc_spin_end: u8;
+    static _stack1_top: u8;
 }
+
+/// Core 1's kernel stack (link-esp32p4.ld `.stack1`: 8 KB below `_stack1_top`); the stage's traps run on what is left
+/// of it below `stage`'s frame.
+const STACK1: usize = 8192;
+const PAINT: u32 = 0x5A17_5A17;
+/// mintstatus as `leave` found it, inside the trap that ends the stage (core 1 only).
+static LEAVE_MINTSTATUS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 // The spinner, position independent (branches only), assembled into rodata and copied behind a header at load
 // (`spin_image`). a0 = the tick to stop at, a1 = the other process's address, a2 = 1: store there, 0: load; a3 = own
@@ -79,13 +87,19 @@ core::arch::global_asm!(
     "proc_spin_end:",
     ".option pop",
     ".popsection",
-    // The idle process: on the U stub page, which is all its view grants (R+X). It spins: a U wfi ended the idle
-    // process at once on the first bench run (#617), so U cannot wait for the tick that way here.
+    // The idle process: on the U stub page, which is all its view grants (R+X). It spins: a U wfi is an illegal
+    // instruction on the P4 (bench, #617: `u_wfi` through OP_URUN on core 1 faults with code 2, mtval = the wfi word,
+    // row proc.u-wfi), although mstatus.TW reads back 0.
     ".pushsection .utext, \"ax\"",
     ".balign 4",
     ".global u_idle",
     "u_idle:",
     "    j u_idle",
+    ".global u_wfi",
+    "u_wfi:",
+    "    wfi",
+    "    li a7, 1",
+    "    ecall",
     ".popsection",
     spin = const 256,
     ticks = const sys::TICKS,
@@ -152,9 +166,37 @@ pub fn prepare() -> Result<(), LoadError> {
     Ok(())
 }
 
-/// Core 1, on OP_PROCS: run the prepared processes until the stage ends. Reply a = [outcome, ticks, 0, 0, 0, 0].
+fn sp() -> usize {
+    let v: usize;
+    // SAFETY: reads the stack pointer.
+    unsafe { core::arch::asm!("mv {0}, sp", out(reg) v, options(nomem, nostack)) };
+    v
+}
+
+/// Paint core 1's free stack from its bottom to 256 bytes below the current sp. Returns (bottom, painted top).
+fn paint() -> (usize, usize) {
+    // SAFETY: a linker symbol; only its address is used.
+    let bottom = unsafe { sym(&_stack1_top) } - STACK1;
+    let top = (sp() - 256) & !3;
+    for a in (bottom..top).step_by(4) {
+        // SAFETY: core 1's own stack below its live frames (256 bytes of margin for this loop); nothing else uses it.
+        unsafe { core::ptr::write_volatile(a as *mut u32, PAINT) };
+    }
+    (bottom, top)
+}
+
+/// Bytes below the painted top that the stage used (the deepest word no longer painted).
+fn high_water(bottom: usize, top: usize) -> u32 {
+    // SAFETY: as `paint`; the stage is over, nothing runs on this part of the stack now.
+    let first = (bottom..top).step_by(4).find(|&a| unsafe { core::ptr::read_volatile(a as *const u32) } != PAINT);
+    first.map_or(0, |a| (top - a) as u32)
+}
+
+/// Core 1, on OP_PROCS: run the prepared processes until the stage ends. Reply a = [outcome, ticks, mintstatus after
+/// the stage, mintstatus at the leave inside its last trap, stack bytes used below `stage`'s frame, 0].
 pub fn stage() -> [u32; 6] {
     crate::smp::uninhibit_mcycle();
+    let (bottom, top) = paint();
     let (mtvec, mscratch) = (hw::trap::mtvec() as usize, csr::mscratch());
     let ctx = {
         // SAFETY: core 0 handed this table over with OP_PROCS (it reads it again only after the reply); no other
@@ -180,9 +222,11 @@ pub fn stage() -> [u32; 6] {
     platform::timer_stop();
     csr::set_mtvec(mtvec);
     csr::set_mscratch(mscratch);
+    let mintstatus = hw::trap::mintstatus();
+    let at_leave = LEAVE_MINTSTATUS.load(core::sync::atomic::Ordering::Relaxed);
     // SAFETY: the stage is over, no trap handler borrow is live (task_leave dropped those frames).
     let k = unsafe { sched::this() };
-    [outcome, k.ticks as u32, 0, 0, 0, 0]
+    [outcome, k.ticks as u32, mintstatus, at_leave, high_water(bottom, top), 0]
 }
 
 /// The stage's supervisor, after every trap on core 1: end it when its work is done or its deadline passed.
@@ -202,6 +246,7 @@ pub fn finish(_k: &mut Kernel) -> ! {
 }
 
 fn leave(outcome: u32) -> ! {
+    LEAVE_MINTSTATUS.store(hw::trap::mintstatus(), core::sync::atomic::Ordering::Relaxed);
     // SAFETY: trap context on core 1 inside `stage`'s task_run (Supervisor::Procs is set only there); the caller's
     // borrow of the Kernel is not used again.
     unsafe { trap::task_leave(outcome as usize) }

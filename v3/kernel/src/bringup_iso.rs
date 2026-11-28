@@ -11,7 +11,8 @@
 //!
 //! The harness takes the hart over for good. It installs its own trap vector (trap.S, full app contexts, so B and A
 //! can be switched), and the kernel runs only inside traps from then on. So the bring-up's Tally moves into a static
-//! first: the bring-up stack is abandoned on the first entry to U (every trap starts again at `_stack_top`).
+//! first: from the first entry to U the kernel runs only in traps, on the stack below `tests::enter`'s frame (the sp
+//! `task_run` saved), and never returns into the bring-up code.
 use crate::bringup::{self, begin, record};
 use crate::global::Global;
 use crate::platform::{self, hw};

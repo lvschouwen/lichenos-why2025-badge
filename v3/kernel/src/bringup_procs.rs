@@ -16,6 +16,7 @@ const LOAD_FAULT: usize = 5;
 const STORE_FAULT: usize = 7;
 
 pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
+    u_wfi(t, l);
     begin("proc.load");
     let loaded = procs::prepare();
     record(
@@ -33,17 +34,18 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
         record(t, "proc.run", Some(false), format_args!("no reply from core 1 within {STAGE_MS} ms"));
         return;
     };
-    let [outcome, ticks, ..] = r.a;
+    let [outcome, ticks, mintstatus, at_leave, stack, _] = r.a;
     // SAFETY: core 1 replied, so its stage is over and it does not touch its table again (the mailbox pop ordered
     // its writes before this); this is the only reference to it on core 0.
     let k = unsafe { sched::of(1) };
     record(
         t,
         "proc.run",
-        Some(outcome == procs::DONE),
+        Some(outcome == procs::DONE && mintstatus == 0),
         format_args!(
             "core 1 ran the stage for {ticks} ticks of its own 1 ms tick: outcome {outcome} (0 done, 1 deadline, \
-             2 nothing runnable, 3 not prepared)"
+             2 nothing runnable, 3 not prepared); mintstatus {at_leave:#x} in the last trap, {mintstatus:#x} after \
+             (want 0); {stack} B of core 1's stack used below the stage's frame"
         ),
     );
     alternation(t, k);
@@ -73,6 +75,29 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
         "proc.alive",
         Some(p.is_some_and(|p| p.a == a.map(|x| !x))),
         format_args!("core 1 answers a ping after the stage: {}", if p.is_some() { "yes" } else { "NO" }),
+    );
+}
+
+/// INFO: what a U `wfi` does on core 1 (the idle process cannot use it, see `procs`). run_u always has a tick, so
+/// the stub cannot park the hart; it exits with a0 if the wfi returns.
+fn u_wfi(t: &mut Tally, l: &mut Link) {
+    extern "C" {
+        fn u_wfi();
+    }
+    begin("proc.u-wfi");
+    let r = l.call(smp::OP_URUN, [u_wfi as *const () as usize as u32, 0x617, 0, 0, 0, 0], 100);
+    let Some([code, tval, epc, a0, exited, _]) = r.map(|r| r.a) else {
+        record(t, "proc.u-wfi", Some(false), format_args!("no reply within 100 ms"));
+        return;
+    };
+    record(
+        t,
+        "proc.u-wfi",
+        None,
+        format_args!(
+            "U wfi on core 1: exited {exited} (a0 {a0:#x}), else code {code} ({}) mtval {tval:#x} mepc {epc:#x}",
+            lichen_kcore::trap::exception_name(code as u16)
+        ),
     );
 }
 
