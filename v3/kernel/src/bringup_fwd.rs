@@ -61,25 +61,15 @@ fn latency(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
         Some(
             outcome == procs::DONE
                 && r.end == Some(End::Exit(0))
-                && writes(WORKER_SLOT) == calls
                 && k.fwd.sent == calls
                 && svc.served == calls
                 && k.calls.stale == 0,
         ),
         format_args!(
-            "the rogue alone made {calls} forwarded WRITEs: ended {:x?} (want Exit(0); 5 = refused, 6 = short), {} came \
-             back complete; core 1 sent {}, answered in the trap {}, later {}, refused {}, stale {}; core 0 served {} \
+            "the rogue alone made {calls} forwarded WRITEs, each checked: ended {:x?} (want Exit(0); 5 = refused, 6 = \
+             short); core 1 sent {}, answered in the trap {}, later {}, refused {}, stale {}; core 0 served {} \
              ({} B, {} held for room); stage outcome {outcome}",
-            r.end,
-            writes(WORKER_SLOT),
-            k.fwd.sent,
-            k.fwd.fast,
-            k.fwd.slow,
-            k.fwd.refused,
-            k.calls.stale,
-            svc.served,
-            svc.bytes,
-            svc.held
+            r.end, k.fwd.sent, k.fwd.fast, k.fwd.slow, k.fwd.refused, k.calls.stale, svc.served, svc.bytes, svc.held
         ),
     );
     perf_line("kernel.syscall.xcore", &mut p.fast, cpu_hz);

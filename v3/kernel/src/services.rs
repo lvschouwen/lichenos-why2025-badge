@@ -78,8 +78,12 @@ pub fn request(l: &mut Link, m: Msg) {
     }
 }
 
-/// Between mailbox polls: retry the held WRITEs once the UART made room.
+/// Between mailbox polls: retry the held WRITEs once the UART made room. With nothing held it touches no hardware, so
+/// core 0's wait loop stays what the timing rows measured (core1.timer: core 0 polling the mailbox, nothing else).
 pub fn poll(l: &mut Link) {
+    if svc().held.iter().all(Option::is_none) {
+        return;
+    }
     platform::console_pump();
     for i in 0..MAX_PROCS {
         if let Some(m) = svc().held[i] {
