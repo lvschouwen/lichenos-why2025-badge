@@ -18,13 +18,18 @@ case $PLAT in
   esp32p4) TEXT0=$((0x4FF60000)); DATA0=$((0x4FF70000)); LEN=$((0x8000)) ;;
   *) echo "unknown platform $PLAT" >&2; exit 2 ;;
 esac
-app() { # name slot
-  local ld=$PWD/$OUT/$1.ld
+app() { # name slot [output name: a second link of one crate for another slot, #618]
+  local out=${3:-$1} ld=$PWD/$OUT/${3:-$1}.ld
   sed -e "s/@TEXT@/$(printf 0x%x $((TEXT0 + $2 * LEN)))/" -e "s/@DATA@/$(printf 0x%x $((DATA0 + $2 * LEN)))/" \
       -e "s/@LEN@/$(printf 0x%x $LEN)/" apps/app.ld.in > "$ld"
-  LICHEN_APP_LD=$ld cargo build --locked -q --release -p "$1" --target $TARGET --target-dir "target/app-$1-$PLAT"
-  "$OBJCOPY" -O binary "target/app-$1-$PLAT/$TARGET/release/$1" "$OUT/$1.bin"
-  echo "app $1: $(stat -c %s "$OUT/$1.bin") bytes"
+  LICHEN_APP_LD=$ld cargo build --locked -q --release -p "$1" --target $TARGET --target-dir "target/app-$out-$PLAT"
+  "$OBJCOPY" -O binary "target/app-$out-$PLAT/$TARGET/release/$1" "$OUT/$out.bin"
+  # The loader refuses an image whose header end differs from its length (an app with no rodata or data once ended on
+  # a 2-byte boundary, #618): fail here, not at load.
+  local end want=$((TEXT0 + $2 * LEN + $(stat -c %s "$OUT/$out.bin")))
+  end=$(od -An -t u4 -j16 -N4 "$OUT/$out.bin" | tr -d ' ')
+  [ "$end" = "$want" ] || { echo "app $out: header image end $end != slot text + length $want" >&2; exit 1; }
+  echo "app $out: $(stat -c %s "$OUT/$out.bin") bytes"
 }
 if [ "$PLAT" = qemu-virt ]; then
   app heartbeat 0
@@ -45,8 +50,9 @@ else
   # The #618 process-stage apps: separate crates, linked on their own, loaded into slots 0 and 1 by core 0.
   app worker 0
   app rogue 1
+  app rogue 0 rogue0 # the same crate for slot 0: the ICache case loads it over what ran there
   LICHEN_APP_HEARTBEAT=$PWD/$OUT/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/$OUT/attacker.bin \
-  LICHEN_APP_WORKER=$PWD/$OUT/worker.bin LICHEN_APP_ROGUE=$PWD/$OUT/rogue.bin \
+  LICHEN_APP_WORKER=$PWD/$OUT/worker.bin LICHEN_APP_ROGUE=$PWD/$OUT/rogue.bin LICHEN_APP_ROGUE0=$PWD/$OUT/rogue0.bin \
   cargo build --locked -q --release -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 \
     --target-dir target/kernel-esp32p4
   KELF=target/kernel-esp32p4/$TARGET/release/lichen-kernel

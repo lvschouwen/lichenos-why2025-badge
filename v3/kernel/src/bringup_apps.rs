@@ -23,8 +23,9 @@ const SURVIVE_TICKS: u64 = 50;
 const SPIN_BUDGET_MS: u64 = 10;
 /// A budget kill happens on the first trap past the budget: at most this many ticks of cycles late.
 const KILL_SLACK_TICKS: u64 = 3;
-/// Share of the stage's cycles the meters must add up to (percent). The rest is the kernel's own time in traps.
-const MIN_ACCOUNTED_PCT: u64 = 90;
+/// How far (percent) the meters plus the kernel's trap time may sit from the stage's clock: the first process's span
+/// starts a few hundred cycles before the stage's clock does, and the last trap's kernel time is not charged.
+const TOLERANCE_PCT: u64 = 1;
 
 pub fn run(t: &mut Tally, l: &mut crate::smp::Link, cpu_hz: u64) {
     let budget = cpu_hz / 1000 * SPIN_BUDGET_MS;
@@ -156,14 +157,17 @@ fn accounting(t: &mut Tally, k: &Kernel, id: &str, cpu_hz: u64) {
         );
     }
     let wall = k.stage_cycles as u64;
+    let kernel = k.kernel_time.cycles();
+    crate::kprintln!("PERF proc.account stage={id} name=kernel cycles={kernel} cpu_hz={cpu_hz}");
     let id = account_id(id);
+    let all = sum + kernel;
     record(
         t,
         id.as_str(),
-        Some(sum <= wall && sum * 100 >= wall * MIN_ACCOUNTED_PCT && k.procs[IDLE].meter.cycles() == 0),
+        Some(all.abs_diff(wall) * 100 <= wall * TOLERANCE_PCT && k.procs[IDLE].meter.cycles() == 0),
         format_args!(
-            "the meters add up to {sum} of the stage's {wall} cycles (want {MIN_ACCOUNTED_PCT}% to 100%; the rest is \
-             the kernel's own time); the idle process never ran: {}",
+            "the processes ({sum}) and the kernel's own trap time ({kernel}) add up to {all} of the stage's {wall} \
+             cycles (want within {TOLERANCE_PCT}%); the idle process never ran: {}",
             k.procs[IDLE].meter.cycles() == 0
         ),
     );

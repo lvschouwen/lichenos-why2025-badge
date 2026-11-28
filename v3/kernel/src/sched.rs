@@ -142,6 +142,9 @@ pub struct Kernel {
     /// An ended process gives its memory and PMP view back at once (`end_proc`). Off for the #607/#613 harness and
     /// the #617 spinner stages, whose rows read the dead processes' memory afterwards.
     pub reclaim: bool,
+    /// The kernel's own time: trap entry to the resume of the next process, summed over every trap. With the meters of
+    /// the processes it adds up to the stage's wall clock (`stage_cycles`).
+    pub kernel_time: Meter,
     /// mcycle the stage took on its hart (set by `procs::stage`): the wall clock the meters add up to.
     #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
     pub stage_cycles: u32,
@@ -160,6 +163,7 @@ impl Kernel {
             harness: tests::Harness::new(),
             deadline: None,
             reclaim: false,
+            kernel_time: Meter::new(),
             stage_cycles: 0,
             preempts: [[0; MAX_PROCS]; MAX_PROCS],
         }
@@ -273,7 +277,9 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         platform::exit(5);
     }
     // Charge the span that just ended (resume stamp to this trap's entry stamp) to the process that ran it.
-    let spent = k.procs[cur].meter.charge(k.procs[cur].ctx.entry_cycle as u32);
+    let entry = k.procs[cur].ctx.entry_cycle as u32;
+    let spent = k.procs[cur].meter.charge(entry);
+    k.kernel_time.resume(entry);
     // CLIC layout on the P4 (code = bits 11:0); a plain mcause decodes the same for every standard code.
     let cause = lichen_kcore::trap::decode(mcause as u32);
     let (irq, code) = (cause.interrupt, cause.code as usize);
@@ -311,7 +317,7 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
     supervise(k);
     marks[2] = csr::mcycle() as u32;
     if !switch && k.procs[cur].state == State::Ready {
-        k.procs[cur].meter.resume(csr::mcycle() as u32);
+        resume(k, cur);
         return &mut k.procs[cur].ctx;
     }
     let next = schedule(k);
@@ -320,7 +326,6 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
     if tick && k.current != cur && !ended {
         k.preempts[cur][k.current] += 1;
         marks[3] = csr::mcycle() as u32;
-        let entry = k.procs[cur].ctx.entry_cycle as u32;
         // SAFETY: this hart's samples; trap context, the only reference.
         let p = unsafe { perf() };
         p.pending = true;
@@ -328,8 +333,16 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         p.pmp.push(p.last_pmp.0);
         p.pmp_writes = p.last_pmp.1;
     }
-    k.procs[k.current].meter.resume(csr::mcycle() as u32);
+    resume(k, k.current);
     next
+}
+
+/// The kernel is done with this trap and hands the CPU to process `i`: the span since the trap entry is the kernel's,
+/// the next one is the process's.
+fn resume(k: &mut Kernel, i: usize) {
+    let now = csr::mcycle() as u32;
+    k.kernel_time.charge(now);
+    k.procs[i].meter.resume(now);
 }
 
 fn supervise(k: &mut Kernel) {

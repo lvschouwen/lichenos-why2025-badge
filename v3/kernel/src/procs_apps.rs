@@ -10,6 +10,8 @@ use crate::sched::{self, Supervisor};
 
 static WORKER: &[u8] = include_bytes!(env!("LICHEN_APP_WORKER"));
 static ROGUE: &[u8] = include_bytes!(env!("LICHEN_APP_ROGUE"));
+/// The same crate linked for slot 0 (an image runs only in the slot it was linked for).
+static ROGUE_SLOT0: &[u8] = include_bytes!(env!("LICHEN_APP_ROGUE0"));
 
 /// The worker is process 0 (slot 0), the rogue process 1 (slot 1); idle is `procs::IDLE`.
 pub const WORKER_SLOT: usize = 0;
@@ -46,7 +48,7 @@ pub fn prepare_pair(mode: usize, cycle_budget: Option<u64>) -> Result<(), LoadEr
 pub fn prepare_replace() -> Result<(), LoadError> {
     let k = fresh();
     let s = platform::slot(WORKER_SLOT);
-    loader::load(k, WORKER_SLOT, "rogue", ROGUE, s, [EXIT, 0, 0, 0], None)?;
+    loader::load(k, WORKER_SLOT, "rogue", ROGUE_SLOT0, s, [EXIT, 0, 0, 0], None)?;
     procs::install_idle(k);
     Ok(())
 }

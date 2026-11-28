@@ -13,7 +13,7 @@ fn main() {
     // The #618 process-stage apps run on the P4 only, so only that build needs them.
     let mut apps = vec![("LICHEN_APP_HEARTBEAT", "heartbeat"), ("LICHEN_APP_ATTACKER", "attacker")];
     if plat == "esp32p4" {
-        apps.extend([("LICHEN_APP_WORKER", "worker"), ("LICHEN_APP_ROGUE", "rogue")]);
+        apps.extend([("LICHEN_APP_WORKER", "worker"), ("LICHEN_APP_ROGUE", "rogue"), ("LICHEN_APP_ROGUE0", "rogue0")]);
     }
     for (v, app) in apps {
         println!("cargo:rerun-if-env-changed={v}");

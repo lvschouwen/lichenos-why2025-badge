@@ -80,6 +80,31 @@ mod tests {
         assert_eq!(m.charge(500), 500);
     }
 
+    /// The scheduler's bookkeeping: each process meter is charged from its resume to the trap entry, the kernel's
+    /// from the entry to the next resume. Over a run they add up to the clock.
+    #[test]
+    fn processes_and_kernel_add_up_to_the_clock() {
+        let (mut a, mut b, mut kernel) = (Meter::new(), Meter::new(), Meter::new());
+        let mut now = 5_000u32;
+        let start = now;
+        a.resume(now);
+        let mut cur = 0;
+        for (run, trap) in [(40_000u32, 1_900u32), (39_000, 2_100), (41_000, 1_950), (40_500, 2_000)] {
+            now = now.wrapping_add(run);
+            let m = if cur == 0 { &mut a } else { &mut b };
+            m.charge(now);
+            kernel.resume(now);
+            now = now.wrapping_add(trap);
+            kernel.charge(now);
+            cur ^= 1;
+            let next = if cur == 0 { &mut a } else { &mut b };
+            next.resume(now);
+        }
+        assert_eq!(a.cycles() + b.cycles() + kernel.cycles(), now.wrapping_sub(start) as u64);
+        assert_eq!(a.cycles(), 40_000 + 41_000);
+        assert_eq!(kernel.cycles(), 1_900 + 2_100 + 1_950 + 2_000);
+    }
+
     #[test]
     fn the_total_outgrows_32_bits() {
         let mut m = Meter::new();
