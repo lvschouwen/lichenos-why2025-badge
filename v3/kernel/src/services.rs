@@ -123,7 +123,8 @@ pub fn take_stats() -> Stats {
 fn ever_fits(i: usize, len: usize) -> bool {
     // SAFETY: as in `serve`: core 0 owns the buffer between the OP_SYS pop and its reply.
     let b = unsafe { forward::bounce(i) };
-    let prefix = b.name.len() + PREFIX_EXTRA;
+    let name = b.name.unwrap_or("?");
+    let prefix = name.len() + PREFIX_EXTRA;
     let cost = svc().lines.cost(i, &b.buf[..len], prefix);
     // The line state may change before it is served: allow for its own prefix and another process's line end.
     fits(cost.saturating_add(prefix + 2), platform::CONSOLE_RING, RESERVE)
@@ -135,7 +136,7 @@ fn serve(l: &mut Link, m: Msg) -> bool {
     // SAFETY: core 1 pushed `m` after filling process i's buffer and does not touch it until this request's reply.
     let b = unsafe { forward::bounce(i) };
     let bytes = &b.buf[..(m.a[2] as usize).min(WRITE_MAX)];
-    let name = b.name;
+    let name = b.name.unwrap_or("?");
     let s = svc();
     let cost = s.lines.cost(i, bytes, name.len() + PREFIX_EXTRA);
     if !fits(cost, platform::console_free(), RESERVE) {

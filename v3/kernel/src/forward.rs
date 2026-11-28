@@ -32,7 +32,9 @@ const FAST_WAIT_US: u64 = 500;
 /// (Acquire) and is done with it before it pushes the reply; core 1 touches it again only after that reply (the caller
 /// is blocked until then, one call in flight per process).
 pub struct Bounce {
-    pub name: &'static str,
+    /// The caller's name for core 0's line prefix. An Option so the table is all zero bytes and stays in .bss (an
+    /// empty `&str` is a non-null pointer and would put 804 B into the loaded image's .data).
+    pub name: Option<&'static str>,
     pub len: usize,
     pub buf: [u8; WRITE_MAX],
 }
@@ -40,7 +42,7 @@ pub struct Bounce {
 /// The bounce buffers, by core 1 process index. Ownership moves with the mailbox messages (see `Bounce`), which is the
 /// only reason a `Global` shared by two harts is sound here.
 static BOUNCE: [Global<Bounce>; MAX_PROCS] =
-    [const { Global::new(Bounce { name: "", len: 0, buf: [0; WRITE_MAX] }) }; MAX_PROCS];
+    [const { Global::new(Bounce { name: None, len: 0, buf: [0; WRITE_MAX] }) }; MAX_PROCS];
 
 /// Process `i`'s bounce buffer.
 ///
@@ -79,7 +81,7 @@ pub fn write(k: &mut Kernel, cur: usize, ptr: usize, len: usize) -> bool {
     let b = unsafe { bounce(cur) };
     // SAFETY: [ptr, ptr + len) lies inside the caller's own slot (checked by dispatch), mapped L2MEM, len <= WRITE_MAX.
     unsafe { core::ptr::copy_nonoverlapping(ptr as *const u8, b.buf.as_mut_ptr(), len) };
-    b.name = k.procs[cur].name;
+    b.name = Some(k.procs[cur].name);
     b.len = len;
     let m = Msg { op: OP_SYS, seq, a: [cur as u32, sys::WRITE as u32, len as u32, 0, 0, 0] };
     // SAFETY: core 1's trap path during a stage; the mailbox loop holds no borrow meanwhile.
