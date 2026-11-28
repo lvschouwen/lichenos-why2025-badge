@@ -243,6 +243,10 @@ pub fn run_u_limit(entry: usize, sp: usize, a0: usize, a1: usize, limit_us: u64)
     if watchdog {
         tick_stop();
         with(|s| s.tick = finished);
+    } else if with(|s| s.tick.as_ref().is_some_and(|t| t.stats.count >= t.target)) {
+        // The caller's tick ran out during the run, and its compare was moved to the run's deadline (on_timer), which
+        // may now be in the past: disarm, or the level line stays pending (review L-b).
+        hw::clint::disarm();
     }
     with(|s| {
         s.user_deadline = None;

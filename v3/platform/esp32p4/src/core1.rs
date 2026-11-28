@@ -85,9 +85,10 @@ pub unsafe fn start(entry: usize, poll_limit: u32) -> Option<u32> {
 /// PMU stall code for HP core 1 that stops it (IDF `esp_cpu_stall`, `pmu_ll_hp_set_sw_stall_code` 0x86).
 const STALL_CODE_STALL: u32 = 0x0086_0000;
 
-/// Stall core 1 where it is (IDF esp_cpu_stall(1)): stall code 0x86, then wait for the stalled bit. Returns whether it
-/// reads stalled within `poll_limit` polls. Fail-closed use (#617 review M1): core 1 stops running U code before core
-/// 0 reuses memory core 1 may still be using. Never undone in this boot.
+/// Stall core 1 where it is (IDF esp_cpu_stall(1)): stall code 0x86, then poll the stalled bit. Returns whether the
+/// bit was seen within `poll_limit` polls. False is not proof core 1 runs: the bit stays clear when the core was in
+/// wfi (IDF cpu_utility_ll.h), so callers report it as unknown. Fail-closed use (#617 review M1): core 1 stops running
+/// U code before core 0 reuses memory core 1 may still be using. Never undone in this boot.
 ///
 /// # Safety
 /// Core 1 must have been started (`start`); whatever it was doing stops mid-instruction stream, so nothing may wait on

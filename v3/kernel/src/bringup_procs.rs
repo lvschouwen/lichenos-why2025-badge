@@ -138,12 +138,13 @@ fn stage(t: &mut Tally, l: &mut Link, id: &str, deadline_ms: u32, idle_ticks: u3
         return r.a;
     }
     // SAFETY: core 1 was started; nothing waits on it after this (the run ends below).
-    let stalled = unsafe { hw::core1::stall(1_000_000) };
+    let stalled = unsafe { hw::core1::stall(1000) };
+    let stalled = if stalled { "status bit set" } else { "unknown (core may be in wfi)" };
     record(
         t,
         id,
         Some(false),
-        format_args!("no reply from core 1 within {STAGE_MS} ms; core 1 stalled: {stalled}; run ends here"),
+        format_args!("no reply from core 1 within {STAGE_MS} ms; core 1 stall requested, {stalled}; run ends here"),
     );
     crate::bringup::finish(*t)
 }
