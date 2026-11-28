@@ -52,7 +52,9 @@ pub extern "C" fn app_main(test: usize, a1: usize, a2: usize, a3: usize) -> isiz
             15 => core::arch::asm!("csrw mtvec, zero"),
             // fmv.w.x f0, zero: F is not in the target ISA string, so encoded by hand. mstatus.FS is off.
             16 => core::arch::asm!(".word 0xF0000053"),
-            // esp.lp.setupi 0, 4, +8 (Espressif binutils esp-15.2.0, -march=rv32imafc_xesploop). HWLP state is off.
+            // esp.lp.setupi 0, 4, +8. HWLP state is off. Round trip with Espressif binutils esp-15.2.0_20251204:
+            // `as -march=rv32imafc_xesploop` assembles `esp.lp.setupi 0, 4, 1f` to 0x0042502b, and objdump of that
+            // object prints `0042502b  esp.lp.setupi 0,4,8`. (Without the xesploop attribute objdump shows `.word`.)
             17 => core::arch::asm!(".word 0x0042502b"),
             // A PIE vector load (bringup_shapes.rs `u.shape.pie-vld`, the same word). PIE state is off.
             18 => core::arch::asm!(".word 0x0201223b"),

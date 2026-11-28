@@ -28,8 +28,9 @@ const MAP_L1_ICACHE: u32 = 0b11;
 /// executing from.
 #[cfg(target_arch = "riscv32")]
 pub unsafe fn sync_icache(addr: usize, len: usize) -> i32 {
-    // The loader's stores must be in the DCache before the controller writes the range back.
-    core::arch::asm!("fence rw, rw", options(nostack));
+    // The loader's stores (memory) must be ordered before the SYNC_CTRL store that starts the write-back (I/O):
+    // `rw, rw` would not order them against the device write.
+    core::arch::asm!("fence iorw, iorw", options(nostack));
     let wb = crate::psram::map::cache_writeback(addr, len);
     if wb != 0 {
         return wb;

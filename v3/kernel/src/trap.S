@@ -90,9 +90,20 @@ task_restore:
 
 # A trap in the kernel: the swap above left a0 = 0 and the kernel's a0 in mscratch. Swap back, so mscratch is 0 again
 # while the kernel runs (any further trap also lands here), and report on a stack of its own, not over the frames of
-# whatever trapped.
+# whatever trapped. A fault inside kernel_fault itself lands here again: the flag makes that one park in wfi instead
+# of reporting (and faulting) over and over.
 task_kernel_trap:
     csrrw a0, mscratch, zero
+    la t0, task_kfault_once
+    lw t1, 0(t0)
+    bnez t1, 2f
+    li t1, 1
+    sw t1, 0(t0)
     la sp, _kfault_stack_top
     call kernel_fault
-1:  j 1b
+2:  wfi
+    j 2b
+
+.section .bss
+.balign 4
+task_kfault_once: .word 0
