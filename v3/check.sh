@@ -10,10 +10,9 @@ SYSROOT_BIN=$(rustc --print sysroot)/lib/rustlib/$HOST/bin
 step() { printf '\n== %s\n' "$*"; }
 export CARGO_TERM_COLOR=never
 
-# Everything except probe-p4: another lane owns it, and it is not rustfmt-clean.
-FMT_PKGS=(-p lichen-abi -p lichen-kcore -p lichen-kernel -p lichen-platform-esp32p4 -p lichen-probe-psram -p heartbeat -p attacker)
+# --all covers every workspace member; v3/boot is its own workspace and runs fmt in boot/check.sh.
 step "rustfmt"
-cargo fmt "${FMT_PKGS[@]}" -- --check
+cargo fmt --all -- --check
 
 step "host tests (kcore, abi; proptest; platform register maths)"
 cargo test --locked -q -p lichen-kcore -p lichen-abi -p lichen-platform-esp32p4 --target $HOST
