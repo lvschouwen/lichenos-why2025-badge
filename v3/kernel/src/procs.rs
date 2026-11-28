@@ -162,6 +162,12 @@ pub fn prepare(until: [usize; APPS], budget: [u32; APPS]) -> Result<(), LoadErro
         let img = spin_image(&s, &mut buf);
         loader::load(k, i, name, img, s, [until[i], target(i), i, s.data], Some(budget[i]))?;
     }
+    install_idle(k);
+    Ok(())
+}
+
+/// The idle process (slot IDLE) on the U stub page, and the first process to run.
+pub fn install_idle(k: &mut Kernel) {
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, idle_pc) = unsafe { (sym(&_utext), u_idle as *const () as usize) };
     let mut ctx = Context::ZERO;
@@ -172,7 +178,6 @@ pub fn prepare(until: [usize; APPS], budget: [u32; APPS]) -> Result<(), LoadErro
     k.procs[IDLE] = Pcb { state: State::Ready, ctx, name: "idle", slot, view: Some(view), ..Pcb::EMPTY };
     k.idle = Some(IDLE);
     k.current = 0;
-    Ok(())
 }
 
 fn sp() -> usize {
@@ -239,7 +244,9 @@ pub fn stage(deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
     // SAFETY: ctx is process 0's context, set up by the loader; MPP = U, its view is loaded and checked, the vector
     // and the tick are this hart's. Control comes back here only through task_leave (`leave`).
     IN_STAGE.store(true, core::sync::atomic::Ordering::Relaxed);
+    let c0 = csr::mcycle() as u32;
     let outcome = unsafe { trap::task_run(ctx) } as u32;
+    let stage_cycles = (csr::mcycle() as u32).wrapping_sub(c0);
     IN_STAGE.store(false, core::sync::atomic::Ordering::Relaxed);
     platform::timer_stop();
     csr::set_mtvec(mtvec);
@@ -249,13 +256,15 @@ pub fn stage(deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
     let at_leave = LEAVE_MINTSTATUS.load(core::sync::atomic::Ordering::Relaxed);
     // SAFETY: the stage is over, no trap handler borrow is live (task_leave dropped those frames).
     let k = unsafe { sched::this() };
+    k.stage_cycles = stage_cycles;
     let shadow = shadow_start as u32 | (shadow_end as u32) << 1;
     [outcome, k.ticks as u32, mintstatus, at_leave, high_water(bottom, top), shadow]
 }
 
 /// The stage's supervisor, after every trap on core 1: end it when its work is done or its deadline passed.
 pub fn poll(k: &mut Kernel) {
-    let apps_done = k.procs[..APPS].iter().all(|p| p.state == State::Ended);
+    // Free counts as done: a stage may load fewer than APPS processes (#618).
+    let apps_done = k.procs[..APPS].iter().all(|p| p.state != State::Ready);
     if apps_done && k.procs[IDLE].ticks >= IDLE_GOAL.load(core::sync::atomic::Ordering::Relaxed) {
         leave(DONE);
     }

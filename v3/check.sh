@@ -44,6 +44,9 @@ CL=(cargo clippy --locked -q --target-dir target/clippy)
 for app in heartbeat attacker; do
   LICHEN_APP_LD=$PWD/target/lichen/qemu-virt/$app.ld "${CL[@]}" -p $app --target $TARGET -- -D warnings
 done
+for app in worker rogue; do
+  LICHEN_APP_LD=$PWD/target/lichen/esp32p4/$app.ld "${CL[@]}" -p $app --target $TARGET -- -D warnings
+done
 LICHEN_APP_HEARTBEAT=$PWD/target/lichen/qemu-virt/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/target/lichen/qemu-virt/attacker.bin \
   "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features qemu-virt -- -D warnings
 "${CL[@]}" -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 -- -D warnings

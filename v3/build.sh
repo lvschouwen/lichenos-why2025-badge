@@ -42,7 +42,11 @@ else
   [ -x "$ESPTOOL" ] || { echo "esptool not found: set ESPTOOL" >&2; exit 2; }
   app heartbeat 0
   app attacker 1
+  # The #618 process-stage apps: separate crates, linked on their own, loaded into slots 0 and 1 by core 0.
+  app worker 0
+  app rogue 1
   LICHEN_APP_HEARTBEAT=$PWD/$OUT/heartbeat.bin LICHEN_APP_ATTACKER=$PWD/$OUT/attacker.bin \
+  LICHEN_APP_WORKER=$PWD/$OUT/worker.bin LICHEN_APP_ROGUE=$PWD/$OUT/rogue.bin \
   cargo build --locked -q --release -p lichen-kernel --target $TARGET --no-default-features --features esp32p4 \
     --target-dir target/kernel-esp32p4
   KELF=target/kernel-esp32p4/$TARGET/release/lichen-kernel

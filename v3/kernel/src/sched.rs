@@ -11,6 +11,7 @@ use crate::handles::Handles;
 use crate::trap::Context;
 use crate::{csr, kprintln, platform, pmp, syscall, tests};
 use core::mem::MaybeUninit;
+use lichen_kcore::account::{over_cycles, reclaim_ranges, Meter};
 use lichen_kcore::sched::{over_budget, pick_next};
 use lichen_kcore::view::View;
 
@@ -48,6 +49,17 @@ pub struct Pcb {
     pub ticks: u32,
     pub syscalls: u32,
     pub end: Option<End>,
+    /// CPU time in cycles (#618): charged at every trap entry from the point the process was resumed.
+    pub meter: Meter,
+    /// End the process once its meter is past this many cycles; None = unlimited. Unlike the tick budget, yielding
+    /// before the tick does not dodge it.
+    pub cycle_budget: Option<u64>,
+    /// Bytes of the loaded image in the text region (what `reclaim` zeroes there).
+    pub image_len: usize,
+    /// The hart's tick count when the process ended.
+    pub ended_tick: u64,
+    /// mcycle spent giving the process's memory back at its end.
+    pub reclaim_cycles: u32,
 }
 impl Pcb {
     pub const EMPTY: Self = Self {
@@ -62,6 +74,11 @@ impl Pcb {
         ticks: 0,
         syscalls: 0,
         end: None,
+        meter: Meter::new(),
+        cycle_budget: None,
+        image_len: 0,
+        ended_tick: 0,
+        reclaim_cycles: 0,
     };
 }
 
@@ -122,6 +139,12 @@ pub struct Kernel {
     /// bounded even when no process has a budget (#612 review L-b).
     #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
     pub deadline: Option<u64>,
+    /// An ended process gives its memory and PMP view back at once (`end_proc`). Off for the #607/#613 harness and
+    /// the #617 spinner stages, whose rows read the dead processes' memory afterwards.
+    pub reclaim: bool,
+    /// mcycle the stage took on its hart (set by `procs::stage`): the wall clock the meters add up to.
+    #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
+    pub stage_cycles: u32,
     /// Tick-driven switches, [from][to].
     pub preempts: [[u32; MAX_PROCS]; MAX_PROCS],
 }
@@ -136,6 +159,8 @@ impl Kernel {
             sup: Supervisor::Harness,
             harness: tests::Harness::new(),
             deadline: None,
+            reclaim: false,
+            stage_cycles: 0,
             preempts: [[0; MAX_PROCS]; MAX_PROCS],
         }
     }
@@ -212,11 +237,32 @@ pub unsafe fn of(h: usize) -> &'static mut Kernel {
     KERNELS[h & 1].get().assume_init_mut()
 }
 
+/// End process `i`: it never runs again, its handles go (their generation moves on, so copies fail). With `k.reclaim`
+/// its memory is zeroed and its PMP view dropped as well, so nothing of it is left for the next image in the slot.
 pub fn end_proc(k: &mut Kernel, i: usize, why: End) {
     let p = &mut k.procs[i];
     p.state = State::Ended;
     p.end = Some(why);
+    p.ended_tick = k.ticks;
     k.handles.release_owner(i);
+    if k.reclaim && Some(i) != k.idle {
+        reclaim(&mut k.procs[i]);
+    }
+}
+
+/// Zero what the process held in its slot and forget its PMP view. The kernel is in M mode, so the process's own view
+/// (still loaded until the next switch) does not stand in the way. The idle process is never reclaimed: its "slot" is
+/// the kernel's U stub page.
+fn reclaim(p: &mut Pcb) {
+    let c0 = csr::mcycle() as u32;
+    for (addr, len) in reclaim_ranges(&p.slot, p.image_len) {
+        // SAFETY: the ranges lie inside this process's slot (reclaim_ranges, host-tested), which is NOLOAD L2MEM
+        // reserved for apps; the process has ended and the kernel is the only one running on this hart, and no other
+        // hart runs it.
+        unsafe { core::ptr::write_bytes(addr as *mut u8, 0, len) };
+    }
+    p.view = None;
+    p.reclaim_cycles = (csr::mcycle() as u32).wrapping_sub(c0);
 }
 
 pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -> *mut Context {
@@ -226,6 +272,8 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         kprintln!("trap: context does not belong to the current process");
         platform::exit(5);
     }
+    // Charge the span that just ended (resume stamp to this trap's entry stamp) to the process that ran it.
+    let spent = k.procs[cur].meter.charge(k.procs[cur].ctx.entry_cycle as u32);
     // CLIC layout on the P4 (code = bits 11:0); a plain mcause decodes the same for every standard code.
     let cause = lichen_kcore::trap::decode(mcause as u32);
     let (irq, code) = (cause.interrupt, cause.code as usize);
@@ -256,13 +304,20 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         let pc = k.procs[cur].ctx.pc;
         end_proc(k, cur, End::Fault { cause: code, tval: mtval, pc });
     }
+    // After the trap's own outcome, so a fault or an exit keeps its cause; any trap can end a process that is over.
+    if k.procs[cur].state == State::Ready && Some(cur) != k.idle && over_cycles(spent, k.procs[cur].cycle_budget) {
+        end_proc(k, cur, End::Budget);
+    }
     supervise(k);
     marks[2] = csr::mcycle() as u32;
     if !switch && k.procs[cur].state == State::Ready {
+        k.procs[cur].meter.resume(csr::mcycle() as u32);
         return &mut k.procs[cur].ctx;
     }
     let next = schedule(k);
-    if tick && k.current != cur {
+    // A switch that ended a process zeroed its memory inside the trap: not a switch cost, so no sample.
+    let ended = k.procs[cur].state != State::Ready;
+    if tick && k.current != cur && !ended {
         k.preempts[cur][k.current] += 1;
         marks[3] = csr::mcycle() as u32;
         let entry = k.procs[cur].ctx.entry_cycle as u32;
@@ -273,6 +328,7 @@ pub fn on_trap(k: &mut Kernel, ctx: *mut Context, mcause: usize, mtval: usize) -
         p.pmp.push(p.last_pmp.0);
         p.pmp_writes = p.last_pmp.1;
     }
+    k.procs[k.current].meter.resume(csr::mcycle() as u32);
     next
 }
 
@@ -288,6 +344,7 @@ fn supervise(k: &mut Kernel) {
 pub fn schedule_current(k: &mut Kernel) -> *mut Context {
     let i = k.current;
     load_view(k, i);
+    k.procs[i].meter.resume(csr::mcycle() as u32);
     &mut k.procs[i].ctx
 }
 

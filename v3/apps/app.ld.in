@@ -9,7 +9,7 @@ SECTIONS {
   .header : { LONG(0x5050414C) LONG(1) LONG(_start) LONG(_heap_start) LONG(_image_end) } > TEXT
   .text : { KEEP(*(.text.start)) *(.text .text.*) } > TEXT
   .rodata : ALIGN(4) { *(.rodata .rodata.*) *(.srodata .srodata.*) . = ALIGN(4); } > TEXT
-  .data : ALIGN(4) { _sdata = .; *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _edata = .; } > DATA AT> TEXT
+  .data : ALIGN(4) { _sdata = .; KEEP(*(.data.first)) *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(4); _edata = .; } > DATA AT> TEXT
   _sidata = LOADADDR(.data);
   _image_end = LOADADDR(.data) + SIZEOF(.data);
   .bss (NOLOAD) : ALIGN(4) { _sbss = .; *(.bss .bss.*) *(.sbss .sbss.*) *(COMMON) . = ALIGN(4); _ebss = .; } > DATA

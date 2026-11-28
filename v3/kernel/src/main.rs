@@ -17,6 +17,8 @@ mod platform;
 #[cfg(feature = "esp32p4")]
 mod bringup;
 #[cfg(feature = "esp32p4")]
+mod bringup_apps;
+#[cfg(feature = "esp32p4")]
 mod bringup_core1;
 #[cfg(feature = "esp32p4")]
 mod bringup_pmp;
@@ -30,6 +32,8 @@ mod bringup_u;
 mod mtrap;
 #[cfg(feature = "esp32p4")]
 mod procs;
+#[cfg(feature = "esp32p4")]
+mod procs_apps;
 #[cfg(feature = "esp32p4")]
 mod smp;
 #[cfg(feature = "esp32p4")]

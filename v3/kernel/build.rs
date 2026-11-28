@@ -10,7 +10,12 @@ fn main() {
     println!("cargo:rustc-env=LICHEN_BUILD_ID={id}");
     // Both builds embed the two harness apps, each linked for its platform's slots (v3/build.sh builds them first).
     // Without the variables (a plain cargo call, e.g. the gate's esp32p4 clippy) the images build.sh wrote are used.
-    for (v, app) in [("LICHEN_APP_HEARTBEAT", "heartbeat"), ("LICHEN_APP_ATTACKER", "attacker")] {
+    // The #618 process-stage apps run on the P4 only, so only that build needs them.
+    let mut apps = vec![("LICHEN_APP_HEARTBEAT", "heartbeat"), ("LICHEN_APP_ATTACKER", "attacker")];
+    if plat == "esp32p4" {
+        apps.extend([("LICHEN_APP_WORKER", "worker"), ("LICHEN_APP_ROGUE", "rogue")]);
+    }
+    for (v, app) in apps {
         println!("cargo:rerun-if-env-changed={v}");
         let p = std::env::var(v).unwrap_or_else(|_| format!("{dir}/../target/lichen/{plat}/{app}.bin"));
         if !std::path::Path::new(&p).is_file() {

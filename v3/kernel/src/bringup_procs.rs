@@ -75,11 +75,11 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     // SAFETY: as `k` above: core 1 is done with its samples.
     perf_line(unsafe { sched::perf_of(1) }, cpu_hz);
     alive(t, l, "proc.alive");
-    stage2(t, l);
+    stage2(t, l, cpu_hz);
 }
 
 /// Stage 2: P0 as before, P1 never faults (budget BUDGET2), idle never finishes, so the deadline ends the stage.
-fn stage2(t: &mut Tally, l: &mut Link) {
+fn stage2(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     if !load(t, "proc.load2", [UNTIL[0], NEVER], [BUDGET, BUDGET2]) {
         return;
     }
@@ -111,6 +111,7 @@ fn stage2(t: &mut Tally, l: &mut Link) {
     );
     fault_row(t, k, 0, "proc.budget.p0");
     alive(t, l, "proc.alive2");
+    crate::bringup_apps::run(t, l, cpu_hz);
 }
 
 /// Core 0 fills core 1's table for a stage (`procs::prepare`).
@@ -131,7 +132,7 @@ fn load(t: &mut Tally, id: &str, until: [usize; APPS], budget: [u32; APPS]) -> b
 
 /// Run one stage on core 1 and return its reply. No reply: core 1 may still run P0/P1 in slots 0 and 1, which the
 /// harness reloads next (review M1): stall it and end the run here, fail closed.
-fn stage(t: &mut Tally, l: &mut Link, id: &str, deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
+pub(crate) fn stage(t: &mut Tally, l: &mut Link, id: &str, deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
     begin(id);
     let r = l.call(smp::OP_PROCS, [deadline_ms, idle_ticks, 0, 0, 0, 0], STAGE_MS);
     if let Some(r) = r.filter(|r| r.op == smp::OP_PROCS | REPLY) {
@@ -149,7 +150,7 @@ fn stage(t: &mut Tally, l: &mut Link, id: &str, deadline_ms: u32, idle_ticks: u3
     crate::bringup::finish(*t)
 }
 
-fn alive(t: &mut Tally, l: &mut Link, id: &str) {
+pub(crate) fn alive(t: &mut Tally, l: &mut Link, id: &str) {
     begin(id);
     let a = [0x617, 1, 2, 3, 4, 5];
     let p = l.call(smp::OP_PING, a, 100);

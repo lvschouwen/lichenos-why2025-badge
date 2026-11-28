@@ -34,6 +34,17 @@ pub fn load(
     ctx.regs[10..14].copy_from_slice(&args);
     // The view is planned and checked here, once: a switch to this process only loads it (#617).
     let view = Some(crate::pmp::app_view(slot.text, slot.data, slot.len));
-    k.procs[i] = Pcb { state: State::Ready, ctx, name, slot, view, heap_start: heap, brk: heap, budget, ..Pcb::EMPTY };
+    k.procs[i] = Pcb {
+        state: State::Ready,
+        ctx,
+        name,
+        slot,
+        view,
+        heap_start: heap,
+        brk: heap,
+        budget,
+        image_len: blob.len(),
+        ..Pcb::EMPTY
+    };
     Ok(())
 }

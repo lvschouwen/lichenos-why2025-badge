@@ -2,6 +2,7 @@
 //! the host with proptest. The kernel and the platform crates only glue it to the machine.
 #![no_std]
 
+pub mod account;
 pub mod check;
 pub mod handles;
 pub mod image;
