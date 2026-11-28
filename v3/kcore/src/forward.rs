@@ -68,6 +68,12 @@ impl<const N: usize> Calls<N> {
         }
     }
 
+    /// An empty table for the next stage that goes on from this one's sequence numbers, so a late reply from this
+    /// stage can never match a call of the next one.
+    pub const fn carry(&self) -> Self {
+        Self { seq: self.seq, waiting: [None; N], stale: 0 }
+    }
+
     pub fn in_flight(&self, proc: usize) -> bool {
         self.waiting.get(proc).is_some_and(|w| w.is_some())
     }
@@ -240,6 +246,17 @@ mod tests {
         let s2 = c.begin(1).unwrap();
         assert!(!c.complete(1, s), "the old call's reply must not answer the new one");
         assert!(c.complete(1, s2));
+    }
+
+    #[test]
+    fn a_carried_table_never_reuses_a_seq() {
+        let mut c = Calls::<2>::new();
+        let old = c.begin(0).unwrap();
+        let mut next = c.carry();
+        assert!(!next.in_flight(0));
+        let new = next.begin(0).unwrap();
+        assert_ne!(old, new);
+        assert!(!next.complete(0, old), "the old stage's reply is stale in the new one");
     }
 
     #[test]

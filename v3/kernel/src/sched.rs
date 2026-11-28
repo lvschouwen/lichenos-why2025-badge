@@ -210,7 +210,10 @@ impl Kernel {
     /// Back to the boot state (core 0 before it fills core 1's table).
     #[cfg(feature = "esp32p4")]
     pub fn reset(&mut self) {
+        let calls = self.calls.carry();
         *self = Self::new();
+        // Sequence numbers go on across stages: a reply left over from the last stage can never wake this one's calls.
+        self.calls = calls;
     }
 }
 
