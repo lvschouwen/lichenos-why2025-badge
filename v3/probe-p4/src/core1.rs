@@ -30,8 +30,13 @@ pub fn stage_step() {
 }
 
 fn regs(when: &str) {
-    pl!("C1 start {when}: clk_ctrl0={} rst_en0={} pmu_sw_stall={} corestalled_st={}",
-        show(m_lw(CLK_CTRL0)), show(m_lw(RST_EN0)), show(m_lw(PMU_SW_STALL)), show(m_lw(CORESTALLED_ST)));
+    pl!(
+        "C1 start {when}: clk_ctrl0={} rst_en0={} pmu_sw_stall={} corestalled_st={}",
+        show(m_lw(CLK_CTRL0)),
+        show(m_lw(RST_EN0)),
+        show(m_lw(PMU_SW_STALL)),
+        show(m_lw(CORESTALLED_ST))
+    );
 }
 
 /// Core 0: start core 1, watch it, end the run. Never returns.
@@ -59,7 +64,10 @@ pub fn launch(id: &str) -> ! {
         }
     }
     regs("after");
-    pl!("C1 boot address {:#010x} handed to the ROM; core 0 prints nothing more until core 1 is done or silent", _start1 as *const () as usize);
+    pl!(
+        "C1 boot address {:#010x} handed to the ROM; core 0 prints nothing more until core 1 is done or silent",
+        _start1 as *const () as usize
+    );
     hw::drain();
     // SAFETY: ROM function `void ets_set_appcpu_boot_addr(uint32_t)` at its esp32p4.rom.ld address.
     let set_boot: extern "C" fn(u32) = unsafe { core::mem::transmute(ETS_SET_APPCPU_BOOT_ADDR) };
@@ -102,7 +110,12 @@ pub fn launch(id: &str) -> ! {
 #[no_mangle]
 extern "C" fn p1main() -> ! {
     STAGE.store(1, SeqCst);
-    pl!("C1 up: mhartid={} mstatus={:#010x} mtvec={:#010x}", csr_read!("mhartid"), csr_read!("mstatus"), csr_read!("mtvec"));
+    pl!(
+        "C1 up: mhartid={} mstatus={:#010x} mtvec={:#010x}",
+        csr_read!("mhartid"),
+        csr_read!("mstatus"),
+        csr_read!("mtvec")
+    );
     crate::b5_dump();
     crate::setup_pmp();
     crate::b1_user_mode();
@@ -111,12 +124,20 @@ extern "C" fn p1main() -> ! {
     begin("B4.grant4k");
     pmp_set(E_T2, napot(0x2080_0000, 0x1000), NAPOT | R | W);
     let t = user(uaddr(crate::u_load), CLIC_THRESH, 0, false);
-    check("B4.grant4k", None, format_args!("U read of own CLIC threshold {CLIC_THRESH:#x} with a 4 KB NAPOT RW grant: {t}"));
+    check(
+        "B4.grant4k",
+        None,
+        format_args!("U read of own CLIC threshold {CLIC_THRESH:#x} with a 4 KB NAPOT RW grant: {t}"),
+    );
     pmp_off(E_T2);
     begin("B4.mtime-u");
     pmp_set(E_T1, napot(CLINT, 0x1000_0000), NAPOT | R | W);
     let t = user(uaddr(crate::u_load), MTIME_LO, 0, false);
-    check("B4.mtime-u", None, format_args!("U read of mtime lo {MTIME_LO:#x} with the bootloader's entry-0 grant: {t} a0={:#x}", t.a0));
+    check(
+        "B4.mtime-u",
+        None,
+        format_args!("U read of mtime lo {MTIME_LO:#x} with the bootloader's entry-0 grant: {t} a0={:#x}", t.a0),
+    );
     pmp_off(E_T1);
     pl!("C1 done");
     hw::drain();

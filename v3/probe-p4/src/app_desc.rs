@@ -28,7 +28,7 @@ const fn desc() -> [u8; 256] {
     d = put(d, 16, super::PROBE_ID.as_bytes()); // version[32] (an 8-hex id, -dirty at most)
     d = put(d, 48, b"lichen-probe-p4"); // project_name[32]
     d = put(d, 112, b"none (bare-metal probe)"); // idf_ver[32]
-    // app_elf_sha256[32] at 144: esptool fills it
+                                                 // app_elf_sha256[32] at 144: esptool fills it
     d = put(d, 176, &0u16.to_le_bytes()); // min_efuse_blk_rev_full
     d = put(d, 178, &199u16.to_le_bytes()); // max_efuse_blk_rev_full
     d[180] = 16; // mmu_page_size, log2: 64 KB

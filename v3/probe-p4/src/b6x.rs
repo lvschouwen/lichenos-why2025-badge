@@ -5,7 +5,9 @@
 //!   the candidates are the AXI ICM address-hole records (icm_sys_reg.h), read before and after U APM faults.
 
 use crate::hw::{self, m_lw, m_sw, napot, pmp_off, pmp_set, user, Trap, NAPOT, R};
-use crate::{begin, check, show, uaddr, E_T1, GPIO_BASE, MTIME_HI, MTIME_LO, PMS_UM_REG0, PMS_UM_REG3, SCRATCH_UNCACHED};
+use crate::{
+    begin, check, show, uaddr, E_T1, GPIO_BASE, MTIME_HI, MTIME_LO, PMS_UM_REG0, PMS_UM_REG3, SCRATCH_UNCACHED,
+};
 
 // hw_ver1 systimer_reg.h (DR_REG_SYSTIMER_BASE 0x500E_2000)
 const ST_CONF: usize = 0x500E_2000;
@@ -62,7 +64,12 @@ impl core::fmt::Display for Khz {
 
 pub fn timers() {
     begin("B6.mtime");
-    pl!("B6 systimer conf={} soc_clk_ctrl2={} peri_clk_ctrl21={}", show(m_lw(ST_CONF)), show(m_lw(CLK_CTRL2)), show(m_lw(PERI_CLK_CTRL21)));
+    pl!(
+        "B6 systimer conf={} soc_clk_ctrl2={} peri_clk_ctrl21={}",
+        show(m_lw(ST_CONF)),
+        show(m_lw(CLK_CTRL2)),
+        show(m_lw(PERI_CLK_CTRL21))
+    );
     let Some((s0, m0)) = both() else {
         check("B6.mtime", Some(false), format_args!("systimer or mtime not readable: skipped"));
         return;
@@ -92,15 +99,41 @@ pub fn timers() {
     // f = ticks / (bytes * 10 / BAUD), the last byte is still shifting out: use bytes - 1.
     let st_hz = ds * BAUD / ((bytes - 1) * 10);
     let mt_hz = dm * BAUD / ((bytes - 1) * 10);
-    check("B6.mtime-uart", None, format_args!("{} bytes at {BAUD} baud: systimer +{ds} = {}, mtime +{dm} = {} (UART-timed)",
-        bytes - 1, Khz(st_hz), Khz(mt_hz)));
+    check(
+        "B6.mtime-uart",
+        None,
+        format_args!(
+            "{} bytes at {BAUD} baud: systimer +{ds} = {}, mtime +{dm} = {} (UART-timed)",
+            bytes - 1,
+            Khz(st_hz),
+            Khz(mt_hz)
+        ),
+    );
 }
 
 fn icm(when: &str) {
-    pl!("B6 ICM {when}: {}={} {}={} {}={} {}={}", ICM[0].0, show(m_lw(ICM[0].1)), ICM[1].0, show(m_lw(ICM[1].1)),
-        ICM[2].0, show(m_lw(ICM[2].1)), ICM[3].0, show(m_lw(ICM[3].1)));
-    pl!("B6 ICM {when}: {}={} {}={} {}={} {}={}", ICM[4].0, show(m_lw(ICM[4].1)), ICM[5].0, show(m_lw(ICM[5].1)),
-        ICM[6].0, show(m_lw(ICM[6].1)), ICM[7].0, show(m_lw(ICM[7].1)));
+    pl!(
+        "B6 ICM {when}: {}={} {}={} {}={} {}={}",
+        ICM[0].0,
+        show(m_lw(ICM[0].1)),
+        ICM[1].0,
+        show(m_lw(ICM[1].1)),
+        ICM[2].0,
+        show(m_lw(ICM[2].1)),
+        ICM[3].0,
+        show(m_lw(ICM[3].1))
+    );
+    pl!(
+        "B6 ICM {when}: {}={} {}={} {}={} {}={}",
+        ICM[4].0,
+        show(m_lw(ICM[4].1)),
+        ICM[5].0,
+        show(m_lw(ICM[5].1)),
+        ICM[6].0,
+        show(m_lw(ICM[6].1)),
+        ICM[7].0,
+        show(m_lw(ICM[7].1))
+    );
 }
 const ICM_INT_CLR: usize = 0x500A_4018; // bit 2 CPU_ADDRHOLE
 fn rec() -> (Result<u32, Trap>, Result<u32, Trap>, Result<u32, Trap>) {
@@ -136,24 +169,50 @@ pub fn violation_record() {
     let t2 = u_apm_fault(PMS_UM_REG3, reg3, 0, GPIO_BASE + 4);
     rec_line("second U GPIO fault at +4, no clear");
     let second = rec();
-    check("B6.record-gpio", Some(first.1 == Ok(GPIO_BASE as u32) && t.code() == 5),
-        format_args!("U GPIO {t}: record addr {}; second fault {t2}: {}", show(first.1),
-            if second.1 == first.1 { "record LATCHED (first kept)" } else { "record OVERWRITTEN" }));
+    check(
+        "B6.record-gpio",
+        Some(first.1 == Ok(GPIO_BASE as u32) && t.code() == 5),
+        format_args!(
+            "U GPIO {t}: record addr {}; second fault {t2}: {}",
+            show(first.1),
+            if second.1 == first.1 { "record LATCHED (first kept)" } else { "record OVERWRITTEN" }
+        ),
+    );
     clear_record();
     rec_line("int_clr bit 2");
     let cleared = rec();
-    check("B6.record-clear", None, format_args!("after ICM_INT_CLR bit 2: int_raw {}, addr {} ({})", show(cleared.0), show(cleared.1),
-        if cleared.1 == first.1 { "addr kept, only the flag clears" } else { "addr reset" }));
+    check(
+        "B6.record-clear",
+        None,
+        format_args!(
+            "after ICM_INT_CLR bit 2: int_raw {}, addr {} ({})",
+            show(cleared.0),
+            show(cleared.1),
+            if cleared.1 == first.1 { "addr kept, only the flag clears" } else { "addr reset" }
+        ),
+    );
     let t3 = u_apm_fault(PMS_UM_REG0, reg0, 2, SCRATCH_UNCACHED);
     rec_line("U uncached L2MEM fault");
     let l2 = rec();
-    check("B6.record-l2mem", None, format_args!("U uncached L2MEM {t3}: record {}",
-        if l2 == cleared { "unchanged (L2MEM APM not reported through the ICM)" } else { "CHANGED" }));
+    check(
+        "B6.record-l2mem",
+        None,
+        format_args!(
+            "U uncached L2MEM {t3}: record {}",
+            if l2 == cleared { "unchanged (L2MEM APM not reported through the ICM)" } else { "CHANGED" }
+        ),
+    );
     clear_record();
     let before = rec();
     let t4 = user(uaddr(crate::u_load), crate::SCRATCH, 0, false);
     let pmp_only = rec();
-    check("B6.record-pmp", None, format_args!("U load with no PMP grant {t4}: record {}",
-        if pmp_only == before { "unchanged (PMP faults stay inside the core)" } else { "CHANGED" }));
+    check(
+        "B6.record-pmp",
+        None,
+        format_args!(
+            "U load with no PMP grant {t4}: record {}",
+            if pmp_only == before { "unchanged (PMP faults stay inside the core)" } else { "CHANGED" }
+        ),
+    );
     clear_record();
 }

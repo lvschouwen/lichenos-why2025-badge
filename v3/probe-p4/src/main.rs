@@ -9,9 +9,9 @@
 
 #[macro_use]
 mod hw;
+mod app_desc;
 mod b6x;
 mod core1;
-mod app_desc;
 
 use core::arch::global_asm;
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
@@ -95,7 +95,7 @@ pub(crate) const MTIME_LO: usize = CLINT + 0xBFF8;
 const MTIME_HI: usize = CLINT + 0xBFFC;
 const MTIP_ID: usize = 7;
 const CLIC_USER: usize = 0x20B0_0000; // "CLIC user" window (TRM Table 2.8-1)
-// Interrupt matrix fallback for B3: the from-CPU-0 software source routed to TEST_CPU_LINE.
+                                      // Interrupt matrix fallback for B3: the from-CPU-0 software source routed to TEST_CPU_LINE.
 const FROM_CPU_0: usize = 0x500E_5010; // HP_SYSTEM_CPU_INT_FROM_CPU_0_REG
 const MAP_FROM_CPU_0: usize = 0x500D_613C; // INTERRUPT_CORE0_CPU_INT_FROM_CPU_0_MAP_REG
 
@@ -106,7 +106,11 @@ const GPIO_BASE: usize = 0x500E_0000;
 
 /// "C1." on core 1, so its CHECK ids stay apart from the core-0 rows in #604.
 fn tag() -> &'static str {
-    if csr_read!("mhartid") == 0 { "" } else { "C1." }
+    if csr_read!("mhartid") == 0 {
+        ""
+    } else {
+        "C1."
+    }
 }
 pub(crate) fn check(id: &str, ok: Option<bool>, detail: core::fmt::Arguments) {
     let verdict = match ok {
@@ -219,8 +223,18 @@ pub(crate) fn setup_pmp() {
 pub(crate) fn b5_dump() {
     begin("B5");
     pl!("B5 misa={:#010x} mhartid={} mstatus={:#010x}", csr_read!("misa"), csr_read!("mhartid"), csr_read!("mstatus"));
-    pl!("B5 marchid={} mimpid={} mtvec={:#010x}", ShowU(csr_try!("0xf12")), ShowU(csr_try!("0xf13")), csr_read!("mtvec"));
-    pl!("B5 mtvt(0x307)={} mintstatus(0x346)={} prv(0x810)={}", ShowU(csr_try!("0x307")), ShowU(csr_try!("0x346")), ShowU(csr_try!("0x810")));
+    pl!(
+        "B5 marchid={} mimpid={} mtvec={:#010x}",
+        ShowU(csr_try!("0xf12")),
+        ShowU(csr_try!("0xf13")),
+        csr_read!("mtvec")
+    );
+    pl!(
+        "B5 mtvt(0x307)={} mintstatus(0x346)={} prv(0x810)={}",
+        ShowU(csr_try!("0x307")),
+        ShowU(csr_try!("0x346")),
+        ShowU(csr_try!("0x810"))
+    );
     pl!("B5 M-fault path control, unimplemented CSR 0x5c0: {}", ShowU(csr_try!("0x5c0")));
     begin("B5.clic");
     pl!("B5 clic_thresh={} clic_info={}", show(m_lw(CLIC_THRESH)), show(m_lw(0x2080_0004)));
@@ -240,7 +254,11 @@ pub(crate) fn b5_dump() {
          10: "0xbca" "0xbda", 11: "0xbcb" "0xbdb", 12: "0xbcc" "0xbdc", 13: "0xbcd" "0xbdd", 14: "0xbce" "0xbde",
          15: "0xbcf" "0xbdf");
     let locked = (0..16).filter(|&i| !unlocked(i)).count();
-    check("B5.rom", None, format_args!("core {} after the ROM: {locked} of 16 PMP entries locked (dump above)", csr_read!("mhartid")));
+    check(
+        "B5.rom",
+        None,
+        format_args!("core {} after the ROM: {locked} of 16 PMP entries locked (dump above)", csr_read!("mhartid")),
+    );
     b5_upper();
 }
 /// PMP entries 16-63 (pmpcfg4-15, pmpaddr16-63), guarded: which exist, and what the ROM left in them.
@@ -292,12 +310,20 @@ pub(crate) fn b1_user_mode() {
     begin("B1");
     let t = user(uaddr(u_ecall), 0, 0, false);
     let ok = t.is_ecall_u() && t.epc == uaddr(u_ecall) && (t.mstatus >> 11) & 3 == 0;
-    check("B1.ecall", Some(ok), format_args!("mret MPP=0 then ecall: {t} (expect ecall-U, mepc={:#010x}, MPP=U)", uaddr(u_ecall)));
+    check(
+        "B1.ecall",
+        Some(ok),
+        format_args!("mret MPP=0 then ecall: {t} (expect ecall-U, mepc={:#010x}, MPP=U)", uaddr(u_ecall)),
+    );
 
     let m_prv = csr_try!("0x810");
     let t = user(uaddr(u_csr810), 0, 0, false);
     if t.is_ecall_u() {
-        check("B1.prv", Some(t.a0 == 0), format_args!("CSR 0x810 from U reads {:#x} (expect 0); from M {}", t.a0, ShowU(m_prv)));
+        check(
+            "B1.prv",
+            Some(t.a0 == 0),
+            format_args!("CSR 0x810 from U reads {:#x} (expect 0); from M {}", t.a0, ShowU(m_prv)),
+        );
     } else {
         check("B1.prv", None, format_args!("CSR 0x810 from U traps: {t}; from M {}", ShowU(m_prv)));
     }
@@ -308,15 +334,31 @@ pub(crate) fn b1_user_mode() {
 
     let mdata = addr_of!(_sbss) as usize;
     let t = user(uaddr(u_load), mdata, 0, false);
-    check("B1.deny-r", Some(t.code() == 5 && t.tval == mdata), format_args!("U load of M data {mdata:#x} (no PMP match): {t} (expect load-access-fault)"));
+    check(
+        "B1.deny-r",
+        Some(t.code() == 5 && t.tval == mdata),
+        format_args!("U load of M data {mdata:#x} (no PMP match): {t} (expect load-access-fault)"),
+    );
     let t = user(uaddr(u_store), mdata, 0x5a5a_5a5a, false);
-    check("B1.deny-w", Some(t.code() == 7 && t.tval == mdata), format_args!("U store to M data: {t} (expect store-access-fault)"));
+    check(
+        "B1.deny-w",
+        Some(t.code() == 7 && t.tval == mdata),
+        format_args!("U store to M data: {t} (expect store-access-fault)"),
+    );
     let mtext = pmain as extern "C" fn() -> ! as usize;
     let t = user(mtext, 0, 0, false);
-    check("B1.deny-x", Some(t.code() == 1 && t.epc == mtext), format_args!("U jump into M text {mtext:#x}: {t} (expect instr-access-fault)"));
+    check(
+        "B1.deny-x",
+        Some(t.code() == 1 && t.epc == mtext),
+        format_args!("U jump into M text {mtext:#x}: {t} (expect instr-access-fault)"),
+    );
     let t = user(uaddr(u_store), UDATA + 0x10, 0x1234_5678, false);
     let back = m_lw(UDATA + 0x10);
-    check("B1.grant", Some(t.is_ecall_u() && back == Ok(0x1234_5678)), format_args!("U store inside its RW window: {t}; M reads back {}", show(back)));
+    check(
+        "B1.grant",
+        Some(t.is_ecall_u() && back == Ok(0x1234_5678)),
+        format_args!("U store inside its RW window: {t}; M reads back {}", show(back)),
+    );
 }
 
 fn a5_dedicated_gpio() {
@@ -324,7 +366,14 @@ fn a5_dedicated_gpio() {
     for (n, f) in [(0x803, u_csr803 as unsafe extern "C" fn()), (0x804, u_csr804), (0x805, u_csr805)] {
         let t = user(uaddr(f), 0, 0, false);
         if t.is_ecall_u() {
-            check("A5", None, format_args!("CSR {n:#x} readable from U: {:#010x} (reads only; a U write could drive routed pads)", t.a0));
+            check(
+                "A5",
+                None,
+                format_args!(
+                    "CSR {n:#x} readable from U: {:#010x} (reads only; a U write could drive routed pads)",
+                    t.a0
+                ),
+            );
         } else {
             check("A5", None, format_args!("CSR {n:#x} from U traps: {t}"));
         }
@@ -352,7 +401,14 @@ fn mtime() -> Result<u64, Trap> {
 }
 fn b3_timer() {
     begin("B3t");
-    pl!("B3t CLINT msip={} cmp lo/hi={} {} load lo={} ctl={}", show(m_lw(MSIP)), show(m_lw(MTIMECMP_LO)), show(m_lw(MTIMECMP_HI)), show(m_lw(MTIMELOAD_LO)), show(m_lw(MTIMECTL)));
+    pl!(
+        "B3t CLINT msip={} cmp lo/hi={} {} load lo={} ctl={}",
+        show(m_lw(MSIP)),
+        show(m_lw(MTIMECMP_LO)),
+        show(m_lw(MTIMECMP_HI)),
+        show(m_lw(MTIMELOAD_LO)),
+        show(m_lw(MTIMECTL))
+    );
     let (Ok(t0), _) = (mtime(), ()) else {
         check("B3t", Some(false), format_args!("mtime not readable from M: timer case skipped"));
         return;
@@ -365,7 +421,13 @@ fn b3_timer() {
         return;
     }
     let saved: [Result<u8, Trap>; 4] = core::array::from_fn(|b| m_lbu(clic_byte(0, MTIP_ID, b)));
-    pl!("B3t id 7 before: ip/ie/attr/ctl {} {} {} {}", ShowB(saved[0]), ShowB(saved[1]), ShowB(saved[2]), ShowB(saved[3]));
+    pl!(
+        "B3t id 7 before: ip/ie/attr/ctl {} {} {} {}",
+        ShowB(saved[0]),
+        ShowB(saved[1]),
+        ShowB(saved[2]),
+        ShowB(saved[3])
+    );
     // SAFETY: single hart; read by the handler only on an interrupt.
     unsafe { write_volatile(addr_of_mut!(hw::IRQ_QUIESCE), quiesce_timer) };
     let _ = m_sb(clic_byte(0, MTIP_ID, 2), 0xC0); // mode M, level-triggered (the CLINT line is level-type)
@@ -384,8 +446,14 @@ fn b3_timer() {
     // SAFETY: written by the handler before its mret.
     let last = unsafe { read_volatile(addr_of!(hw::IRQ_LAST)) };
     let in_u = (last.mstatus >> 11) & 3 == 0 && (last.epc & !0xFFF) == UTEXT;
-    check("B3t.preempt", Some(n == 1 && in_u && t.is_ecall_u() && t.a0 == 0),
-        format_args!("CLINT timer while U spins: {n} interrupt(s), last {last}, MPP {}; U ended {t}", (last.mstatus >> 11) & 3));
+    check(
+        "B3t.preempt",
+        Some(n == 1 && in_u && t.is_ecall_u() && t.a0 == 0),
+        format_args!(
+            "CLINT timer while U spins: {n} interrupt(s), last {last}, MPP {}; U ended {t}",
+            (last.mstatus >> 11) & 3
+        ),
+    );
     quiesce_timer();
     for b in [2, 3] {
         if let Ok(v) = saved[b] {
@@ -397,7 +465,14 @@ pub(crate) fn b3_interrupt_in_u() {
     begin("B3");
     let saved: [Result<u8, Trap>; 4] = core::array::from_fn(|b| m_lbu(clic_byte(0, TEST_ID, b)));
     let thresh = m_lw(CLIC_THRESH);
-    pl!("B3 line {TEST_ID} before: ip/ie/attr/ctl {} {} {} {}, thresh {}", ShowB(saved[0]), ShowB(saved[1]), ShowB(saved[2]), ShowB(saved[3]), show(thresh));
+    pl!(
+        "B3 line {TEST_ID} before: ip/ie/attr/ctl {} {} {} {}, thresh {}",
+        ShowB(saved[0]),
+        ShowB(saved[1]),
+        ShowB(saved[2]),
+        ShowB(saved[3]),
+        show(thresh)
+    );
     // SAFETY: single hart; the handler reads this pointer only on an interrupt.
     unsafe { write_volatile(addr_of_mut!(hw::IRQ_QUIESCE), quiesce_test_line) };
     let _ = m_sb(clic_byte(0, TEST_ID, 1), 0);
@@ -426,7 +501,11 @@ pub(crate) fn b3_interrupt_in_u() {
     }
     hw::spin(1000);
     let held = irq_count();
-    check("B3.m-masked", Some(held == 0), format_args!("pending via {source} (ip read {}), M with MIE=0 takes no interrupt: count {held}", ShowB(ip)));
+    check(
+        "B3.m-masked",
+        Some(held == 0),
+        format_args!("pending via {source} (ip read {}), M with MIE=0 takes no interrupt: count {held}", ShowB(ip)),
+    );
 
     let mut result = None;
     for mpie in [false, true] {
@@ -435,7 +514,11 @@ pub(crate) fn b3_interrupt_in_u() {
         let n = irq_count();
         // SAFETY: written by the handler before its mret; read after the U run ended.
         let last = unsafe { read_volatile(addr_of!(hw::IRQ_LAST)) };
-        pl!("B3 mpie={} U spin ended {t}, interrupts {n}, last {last}, MPP at irq {}", mpie as u8, (last.mstatus >> 11) & 3);
+        pl!(
+            "B3 mpie={} U spin ended {t}, interrupts {n}, last {last}, MPP at irq {}",
+            mpie as u8,
+            (last.mstatus >> 11) & 3
+        );
         if n > 0 {
             let in_u = (last.mstatus >> 11) & 3 == 0 && (last.epc & !0xFFF) == UTEXT;
             let resumed = t.is_ecall_u() && t.a0 == 0;
@@ -447,9 +530,19 @@ pub(crate) fn b3_interrupt_in_u() {
         let _ = m_sw(FROM_CPU_0, if source == "from-cpu-0" { 1 } else { 0 });
     }
     match result {
-        Some((mpie, n, in_u, resumed, last)) => check("B3.irq-in-u", Some(in_u && resumed && n == 1),
-            format_args!("via {source}, MPIE={}: {n} interrupt(s) taken from U (mepc {:#x}), U resumed and finished: {resumed}", mpie as u8, last.epc)),
-        None => check("B3.irq-in-u", Some(false), format_args!("via {source}: no interrupt taken while in U (MPIE 0 and 1)")),
+        Some((mpie, n, in_u, resumed, last)) => check(
+            "B3.irq-in-u",
+            Some(in_u && resumed && n == 1),
+            format_args!(
+                "via {source}, MPIE={}: {n} interrupt(s) taken from U (mepc {:#x}), U resumed and finished: {resumed}",
+                mpie as u8, last.epc
+            ),
+        ),
+        None => check(
+            "B3.irq-in-u",
+            Some(false),
+            format_args!("via {source}: no interrupt taken while in U (MPIE 0 and 1)"),
+        ),
     }
     // Restore the line and the threshold.
     let _ = m_sb(clic_byte(0, TEST_ID, 1), 0);
@@ -496,15 +589,25 @@ fn b6_apm() {
     pmp_set(E_T1, napot(GPIO_BASE, 0x1000), NAPOT | R);
     let m_before = m_lw(GPIO_BASE);
     let u_allow = user(uaddr(u_load), GPIO_BASE, 0, false);
-    check("B6.gpio-ctl", Some(m_before.is_ok() && u_allow.is_ecall_u()),
-        format_args!("control, UM bit allow: M read {}, U read {u_allow}", show(m_before)));
+    check(
+        "B6.gpio-ctl",
+        Some(m_before.is_ok() && u_allow.is_ecall_u()),
+        format_args!("control, UM bit allow: M read {}, U read {u_allow}", show(m_before)),
+    );
     let _ = m_sw(PMS_UM_REG3, reg3 & !1);
     let cleared = m_lw(PMS_UM_REG3);
     begin("B6.gpio");
     let u_deny = user(uaddr(u_load), GPIO_BASE, 0, false);
     let m_after = m_lw(GPIO_BASE);
-    check("B6.gpio", Some(u_deny.code() == 5 && m_after.is_ok()),
-        format_args!("UM HP_GPIO cleared (reg3 now {}): U read {u_deny} (expect fault), M read {}", show(cleared), show(m_after)));
+    check(
+        "B6.gpio",
+        Some(u_deny.code() == 5 && m_after.is_ok()),
+        format_args!(
+            "UM HP_GPIO cleared (reg3 now {}): U read {u_deny} (expect fault), M read {}",
+            show(cleared),
+            show(m_after)
+        ),
+    );
     let _ = m_sw(PMS_UM_REG3, reg3);
     let u_back = user(uaddr(u_load), GPIO_BASE, 0, false);
     check("B6.gpio-restore", Some(u_back.is_ecall_u()), format_args!("UM bit restored: U read {u_back} (bus alive)"));
@@ -519,8 +622,11 @@ fn b6_apm() {
     pmp_set(E_T2, napot(SCRATCH, 0x1000), NAPOT | R);
     let u_un = user(uaddr(u_load), SCRATCH_UNCACHED, 0, false);
     let u_ca = user(uaddr(u_load), SCRATCH, 0, false);
-    check("B6.l2mem-ctl", Some(u_un.is_ecall_u() && u_ca.is_ecall_u()),
-        format_args!("control, UM bit allow: U uncached {u_un} a0={:#x}; U cached {u_ca}", u_un.a0));
+    check(
+        "B6.l2mem-ctl",
+        Some(u_un.is_ecall_u() && u_ca.is_ecall_u()),
+        format_args!("control, UM bit allow: U uncached {u_un} a0={:#x}; U cached {u_ca}", u_un.a0),
+    );
     begin("B6.l2mem");
     let _ = m_sw(PMS_UM_REG0, reg0 & !(1 << 2));
     let cleared = m_lw(PMS_UM_REG0);
@@ -528,10 +634,20 @@ fn b6_apm() {
     let u_ca = user(uaddr(u_load), SCRATCH, 0, false);
     let m_un = m_lw(SCRATCH_UNCACHED);
     let _ = m_sw(PMS_UM_REG0, reg0);
-    check("B6.l2mem-uncached", Some(u_un.code() == 5 && m_un.is_ok()),
-        format_args!("UM L2MEM cleared (reg0 now {}): U uncached {u_un} (expect fault), M uncached {}", show(cleared), show(m_un)));
-    check("B6.l2mem-cached", None,
-        format_args!("UM L2MEM cleared: U cached {u_ca} (C3 predicts allowed: APM does not see cached accesses)"));
+    check(
+        "B6.l2mem-uncached",
+        Some(u_un.code() == 5 && m_un.is_ok()),
+        format_args!(
+            "UM L2MEM cleared (reg0 now {}): U uncached {u_un} (expect fault), M uncached {}",
+            show(cleared),
+            show(m_un)
+        ),
+    );
+    check(
+        "B6.l2mem-cached",
+        None,
+        format_args!("UM L2MEM cleared: U cached {u_ca} (C3 predicts allowed: APM does not see cached accesses)"),
+    );
     pmp_off(E_T1);
     pmp_off(E_T2);
 }
@@ -556,7 +672,11 @@ fn u_write_probe(id: &str, what: &str, addr: usize, val: u32, byte: bool) {
         (true, Err(_)) => "M read-back traps",
     };
     let _ = if byte { m_sb(addr, old as u8) } else { m_sw(addr, old) };
-    check(id, None, format_args!("{what} {addr:#x}: before {old:#x}, U wrote {val:#x}: {t}; after {}: {effect}", show(after)));
+    check(
+        id,
+        None,
+        format_args!("{what} {addr:#x}: before {old:#x}, U wrote {val:#x}: {t}; after {}: {effect}", show(after)),
+    );
 }
 fn b4_clic_from_u() {
     begin("B4");
@@ -579,7 +699,12 @@ fn b4_clic_from_u() {
     let t = user(uaddr(u_load), MTIME_LO, 0, false);
     check("B4.mtime-u", None, format_args!("U read of mtime lo: {t} a0={:#x}", t.a0));
     begin("B4.clic-user");
-    pl!("B4 CLIC user window M reads: +0 {} +4 {} +8 {}", show(m_lw(CLIC_USER)), show(m_lw(CLIC_USER + 4)), show(m_lw(CLIC_USER + 8)));
+    pl!(
+        "B4 CLIC user window M reads: +0 {} +4 {} +8 {}",
+        show(m_lw(CLIC_USER)),
+        show(m_lw(CLIC_USER + 4)),
+        show(m_lw(CLIC_USER + 8))
+    );
     u_write_probe("B4.clic-user", "CLIC user window +8", CLIC_USER + 8, 0xFF00_0000, false);
     // The other core's windows (CLIC_THRESH + OTHER_CORE, ...) are not probed: with core 1 held off in ROM state
     // an M read of them stalled the bus until reset (#608 run 1, probe ed277b62).
@@ -604,39 +729,65 @@ fn b2_locks() {
     // a) a locked R-only NAPOT entry: M read, U read and U write.
     pmp_set(E_LOCK_NAPOT, napot(LOCK_A, 0x100), NAPOT | R | L);
     let m_r = m_lw(LOCK_A);
-    check("B2.lock-m-read", Some(m_r == Ok(0x1111_1111)), format_args!("locked R entry {E_LOCK_NAPOT} (cfg {:#04x}): M read {}", pmp_cfg_byte(E_LOCK_NAPOT), show(m_r)));
+    check(
+        "B2.lock-m-read",
+        Some(m_r == Ok(0x1111_1111)),
+        format_args!("locked R entry {E_LOCK_NAPOT} (cfg {:#04x}): M read {}", pmp_cfg_byte(E_LOCK_NAPOT), show(m_r)),
+    );
     let u_r = user(uaddr(u_load), LOCK_A, 0, false);
     let u_w = user(uaddr(u_store), LOCK_A, 0x3333_3333, false);
-    check("B2.lock-grants-u", Some(u_r.is_ecall_u() && u_w.code() == 7),
-        format_args!("locked R entry, no other U grant: U read {u_r}; U write {u_w}"));
+    check(
+        "B2.lock-grants-u",
+        Some(u_r.is_ecall_u() && u_w.code() == 7),
+        format_args!("locked R entry, no other U grant: U read {u_r}; U write {u_w}"),
+    );
     // b) writes to a locked entry are ignored.
     let addr0 = hw::pmpaddr_r(E_LOCK_NAPOT);
     let cfg0 = pmp_cfg_byte(E_LOCK_NAPOT);
     hw::pmpaddr_w(E_LOCK_NAPOT, napot(LOCK_B, 0x100));
     hw::pmp_cfg_set(E_LOCK_NAPOT, NAPOT | R | W | X);
     let (addr1, cfg1) = (hw::pmpaddr_r(E_LOCK_NAPOT), pmp_cfg_byte(E_LOCK_NAPOT));
-    check("B2.lock-sticky", Some(addr1 == addr0 && cfg1 == cfg0),
-        format_args!("rewrite locked entry: addr {addr0:#x} -> {addr1:#x}, cfg {cfg0:#04x} -> {cfg1:#04x} (expect unchanged)"));
+    check(
+        "B2.lock-sticky",
+        Some(addr1 == addr0 && cfg1 == cfg0),
+        format_args!(
+            "rewrite locked entry: addr {addr0:#x} -> {addr1:#x}, cfg {cfg0:#04x} -> {cfg1:#04x} (expect unchanged)"
+        ),
+    );
     // c) a locked TOR entry i and the pmpaddr[i-1] it uses as its base.
     hw::pmpaddr_w(E_TOR_LO, LOCK_B >> 2);
     pmp_set(E_TOR_HI, (LOCK_B + 0x100) >> 2, TOR | R | L);
     let lo0 = hw::pmpaddr_r(E_TOR_LO);
     hw::pmpaddr_w(E_TOR_LO, (LOCK_B + 0x80) >> 2);
     let lo1 = hw::pmpaddr_r(E_TOR_LO);
-    check("B2.tor", None, format_args!("locked TOR entry {E_TOR_HI}: pmpaddr{E_TOR_LO} {lo0:#x} -> {lo1:#x} after a write ({})",
-        if lo1 == lo0 { "locked with i" } else { "still writable" }));
+    check(
+        "B2.tor",
+        None,
+        format_args!(
+            "locked TOR entry {E_TOR_HI}: pmpaddr{E_TOR_LO} {lo0:#x} -> {lo1:#x} after a write ({})",
+            if lo1 == lo0 { "locked with i" } else { "still writable" }
+        ),
+    );
     let u_tor = user(uaddr(u_store), LOCK_B + 0x10, 0x4444_4444, false);
     check("B2.tor-u", Some(u_tor.code() == 7), format_args!("U write inside the locked R TOR range: {u_tor}"));
     // d) with locked entries present, is an address no entry matches still open to M? (uncached L2MEM alias)
     begin("B2.unmatched");
     let m_un = m_lw(SCRATCH_UNCACHED);
-    check("B2.unmatched-m", None, format_args!("M read of unmatched {SCRATCH_UNCACHED:#x} with locked entries present: {}", show(m_un)));
+    check(
+        "B2.unmatched-m",
+        None,
+        format_args!("M read of unmatched {SCRATCH_UNCACHED:#x} with locked entries present: {}", show(m_un)),
+    );
     // e) last: an M write the locked R entry forbids. Runs 4 and 5 stopped here with no trap delivered.
     begin("B2.m-write");
     pl!("CHECK B2.m-write INFO an M store to the locked R entry follows; no CHECK line after this means the core hung (no trap)");
     hw::drain();
     let m_w = m_sw(LOCK_A, 0xdead_beef);
-    check("B2.m-write", Some(matches!(m_w, Err(t) if t.code() == 7)), format_args!("M store to the locked R entry: {:?}", m_w.err()));
+    check(
+        "B2.m-write",
+        Some(matches!(m_w, Err(t) if t.code() == 7)),
+        format_args!("M store to the locked R entry: {:?}", m_w.err()),
+    );
 }
 
 #[panic_handler]
