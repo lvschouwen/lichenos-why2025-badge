@@ -29,10 +29,13 @@ impl Mem {
     }
 }
 impl Scrub for Mem {
-    fn zero(&mut self, off: usize, len: usize) -> bool {
+    fn zero(&mut self, off: usize, len: usize, kind: Kind) -> bool {
         if std::mem::take(&mut self.fail) {
             return false;
         }
+        // The kind passed is the arena's: an exec page is never zeroed as data (that would skip the ICache).
+        let exec = off >= EXEC.0 && off + len <= EXEC.0 + EXEC.1;
+        assert_eq!(kind == Kind::Exec, exec, "{off:#x}+{len:#x} zeroed as {kind:?}");
         self.zeroed.push((off, len));
         self.write(off, len, 0);
         true

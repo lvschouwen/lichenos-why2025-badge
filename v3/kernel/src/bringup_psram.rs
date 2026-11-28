@@ -82,6 +82,7 @@ pub fn run(t: &mut Tally) {
     own_rows(t, &a, a_sp);
     deny_rows(t, &a, &b, a_sp);
     zero_row(t, a, b);
+    icache_row(t);
 }
 
 /// Owners 0 and 1 get a data block each; an exec block for 0; a third block over the quota is refused.
@@ -196,6 +197,43 @@ fn zero_row(t: &mut Tally, a: Block, b: Block) {
             a.len / 4,
             a.off,
             b.off
+        ),
+    );
+}
+
+/// `li a0, 1; li a7, EXIT; ecall`: exit 1 from wherever it is loaded.
+const EXIT1: [u32; 3] = [0x0010_0513, 0x0010_0893, 0x0000_0073];
+const ILLEGAL: u16 = 2;
+
+/// Code in PSRAM (the exec arena), and stale code never survives a free: owner 3 runs EXIT1 from its exec block
+/// twice (the second run from a warm ICache), its blocks are released, owner 4 gets the same exec page and running it
+/// must fault illegal (the page is zeros). Without the ICache invalidate in the zeroing, the old lines would run.
+fn icache_row(t: &mut Tally) {
+    begin("psram.icache");
+    let _ = psram::set_quota(3, QUOTA).and(psram::set_quota(4, QUOTA));
+    let run = |b: &Block| {
+        let Some(r) = psram::grant(b) else { platform::exit(4) };
+        crate::pmp::load(crate::pmp::checked(&[r]).plan());
+        mtrap::run_u(r.base as usize, r.end as usize, 0, 0)
+    };
+    let e = psram::alloc(3, Kind::Exec, PAGE).map(|x| x.1);
+    let first = e.map_or([None; 2], |e| {
+        let ok = psram::load_code(&e, &EXIT1);
+        [ok.then(|| run(&e).exit).flatten(), ok.then(|| run(&e).exit).flatten()]
+    });
+    let released = psram::release_owner(3);
+    let e2 = psram::alloc(4, Kind::Exec, PAGE).map(|x| x.1);
+    let same = e.is_ok() && e2.map(|b| b.off) == e.map(|b| b.off);
+    let code = e2.map_or(0xFFF, |b| run(&b).fault.map_or(0xFFF, |f| lichen_kcore::trap::decode(f.cause).code));
+    let _ = psram::release_owner(4);
+    record(
+        t,
+        "psram.icache",
+        Some(first == [Some(1); 2] && released && same && code == ILLEGAL),
+        format_args!(
+            "owner 3 ran its PSRAM code: exits {:?} {:?} (want 1 1); released {released}; owner 4 got the same page \
+             {same}, running it: code {code} (want {ILLEGAL}, stale code would exit)",
+            first[0], first[1]
         ),
     );
 }

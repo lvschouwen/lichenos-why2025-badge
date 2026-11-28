@@ -1,9 +1,9 @@
 //! PSRAM in the kernel (#621): bring-up, the kernel-only MMU map, and app memory from `lichen_kcore::palloc`.
 //!
 //! - **Clock:** the kernel stays at the ROM clock (CPU on the 40 MHz XTAL) with PSRAM at 120 MHz. `cpu_to_360` would
-//!   make every cached rate stale (#655 `clock_changed`) and its code does not fit the loaded-image limit with this.
-//!   The bring-up of #620 passed walking bits, random fills and retention at CPU 40 MHz; the bit-8 flips it found are
-//!   uncached single-word stores, which this module never does (it writes through the cached alias only).
+//!   make every cached rate stale and lands with #655's `clock_changed`, kept separate. The bring-up of #620 passed
+//!   walking bits, random fills and retention at CPU 40 MHz, and the `psram.zero` row shows cached write-back reaching
+//!   the chip at this clock; the bit-8 flips #620 found are uncached single-word stores, which this module never does.
 //! - **MMU:** `map_identity` puts physical page n at virtual page n of the window, once: a physical page has exactly
 //!   one cached address and the hardware's uncached alias of it. The MMU registers are SPIMEM2 MMIO, which no U view
 //!   grants. The excluded range (#620) stays unmapped.
@@ -12,6 +12,7 @@
 //! - **Metadata:** the allocator is a zero-initialised static, so it lives in bss in L2MEM. Nothing in-band in PSRAM.
 //! - **Single context:** core 0 only, outside traps (the bring-up and, later, the loader).
 use crate::global::Global;
+use crate::kprintln;
 use crate::platform::hw;
 use hw::psram::{self, map};
 use lichen_kcore::palloc::{self, Block, Error, Handle, Kind, Palloc, Scrub};
@@ -28,18 +29,33 @@ const _: () = assert!(palloc::HOLE_START == map::EXCLUDED_START && palloc::HOLE_
 
 static ALLOC: Global<Palloc> = Global::new(Palloc::EMPTY);
 
-/// Zeroing through the cached alias, then written back and dropped from the caches: the chip holds zeros and no
-/// cached line holds the old data. (The uncached alias is never written: #620's bit-8 flips.)
+/// Zeroing through the cached alias, then written back and dropped from the data caches: the chip holds zeros and no
+/// cached line holds the old data. Exec blocks are also dropped from both cores' L1 ICache (`sync_icache`: ROM
+/// `Cache_Invalidate_Addr` with the ICache map, then `fence.i`): the next owner must not run the last owner's code.
+/// (The uncached alias is never written: #620's bit-8 flips.)
 struct CachedZero;
 impl Scrub for CachedZero {
-    fn zero(&mut self, off: usize, len: usize) -> bool {
+    fn zero(&mut self, off: usize, len: usize, kind: Kind) -> bool {
         let Some(a) = map::cached_range(off, len) else { return false };
         // SAFETY: [off, off + len) is mapped PSRAM inside an arena (the allocator only names its own pages), which no
-        // one is granted while it is being zeroed.
+        // one is granted or executing while it is being zeroed; core 0 is the one user of the cache sync registers.
         unsafe {
             core::ptr::write_bytes(a as *mut u8, 0, len);
-            map::cache_writeback_invalidate(a, len) == 0
+            map::cache_writeback_invalidate(a, len) == 0 && (kind == Kind::Data || hw::cache::sync_icache(a, len) == 0)
         }
+    }
+}
+
+/// Copy `code` into exec block `b` and make it visible to instruction fetch on both cores. False if it does not fit
+/// or a cache operation failed (the code must not run then).
+pub fn load_code(b: &Block, code: &[u32]) -> bool {
+    let Some(a) = map::cached_range(b.off, b.len).filter(|_| b.kind == Kind::Exec && code.len() * 4 <= b.len) else {
+        return false;
+    };
+    // SAFETY: an exec block the kernel owns while no U runs; `a` is its mapped cached alias, `code` fits.
+    unsafe {
+        core::ptr::copy_nonoverlapping(code.as_ptr(), a as *mut u32, code.len());
+        hw::cache::sync_icache(a, code.len() * 4) == 0
     }
 }
 
@@ -47,7 +63,8 @@ impl Scrub for CachedZero {
 pub fn up() -> Result<psram::Info, &'static str> {
     // SAFETY: the one caller, core 0 during bring-up; nothing else uses PSRAM, MPLL or the MSPI pins.
     let info =
-        unsafe { psram::init(psram::Upto::Tuned, psram::TuneOverride::default(), &mut |_| {}) }.map_err(|_| "init")?;
+        unsafe { psram::init(psram::Upto::Tuned, psram::TuneOverride::default(), &mut |a| kprintln!("psram: {a}")) }
+            .map_err(|_| "init")?;
     // SAFETY: init reached Tuned. The L2 tags are undefined after a download-mode boot: invalidate before the first map.
     let rc = unsafe { map::cache_invalidate_all_l2() | map::map_identity(PAGES) };
     if rc != 0 {

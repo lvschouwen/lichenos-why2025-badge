@@ -37,7 +37,6 @@ step "clippy -D warnings"
 CL=(cargo clippy --locked -q --target-dir target/clippy)
 "${CL[@]}" -p lichen-kcore -p lichen-abi --all-targets --target $HOST -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --target $TARGET -- -D warnings
-"${CL[@]}" -p lichen-platform-esp32p4 --features quiet-init --target $TARGET -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --all-targets --target $HOST -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --features bench-experiments --target $TARGET -- -D warnings
 "${CL[@]}" -p lichen-platform-esp32p4 --features bench-experiments --all-targets --target $HOST -- -D warnings

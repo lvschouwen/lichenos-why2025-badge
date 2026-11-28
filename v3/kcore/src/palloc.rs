@@ -75,8 +75,10 @@ pub enum Error {
 }
 
 /// Zeroes physical PSRAM. `zero` returns false when the bytes may not have reached the memory (a cache sync failed).
+/// For `Kind::Exec` it must also drop the range from every instruction cache: stale code of the previous owner must
+/// not run in the next owner's block.
 pub trait Scrub {
-    fn zero(&mut self, off: usize, len: usize) -> bool;
+    fn zero(&mut self, off: usize, len: usize, kind: Kind) -> bool;
 }
 
 /// A block handle: generation << 8 | index. Stale after `free`.
@@ -217,7 +219,7 @@ impl Palloc {
                 continue;
             }
             let run = (q..p + n).take_while(|&r| !a.clean.get(r)).count();
-            if !s.zero(a.base + q * PAGE, run * PAGE) {
+            if !s.zero(a.base + q * PAGE, run * PAGE, kind) {
                 return Err(Error::Scrub);
             }
             a.clean.set(q, run, true);
@@ -252,7 +254,7 @@ impl Palloc {
         let a = &mut self.arenas[b.kind as usize];
         let (p, n) = ((b.off - a.base) / PAGE, b.len / PAGE);
         a.used.set(p, n, false);
-        let zeroed = s.zero(b.off, b.len);
+        let zeroed = s.zero(b.off, b.len, b.kind);
         a.clean.set(p, n, zeroed);
         zeroed
     }
