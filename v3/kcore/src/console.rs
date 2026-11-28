@@ -26,8 +26,6 @@ use core::fmt::{self, Display, Write};
 pub const LINE_MAX: usize = 96;
 /// Longest app name `run` accepts.
 pub const APP_NAME_MAX: usize = 16;
-/// Highest pid `kill` accepts; pid 0 is the kernel and never killable.
-pub const PID_MAX: u8 = 64;
 
 /// Why a received line was dropped before parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,8 +196,9 @@ fn one_arg(arg: Option<&str>, extra: bool) -> Result<&str, ParseError> {
     }
 }
 
-/// Parse one line (words split on spaces, commands are case-sensitive).
-pub fn parse(line: &str) -> Result<Command, ParseError> {
+/// Parse one line (words split on spaces, commands are case-sensitive). `pid_max` is the kernel's process-table size:
+/// `kill` accepts 1..=pid_max (pid 0 is the kernel, never killable) and no leading zeros.
+pub fn parse(line: &str, pid_max: u8) -> Result<Command, ParseError> {
     let mut words = line.split(' ').filter(|w| !w.is_empty());
     let name = words.next().ok_or(ParseError::Empty)?;
     let arg = words.next();
@@ -208,11 +207,15 @@ pub fn parse(line: &str) -> Result<Command, ParseError> {
         "run" => AppName::new(one_arg(arg, extra)?).map(Command::Run).ok_or(ParseError::BadAppName),
         "kill" => {
             let a = one_arg(arg, extra)?;
-            if a.is_empty() || a.len() > 3 || !a.bytes().all(|c| c.is_ascii_digit()) {
+            if a.is_empty()
+                || a.len() > 3
+                || (a.len() > 1 && a.starts_with('0'))
+                || !a.bytes().all(|c| c.is_ascii_digit())
+            {
                 return Err(ParseError::BadPid);
             }
             match a.parse::<u8>() {
-                Ok(p) if (1..=PID_MAX).contains(&p) => Ok(Command::Kill(p)),
+                Ok(p) if (1..=pid_max).contains(&p) => Ok(Command::Kill(p)),
                 _ => Err(ParseError::PidRange),
             }
         }
@@ -321,6 +324,16 @@ impl Display for Tok<'_> {
             return f.write_char('-');
         }
         self.0.bytes().try_for_each(|b| f.write_char(if b.is_ascii_graphic() && b != b'=' { b as char } else { '_' }))
+    }
+}
+
+/// Render the reply; if the sink fails midway, append `err reason=output_truncated` so the reply still ends in a
+/// terminator (the sink may be full again, then the error is returned). The kernel's UART writer is blocking and
+/// infallible in practice; this covers a bounded or test sink.
+pub fn render_or_truncated<W: Write>(cmd: &Command, snap: &Snapshot, w: &mut W) -> fmt::Result {
+    match render(cmd, snap, w) {
+        Ok(()) => Ok(()),
+        Err(_) => render_error(w, "output_truncated"),
     }
 }
 
@@ -454,41 +467,41 @@ mod tests {
         }
         #[test]
         fn parse_never_panics(s in "\\PC{0,120}") {
-            let _ = parse(&s);
+            let _ = parse(&s, 64);
         }
     }
 
     #[test]
     fn parses_simple_commands() {
         for (n, c) in SIMPLE {
-            assert_eq!(parse(n), Ok(c));
-            assert_eq!(parse(&std::format!("  {n}  ")), Ok(c));
-            assert_eq!(parse(&std::format!("{n} x")), Err(ParseError::ExtraArgs));
+            assert_eq!(parse(n, 64), Ok(c));
+            assert_eq!(parse(&std::format!("  {n}  "), 64), Ok(c));
+            assert_eq!(parse(&std::format!("{n} x"), 64), Err(ParseError::ExtraArgs));
         }
-        assert_eq!(parse(""), Err(ParseError::Empty));
-        assert_eq!(parse("   "), Err(ParseError::Empty));
-        assert_eq!(parse("PS"), Err(ParseError::UnknownCommand));
-        assert_eq!(parse("reboot"), Err(ParseError::UnknownCommand));
+        assert_eq!(parse("", 64), Err(ParseError::Empty));
+        assert_eq!(parse("   ", 64), Err(ParseError::Empty));
+        assert_eq!(parse("PS", 64), Err(ParseError::UnknownCommand));
+        assert_eq!(parse("reboot", 64), Err(ParseError::UnknownCommand));
     }
 
     #[test]
     fn parses_run_and_kill() {
-        assert_eq!(parse("run hello-1").map(|c| matches!(c, Command::Run(a) if a.as_str() == "hello-1")), Ok(true));
-        assert_eq!(parse("run"), Err(ParseError::MissingArg));
-        assert_eq!(parse("run a b"), Err(ParseError::ExtraArgs));
-        assert_eq!(parse("run Hello"), Err(ParseError::BadAppName));
-        assert_eq!(parse("run ../x"), Err(ParseError::BadAppName));
-        assert_eq!(parse("run 12345678901234567"), Err(ParseError::BadAppName));
-        assert_eq!(parse("kill 7"), Ok(Command::Kill(7)));
-        assert_eq!(parse("kill 64"), Ok(Command::Kill(64)));
-        assert_eq!(parse("kill 65"), Err(ParseError::PidRange));
-        assert_eq!(parse("kill 0"), Err(ParseError::PidRange));
-        assert_eq!(parse("kill 256"), Err(ParseError::PidRange));
-        assert_eq!(parse("kill 99999999"), Err(ParseError::BadPid));
-        assert_eq!(parse("kill -1"), Err(ParseError::BadPid));
-        assert_eq!(parse("kill x"), Err(ParseError::BadPid));
-        assert_eq!(parse("kill"), Err(ParseError::MissingArg));
-        assert_eq!(parse("kill 1 2"), Err(ParseError::ExtraArgs));
+        assert_eq!(parse("run hello-1", 64).map(|c| matches!(c, Command::Run(a) if a.as_str() == "hello-1")), Ok(true));
+        assert_eq!(parse("run", 64), Err(ParseError::MissingArg));
+        assert_eq!(parse("run a b", 64), Err(ParseError::ExtraArgs));
+        assert_eq!(parse("run Hello", 64), Err(ParseError::BadAppName));
+        assert_eq!(parse("run ../x", 64), Err(ParseError::BadAppName));
+        assert_eq!(parse("run 12345678901234567", 64), Err(ParseError::BadAppName));
+        assert_eq!(parse("kill 7", 64), Ok(Command::Kill(7)));
+        assert_eq!(parse("kill 64", 64), Ok(Command::Kill(64)));
+        assert_eq!(parse("kill 65", 64), Err(ParseError::PidRange));
+        assert_eq!(parse("kill 0", 64), Err(ParseError::PidRange));
+        assert_eq!(parse("kill 256", 64), Err(ParseError::PidRange));
+        assert_eq!(parse("kill 99999999", 64), Err(ParseError::BadPid));
+        assert_eq!(parse("kill -1", 64), Err(ParseError::BadPid));
+        assert_eq!(parse("kill x", 64), Err(ParseError::BadPid));
+        assert_eq!(parse("kill", 64), Err(ParseError::MissingArg));
+        assert_eq!(parse("kill 1 2", 64), Err(ParseError::ExtraArgs));
     }
 
     fn render_to(cmd: &Command, snap: &Snapshot) -> String {
@@ -534,8 +547,92 @@ mod tests {
         );
         assert_eq!(t(Command::Wdt), "wdt enabled=1 timeout_ms=5000 feeds=8 since_feed_ms=12\nok\n");
         assert_eq!(t(Command::Help), "help cmds=ver,boot,up,clk,mem,ps,ipc,faults,wdt,run,kill,help\nok\n");
-        assert_eq!(t(parse("run demo").unwrap()), "run app=demo state=requested\nok\n");
+        assert_eq!(t(parse("run demo", 64).unwrap()), "run app=demo state=requested\nok\n");
         assert_eq!(t(Command::Kill(3)), "kill pid=3 state=requested\nok\n");
+    }
+
+    #[test]
+    fn every_simple_command_is_in_help() {
+        let help: std::vec::Vec<&str> = HELP.split(',').collect();
+        for (n, _) in SIMPLE {
+            assert!(help.contains(&n), "{n}");
+        }
+        assert!(help.contains(&"run") && help.contains(&"kill"));
+        assert_eq!(help.len(), SIMPLE.len() + 2);
+    }
+
+    /// Fails exactly one write (the `fail_at`th), accepts the rest.
+    struct Flaky {
+        out: String,
+        n: usize,
+        fail_at: usize,
+    }
+    impl Write for Flaky {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            self.n += 1;
+            if self.n == self.fail_at {
+                return Err(fmt::Error);
+            }
+            self.out.push_str(s);
+            Ok(())
+        }
+    }
+
+    fn empty_snap() -> Snapshot<'static> {
+        Snapshot {
+            version: VersionInfo { kernel: "k", stage: "s", build: "b" },
+            boot: BootInfo { slot: 0, reset: "r", count: 0 },
+            uptime_ms: 0,
+            clock: ClockInfo { cpu_hz: 0, psram_hz: 0 },
+            pools: &[],
+            procs: &[],
+            ipc: IpcInfo::default(),
+            faults: &[],
+            wdt: WdtInfo { enabled: false, timeout_ms: 0, feeds: 0, since_feed_ms: 0 },
+        }
+    }
+
+    #[test]
+    fn sink_failure_ends_with_truncated_error() {
+        let snap = empty_snap();
+        let mut w = Flaky { out: String::new(), n: 0, fail_at: usize::MAX };
+        render_or_truncated(&Command::Ps, &snap, &mut w).unwrap();
+        assert_eq!(w.out, "ps count=0\nok\n");
+        // Fail the first write of `ps`: the reply must still end with the truncation terminator, and never with `ok`.
+        let mut w = Flaky { out: String::new(), n: 0, fail_at: 1 };
+        render_or_truncated(&Command::Ps, &snap, &mut w).unwrap();
+        assert!(w.out.ends_with("err reason=output_truncated\n") && !w.out.contains("ok\n"));
+    }
+
+    proptest! {
+        #[test]
+        fn text_fields_keep_the_grammar(name in "\\PC{0,12}", reset in any::<std::vec::Vec<u8>>(), build in "[\\x00-\\x7f]{0,12}") {
+            let reset = String::from_utf8_lossy(&reset).into_owned();
+            let pools = [PoolInfo { name: &name, total: 1, used: 2, peak: 3 }];
+            let procs = [ProcInfo { pid: 1, name: &name, state: ProcState::Ready, cycles: 1, mem_used: 2 }];
+            let mut snap = empty_snap();
+            snap.version.build = &build;
+            snap.boot.reset = &reset;
+            snap.pools = &pools;
+            snap.procs = &procs;
+            let cases = [(Command::Ver, 1usize), (Command::Boot, 1), (Command::Mem, 3), (Command::Ps, 2)];
+            for (cmd, n) in cases {
+                let out = render_to(&cmd, &snap);
+                let lines: std::vec::Vec<&str> = out.split_terminator('\n').collect();
+                prop_assert_eq!(lines.len(), n + 1);
+                prop_assert_eq!(*lines.last().unwrap(), "ok");
+                for l in &lines[..n] {
+                    let mut f = l.split(' ');
+                    let tag = f.next().unwrap();
+                    prop_assert!(!tag.is_empty() && !tag.contains('='));
+                    for kv in f {
+                        let (k, v) = kv.split_once('=').expect("k=v");
+                        prop_assert!(!k.is_empty() && !v.is_empty() && !v.contains('='));
+                        prop_assert!(v.bytes().all(|c| c.is_ascii_graphic()));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
