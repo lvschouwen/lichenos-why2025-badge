@@ -28,10 +28,12 @@ pub const UNTIL: [usize; APPS] = [30, 40];
 pub const TARGET_OFFSET: usize = 64;
 /// CPU budget per spinner, in ticks: far above what UNTIL needs, so only a spinner that never faults reaches it.
 pub const BUDGET: u32 = 200;
-/// The stage ends once both spinners ended and idle ran this many ticks.
+/// The stage ends once both spinners ended and idle ran this many ticks (OP_PROCS a[1] overrides it) ...
 pub const IDLE_TICKS: u32 = 10;
-/// ... or at this deadline, whatever happened.
+/// ... or at this deadline, whatever happened (OP_PROCS a[0], in ms, overrides it).
 const DEADLINE_US: u64 = 1_000_000;
+/// A spinner that never touches the other one's data (its tick never comes): it can only end on its budget.
+pub const NEVER: usize = usize::MAX;
 /// `stage` reply a[0].
 pub const DONE: u32 = 0;
 pub const TIMED_OUT: u32 = 1;
@@ -55,6 +57,8 @@ const STACK1: usize = 8192;
 const PAINT: u32 = 0x5A17_5A17;
 /// Set on core 1 around `stage`'s task_run: `leave` refuses to task_leave outside it (review L5).
 static IN_STAGE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// The idle ticks this stage waits for (core 1 only, set by `stage`).
+static IDLE_GOAL: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(IDLE_TICKS);
 /// mintstatus as `leave` found it, inside the trap that ends the stage (core 1 only).
 static LEAVE_MINTSTATUS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -147,7 +151,7 @@ pub fn target(i: usize) -> usize {
 ///
 /// The views are planned here at core 0's PMP granularity (`pmp::gran()` of hart 0). Both harts measured 128 B at
 /// boot (pmp.report), and `pmp::switch` on core 1 halts fail-closed if its own granularity differs (review L4).
-pub fn prepare() -> Result<(), LoadError> {
+pub fn prepare(until: [usize; APPS], budget: [u32; APPS]) -> Result<(), LoadError> {
     // SAFETY: core 1 does not use its Kernel until OP_PROCS (module doc); this is the only reference to it.
     let k = unsafe { sched::of(1) };
     k.reset();
@@ -156,7 +160,7 @@ pub fn prepare() -> Result<(), LoadError> {
     for (i, name) in ["P0", "P1"].into_iter().enumerate() {
         let s = platform::slot(i);
         let img = spin_image(&s, &mut buf);
-        loader::load(k, i, name, img, s, [UNTIL[i], target(i), i, s.data], Some(BUDGET))?;
+        loader::load(k, i, name, img, s, [until[i], target(i), i, s.data], Some(budget[i]))?;
     }
     // SAFETY: linker symbols; only their addresses are used.
     let (utext, idle_pc) = unsafe { (sym(&_utext), u_idle as *const () as usize) };
@@ -197,9 +201,11 @@ fn high_water(bottom: usize, top: usize) -> u32 {
     first.map_or(0, |a| (top - a) as u32)
 }
 
-/// Core 1, on OP_PROCS: run the prepared processes until the stage ends. Reply a = [outcome, ticks, mintstatus after
-/// the stage, mintstatus at the leave inside its last trap, stack bytes used below `stage`'s frame, 0].
-pub fn stage() -> [u32; 6] {
+/// Core 1, on OP_PROCS: run the prepared processes until the stage ends, at the latest after `deadline_ms` (0: 1 s);
+/// it is done once both spinners ended and idle ran `idle_ticks` (0: IDLE_TICKS). Reply a = [outcome, ticks,
+/// mintstatus after the stage, mintstatus at the leave inside its last trap, stack bytes used below `stage`'s frame,
+/// bit 0: the PMP matched its shadow at the start, bit 1: at the end].
+pub fn stage(deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
     // Entered from the mailbox loop at level 0: a raised CLIC level (mintstatus.mil) or a nonzero mcause.mpil (bits
     // 23:16, what the first mret would restore) would mask the tick for the whole stage (review L1). Read only.
     if hw::trap::mintstatus() != 0 || (hw::trap::mcause() >> 16) & 0xFF != 0 {
@@ -215,7 +221,10 @@ pub fn stage() -> [u32; 6] {
         if k.sup != Supervisor::Procs || k.procs[0].state != State::Ready {
             return [NOT_PREPARED, 0, 0, 0, 0, 0];
         }
-        k.deadline = Some(hw::clint::mtime() + crate::timebase::us_to_ticks(DEADLINE_US));
+        let us = if deadline_ms == 0 { DEADLINE_US } else { deadline_ms as u64 * 1000 };
+        k.deadline = Some(hw::clint::mtime() + crate::timebase::us_to_ticks(us));
+        let goal = if idle_ticks == 0 { IDLE_TICKS } else { idle_ticks };
+        IDLE_GOAL.store(goal, core::sync::atomic::Ordering::Relaxed);
         // mscratch = 0 before the vector: MIE is clear here (the mailbox loop never sets it), so nothing traps
         // in between, and the first trap from U finds the process context task_restore put there.
         csr::clear_mscratch();
@@ -224,8 +233,9 @@ pub fn stage() -> [u32; 6] {
         let ctx = sched::schedule_current(k);
         csr::mstatus_return_to_user();
         trap::check_return(k, ctx);
-        ctx
+        (ctx, pmp::shadow_matches())
     };
+    let (ctx, shadow_start) = ctx;
     // SAFETY: ctx is process 0's context, set up by the loader; MPP = U, its view is loaded and checked, the vector
     // and the tick are this hart's. Control comes back here only through task_leave (`leave`).
     IN_STAGE.store(true, core::sync::atomic::Ordering::Relaxed);
@@ -234,17 +244,19 @@ pub fn stage() -> [u32; 6] {
     platform::timer_stop();
     csr::set_mtvec(mtvec);
     csr::set_mscratch(mscratch);
+    let shadow_end = pmp::shadow_matches();
     let mintstatus = hw::trap::mintstatus();
     let at_leave = LEAVE_MINTSTATUS.load(core::sync::atomic::Ordering::Relaxed);
     // SAFETY: the stage is over, no trap handler borrow is live (task_leave dropped those frames).
     let k = unsafe { sched::this() };
-    [outcome, k.ticks as u32, mintstatus, at_leave, high_water(bottom, top), 0]
+    let shadow = shadow_start as u32 | (shadow_end as u32) << 1;
+    [outcome, k.ticks as u32, mintstatus, at_leave, high_water(bottom, top), shadow]
 }
 
 /// The stage's supervisor, after every trap on core 1: end it when its work is done or its deadline passed.
 pub fn poll(k: &mut Kernel) {
     let apps_done = k.procs[..APPS].iter().all(|p| p.state == State::Ended);
-    if apps_done && k.procs[IDLE].ticks >= IDLE_TICKS {
+    if apps_done && k.procs[IDLE].ticks >= IDLE_GOAL.load(core::sync::atomic::Ordering::Relaxed) {
         leave(DONE);
     }
     if lichen_kcore::sched::past_deadline(hw::clint::mtime(), k.deadline) {

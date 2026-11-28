@@ -42,12 +42,14 @@ pub const OP_TICK: u32 = 4;
 pub const OP_USPIN: u32 = 5;
 /// Reply, then park in wfi for good.
 pub const OP_PARK: u32 = 6;
-/// Run the U stub at a[0] (it must lie on the U stub page) with a0 = a[1] on core 1 under its U view.
-/// Reply a = [fault code (0xFFF none), mtval, epc, exit a0, 1 if it exited, 0]; all u32::MAX for a bad entry.
+/// Run the U stub at a[0] (it must lie on the U stub page) with a0 = a[1] on core 1 under its U view, run limit a[2]
+/// ms (0: run_u's own). Reply a = [fault code (0xFFF none), mtval, epc, exit a0, 1 if it exited, bit 0 timed out |
+/// mintstatus.mil after the run << 8]; all u32::MAX for a bad entry.
 pub const OP_URUN: u32 = 7;
 /// Core 1's U-visible boot state. Reply a = [HWLP state 0x7f1, PIE state 0x7f2, mcounteren, mstatus, 0, 0].
 pub const OP_BOOT: u32 = 8;
-/// Run the process stage core 0 prepared in core 1's table (#617, `procs::stage`). Reply a = [outcome, ticks, 0..].
+/// Run the process stage core 0 prepared in core 1's table (#617, `procs::stage`): a[0] deadline ms, a[1] idle
+/// ticks to wait for (0: the defaults). Reply: see `procs::stage`.
 pub const OP_PROCS: u32 = 9;
 /// Set on every reply.
 pub const REPLY: u32 = 0x8000_0000;
@@ -239,8 +241,8 @@ extern "C" fn kmain1() -> ! {
             }
             OP_TICK => tick_run(m.a[0] as u64, m.a[1]),
             OP_USPIN => u_spin(m.a[0] as usize),
-            OP_URUN => u_run(m.a[0] as usize, m.a[1] as usize),
-            OP_PROCS => crate::procs::stage(),
+            OP_URUN => u_run(m.a[0] as usize, m.a[1] as usize, m.a[2]),
+            OP_PROCS => crate::procs::stage(m.a[0], m.a[1]),
             OP_BOOT => {
                 [hw::trap::hwlp_state(), hw::trap::pie_state(), hw::trap::mcounteren(), hw::trap::mstatus(), 0, 0]
             }
@@ -309,15 +311,19 @@ fn u_view() -> usize {
 
 /// Run one U stub on core 1 (the core-local deny rows and the access shapes, review H1 on both harts). The entry must
 /// lie on the U stub page, so a bad message can never make core 1 run U code anywhere else.
-fn u_run(entry: usize, a0: usize) -> [u32; 6] {
+fn u_run(entry: usize, a0: usize, limit_ms: u32) -> [u32; 6] {
     // SAFETY: a linker symbol; only its address is used.
     let utext = unsafe { &_utext as *const u8 as usize };
     if !(utext..utext + UPAGE).contains(&entry) {
         return [u32::MAX; 6];
     }
     let udata = u_view();
-    let u = mtrap::run_u(entry, udata + UPAGE, a0, 0);
+    let u = match limit_ms {
+        0 => mtrap::run_u(entry, udata + UPAGE, a0, 0),
+        ms => mtrap::run_u_limit(entry, udata + UPAGE, a0, 0, ms as u64 * 1000),
+    };
     let (code, tval, epc) =
         u.fault.map_or((0xFFF, 0, 0), |f| (lichen_kcore::trap::decode(f.cause).code as u32, f.tval, f.epc));
-    [code, tval, epc, u.exit.unwrap_or(0) as u32, u.exit.is_some() as u32, 0]
+    let mil = hw::trap::mintstatus() >> 24;
+    [code, tval, epc, u.exit.unwrap_or(0) as u32, u.exit.is_some() as u32, u.timed_out as u32 | mil << 8]
 }

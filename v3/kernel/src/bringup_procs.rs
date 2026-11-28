@@ -1,10 +1,13 @@
 //! #617 bench rows, run by core 0 before core 1 parks: the process stage on core 1 (`procs`), judged from core 1's
 //! process table once it replied, the switch cost PERF line, and a ping afterwards as proof core 1's kernel survived.
+//! A second stage proves the limits the first one never reaches: its deadline (idle never finishes) and a budget (a
+//! spinner that never faults). Before the stages, the run_u limit on both cores (review-617 addendum).
 use crate::bringup::{begin, record};
 use crate::platform::{self, hw};
-use crate::procs::{self, APPS, IDLE, TARGET_OFFSET};
+use crate::procs::{self, APPS, BUDGET, IDLE, NEVER, TARGET_OFFSET, UNTIL};
 use crate::sched::{self, End, Kernel, State};
 use crate::smp::{self, Link, REPLY};
+use crate::{mtrap, timebase};
 use lichen_kcore::check::Tally;
 use lichen_kcore::perf::{self, Us100};
 
@@ -14,52 +17,47 @@ const STAGE_MS: u64 = 2000;
 const MIN_SWITCHES: u32 = 5;
 const LOAD_FAULT: usize = 5;
 const STORE_FAULT: usize = 7;
+/// The second stage: P1 never faults and ends on this budget; the stage ends on this deadline (idle never finishes).
+const BUDGET2: u32 = 20;
+const DEADLINE2_MS: u32 = 80;
+/// The short run_u limit of the limit rows.
+const U_LIMIT_MS: u32 = 50;
+const UPAGE: usize = 4096;
+/// The no-fault code of an OP_URUN reply.
+const NO_FAULT: u32 = 0xFFF;
+
+extern "C" {
+    fn u_idle();
+    static _utext: u8;
+}
 
 pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     u_wfi(t, l);
-    begin("proc.load");
-    let loaded = procs::prepare();
-    record(
-        t,
-        "proc.load",
-        Some(loaded.is_ok()),
-        format_args!("P0 and P1 (spinners) in slots 0 and 1, idle on the U stub page, into core 1's table: {loaded:?}"),
-    );
-    if loaded.is_err() {
+    u_limit_core1(t, l);
+    u_limit_finite_tick(t);
+    // Stage 1: alternation, the two faults, idle, the switch cost.
+    if !load(t, "proc.load", UNTIL, [BUDGET; APPS]) {
         return;
     }
-    begin("proc.run");
-    let r = l.call(smp::OP_PROCS, [0; 6], STAGE_MS);
-    let Some(r) = r.filter(|r| r.op == smp::OP_PROCS | REPLY) else {
-        // Core 1 may still run P0/P1 in slots 0 and 1, which the harness reloads next (review M1): stop it and end the
-        // run here, fail closed.
-        // SAFETY: core 1 was started; nothing waits on it after this (the run ends below).
-        let stalled = unsafe { hw::core1::stall(1_000_000) };
-        record(
-            t,
-            "proc.run",
-            Some(false),
-            format_args!("no reply from core 1 within {STAGE_MS} ms; core 1 stalled: {stalled}; run ends here"),
-        );
-        crate::bringup::finish(*t)
-    };
-    let [outcome, ticks, mintstatus, at_leave, stack, _] = r.a;
+    let [outcome, ticks, mintstatus, at_leave, stack, shadow] = stage(t, l, "proc.run", 0, 0);
     // SAFETY: core 1 replied, so its stage is over and it does not touch its table again (the mailbox pop ordered
     // its writes before this); this is the only reference to it on core 0.
     let k = unsafe { sched::of(1) };
     record(
         t,
         "proc.run",
-        Some(outcome == procs::DONE && mintstatus == 0),
+        Some(outcome == procs::DONE && mintstatus == 0 && shadow == 3),
         format_args!(
             "core 1 ran the stage for {ticks} ticks of its own 1 ms tick: outcome {outcome} (0 done, 1 deadline, \
              2 nothing runnable, 3 not prepared); mintstatus {at_leave:#x} in the last trap, {mintstatus:#x} after \
-             (want 0); {stack} B of core 1's stack used below the stage's frame"
+             (want 0); {stack} B of core 1's stack used below the stage's frame; PMP = shadow at start/end {}/{}",
+            shadow & 1,
+            shadow >> 1
         ),
     );
     alternation(t, k);
     for i in 0..APPS {
-        fault_row(t, k, i);
+        fault_row(t, k, i, ["proc.fault.p0", "proc.fault.p1"][i]);
     }
     let idle = &k.procs[IDLE];
     record(
@@ -76,14 +74,138 @@ pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     );
     // SAFETY: as `k` above: core 1 is done with its samples.
     perf_line(unsafe { sched::perf_of(1) }, cpu_hz);
-    begin("proc.alive");
+    alive(t, l, "proc.alive");
+    stage2(t, l);
+}
+
+/// Stage 2: P0 as before, P1 never faults (budget BUDGET2), idle never finishes, so the deadline ends the stage.
+fn stage2(t: &mut Tally, l: &mut Link) {
+    if !load(t, "proc.load2", [UNTIL[0], NEVER], [BUDGET, BUDGET2]) {
+        return;
+    }
+    let [outcome, ticks, mintstatus, _, _, shadow] = stage(t, l, "proc.deadline", DEADLINE2_MS, u32::MAX);
+    record(
+        t,
+        "proc.deadline",
+        Some(outcome == procs::TIMED_OUT && mintstatus == 0 && shadow == 3),
+        format_args!(
+            "stage with a {DEADLINE2_MS} ms deadline and idle never done: outcome {outcome} (want 1, deadline) after \
+             {ticks} ticks, mintstatus {mintstatus:#x} after (want 0), PMP = shadow at start/end {}/{}",
+            shadow & 1,
+            shadow >> 1
+        ),
+    );
+    // SAFETY: as in `run`: core 1 replied.
+    let k = unsafe { sched::of(1) };
+    let p1 = &k.procs[1];
+    record(
+        t,
+        "proc.budget",
+        Some(p1.end == Some(End::Budget) && p1.ticks == BUDGET2 + 1),
+        format_args!(
+            "P1 never faults: ended {:x?} after {} of its own ticks (want Budget after {})",
+            p1.end,
+            p1.ticks,
+            BUDGET2 + 1
+        ),
+    );
+    fault_row(t, k, 0, "proc.budget.p0");
+    alive(t, l, "proc.alive2");
+}
+
+/// Core 0 fills core 1's table for a stage (`procs::prepare`).
+fn load(t: &mut Tally, id: &str, until: [usize; APPS], budget: [u32; APPS]) -> bool {
+    begin(id);
+    let loaded = procs::prepare(until, budget);
+    record(
+        t,
+        id,
+        Some(loaded.is_ok()),
+        format_args!(
+            "P0 and P1 (spinners, until tick {until:?}, budget {budget:?}) in slots 0 and 1, idle on the U stub page, \
+             into core 1's table: {loaded:?}"
+        ),
+    );
+    loaded.is_ok()
+}
+
+/// Run one stage on core 1 and return its reply. No reply: core 1 may still run P0/P1 in slots 0 and 1, which the
+/// harness reloads next (review M1): stall it and end the run here, fail closed.
+fn stage(t: &mut Tally, l: &mut Link, id: &str, deadline_ms: u32, idle_ticks: u32) -> [u32; 6] {
+    begin(id);
+    let r = l.call(smp::OP_PROCS, [deadline_ms, idle_ticks, 0, 0, 0, 0], STAGE_MS);
+    if let Some(r) = r.filter(|r| r.op == smp::OP_PROCS | REPLY) {
+        return r.a;
+    }
+    // SAFETY: core 1 was started; nothing waits on it after this (the run ends below).
+    let stalled = unsafe { hw::core1::stall(1_000_000) };
+    record(
+        t,
+        id,
+        Some(false),
+        format_args!("no reply from core 1 within {STAGE_MS} ms; core 1 stalled: {stalled}; run ends here"),
+    );
+    crate::bringup::finish(*t)
+}
+
+fn alive(t: &mut Tally, l: &mut Link, id: &str) {
+    begin(id);
     let a = [0x617, 1, 2, 3, 4, 5];
     let p = l.call(smp::OP_PING, a, 100);
     record(
         t,
-        "proc.alive",
+        id,
         Some(p.is_some_and(|p| p.a == a.map(|x| !x))),
-        format_args!("core 1 answers a ping after the stage: {}", if p.is_some() { "yes" } else { "NO" }),
+        format_args!("core 1 answers a ping: {}", if p.is_some() { "yes" } else { "NO" }),
+    );
+}
+
+/// run_u's limit on core 1 (review L-b): `u_idle` spins for ever, only its 10 ms watchdog tick preempts it, and the
+/// U_LIMIT_MS limit ends the run on a tick, through to_kernel's mret. Then the CLIC level is 0 and core 1 answers.
+fn u_limit_core1(t: &mut Tally, l: &mut Link) {
+    begin("proc.u-limit");
+    let r = l.call(smp::OP_URUN, [u_idle as *const () as usize as u32, 0, U_LIMIT_MS, 0, 0, 0], 500);
+    let Some([code, _, _, _, exited, flags]) = r.map(|r| r.a) else {
+        record(t, "proc.u-limit", Some(false), format_args!("no reply within 500 ms"));
+        return;
+    };
+    let (timed_out, mil) = (flags & 1, flags >> 8);
+    let a = [0x657, 0, 0, 0, 0, 0];
+    let ping = l.call(smp::OP_PING, a, 100).is_some_and(|p| p.a == a.map(|x| !x));
+    record(
+        t,
+        "proc.u-limit",
+        Some(timed_out == 1 && code == NO_FAULT && exited == 0 && mil == 0 && ping),
+        format_args!(
+            "U spin on core 1 with a {U_LIMIT_MS} ms run limit: timed out {timed_out}, fault code {code:#x} (want none), \
+             exited {exited}, mintstatus.mil after {mil:#x} (want 0), ping after: {ping}"
+        ),
+    );
+}
+
+/// Review L3 on core 0: a finite tick (5 x 100 us) runs out during a U spin; the compare must go to the run's
+/// deadline instead of disarming, or the run never returns (the BEGIN line names the hang).
+fn u_limit_finite_tick(t: &mut Tally) {
+    begin("u.limit-tick");
+    // SAFETY: a linker symbol; only its address is used.
+    let utext = unsafe { &_utext as *const u8 as usize };
+    let udata = platform::slot(0).data;
+    crate::pmp::apply(utext, udata, UPAGE);
+    let t0 = hw::clint::mtime();
+    mtrap::tick_start(timebase::us_to_ticks(100), 5);
+    let u = mtrap::run_u_limit(u_idle as *const () as usize, udata + UPAGE, 0, 0, U_LIMIT_MS as u64 * 1000);
+    let tick = mtrap::tick_stop().map_or(0, |k| k.stats.count);
+    let us = timebase::ticks_to_us(hw::clint::mtime() - t0);
+    let mil = hw::trap::mintstatus() >> 24;
+    record(
+        t,
+        "u.limit-tick",
+        Some(u.timed_out && u.fault.is_none() && u.exit.is_none() && tick == 5 && mil == 0),
+        format_args!(
+            "U spin with a 5-tick tick and a {U_LIMIT_MS} ms limit: timed out {}, {tick} tick(s) (want 5), returned \
+             after {us} us, mintstatus.mil {mil:#x} (want 0)",
+            u.timed_out
+        ),
     );
 }
 
@@ -134,8 +256,7 @@ fn alternation(t: &mut Tally, k: &Kernel) {
 }
 
 /// Spinner i ended on a fault at the other one's data, from its own text; P1's store left P0's word unchanged.
-fn fault_row(t: &mut Tally, k: &Kernel, i: usize) {
-    let id = ["proc.fault.p0", "proc.fault.p1"][i];
+fn fault_row(t: &mut Tally, k: &Kernel, i: usize, id: &str) {
     let p = &k.procs[i];
     let want_cause = if i == 0 { LOAD_FAULT } else { STORE_FAULT };
     let target = procs::target(i);

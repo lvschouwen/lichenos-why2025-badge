@@ -210,6 +210,11 @@ const RUN_LIMIT_US: u64 = 2_000_000;
 
 /// Run U code at `entry` (on the U stub page, under the PMP view the caller applied) until it exits or faults.
 pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
+    run_u_limit(entry, sp, a0, a1, RUN_LIMIT_US)
+}
+
+/// `run_u` with its own run limit in microseconds (the bench rows that prove the limit use a short one).
+pub fn run_u_limit(entry: usize, sp: usize, a0: usize, a1: usize, limit_us: u64) -> URun {
     // U never runs without the fixed window entry (a U window load would hang, #646) ...
     if !crate::pmp::view_loaded() {
         platform::enter_fatal();
@@ -227,7 +232,7 @@ pub fn run_u(entry: usize, sp: usize, a0: usize, a1: usize) -> URun {
     if watchdog {
         tick_start(crate::timebase::us_to_ticks(WATCHDOG_US), u32::MAX);
     }
-    let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(RUN_LIMIT_US);
+    let deadline = hw::clint::mtime() + crate::timebase::us_to_ticks(limit_us);
     with(|s| {
         s.user = Some(URun::default());
         s.user_deadline = Some(deadline);

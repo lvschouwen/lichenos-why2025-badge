@@ -167,6 +167,15 @@ pub fn load(want: &pmp::Plan) -> usize {
     write_plan(want)
 }
 
+/// Does the hardware hold what the shadow says, all 16 entries as they read back (review-617 hardening)? 16 CSR reads
+/// plus 4 cfg words: off the switch path, run at the edges of a process run (core 1's stage, the core 0 harness).
+pub fn shadow_matches() -> bool {
+    let g = gran();
+    // SAFETY: this hart's shadow, MIE clear, no other reference to it exists.
+    let sh = unsafe { SHADOW[hart()].get() };
+    read_entries().iter().zip(sh.iter()).all(|(hw, s)| *hw == pmp::readback(*s, g))
+}
+
 /// Is the view the hardware holds (per the shadow) a safe one? `run_u` asserts it before every U entry.
 #[cfg_attr(not(feature = "esp32p4"), allow(dead_code))]
 pub fn view_loaded() -> bool {

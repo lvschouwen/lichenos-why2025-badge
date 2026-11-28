@@ -157,6 +157,11 @@ pub fn enter(k: &mut Kernel) -> ! {
     platform::timer_init();
     k.current = B;
     let ctx = crate::sched::schedule_current(k);
+    // Review-617 hardening: once, before the first entry to U, the hardware must hold what the shadow says.
+    if !crate::pmp::shadow_matches() {
+        kprintln!("harness: the PMP does not match its shadow: halting");
+        platform::exit(4);
+    }
     csr::mstatus_return_to_user();
     trap::check_return(k, ctx);
     // SAFETY: B's context was set up by the loader; mstatus.MPP = U, the PMP holds B's view, mtvec points at

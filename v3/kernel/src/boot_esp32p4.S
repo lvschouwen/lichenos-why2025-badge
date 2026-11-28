@@ -148,6 +148,8 @@ to_kernel:
     # Back into the kernel through mret, not ret (#617): mret puts the CLIC interrupt level back (mil from mcause.mpil,
     # 0 for a trap from U). An exit or fault never raised it, but a run ended by its deadline ends inside a tick.
     # MPP = M and MPIE = 0: this lands in run_user's caller in M-mode with MIE clear, as `ret` did.
+    # Safe only while no CLIC line uses hardware vectoring (shv; every line is ATTR_M_LEVEL = 0xC0 today): with
+    # mcause.minhv set, an mret fetches its target from a vector table instead of mepc.
     csrw mepc, ra
     li t0, 0x1800
     csrs mstatus, t0

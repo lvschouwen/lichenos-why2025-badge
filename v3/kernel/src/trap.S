@@ -146,6 +146,8 @@ task_leave:
     # Out of the trap through mret, not ret: on the P4 CLIC mret is what puts the interrupt level back (mil from
     # mcause.mpil, 0 for a trap from U), and the stage usually ends inside a tick. MPP = M and MPIE = 0, so this lands
     # in task_run's caller in M-mode with MIE still clear.
+    # Safe only while no CLIC line uses hardware vectoring (shv; every line is ATTR_M_LEVEL = 0xC0 today): with
+    # mcause.minhv set, an mret fetches its target from a vector table instead of mepc.
     csrw mepc, ra
     li t0, 0x1800
     csrs mstatus, t0
