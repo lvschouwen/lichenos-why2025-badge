@@ -4,7 +4,7 @@
 //! The console: a forwarded WRITE is printed from the caller's bounce buffer (`forward::bounce`), never from a U
 //! address, on lines of its own prefixed `[c1 <name>] ` (`Lines`). It is printed only when the log ring keeps
 //! RESERVE bytes free afterwards (`fits`); until then core 0 holds the reply, so the caller stays blocked and a flood
-//! runs at the UART's rate (about 11 bytes per ms) instead of pushing the kernel's rows out of the ring. Core 0 never
+//! runs at the UART's rate (the #619 bench measured about 66 bytes per ms) instead of pushing the kernel's rows out of the ring. Core 0 never
 //! busy-waits for that room: `poll` retries between its mailbox polls.
 use crate::forward;
 use crate::global::Global;
@@ -63,6 +63,10 @@ pub fn request(l: &mut Link, m: Msg) {
     } else if len > WRITE_MAX || svc().held[i].is_some() {
         // A second request from a process with one held breaks the one-in-flight rule: refuse it, keep the first.
         Some(err::EINVAL)
+    } else if !ever_fits(i, len) {
+        // Even an empty ring could not take it with the reserve kept (a WRITE of newlines only, each with its prefix):
+        // holding it would block the caller for good.
+        Some(err::EINVAL)
     } else {
         None
     };
@@ -113,6 +117,16 @@ pub fn settle() {
 
 pub fn take_stats() -> Stats {
     core::mem::take(&mut svc().stats)
+}
+
+/// Process `i`'s `len` bytes in its bounce buffer fit an empty console ring, the reserve kept, whatever line is open.
+fn ever_fits(i: usize, len: usize) -> bool {
+    // SAFETY: as in `serve`: core 0 owns the buffer between the OP_SYS pop and its reply.
+    let b = unsafe { forward::bounce(i) };
+    let prefix = b.name.len() + PREFIX_EXTRA;
+    let cost = svc().lines.cost(i, &b.buf[..len], prefix);
+    // The line state may change before it is served: allow for its own prefix and another process's line end.
+    fits(cost.saturating_add(prefix + 2), platform::CONSOLE_RING, RESERVE)
 }
 
 /// Print `m`'s bytes and answer it, if the console has room for them; false (nothing done) if not.

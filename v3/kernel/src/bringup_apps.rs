@@ -23,7 +23,7 @@ const SURVIVE_TICKS: u64 = 50;
 /// tick), and well before the deadline.
 const SPIN_BUDGET_MS: u64 = 10;
 /// A budget kill happens on the first trap past the budget: at most this many ticks of cycles late.
-const KILL_SLACK_TICKS: u64 = 3;
+pub(crate) const KILL_SLACK_TICKS: u64 = 3;
 /// How far (percent) the meters plus the kernel's trap time may sit from the stage's clock: the first process's span
 /// starts a few hundred cycles before the stage's clock does, and the last trap's kernel time is not charged.
 const TOLERANCE_PCT: u64 = 1;
@@ -78,7 +78,7 @@ fn zeroed(addr: usize, len: usize) -> bool {
 }
 
 /// The worker is still running after the rogue ended: it ran alone for SURVIVE_TICKS, its counter moved.
-fn survivor_ok(k: &Kernel) -> (bool, u64, u32) {
+pub(crate) fn survivor_ok(k: &Kernel) -> (bool, u64, u32) {
     let (w, r) = (&k.procs[WORKER_SLOT], &k.procs[ROGUE_SLOT]);
     let alone = k.ticks.saturating_sub(r.ended_tick);
     // SAFETY: the worker's first data word is its round counter (apps/worker); aligned L2MEM, written by core 1 only.
@@ -126,7 +126,7 @@ fn spin_rows(t: &mut Tally, k: &Kernel, budget: u64, cpu_hz: u64) {
 
 /// What termination gave back: the rogue's slot memory is zero, its handles are gone, its PMP view is dropped; the
 /// worker keeps its own handle and its memory (it would have ended on a changed canary or a dead handle).
-fn released(t: &mut Tally, k: &Kernel, id: &str) {
+pub(crate) fn released(t: &mut Tally, k: &Kernel, id: &str) {
     let r = &k.procs[ROGUE_SLOT];
     let s = platform::slot(ROGUE_SLOT);
     let mem = zeroed(s.data, s.len) && zeroed(s.text, r.image_len.next_multiple_of(4));

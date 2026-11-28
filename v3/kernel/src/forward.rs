@@ -13,7 +13,7 @@
 //! - The kernel's work for a call (trap, check, copy, push) is billed to the caller (`bill_service`), so a flood is
 //!   metered and its cycle budget still ends it.
 //! - Core 0 holds a WRITE while its console is short of room (`services`): the caller stays blocked, so the flood
-//!   goes at the UART's rate and never pushes the kernel's rows out of the log ring.
+//!   goes at the UART's rate (about 66 bytes per ms on the #619 bench) and never pushes the kernel's rows out of the log ring.
 //! - Latency: when no other process can run, core 1 waits for the reply inside the trap for up to FAST_WAIT_US
 //!   (`fast` in the counts) instead of switching to idle, which would leave the reply until the next tick.
 use crate::global::Global;

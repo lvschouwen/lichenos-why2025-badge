@@ -8,6 +8,8 @@ pub use lichen_platform_esp32p4 as hw;
 
 pub const NAME: &str = "esp32p4";
 const LOG_RING: usize = 4096;
+/// The console ring's size, for core 0's forwarded console (#619).
+pub const CONSOLE_RING: usize = LOG_RING;
 
 static RING: Global<Ring<LOG_RING>> = Global::new(Ring::new());
 /// Set once by a fatal trap path: from then on `putc` writes straight to the UART and never touches RING, which the

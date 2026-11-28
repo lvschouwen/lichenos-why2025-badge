@@ -313,6 +313,17 @@ mod tests {
         }
     }
 
+    /// The case the console service must refuse instead of holding: a full WRITE of newlines, each with its prefix,
+    /// is more than a 4 KB ring can take with a 1 KB reserve, so it would never fit and its caller would never resume.
+    #[test]
+    fn a_write_of_newlines_can_outgrow_the_ring() {
+        let l = Lines::<3>::new();
+        let cost = l.cost(0, &[b'\n'; 256], 11);
+        assert_eq!(cost, 256 * 13);
+        assert!(!fits(cost, 4096, 1024));
+        assert!(fits(l.cost(0, &[b'x'; 256], 11), 4096, 1024), "a full line of text does fit");
+    }
+
     #[test]
     fn a_write_must_leave_the_reserve_free() {
         assert!(fits(100, 1124, 1024));

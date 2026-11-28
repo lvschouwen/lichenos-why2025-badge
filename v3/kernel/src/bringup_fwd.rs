@@ -4,8 +4,10 @@
 //!   flood    the rogue floods full-size WRITEs for the whole stage next to the worker. Each call blocks it, core 0
 //!            holds the replies while its console is short of room, and the worker must keep at least FLOOR_PCT of
 //!            core 1's cycles (its fair share of two is 50 %; the floor leaves the kernel's trap time out).
+//!   budget   the same flood with a small cycle budget: the forwarding work billed to the rogue ends it on its budget,
+//!            with a call in flight; its late reply is stale on core 1, and termination gives everything back.
 use crate::bringup::{begin, record};
-use crate::bringup_apps::accounting;
+use crate::bringup_apps::{accounting, released, survivor_ok, KILL_SLACK_TICKS};
 use crate::bringup_procs::{alive, stage};
 use crate::procs;
 use crate::procs_apps::{self as apps, ROGUE_SLOT, WORKER_SLOT};
@@ -22,9 +24,13 @@ const FLOOD_MS: u32 = 150;
 /// The worker's share of core 1's cycles in the flood must stay at or above this.
 const FLOOR_PCT: u64 = 45;
 
+/// The budget stage's rogue: well under the ~50k cycles its flood takes over FLOOD_MS (50059 on the c9152874 bench).
+const FLOOD_BUDGET: u64 = 20_000;
+
 pub fn run(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     latency(t, l, cpu_hz);
     flood(t, l, cpu_hz);
+    budget(t, l, cpu_hz);
 }
 
 fn load(t: &mut Tally, id: &str, f: impl FnOnce() -> Result<(), crate::loader::LoadError>) -> bool {
@@ -111,6 +117,39 @@ fn flood(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
     accounting(t, k, "fwd.flood", cpu_hz);
     perf_line("kernel.syscall.xcore_contended", &mut p.slow, cpu_hz);
     alive(t, l, "fwd.alive2");
+}
+
+fn budget(t: &mut Tally, l: &mut Link, cpu_hz: u64) {
+    if !load(t, "fwd.budget.load", || apps::prepare_pair(apps::WRITE_LOOP, Some(FLOOD_BUDGET))) {
+        return;
+    }
+    stage(t, l, "fwd.budget", FLOOD_MS, u32::MAX);
+    let svc = services::take_stats();
+    // SAFETY: as in `latency`.
+    let k = unsafe { sched::of(1) };
+    let r = &k.procs[ROGUE_SLOT];
+    let cycles = r.meter.cycles();
+    let slack = KILL_SLACK_TICKS * cpu_hz / 1000;
+    let (survived, alone, rounds) = survivor_ok(k);
+    record(
+        t,
+        "fwd.budget.kill",
+        Some(r.end == Some(End::Budget) && cycles > FLOOD_BUDGET && cycles <= FLOOD_BUDGET + slack && survived),
+        format_args!(
+            "the flooding rogue ended {:x?} (want Budget) at {cycles} cycles of a {FLOOD_BUDGET} budget (at most {slack} \
+             over) after {} syscalls, {} forwarded; stale replies on core 1 {} (a call in flight at the kill answers \
+             nobody); core 0 served {}, held {}, dropped {}; the worker ran on alone for {alone} ticks, {rounds} rounds",
+            r.end,
+            r.syscalls,
+            k.fwd.sent,
+            k.calls.stale,
+            svc.served,
+            svc.held,
+            svc.dropped
+        ),
+    );
+    released(t, k, "fwd.budget.released");
+    alive(t, l, "fwd.alive3");
 }
 
 /// The worker kept its share of core 1 while the rogue flooded.
