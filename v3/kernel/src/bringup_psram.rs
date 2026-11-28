@@ -203,11 +203,13 @@ fn zero_row(t: &mut Tally, a: Block, b: Block) {
 
 /// `li a0, 1; li a7, EXIT; ecall`: exit 1 from wherever it is loaded.
 const EXIT1: [u32; 3] = [0x0010_0513, 0x0010_0893, 0x0000_0073];
+/// The same with `li a0, 2`.
+const EXIT2: [u32; 3] = [0x0020_0513, 0x0010_0893, 0x0000_0073];
 const ILLEGAL: u16 = 2;
 
 /// Code in PSRAM (the exec arena), and stale code never survives a free: owner 3 runs EXIT1 from its exec block
 /// twice (the second run from a warm ICache), its blocks are released, owner 4 gets the same exec page and running it
-/// must fault illegal (the page is zeros). Without the ICache invalidate in the zeroing, the old lines would run.
+/// must fault illegal (the page is zeros); then owner 4 loads EXIT2 there and it must exit 2, not 1. Without the ICache invalidate in the zeroing, the old lines would run.
 fn icache_row(t: &mut Tally) {
     begin("psram.icache");
     let _ = psram::set_quota(3, QUOTA).and(psram::set_quota(4, QUOTA));
@@ -225,15 +227,17 @@ fn icache_row(t: &mut Tally) {
     let e2 = psram::alloc(4, Kind::Exec, PAGE).map(|x| x.1);
     let same = e.is_ok() && e2.map(|b| b.off) == e.map(|b| b.off);
     let code = e2.map_or(0xFFF, |b| run(&b).fault.map_or(0xFFF, |f| lichen_kcore::trap::decode(f.cause).code));
+    // Owner 4 loads its own code into the page: it must run, not the old one.
+    let second = e2.ok().and_then(|b| psram::load_code(&b, &EXIT2).then(|| run(&b).exit).flatten());
     let _ = psram::release_owner(4);
     record(
         t,
         "psram.icache",
-        Some(first == [Some(1); 2] && released && same && code == ILLEGAL),
+        Some(first == [Some(1); 2] && released && same && code == ILLEGAL && second == Some(2)),
         format_args!(
             "owner 3 ran its PSRAM code: exits {:?} {:?} (want 1 1); released {released}; owner 4 got the same page \
-             {same}, running it: code {code} (want {ILLEGAL}, stale code would exit)",
-            first[0], first[1]
+             {same}, running it: code {code} (want {ILLEGAL}, stale code would exit); its own code exits {:?} (want 2)",
+            first[0], first[1], second
         ),
     );
 }
